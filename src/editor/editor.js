@@ -16,6 +16,7 @@ import {
 } from "../game/config.js";
 import { controlsHTML, bindControls } from "./controls.js";
 import { createWeaponDesigner } from "./tools/weapon-designer.js";
+import { createEnemyDesigner } from "./tools/enemy-designer.js";
 
 const root = document.getElementById("editor");
 let tab = "settings";
@@ -24,7 +25,7 @@ let activeTool = null; // the mounted tool instance ({ dispose })
 
 const TOOLS = [
   { id: "weapon", label: "Weapon Designer", desc: "Compose weapons from primitives, watch them fire, and check them against the cost budget." },
-  { label: "Enemy Designer", desc: "Tune archetype stats and behavior/steering parameters." },
+  { id: "enemy", label: "Enemy Designer", desc: "Tune archetype stats and behavior; watch the real AI drive it in a live preview." },
   { label: "Level Editor", desc: "Place platforms, spawns, loot, and the exit on a canvas." },
 ];
 
@@ -40,7 +41,7 @@ function render() {
 
   let body;
   if (tab === "settings") body = settingsView();
-  else if (toolId === "weapon") body = `<div id="tool-host" class="tool-host"></div>`;
+  else if (toolId === "weapon" || toolId === "enemy") body = `<div id="tool-host" class="tool-host"></div>`;
   else body = toolsView();
 
   root.innerHTML = `
@@ -55,11 +56,11 @@ function render() {
     <main class="ed-body">${body}</main>`;
 
   if (tab === "settings") bindControls(document.getElementById("cfg"), (key, val) => setConfig(key, val));
-  if (tab === "tools" && toolId === "weapon")
-    activeTool = createWeaponDesigner(document.getElementById("tool-host"), () => {
-      toolId = null;
-      render();
-    });
+  if (tab === "tools" && (toolId === "weapon" || toolId === "enemy")) {
+    const host = document.getElementById("tool-host");
+    const back = () => { toolId = null; render(); };
+    activeTool = toolId === "weapon" ? createWeaponDesigner(host, back) : createEnemyDesigner(host, back);
+  }
 }
 
 function settingsView() {

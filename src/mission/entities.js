@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { WEAPONS, ENEMIES } from "../game/content.js";
+import { customEnemyMap } from "../game/customcontent.js";
 import { config } from "../game/config.js";
 
 const MAX_FALL = 1200;
@@ -206,7 +207,12 @@ export function loadMission(level, squad) {
     new Soldier(s.data, s.weapon, level.playerSpawn.x + i * 44, level.playerSpawn.y)
   );
 
-  const enemies = level.enemies.map((e) => new Enemy(ENEMIES[e.type], e.x, e.y));
+  // Custom (editor-authored) enemy types resolve alongside the built-ins, so a
+  // level can place `type: "<custom id>"` once the Level Editor (or a hand edit)
+  // references it. Custom ids win ties only if they collide, which they can't:
+  // saveCustomEnemy mints ids unique across the ENEMIES keys.
+  const defs = { ...ENEMIES, ...customEnemyMap() };
+  const enemies = level.enemies.map((e) => new Enemy(defs[e.type], e.x, e.y));
 
   return {
     // gravity comes from config (editable) rather than the level's own value

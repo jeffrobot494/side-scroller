@@ -58,7 +58,8 @@ npx serve .
 | `src/hub/`              | All DOM screens (rooms, deploy, results, win/lose) + CSS   |
 | `src/mission/`          | Canvas run-and-gun: scene, entities, AI, input            |
 | `src/game/config.js`    | Tweakable settings + tuning constants (single source)      |
-| `editor.html` `src/editor/` | Dev editor for settings/tuning; GUI tools to come      |
+| `src/game/customcontent.js` | Editor-authored weapons/enemies, persisted to localStorage |
+| `editor.html` `src/editor/` | Dev editor: settings/tuning + Weapon & Enemy Designers  |
 | `src/player2/`          | Player2 API client (LLM authoring — not yet wired)         |
 
 ## Editor
@@ -68,5 +69,23 @@ constants — friendly fire, squad damage, gravity, run/jump speed, the doom-clo
 rate. Controls are auto-generated from a schema in `src/game/config.js`; adding a
 knob is one entry there. Changes save to your browser instantly (live values
 apply mid-mission; load-time values on the next deploy). **Export JSON** to copy
-values into `config.js` defaults and make them permanent. GUI tools (weapon,
-enemy, and level editors) will live under the editor's Tools tab.
+values into `config.js` defaults and make them permanent.
+
+The **Tools** tab hosts bespoke GUI editors:
+
+- **Weapon Designer** — compose a weapon from primitives, watch it fire against a
+  dummy, and check its cost against a tech-tier budget. **Save to armory** writes
+  it to browser storage; it loads into the armory next time you start the game
+  (reload to deploy it) and can be assigned on the deploy screen.
+- **Enemy Designer** — author a stat block + archetype (charger / shooter /
+  turret) and watch the **real** entity + AI code drive it in a live preview
+  (chargers charge, shooters hold range and telegraph, turrets sit and fire).
+  **Save to enemy pool** persists it; placing one in a mission needs the Level
+  Editor (not built) or a hand edit to `LEVELS[...].enemies` — `loadMission`
+  already resolves custom enemy types, so placement will just work once that
+  lands.
+- **Level Editor** — planned.
+
+Both designers also **Export JSON** in `content.js` shape; paste it into
+`WEAPONS` / `ENEMIES` to make a custom entry permanent (browser storage is
+per-browser, same caveat as settings).
