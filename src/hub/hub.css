@@ -78,6 +78,11 @@ body::after {
 .resources { display: flex; align-items: center; gap: 18px; }
 .credits { color: var(--credits); font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 0 8px rgba(242, 193, 78, 0.25); }
 .roster-count { color: var(--muted); font-size: 14px; }
+.dev-link {
+  color: var(--muted); text-decoration: none; font-size: 18px; line-height: 1;
+  opacity: 0.5; transition: opacity 0.15s, transform 0.15s;
+}
+.dev-link:hover { opacity: 1; transform: rotate(45deg); }
 
 /* ---- Layout ---- */
 .layout { flex: 1; display: grid; grid-template-columns: 250px 1fr; }

@@ -9,6 +9,7 @@
 
 import { RECRUIT_POOL } from "./soldiers.js";
 import { WEAPONS, MISSIONS, BLUEPRINTS, TUNING } from "./content.js";
+import { config } from "./config.js";
 
 let nextId = 1;
 const uid = (p) => `${p}_${nextId++}`;
@@ -131,7 +132,7 @@ export function advanceDay(state) {
   }
 
   // Doom clock: the invasion advances whether or not you acted.
-  state.campaignHealth = Math.max(0, state.campaignHealth - TUNING.doomPerDay);
+  state.campaignHealth = Math.max(0, state.campaignHealth - config.doomPerDay);
   if (state.campaignHealth <= TUNING.loseAt) {
     state.outcome = "lost";
     note(state, "The invasion overran the sector. Campaign lost.");

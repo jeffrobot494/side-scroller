@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { WEAPONS, ENEMIES } from "../game/content.js";
+import { config } from "../game/config.js";
 
 const MAX_FALL = 1200;
 
@@ -60,11 +61,11 @@ function collideAxis(a, platforms, axis) {
 
 // ---- Soldier (player-controlled or AI companion) --------------------------
 
+// runSpeed and jumpSpeed are read live from config (tweakable in the editor);
+// accel/friction stay fixed for now.
 const SOLDIER_TUNING = {
-  runSpeed: 320,
   accel: 2600,
   friction: 3000,
-  jumpSpeed: 720,
 };
 
 export class Soldier {
@@ -110,7 +111,7 @@ export class Soldier {
     if (!this.alive) return;
     if (move !== 0) {
       this.vx += move * SOLDIER_TUNING.accel * dt;
-      this.vx = clamp(this.vx, -SOLDIER_TUNING.runSpeed, SOLDIER_TUNING.runSpeed);
+      this.vx = clamp(this.vx, -config.runSpeed, config.runSpeed);
       this.facing = move > 0 ? 1 : -1;
     } else {
       const drop = SOLDIER_TUNING.friction * dt;
@@ -118,7 +119,7 @@ export class Soldier {
       else this.vx -= Math.sign(this.vx) * drop;
     }
     if (jump && this.onGround) {
-      this.vy = -SOLDIER_TUNING.jumpSpeed;
+      this.vy = -config.jumpSpeed;
       this.onGround = false;
     }
   }
@@ -208,7 +209,8 @@ export function loadMission(level, squad) {
   const enemies = level.enemies.map((e) => new Enemy(ENEMIES[e.type], e.x, e.y));
 
   return {
-    world: level.world,
+    // gravity comes from config (editable) rather than the level's own value
+    world: { ...level.world, gravity: config.gravity },
     platforms: level.platforms.map((p) => ({ ...p })),
     exit: { ...level.exit },
     artifact: level.artifact ? { ...level.artifact } : null,

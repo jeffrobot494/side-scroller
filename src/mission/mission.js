@@ -10,6 +10,7 @@
 import { MissionInput } from "./input.js";
 import { loadMission, stepActor, overlaps, clamp, Loot } from "./entities.js";
 import { fire, updateCompanion, updateEnemy } from "./ai.js";
+import { config } from "../game/config.js";
 
 const STEP = 1 / 60;
 
@@ -199,9 +200,15 @@ export class Mission {
       }
       if (p.dead) continue;
 
-      const targets = p.team === "player" ? scene.enemies : scene.soldiers;
+      // Target set. Squad-only friendly fire: a player-team shot can also hit
+      // soldiers (never its own shooter). Aliens stay immune to each other.
+      let targets;
+      if (p.team === "player")
+        targets = config.friendlyFire ? [...scene.enemies, ...scene.soldiers] : scene.enemies;
+      else targets = scene.soldiers;
+
       for (const t of targets) {
-        if (!t.alive || !overlaps(p, t)) continue;
+        if (t === p.owner || !t.alive || !overlaps(p, t)) continue;
         this._applyEffects(t, p.effects, p.owner);
         this._sparks(p.x, p.y, p.color, 7, 150);
         p.dead = true;
@@ -212,10 +219,12 @@ export class Mission {
   }
 
   _applyEffects(target, effects, owner) {
+    // Your soldiers' damage is scaled by the config multiplier; alien fire isn't.
+    const mult = owner && owner.kind === "soldier" ? config.playerDamageMult : 1;
     for (const fx of effects) {
-      if (fx.kind === "damage") this._damage(target, fx.amount, owner);
+      if (fx.kind === "damage") this._damage(target, fx.amount * mult, owner);
       else if (fx.kind === "burn") {
-        target.burn = { dps: fx.dps, time: fx.duration }; // refreshes on re-hit
+        target.burn = { dps: fx.dps * mult, time: fx.duration }; // refreshes on re-hit
         target._burnOwner = owner; // so a burn kill still credits the shooter
       }
     }

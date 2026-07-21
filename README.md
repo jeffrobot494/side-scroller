@@ -57,4 +57,16 @@ npx serve .
 | `src/game/soldiers.js`  | Soldier schema + starting recruit pool                     |
 | `src/hub/`              | All DOM screens (rooms, deploy, results, win/lose) + CSS   |
 | `src/mission/`          | Canvas run-and-gun: scene, entities, AI, input            |
+| `src/game/config.js`    | Tweakable settings + tuning constants (single source)      |
+| `editor.html` `src/editor/` | Dev editor for settings/tuning; GUI tools to come      |
 | `src/player2/`          | Player2 API client (LLM authoring — not yet wired)         |
+
+## Editor
+
+Open `editor.html` (or the ⚙ in the hub top bar) to tweak settings and tuning
+constants — friendly fire, squad damage, gravity, run/jump speed, the doom-clock
+rate. Controls are auto-generated from a schema in `src/game/config.js`; adding a
+knob is one entry there. Changes save to your browser instantly (live values
+apply mid-mission; load-time values on the next deploy). **Export JSON** to copy
+values into `config.js` defaults and make them permanent. GUI tools (weapon,
+enemy, and level editors) will live under the editor's Tools tab.

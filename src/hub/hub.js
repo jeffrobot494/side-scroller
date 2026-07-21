@@ -100,6 +100,7 @@ export class Hub {
           </span>
           <span class="credits">§ ${g.money.toLocaleString()}</span>
           <span class="roster-count">${livingRoster(g).length} on roster</span>
+          <a class="dev-link" href="./editor.html" title="Open the settings & tuning editor">⚙</a>
         </div>
       </header>`;
   }
