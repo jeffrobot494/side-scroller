@@ -1,7 +1,12 @@
-# Side Scroller
+# XCOM Task Force — side-scroller
 
-A 2D side-scrolling action game for the browser, built from scratch on the
-HTML5 Canvas API — no framework, no build step.
+An XCOM-style alien-invasion game with a 2D run-and-gun action layer, built from
+scratch on plain JS + the HTML5 Canvas API — no framework, no build step. Hire a
+squad, deploy into missions, fight JSON-defined enemies with AI companions, lose
+soldiers permanently, sell loot, commission weapons, and beat the doom clock.
+
+This repo currently holds a **playable vertical slice** of the full core loop.
+See `docs/DEVELOPMENT_PLAN.md` and `docs/GDD.md`.
 
 ## Run it
 
@@ -20,17 +25,36 @@ or, if you have Node:
 npx serve .
 ```
 
-## Controls
+## How to play
 
-- **Move:** Arrow keys or `A` / `D`
-- **Jump:** Space, `W`, or Up arrow
+1. **Barracks** — hire a few soldiers (you start with §750).
+2. **Operations** — pick a mission and **Deploy squad** (up to 3). Assign each
+   soldier a weapon from the armory.
+3. **Mission** — reach the **EXTRACT** gate on the right. Kill enemies for loot.
+   Anyone who dies is gone for good.
+4. **Results** — sell recovered loot for credits.
+5. **Engineering** — commission a better weapon (finishes after a few days).
+6. **War Room** — **Advance the day** to progress fabrication and the doom clock.
+7. Complete **Recon → Raid → The Hive Core** to win, before the doom clock
+   drains the sector to 0.
+
+### Mission controls
+
+- **Move:** `A` / `D` or Arrow keys
+- **Aim up:** `W` / Up
+- **Jump:** Space
+- **Fire:** `J`
+- **Swap controlled soldier:** `Tab` (control also auto-swaps on death)
 
 ## Structure
 
-| File            | Responsibility                                      |
-| --------------- | --------------------------------------------------- |
-| `index.html`    | Canvas element + page shell                         |
-| `src/main.js`   | Fixed-timestep game loop, camera, rendering         |
-| `src/input.js`  | Keyboard → logical actions (left/right/jump)        |
-| `src/player.js` | Player physics, movement feel, collision            |
-| `src/world.js`  | Level layout and world constants (gravity, size)    |
+| Path                    | Responsibility                                             |
+| ----------------------- | ---------------------------------------------------------- |
+| `index.html`            | Single entry; scene manager mounts the hub or the mission  |
+| `src/main.js`           | App bootstrap + scene manager (hub ↔ mission)              |
+| `src/game/content.js`   | The JSON content library: weapons, enemies, levels, etc.   |
+| `src/game/state.js`     | Unified game state + all meta actions                      |
+| `src/game/soldiers.js`  | Soldier schema + starting recruit pool                     |
+| `src/hub/`              | All DOM screens (rooms, deploy, results, win/lose) + CSS   |
+| `src/mission/`          | Canvas run-and-gun: scene, entities, AI, input            |
+| `src/player2/`          | Player2 API client (LLM authoring — not yet wired)         |

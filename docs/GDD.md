@@ -1,7 +1,11 @@
 # Game Design Document
 
 > **Working title:** XCOM Task Force (side-scroller)
-> **Status:** Pre-production. Base hub + soldier hiring screen prototyped; action prototype seeded.
+> **Status:** Playable vertical slice. The full core loop runs end to end as a
+> single-page app (hire → deploy → run-and-gun mission with companions +
+> permadeath → results → sell → commission → advance day → win/lose). LLM
+> authoring (Player2) is the remaining bolt-on; hand-authored blueprint JSON
+> stands in for it. See [DEVELOPMENT_PLAN](DEVELOPMENT_PLAN.md).
 > **Last updated:** 2026-07-21
 
 ---
@@ -242,32 +246,47 @@ because it depends on none of the combat vocabulary and plants the emotional cor
 - **Repo layout (current):**
 
 ```
-index.html            base hub (DOM)
-game.html             action prototype (canvas)
+index.html            single entry — scene manager mounts hub (DOM) or mission (canvas)
+game.html             legacy entry; redirects to index.html
 src/
-  main.js             fixed-timestep loop, camera, rendering
-  input.js            keyboard → left/right/jump
-  player.js           player physics & collision (feel constants live here)
-  world.js            level layout, gravity, world size
-  base/
+  main.js             app bootstrap + scene manager (hub ↔ mission)
+  game/
+    content.js        WEAPONS / ENEMIES / LEVELS / MISSIONS / BLUEPRINTS + tuning (the JSON library)
     soldiers.js       soldier schema + starting recruit pool
-    state.js          money, recruits, roster + hire()
-    base.js           base hub + hiring UI
-    base.css          underground-bunker styling
+    state.js          unified game state + actions (hire, commission, sell, advanceDay, mission result)
+  hub/
+    hub.js            all DOM screens: rooms, deploy, results, win/lose
+    hub.css           underground-bunker styling
+  mission/
+    mission.js        canvas run-and-gun scene (fixed-timestep loop, HUD, outcome)
+    entities.js       Actor/Soldier/Enemy/Projectile/Loot + physics + loader
+    ai.js             companion + enemy behaviors, shared fire()
+    input.js          keyboard for the action layer
+  player2/            Player2 API client (Phase 6, not yet wired)
 docs/
   GDD.md              this document
+  DEVELOPMENT_PLAN.md vertical-slice plan + status
 ```
 
 ---
 
 ## 13. Current Implementation Status
 
-- **Action prototype:** a controllable player runs and jumps across a scrolling,
-  multi-platform level with gravity and per-axis collision. Placeholder rectangles.
-- **Base hub:** underground-themed command center with five room locations. Barracks
-  is functional; others are honest placeholders.
-- **Hiring screen:** six hand-authored recruits (portraits, stat bars, traits, bios,
-  costs), a credits budget, and hire → roster flow.
+The vertical slice is playable end to end (see DEVELOPMENT_PLAN §3):
+
+- **One app, one state:** a scene manager unifies the DOM hub and the canvas
+  mission over a single game-state object.
+- **Action missions:** run-and-gun combat — projectiles, `damage` + `burn`
+  effect primitives, health/death, three enemy archetypes (charger,
+  repositioning shooter, telegraphing turret), a squad of up to 3 with AI
+  companions, control-swap on death, and permadeath.
+- **Base hub:** Barracks (hire), Engineering (commission a weapon on a build
+  timer), Operations (mission list + sell loot), War Room (campaign health +
+  advance the day). Robotics stays an honest placeholder.
+- **Campaign:** three-mission arc with unlocks, a doom clock that loses the
+  campaign at 0, and a win on destroying the Hive Core.
+- **Deferred:** live LLM authoring via Player2 (hand-authored blueprint JSON
+  stands in), Robotics, base defense, and the wider endgame.
 
 ---
 

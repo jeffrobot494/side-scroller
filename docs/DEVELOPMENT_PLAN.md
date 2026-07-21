@@ -5,6 +5,15 @@
 > end to end.
 > **Companion docs:** [GDD](GDD.md).
 > **Last updated:** 2026-07-21
+>
+> **STATUS: vertical slice built (Phases 0–5 + 7).** The whole loop runs as a
+> single-page app: hire → deploy → run-and-gun mission with companions and
+> permadeath → results → sell loot → commission a weapon in Engineering →
+> advance the day → next mission → win on the Hive Core or lose to the doom
+> clock. Phase 6 (live LLM authoring via Player2) is deferred as planned; the
+> Engineering commission path runs on hand-authored blueprint JSON in its place,
+> which is the exact shape the LLM will later emit. Open `index.html` from a
+> local server to play.
 
 ---
 
@@ -28,14 +37,18 @@ is done.
 
 ### Success criteria
 
-- [ ] Hub and mission share one continuous game state (money, roster, loot, campaign).
-- [ ] A soldier's death in a mission permanently removes them from the roster.
-- [ ] At least one enemy type fights back with authored behavior (not a stationary target).
-- [ ] Loot from a mission converts to credits that can be spent.
-- [ ] At least one weapon is defined entirely in JSON and usable in a mission.
-- [ ] Time advances and gates at least one build/research action.
-- [ ] Campaign health can reach a lose state, and the slice has a win state.
-- [ ] The whole loop runs on placeholder art without crashing or soft-locking.
+- [x] Hub and mission share one continuous game state (money, roster, loot, campaign).
+- [x] A soldier's death in a mission permanently removes them from the roster.
+- [x] At least one enemy type fights back with authored behavior (not a stationary target).
+      *(Three: `charger`, repositioning `shooter`, telegraphing `turret`.)*
+- [x] Loot from a mission converts to credits that can be spent.
+- [x] At least one weapon is defined entirely in JSON and usable in a mission.
+      *(All weapons are JSON in `src/game/content.js`; commissioned ones too.)*
+- [x] Time advances and gates at least one build/research action.
+      *(Advance the day in the War Room; Engineering builds finish on a timer.)*
+- [x] Campaign health can reach a lose state, and the slice has a win state.
+      *(Doom clock loses at 0; completing the Hive Core wins.)*
+- [x] The whole loop runs on placeholder art without crashing or soft-locking.
 
 ---
 
@@ -55,16 +68,31 @@ enemy variety; final art and audio; multiple level biomes; balancing beyond
 
 ## 3. Current state
 
-- **Action prototype** (`game.html`, `src/main.js` + `input/player/world.js`):
-  fixed-timestep loop, a controllable player, gravity, per-axis platform collision,
-  scrolling camera. Level is hardcoded in `world.js`. No combat, no enemies.
-- **Base hub** (`index.html`, `src/base/*`): five rooms, functional Barracks, hiring
-  → roster flow, credits. State lives in `src/base/state.js`.
-- **Gap:** the hub and the mission are **separate HTML pages with separate module
-  state**. There is no shooting, no enemy, no loot, no mission selection, no time,
-  and no bridge between the two halves.
-- **Planned dependency:** AI content generation goes through the Player2 API
-  (`player2-api.yaml`, client to live in `src/player2/`). Relevant only to Phase 6.
+The slice is built. `index.html` is now the single entry for the whole game; a
+scene manager in `src/main.js` toggles between the DOM hub and the canvas
+mission, both reading/writing one state object (`src/game/state.js`). `game.html`
+redirects to it.
+
+- **One app, one state** (`src/main.js`, `src/game/state.js`): money, roster,
+  armory, stores (loot), engineering queue, day, campaign health, and mission
+  progress all live in one object. Deploy carries a squad in; the result comes
+  back and is applied in one place.
+- **Content is data** (`src/game/content.js`): weapons, enemies, levels,
+  missions, and engineering blueprints are all JSON-shaped data with `cost` /
+  `budgetSpent` fields; `src/mission/entities.js` instantiates live objects from
+  it. A human authors the same shape the LLM will later emit.
+- **Combat** (`src/mission/*`): run-and-gun on the canvas — projectiles, damage
+  and burn effect primitives, health/death, three enemy archetypes with
+  telegraphs, minimal HUD.
+- **Squad + companions**: deploy up to 3; player controls one, the rest are AI
+  (follow + shoot); control swaps on death; permadeath removes the fallen from
+  the roster; reach-the-exit success, squad-wipe failure.
+- **Meta loop** (`src/hub/hub.js`): Operations mission list with unlocks, results
+  screen, sell loot → credits, Engineering commission gated by a build timer,
+  War Room advance-day + doom clock, and a campaign win/lose end screen.
+- **Deferred:** Phase 6 live LLM authoring through the Player2 API
+  (`player2-api.yaml`, `src/player2/`). The Engineering commission path stands in
+  with hand-authored blueprint JSON until then. Robotics remains a placeholder.
 
 ---
 
@@ -73,7 +101,7 @@ enemy variety; final art and audio; multiple level biomes; balancing beyond
 Each phase is independently testable and leaves the build runnable. Rough size tags:
 **S** ≈ small, **M** ≈ medium, **L** ≈ large.
 
-### Phase 0 — One app, one state  **(M)**
+### Phase 0 — One app, one state  **(M)** — ✅ done
 Make the hub and the mission a single application that shares state.
 - Introduce a scene manager (Hub / Mission / Results) in one page, or a shared
   `game-state` module both pages read/write via storage.
@@ -83,7 +111,7 @@ Make the hub and the mission a single application that shares state.
 - *Done when:* you can start in the hub, enter a stub mission, and come back with the
   same money and roster intact.
 
-### Phase 1 — Data-driven entities  **(M)**
+### Phase 1 — Data-driven entities  **(M)** — ✅ done
 Turn hardcoded content into JSON the engine loads at runtime. First slice of the
 primitive library.
 - Define JSON schemas: `level`, `entity`, `weapon`, `enemy` (subset only).
@@ -92,7 +120,7 @@ primitive library.
 - Express the player as a JSON-driven soldier entity.
 - *Done when:* the existing prototype runs entirely from JSON files, no behavior change.
 
-### Phase 2 — Combat  **(L)**
+### Phase 2 — Combat  **(L)** — ✅ done
 Add the verbs of a run-and-gun.
 - Weapon firing: fire mode, fire rate, projectiles.
 - Effect primitives, starting with `damage` (each carries a cost field for later).
@@ -101,7 +129,7 @@ Add the verbs of a run-and-gun.
 - Minimal HUD: health, current weapon/ammo.
 - *Done when:* you can shoot an enemy, it dies and drops loot, and it can kill you.
 
-### Phase 3 — Squad, companions, and mission outcome  **(L)**
+### Phase 3 — Squad, companions, and mission outcome  **(L)** — ✅ done
 - Deploy up to 3 soldiers; player controls one, AI controls the rest.
 - Companion behavior: follow, keep up, shoot enemies in line of sight.
 - Control swaps to a living soldier on death; death removes the soldier from the roster.
@@ -110,13 +138,13 @@ Add the verbs of a run-and-gun.
 - *Done when:* a 3-soldier deployment can partially wipe, still succeed, and return a
   result that reflects who died and what was recovered.
 
-### Phase 4 — Enemy behavior  **(M)**
+### Phase 4 — Enemy behavior  **(M)** — ✅ done
 - Behavior/steering parameters in enemy JSON (not live LLM control).
 - 2–3 archetypes with distinct behavior (e.g. a charger, a repositioning shooter).
 - Clear attack telegraphs.
 - *Done when:* enemies move and attack with intent, and their threat reads fairly.
 
-### Phase 5 — Meta loop  **(M)**
+### Phase 5 — Meta loop  **(M)** — ✅ done
 Close the loop around the mission.
 - Mission list + selection screen (minimal Operations).
 - Results screen: loot recovered, casualties.
@@ -126,7 +154,7 @@ Close the loop around the mission.
 - *Done when:* you can run mission → results → sell → advance time → next mission, and
   win or lose the slice on campaign health.
 
-### Phase 6 — AI authoring proof (Player2)  **(L)**
+### Phase 6 — AI authoring proof (Player2)  **(L)** — ⏳ deferred (blueprint JSON stands in)
 Prove the content pipeline with one generated weapon. *Recommended in-slice; can be
 deferred if it threatens the schedule — Phases 1–5 already run on hand-authored JSON.*
 - Review `player2-api.yaml`; choose the concurrency model (async jobs map cleanly to
@@ -138,7 +166,7 @@ deferred if it threatens the schedule — Phases 1–5 already run on hand-autho
 - *Done when:* a commissioned weapon is generated, validated, built over time, and
   fired in a mission.
 
-### Phase 7 — Integration and polish  **(M)**
+### Phase 7 — Integration and polish  **(M)** — ✅ playable end to end
 - End-to-end playtest of the full 2–3 mission mini-campaign.
 - Balance pass to "playable"; fix soft-locks and state bugs.
 - Consistent placeholder art; readable HUD and transitions.
