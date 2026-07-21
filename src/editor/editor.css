@@ -118,6 +118,83 @@
   padding: 2px 8px; border-radius: 3px;
 }
 
+.tool-card.available { border-style: solid; cursor: pointer; transition: transform 0.14s, box-shadow 0.14s, border-color 0.14s; }
+.tool-card.available:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 10px 22px rgba(0,0,0,0.5); }
+.tool-card.available .soon { color: var(--accent); border-color: var(--accent); }
+
+/* ==========================================================================
+   WEAPON DESIGNER
+   ========================================================================== */
+.wd-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.wd-name {
+  font-size: 20px; font-weight: 700; color: var(--text);
+  background: var(--track); border: 1px solid var(--line); border-radius: 5px;
+  padding: 8px 12px; min-width: 240px;
+}
+.wd-id { color: var(--muted); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+
+.wd-grid { display: grid; grid-template-columns: 1fr 400px; gap: 28px; align-items: start; }
+
+.wd-h {
+  font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
+  margin: 22px 0 6px; opacity: 0.85;
+}
+.wd-h:first-child { margin-top: 0; }
+.wd-row { grid-template-columns: 1fr 220px; }
+
+/* effects */
+.wd-effects { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.wd-effect { border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; background: rgba(20,25,32,0.5); }
+.wd-effect-top { display: flex; align-items: center; gap: 10px; }
+.wd-effect-top select {
+  background: var(--track); color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: 5px 8px; font-size: 13px;
+}
+.wd-fx-cost { color: var(--credits); font-size: 12px; font-weight: 700; margin-left: auto; }
+.wd-fx-x {
+  width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 4px;
+  background: #2a1c1c; color: #e59090; cursor: pointer; font-size: 16px; line-height: 1;
+}
+.wd-fx-x:hover { background: #3a2222; }
+.wd-effect-params { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+.wd-mini { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 130px; }
+.wd-mini-ctl { display: flex; align-items: center; gap: 8px; }
+.wd-mini-ctl input[type="range"] { flex: 1; accent-color: var(--accent); }
+.wd-empty { color: var(--muted); font-style: italic; font-size: 13px; }
+.wd-addfx { display: flex; gap: 10px; }
+
+/* side panel: preview + budget + export */
+.wd-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
+.wd-canvas {
+  width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px;
+  background: #0c1424; box-shadow: inset 0 0 30px rgba(0,0,0,0.5);
+}
+.wd-readout { display: flex; gap: 12px; }
+.wd-stat {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: rgba(20,25,32,0.5);
+}
+.wd-stat span { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.wd-stat b { font-size: 20px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.wd-budget { border: 1px solid var(--line); border-radius: 6px; padding: 12px; background: rgba(20,25,32,0.5); }
+.wd-tier { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.wd-tier select {
+  flex: 1; background: var(--track); color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: 6px 8px; font-size: 13px;
+}
+.wd-meter { height: 12px; border-radius: 6px; background: var(--track); overflow: hidden; margin: 10px 0 8px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.5); }
+.wd-meter-fill { display: block; height: 100%; width: 0; transition: width 0.15s, background 0.15s; }
+.wd-verdict { font-size: 13px; font-weight: 600; }
+.wd-verdict.ok { color: var(--good); }
+.wd-verdict.bad { color: var(--bad); }
+
+.wd-export { display: flex; flex-direction: column; gap: 8px; }
+.wd-export .ed-msg { min-height: 16px; }
+.wd-json { min-height: 150px; }
+
+@media (max-width: 900px) { .wd-grid { grid-template-columns: 1fr; } .wd-side { position: static; } }
+
 @media (max-width: 640px) {
   .cfg-row { grid-template-columns: 1fr; gap: 10px; }
   .cfg-control { justify-content: flex-start; }

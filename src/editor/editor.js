@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
-// EDITOR APP — a dev-only entry (editor.html) for tweaking settings and, later,
+// EDITOR APP — a dev-only entry (editor.html) for tweaking settings and running
 // GUI tools. The Settings tab is auto-generated from the config SCHEMA; the
-// Tools tab is where bespoke GUI editors (weapons, enemies, levels) will live.
+// Tools tab hosts bespoke GUI editors (the Weapon Designer today; enemy and
+// level editors to come).
 // ---------------------------------------------------------------------------
 
 import {
@@ -14,18 +15,34 @@ import {
   importConfig,
 } from "../game/config.js";
 import { controlsHTML, bindControls } from "./controls.js";
+import { createWeaponDesigner } from "./tools/weapon-designer.js";
 
 const root = document.getElementById("editor");
 let tab = "settings";
+let toolId = null; // which Tools-tab tool is open (null = the tool grid)
+let activeTool = null; // the mounted tool instance ({ dispose })
 
-// Placeholders that establish the panel pattern for future bespoke tools.
 const TOOLS = [
-  { label: "Weapon Designer", desc: "Compose weapons from primitives and validate them against the cost budget." },
+  { id: "weapon", label: "Weapon Designer", desc: "Compose weapons from primitives, watch them fire, and check them against the cost budget." },
   { label: "Enemy Designer", desc: "Tune archetype stats and behavior/steering parameters." },
   { label: "Level Editor", desc: "Place platforms, spawns, loot, and the exit on a canvas." },
 ];
 
+function disposeTool() {
+  if (activeTool) {
+    activeTool.dispose();
+    activeTool = null;
+  }
+}
+
 function render() {
+  disposeTool();
+
+  let body;
+  if (tab === "settings") body = settingsView();
+  else if (toolId === "weapon") body = `<div id="tool-host" class="tool-host"></div>`;
+  else body = toolsView();
+
   root.innerHTML = `
     <header class="ed-top">
       <div class="ed-brand">⚙ XCOM&nbsp;TASK&nbsp;FORCE <span>· EDITOR</span></div>
@@ -35,9 +52,14 @@ function render() {
       </nav>
       <a class="ed-play" href="./index.html">▸ Play</a>
     </header>
-    <main class="ed-body">${tab === "settings" ? settingsView() : toolsView()}</main>`;
+    <main class="ed-body">${body}</main>`;
 
   if (tab === "settings") bindControls(document.getElementById("cfg"), (key, val) => setConfig(key, val));
+  if (tab === "tools" && toolId === "weapon")
+    activeTool = createWeaponDesigner(document.getElementById("tool-host"), () => {
+      toolId = null;
+      render();
+    });
 }
 
 function settingsView() {
@@ -69,7 +91,10 @@ function toolsView() {
     </p>
     <div class="tool-grid">
       ${TOOLS.map(
-        (t) => `<article class="tool-card"><h3>${t.label}</h3><p>${t.desc}</p><span class="soon">Planned</span></article>`
+        (t) => `<article class="tool-card${t.id ? " available" : ""}"${t.id ? ` data-tool="${t.id}"` : ""}>
+          <h3>${t.label}</h3><p>${t.desc}</p>
+          <span class="soon">${t.id ? "Open ▸" : "Planned"}</span>
+        </article>`
       ).join("")}
     </div>`;
 }
@@ -77,7 +102,14 @@ function toolsView() {
 root.addEventListener("click", (e) => {
   const tb = e.target.closest("[data-tab]");
   if (tb) {
+    toolId = null;
     tab = tb.dataset.tab;
+    render();
+    return;
+  }
+  const tool = e.target.closest("[data-tool]");
+  if (tool && tab === "tools") {
+    toolId = tool.dataset.tool;
     render();
     return;
   }
