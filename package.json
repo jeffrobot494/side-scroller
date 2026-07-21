@@ -1,0 +1,9 @@
+{
+  "name": "side-scroller",
+  "private": true,
+  "type": "module",
+  "description": "Static, no-build browser game. package.json exists ONLY so node runs the ESM test suite; the browser ignores it and there is no build step.",
+  "scripts": {
+    "test": "node test/run.mjs"
+  }
+}
