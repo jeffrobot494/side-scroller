@@ -10,6 +10,7 @@
 import { RECRUIT_POOL } from "./soldiers.js";
 import { WEAPONS, MISSIONS, BLUEPRINTS, TUNING } from "./content.js";
 import { config } from "./config.js";
+import { listCustomWeapons } from "./customcontent.js";
 
 let nextId = 1;
 const uid = (p) => `${p}_${nextId++}`;
@@ -24,8 +25,10 @@ export function createState() {
     roster: [],
 
     // Weapons the player owns and can assign to soldiers. The rifle is standard
-    // issue; commissioned blueprints append here when they finish building.
-    armory: [structuredClone(WEAPONS.rifle)],
+    // issue; commissioned blueprints append here when they finish building;
+    // weapons authored in the editor's Weapon Designer load in here too (read at
+    // load time — reload the game to pick up ones saved after this state began).
+    armory: [structuredClone(WEAPONS.rifle), ...listCustomWeapons().map((w) => structuredClone(w))],
 
     // Recovered-but-unsold loot: { name, value } entries from missions.
     stores: [],

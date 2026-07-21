@@ -191,7 +191,20 @@
 
 .wd-export { display: flex; flex-direction: column; gap: 8px; }
 .wd-export .ed-msg { min-height: 16px; }
+.wd-export-btns { display: flex; gap: 10px; }
 .wd-json { min-height: 150px; }
+
+/* saved-weapons list */
+.wd-saved { border: 1px solid var(--line); border-radius: 6px; padding: 12px; background: rgba(20,25,32,0.5); }
+.wd-saved .wd-h { margin-top: 0; }
+.wd-saved-note { font-size: 11px; color: var(--muted); line-height: 1.4; margin: 0 0 10px; }
+.wd-saved-list { display: flex; flex-direction: column; gap: 8px; }
+.wd-saved-row {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: 5px; padding: 7px 10px; background: rgba(12,16,22,0.5);
+}
+.wd-saved-name { font-weight: 600; color: var(--text); font-size: 13px; }
+.wd-saved-budget { color: var(--credits); font-size: 12px; font-weight: 700; margin-left: auto; }
 
 @media (max-width: 900px) { .wd-grid { grid-template-columns: 1fr; } .wd-side { position: static; } }
 

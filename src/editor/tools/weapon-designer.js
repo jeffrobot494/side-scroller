@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { effectCost, dps, validate, finalizeWeapon, TIERS } from "../../game/weaponcost.js";
+import { listCustomWeapons, saveCustomWeapon, deleteCustomWeapon } from "../../game/customcontent.js";
 
 // Numeric fields rendered as sliders (path into the weapon object).
 const FIELDS = [
@@ -81,9 +82,17 @@ export function createWeaponDesigner(container, onBack) {
             <div class="wd-verdict" id="wd-verdict"></div>
           </div>
           <div class="wd-export">
-            <button class="btn" data-wd="copy">Copy JSON</button>
+            <div class="wd-export-btns">
+              <button class="btn" data-wd="save">Save to armory</button>
+              <button class="btn btn-alt" data-wd="copy">Copy JSON</button>
+            </div>
             <span class="ed-msg" id="wd-msg"></span>
             <textarea class="ed-json wd-json" id="wd-json" spellcheck="false" readonly></textarea>
+          </div>
+          <div class="wd-saved">
+            <h3 class="wd-h">Saved weapons</h3>
+            <p class="wd-saved-note">Saved to this browser and loaded into the armory next time you start the game — reload to deploy them.</p>
+            <div class="wd-saved-list" id="wd-saved"></div>
           </div>
         </div>
       </div>
@@ -118,6 +127,23 @@ export function createWeaponDesigner(container, onBack) {
         </div>
         <div class="wd-effect-params">${params}</div>
       </div>`;
+  }
+
+  // ---- saved-weapons list (rebuilt on save/delete) -----------------------
+  function renderSaved() {
+    const saved = listCustomWeapons();
+    $("#wd-saved").innerHTML = saved.length
+      ? saved
+          .map(
+            (w) => `
+        <div class="wd-saved-row" data-id="${w.id}">
+          <span class="wd-saved-name">${escapeHtml(w.name || w.id)}</span>
+          <span class="wd-saved-budget">budget ${w.budgetSpent ?? "—"}</span>
+          <button class="wd-fx-x" data-wd="del-saved" data-id="${w.id}" title="Delete">×</button>
+        </div>`
+          )
+          .join("")
+      : `<p class="wd-empty">No saved weapons yet.</p>`;
   }
 
   // ---- refresh derived readouts (no input rebuild, keeps slider focus) ----
@@ -185,8 +211,20 @@ export function createWeaponDesigner(container, onBack) {
       case "add-burn": weapon.effects.push({ kind: "burn", dps: 6, duration: 3 }); renderEffects(); refresh(); break;
       case "fx-remove": weapon.effects.splice(+el.dataset.idx, 1); renderEffects(); refresh(); break;
       case "copy": copyJSON(); break;
+      case "save": saveWeapon(); break;
+      case "del-saved": deleteCustomWeapon(el.dataset.id); renderSaved(); break;
     }
   });
+
+  // Save to armory regardless of budget legality (dev tool); the tier verdict
+  // stays visible so you can still see whether it's legal.
+  function saveWeapon() {
+    const res = saveCustomWeapon(finalizeWeapon(weapon));
+    const msg = $("#wd-msg");
+    msg.textContent = res.ok ? `Saved as "${res.id}" — reload the game to deploy it.` : "Save failed.";
+    msg.className = "ed-msg " + (res.ok ? "ok" : "bad");
+    renderSaved();
+  }
 
   function copyJSON() {
     const text = $("#wd-json").value;
@@ -297,6 +335,7 @@ export function createWeaponDesigner(container, onBack) {
   }
 
   renderEffects();
+  renderSaved();
   refresh();
   draw(); // one synchronous frame (also makes headless mount verifiable)
   raf = req(loop);
@@ -337,6 +376,7 @@ function get(o, p) { return p.split(".").reduce((a, k) => (a == null ? a : a[k])
 function set(o, p, v) { const ks = p.split("."); const last = ks.pop(); let t = o; for (const k of ks) t = t[k]; t[last] = v; }
 function slug(s) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "custom_weapon"; }
 function fmt(n) { return Number.isInteger(n) ? String(n) : Number(n).toFixed(2); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function perfNow() { return typeof performance !== "undefined" ? performance.now() : Date.now(); }
 function req(fn) { return typeof requestAnimationFrame === "function" ? requestAnimationFrame(fn) : null; }
 function roundRect(ctx, x, y, w, h, r) {
