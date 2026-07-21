@@ -10,6 +10,7 @@
 import { MissionInput } from "./input.js";
 import { loadMission, stepActor, overlaps, clamp, Loot } from "./entities.js";
 import { fire, updateCompanion, updateEnemy } from "./ai.js";
+import { updateProjectiles, updateStatuses } from "./combat.js";
 import { config } from "../game/config.js";
 
 const STEP = 1 / 60;
@@ -35,6 +36,17 @@ export class Mission {
     this.introTimer = 2.2;
     this.endBanner = null; // { success, timer } once the mission resolves
     this.result = null;
+
+    // Bridge to the shared combat module: rules run in combat.js, cosmetics +
+    // bookkeeping stay here. friendlyFire/damageMult read live from config.
+    this._ctx = {
+      get friendlyFire() { return config.friendlyFire; },
+      get damageMult() { return config.playerDamageMult; },
+      damage: (t, a, o) => this._damage(t, a, o),
+      kill: (t, o) => this._kill(t, o),
+      spark: (x, y, c, n, s) => this._sparks(x, y, c, n, s),
+      burst: (x, y, c, n, s) => this._burst(x, y, c, n, s),
+    };
 
     // cosmetic-only state (never read by game logic)
     this.time = 0;
@@ -180,54 +192,7 @@ export class Mission {
   }
 
   _updateProjectiles(dt) {
-    const scene = this.scene;
-    for (const p of scene.projectiles) {
-      if (p.dead) continue;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.life -= dt;
-      if (p.life <= 0) {
-        p.dead = true;
-        continue;
-      }
-      // Walls stop shots.
-      for (const plat of scene.platforms) {
-        if (overlaps(p, plat)) {
-          p.dead = true;
-          this._sparks(p.x, p.y, p.color, 4, 90);
-          break;
-        }
-      }
-      if (p.dead) continue;
-
-      // Target set. Squad-only friendly fire: a player-team shot can also hit
-      // soldiers (never its own shooter). Aliens stay immune to each other.
-      let targets;
-      if (p.team === "player")
-        targets = config.friendlyFire ? [...scene.enemies, ...scene.soldiers] : scene.enemies;
-      else targets = scene.soldiers;
-
-      for (const t of targets) {
-        if (t === p.owner || !t.alive || !overlaps(p, t)) continue;
-        this._applyEffects(t, p.effects, p.owner);
-        this._sparks(p.x, p.y, p.color, 7, 150);
-        p.dead = true;
-        break;
-      }
-    }
-    scene.projectiles = scene.projectiles.filter((p) => !p.dead);
-  }
-
-  _applyEffects(target, effects, owner) {
-    // Your soldiers' damage is scaled by the config multiplier; alien fire isn't.
-    const mult = owner && owner.kind === "soldier" ? config.playerDamageMult : 1;
-    for (const fx of effects) {
-      if (fx.kind === "damage") this._damage(target, fx.amount * mult, owner);
-      else if (fx.kind === "burn") {
-        target.burn = { dps: fx.dps * mult, time: fx.duration }; // refreshes on re-hit
-        target._burnOwner = owner; // so a burn kill still credits the shooter
-      }
-    }
+    updateProjectiles(this.scene, dt, this._ctx);
   }
 
   _damage(target, amount, owner) {
@@ -266,16 +231,7 @@ export class Mission {
   }
 
   _updateStatuses(dt) {
-    const all = [...this.scene.soldiers, ...this.scene.enemies];
-    for (const a of all) {
-      if (a.hitFlash > 0) a.hitFlash -= dt;
-      if (a.burn) {
-        a.health -= a.burn.dps * dt;
-        a.burn.time -= dt;
-        if (a.burn.time <= 0) a.burn = null;
-        if (a.alive && a.health <= 0) this._kill(a, a._burnOwner);
-      }
-    }
+    updateStatuses(this.scene, dt, this._ctx);
   }
 
   _updateLoot(dt) {

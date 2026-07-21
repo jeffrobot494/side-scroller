@@ -51,7 +51,12 @@ Static site — serve the folder and open a page. No bundler, no transpile.
 - `src/game/gen/` + `enemycost.js` — procedural level generation (seeded RNG,
   jump-reachability, threat-cost model, `generateLevel`). Deterministic per seed.
 - `src/mission/` — Canvas run-and-gun: `entities.js` (physics, `loadMission`,
-  `Enemy`/`Soldier`/`Projectile`), `ai.js` (`updateEnemy`, `fire`), scene/input.
+  `Enemy`/`Soldier`/`Projectile`), `ai.js` (`updateEnemy`, `fire`), `combat.js`
+  (shared projectile + effect resolution, used by the mission AND the editor's
+  Firing Room so the tool tests real behavior), `mission.js` scene, input.
+- `src/game/weaponcost.js` + `arsenal.js` — the effect cost model (value effects
+  damage/burn/slow/knockback/explode/chain; delivery modifiers pellets/pierce/
+  homing) and the 24-weapon arsenal authored against it.
 - `src/hub/` — every DOM screen (rooms, deploy, results, win/lose) + CSS. Owns no
   rules; calls state actions.
 - `src/player2/` — Player2 API client (`client.js`, `queue.js`). LLM + image

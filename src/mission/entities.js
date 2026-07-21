@@ -31,7 +31,10 @@ export function stepActor(a, dt, world, platforms) {
   a.vy += world.gravity * dt;
   if (a.vy > MAX_FALL) a.vy = MAX_FALL;
 
-  a.x += a.vx * dt;
+  // A `slow` status scales horizontal displacement only (one choke point so the
+  // slow effect works for every actor without the AI needing to know about it).
+  const slowMult = a.slow && a.slow.time > 0 ? a.slow.factor : 1;
+  a.x += a.vx * slowMult * dt;
   collideAxis(a, platforms, "x");
 
   a.y += a.vy * dt;

@@ -247,6 +247,18 @@
 
 @media (max-width: 720px) { .lg-out { grid-template-columns: 1fr; } }
 
+/* ==========================================================================
+   FIRING ROOM
+   ========================================================================== */
+.fr-params { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 14px; }
+.fr-params .lg-field select { min-width: 200px; }
+.fr-canvas { margin-bottom: 14px; }
+.fr-effects { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+.fr-chip {
+  font-size: 11px; color: var(--text); background: rgba(20,25,32,0.7);
+  border: 1px solid var(--line); border-radius: 12px; padding: 3px 9px; white-space: nowrap;
+}
+
 @media (max-width: 640px) {
   .cfg-row { grid-template-columns: 1fr; gap: 10px; }
   .cfg-control { justify-content: flex-start; }

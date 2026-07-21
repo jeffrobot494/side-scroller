@@ -35,24 +35,32 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   dx /= len;
   dy /= len;
 
-  // spread: the weapon's own spread plus an accuracy penalty
-  const spread = (w.spread || 0) + (1 - accuracy) * 0.12;
-  if (spread) {
-    const a = (Math.random() * 2 - 1) * spread;
-    const cos = Math.cos(a);
-    const sin = Math.sin(a);
-    const nx = dx * cos - dy * sin;
-    const ny = dx * sin + dy * cos;
-    dx = nx;
-    dy = ny;
-  }
+  // A `pellets` delivery effect fires `count` projectiles across an extra arc
+  // (shotgun). Without it this loops once and behaves exactly as a single shot.
+  const pellets = (w.effects || []).find((e) => e.kind === "pellets");
+  const count = pellets ? Math.max(1, pellets.count || 1) : 1;
+  const arc = pellets ? (pellets.spread ?? 0.12) : 0;
 
+  // spread: the weapon's own spread plus an accuracy penalty (+ the pellet arc)
+  const spread = (w.spread || 0) + (1 - accuracy) * 0.12 + arc;
   const spec = w.projectile;
-  const ox = shooter.x + shooter.w / 2 + dx * (shooter.w / 2 + 6);
-  const oy = shooter.y + shooter.h * 0.42 + dy * (shooter.h / 2 + 6);
-  scene.projectiles.push(
-    new Projectile(ox, oy, dx * spec.speed, dy * spec.speed, spec, team, w.effects, shooter)
-  );
+
+  for (let i = 0; i < count; i++) {
+    let ax = dx;
+    let ay = dy;
+    if (spread) {
+      const a = (Math.random() * 2 - 1) * spread;
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      ax = dx * cos - dy * sin;
+      ay = dx * sin + dy * cos;
+    }
+    const ox = shooter.x + shooter.w / 2 + ax * (shooter.w / 2 + 6);
+    const oy = shooter.y + shooter.h * 0.42 + ay * (shooter.h / 2 + 6);
+    scene.projectiles.push(
+      new Projectile(ox, oy, ax * spec.speed, ay * spec.speed, spec, team, w.effects, shooter)
+    );
+  }
   // cosmetic: a brief muzzle flash the renderer draws at the barrel tip
   shooter.muzzleFlash = 0.055;
   shooter.muzzleDir = { x: dx, y: dy };

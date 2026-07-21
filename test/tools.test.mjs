@@ -4,6 +4,7 @@ import { installDom, makeEl } from "./harness.mjs";
 import { createWeaponDesigner } from "../src/editor/tools/weapon-designer.js";
 import { createEnemyDesigner } from "../src/editor/tools/enemy-designer.js";
 import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
+import { createFiringRoom } from "../src/editor/tools/firing-room.js";
 import { Enemy, Soldier, stepActor } from "../src/mission/entities.js";
 import { updateEnemy } from "../src/mission/ai.js";
 
@@ -30,6 +31,7 @@ export default async function run(t) {
   mountable(t, "weapon-designer", createWeaponDesigner);
   mountable(t, "enemy-designer", createEnemyDesigner);
   mountable(t, "level-generator", createLevelGenerator);
+  mountable(t, "firing-room", createFiringRoom);
 
   // Real AI: a shooter telegraphs then fires (the preview's building blocks).
   const data = { id: "s1", name: "Rook", callsign: "RK", stats: { health: 5, aim: 5, speed: 5 } };
