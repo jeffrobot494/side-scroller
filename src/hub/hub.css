@@ -419,3 +419,113 @@ body::after {
   .two-col, .results-body { grid-template-columns: 1fr; }
   .mission-row { flex-direction: column; align-items: flex-start; }
 }
+
+/* ==========================================================================
+   POLISH LAYER — animation + depth added on top of the base bunker theme.
+   Purely cosmetic; safe to tweak or drop.
+   ========================================================================== */
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@keyframes barber {
+  from { background-position: 0 0; }
+  to { background-position: 40px 0; }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes badge-pulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px currentColor); }
+  50% { transform: scale(1.08); filter: drop-shadow(0 0 26px currentColor); }
+}
+@keyframes ribbon-sheen {
+  from { background-position: -220% 0; }
+  to { background-position: 220% 0; }
+}
+
+/* the whole panel fades its content up as you switch rooms */
+.panel > .location-header,
+.panel > section,
+.panel > .results-body,
+.panel > .result-ribbon,
+.panel > .end-screen,
+.panel > .deploy-bar { animation: rise-in 0.28s ease both; }
+
+/* animated energy in every health/meter fill */
+.health-fill, .big-fill, .stat-fill {
+  position: relative;
+  background-image: linear-gradient(90deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%);
+  background-size: 40px 40px;
+  animation: barber 1s linear infinite;
+}
+.big-meter { position: relative; }
+.big-meter::after {
+  content: ""; position: absolute; inset: 0; border-radius: 4px;
+  box-shadow: inset 0 0 12px rgba(0,0,0,0.6); pointer-events: none;
+}
+
+/* topbar health chip reads like a live gauge */
+.health-chip { padding: 4px 10px; border: 1px solid var(--line); border-radius: 20px; background: rgba(8,12,18,0.6); }
+
+/* buttons get a moving sheen on hover */
+.btn { position: relative; overflow: hidden; }
+.btn::after {
+  content: ""; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent);
+  transform: skewX(-20deg); transition: left 0.5s ease;
+}
+.btn:hover:not(:disabled)::after { left: 130%; }
+
+/* location hatches glow a touch on the active room */
+.loc.active .loc-icon { animation: pulse-glow 2.4s ease-in-out infinite; }
+
+/* mission dossiers lift and light their edge on hover */
+.mission-row { transition: transform 0.14s, border-color 0.14s, box-shadow 0.14s; }
+.mission-row:not(.is-locked):not(.is-done):hover {
+  transform: translateX(3px);
+  border-left-color: var(--accent);
+  box-shadow: -8px 0 18px -10px rgba(233,69,96,0.5), 0 3px 10px rgba(0,0,0,0.5);
+}
+.win-flag { text-shadow: 0 0 10px rgba(242,193,78,0.4); }
+
+/* blueprints + soldier cards lift on hover */
+.blueprint, .soldier-card { transition: transform 0.14s, box-shadow 0.14s, border-color 0.14s; }
+.blueprint:hover, .soldier-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+/* chosen deploy cards pulse a green rim */
+.deploy-card.chosen { animation: pulse-glow 1.6s ease-in-out infinite; }
+
+/* results ribbon gets a slow light sweep across it */
+.result-ribbon { position: relative; overflow: hidden; }
+.result-ribbon::before {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 40%, rgba(255,255,255,0.14) 50%, transparent 60%);
+  background-size: 220% 100%;
+  animation: ribbon-sheen 3.5s linear infinite;
+}
+.result-ribbon.win { text-shadow: 0 0 18px rgba(138,255,193,0.5); }
+.result-ribbon.loss { text-shadow: 0 0 18px rgba(255,107,107,0.4); }
+
+/* end-screen badge breathes */
+.end-screen.won .end-badge { color: #57c98a; animation: badge-pulse 2.4s ease-in-out infinite; }
+.end-screen.lost .end-badge { color: #c0504e; animation: badge-pulse 2.8s ease-in-out infinite; }
+
+/* KIA entries get a faint danger edge-glow */
+.kia-list li { box-shadow: -6px 0 14px -10px rgba(224,90,90,0.6); }
+
+/* headings feel more "operations terminal" */
+.location-header h1 { letter-spacing: 0.5px; }
+.squad-block h2, .recruit-block h2, .result-col h2 { position: relative; }
+.squad-block h2::before, .recruit-block h2::before, .result-col h2::before {
+  content: "▚"; margin-right: 8px; color: var(--accent); opacity: 0.6; font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; }
+}

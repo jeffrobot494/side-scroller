@@ -53,6 +53,10 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   scene.projectiles.push(
     new Projectile(ox, oy, dx * spec.speed, dy * spec.speed, spec, team, w.effects, shooter)
   );
+  // cosmetic: a brief muzzle flash the renderer draws at the barrel tip
+  shooter.muzzleFlash = 0.055;
+  shooter.muzzleDir = { x: dx, y: dy };
+  shooter.muzzleColor = spec.color;
   return true;
 }
 
