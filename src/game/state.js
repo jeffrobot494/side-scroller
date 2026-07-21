@@ -8,15 +8,16 @@
 // ---------------------------------------------------------------------------
 
 import { RECRUIT_POOL } from "./soldiers.js";
-import { WEAPONS, MISSIONS, BLUEPRINTS, TUNING } from "./content.js";
+import { WEAPONS, ENEMIES, BLUEPRINTS, TUNING } from "./content.js";
 import { config } from "./config.js";
-import { listCustomWeapons } from "./customcontent.js";
+import { listCustomWeapons, customEnemyMap } from "./customcontent.js";
+import { generateLevel } from "./gen/levelgen.js";
 
 let nextId = 1;
 const uid = (p) => `${p}_${nextId++}`;
 
 export function createState() {
-  return {
+  const state = {
     day: 1,
     money: TUNING.startMoney,
     campaignHealth: TUNING.startCampaignHealth,
@@ -36,13 +37,84 @@ export function createState() {
     // Engineering build queue: { blueprintId, name, daysLeft }.
     building: [],
 
-    // Meta progress.
-    missions: MISSIONS.map((m) => ({ ...m })),
-    completedMissions: [], // ids
+    // Operations leads (procedurally generated). Each lead is MISSION-shaped and
+    // carries its own generated `level` (drop-in for loadMission). Filled below.
+    leads: [],
+    completedMissions: [], // ids of cleared leads (also the win counter)
     outcome: null, // null | "won" | "lost"
 
     log: [], // short human-readable campaign log (newest first)
   };
+  refillLeads(state);
+  return state;
+}
+
+// ---- lead generation (Slice 1) --------------------------------------------
+// Operations surfaces generated leads instead of a fixed mission list. Enemy
+// budgets and difficulty scale with campaign pressure (days elapsed + wins), and
+// a one-shot BOSS lead (winsCampaign) surfaces once you've cleared enough of
+// them — the stand-in for the Ops-investment endgame gating of a later slice.
+
+const DIFF_BY_PRESSURE = [
+  { max: 1.2, weights: { low: 3, medium: 2, high: 0 } },
+  { max: 1.6, weights: { low: 2, medium: 3, high: 1 } },
+  { max: 99, weights: { low: 1, medium: 3, high: 3 } },
+];
+const LENGTHS = ["short", "medium", "medium", "long"];
+
+function pressureScale(state) {
+  return Math.min(config.threatScaleCap, 1 + (state.day - 1) * 0.06 + state.completedMissions.length * 0.05);
+}
+
+function pickDifficulty(scale) {
+  const band = DIFF_BY_PRESSURE.find((b) => scale <= b.max) || DIFF_BY_PRESSURE[DIFF_BY_PRESSURE.length - 1];
+  const entries = Object.entries(band.weights).filter(([, w]) => w > 0);
+  const total = entries.reduce((s, [, w]) => s + w, 0);
+  let r = Math.random() * total;
+  for (const [id, w] of entries) {
+    r -= w;
+    if (r < 0) return id;
+  }
+  return "medium";
+}
+
+// Legal enemy roster for generation = built-ins + editor-authored custom enemies.
+function genRoster() {
+  return Object.values({ ...ENEMIES, ...customEnemyMap() });
+}
+
+function makeLead(state, opts = {}) {
+  const seed = (Math.random() * 1e9) | 0;
+  const scale = pressureScale(state);
+  const { level, mission, report } = generateLevel({
+    seed,
+    boss: !!opts.boss,
+    difficulty: opts.boss ? undefined : pickDifficulty(scale),
+    length: LENGTHS[(Math.random() * LENGTHS.length) | 0],
+    roster: genRoster(),
+    scale,
+  });
+  return { ...mission, level, report };
+}
+
+// Add one lead with a collision-free id (level ids are gen_<seed>).
+function addUniqueLead(state, opts) {
+  for (let i = 0; i < 8; i++) {
+    const lead = makeLead(state, opts);
+    if (!state.leads.some((l) => l.id === lead.id)) {
+      state.leads.push(lead);
+      return;
+    }
+  }
+}
+
+// Top up the board to LEAD_COUNT, adding the boss lead once eligible.
+export function refillLeads(state) {
+  if (state.outcome) return;
+  const bossEligible = state.completedMissions.length >= config.bossAfter;
+  if (bossEligible && !state.leads.some((l) => l.winsCampaign)) addUniqueLead(state, { boss: true });
+  let guard = 0;
+  while (state.leads.length < config.leadCount && guard++ < 20) addUniqueLead(state, {});
 }
 
 // ---- helpers --------------------------------------------------------------
@@ -54,16 +126,6 @@ function note(state, text) {
 
 export function livingRoster(state) {
   return state.roster.filter((s) => s.status !== "dead");
-}
-
-export function missionUnlocked(state, mission) {
-  return mission.unlockAfter.every((id) => state.completedMissions.includes(id));
-}
-
-export function missionAvailable(state, mission) {
-  return (
-    !state.completedMissions.includes(mission.id) && missionUnlocked(state, mission)
-  );
 }
 
 // ---- Barracks -------------------------------------------------------------
@@ -151,7 +213,7 @@ export function advanceDay(state) {
 //     loot: [{name,value}], kills }
 
 export function applyMissionResult(state, result) {
-  const mission = state.missions.find((m) => m.id === result.missionId);
+  const mission = state.leads.find((l) => l.id === result.missionId);
 
   // Permadeath: anyone who fell is gone from the roster for good.
   for (const id of result.casualties) {
@@ -194,6 +256,10 @@ export function applyMissionResult(state, result) {
     note(state, `${mission.name} — failed. The squad was wiped.`);
     if (state.campaignHealth <= TUNING.loseAt) state.outcome = "lost";
   }
+
+  // The lead is spent whether or not the squad survived; refresh the board.
+  state.leads = state.leads.filter((l) => l.id !== result.missionId);
+  refillLeads(state);
 
   return state;
 }

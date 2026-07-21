@@ -17,6 +17,7 @@ import {
 import { controlsHTML, bindControls } from "./controls.js";
 import { createWeaponDesigner } from "./tools/weapon-designer.js";
 import { createEnemyDesigner } from "./tools/enemy-designer.js";
+import { createLevelGenerator } from "./tools/level-generator.js";
 
 const root = document.getElementById("editor");
 let tab = "settings";
@@ -26,6 +27,7 @@ let activeTool = null; // the mounted tool instance ({ dispose })
 const TOOLS = [
   { id: "weapon", label: "Weapon Designer", desc: "Compose weapons from primitives, watch them fire, and check them against the cost budget." },
   { id: "enemy", label: "Enemy Designer", desc: "Tune archetype stats and behavior; watch the real AI drive it in a live preview." },
+  { id: "levelgen", label: "Level Generator", desc: "Generate procedural missions from a seed; preview the layout and check the threat budget." },
   { label: "Level Editor", desc: "Place platforms, spawns, loot, and the exit on a canvas." },
 ];
 
@@ -39,9 +41,10 @@ function disposeTool() {
 function render() {
   disposeTool();
 
+  const MOUNTABLE = ["weapon", "enemy", "levelgen"];
   let body;
   if (tab === "settings") body = settingsView();
-  else if (toolId === "weapon" || toolId === "enemy") body = `<div id="tool-host" class="tool-host"></div>`;
+  else if (MOUNTABLE.includes(toolId)) body = `<div id="tool-host" class="tool-host"></div>`;
   else body = toolsView();
 
   root.innerHTML = `
@@ -56,10 +59,11 @@ function render() {
     <main class="ed-body">${body}</main>`;
 
   if (tab === "settings") bindControls(document.getElementById("cfg"), (key, val) => setConfig(key, val));
-  if (tab === "tools" && (toolId === "weapon" || toolId === "enemy")) {
+  if (tab === "tools" && MOUNTABLE.includes(toolId)) {
     const host = document.getElementById("tool-host");
     const back = () => { toolId = null; render(); };
-    activeTool = toolId === "weapon" ? createWeaponDesigner(host, back) : createEnemyDesigner(host, back);
+    const factory = { weapon: createWeaponDesigner, enemy: createEnemyDesigner, levelgen: createLevelGenerator }[toolId];
+    activeTool = factory(host, back);
   }
 }
 

@@ -358,6 +358,7 @@ body::after {
 }
 .mission-row.is-done { opacity: 0.6; border-left-color: var(--good); }
 .mission-row.is-locked { opacity: 0.55; }
+.mission-row.is-boss { border-left-color: var(--credits); box-shadow: 0 0 16px -4px rgba(242,193,78,0.35); }
 .mission-title { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mission-brief { margin: 6px 0 0; font-size: 13px; color: #b3bcc8; max-width: 620px; line-height: 1.5; }
 .mission-action { flex-shrink: 0; }
@@ -367,6 +368,7 @@ body::after {
 .tag-locked { background: #2a2530; color: #b09fc0; }
 .tag-diff-low { background: #1c3040; color: #7fb8dc; }
 .tag-diff-medium { background: #3a3320; color: #dcc47f; }
+.tag-diff-high { background: #3a2a1c; color: #e5b483; }
 .tag-diff-extreme { background: #3a1c1c; color: #e59090; }
 
 /* ---- Deploy screen ---- */

@@ -85,6 +85,41 @@ export const SCHEMA = [
       },
     ],
   },
+  {
+    title: "Generation",
+    items: [
+      {
+        key: "leadCount",
+        label: "Leads on the board",
+        type: "range",
+        default: 3,
+        min: 1,
+        max: 5,
+        step: 1,
+        help: "How many operations Ops surfaces at once. Applies as the board refills.",
+      },
+      {
+        key: "bossAfter",
+        label: "Wins before the finale",
+        type: "range",
+        default: 4,
+        min: 1,
+        max: 10,
+        step: 1,
+        help: "Operations you must clear before the boss (campaign-ending) lead can appear.",
+      },
+      {
+        key: "threatScaleCap",
+        label: "Max threat scaling",
+        type: "range",
+        default: 2.2,
+        min: 1,
+        max: 4,
+        step: 0.1,
+        help: "Ceiling on how far generated enemy budgets scale up as the campaign drags on.",
+      },
+    ],
+  },
 ];
 
 const STORAGE_KEY = "sidescroller.config.v1";

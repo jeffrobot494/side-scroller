@@ -14,10 +14,8 @@ import {
   sellAllLoot,
   advanceDay,
   livingRoster,
-  missionAvailable,
-  missionUnlocked,
 } from "../game/state.js";
-import { MISSIONS, BLUEPRINTS, LEVELS, WEAPONS, TUNING } from "../game/content.js";
+import { BLUEPRINTS, WEAPONS, TUNING } from "../game/content.js";
 
 const LOCATIONS = [
   { id: "barracks", label: "Barracks", icon: "🪖", staff: "Sgt. Bishop" },
@@ -276,29 +274,16 @@ export class Hub {
 
   _operations() {
     const g = this.game;
-    const rows = MISSIONS.map((m) => {
-      const done = g.completedMissions.includes(m.id);
-      const unlocked = missionUnlocked(g, m);
-      let status, action;
-      if (done) {
-        status = `<span class="tag tag-done">✓ Complete</span>`;
-        action = "";
-      } else if (!unlocked) {
-        const need = m.unlockAfter
-          .filter((id) => !g.completedMissions.includes(id))
-          .map((id) => MISSIONS.find((x) => x.id === id).name)
-          .join(", ");
-        status = `<span class="tag tag-locked">🔒 Locked</span>`;
-        action = `<div class="muted small">Requires: ${need}</div>`;
-      } else {
-        status = `<span class="tag tag-diff-${m.difficulty.toLowerCase()}">${m.difficulty} threat</span>`;
-        const canDeploy = livingRoster(g).length > 0;
-        action = `<button class="btn" data-action="predeploy" data-id="${m.id}" ${
-          canDeploy ? "" : "disabled"
-        }>${canDeploy ? "Deploy squad" : "No soldiers"}</button>`;
-      }
-      return `
-        <article class="mission-row ${done ? "is-done" : ""} ${!unlocked ? "is-locked" : ""}">
+    const canDeploy = livingRoster(g).length > 0;
+    const rows = g.leads.length
+      ? g.leads
+          .map((m) => {
+            const status = `<span class="tag tag-diff-${m.difficulty.toLowerCase()}">${m.difficulty} threat</span>`;
+            const action = `<button class="btn" data-action="predeploy" data-id="${m.id}" ${
+              canDeploy ? "" : "disabled"
+            }>${canDeploy ? "Deploy squad" : "No soldiers"}</button>`;
+            return `
+        <article class="mission-row ${m.winsCampaign ? "is-boss" : ""}">
           <div class="mission-main">
             <div class="mission-title">${m.name} ${status}</div>
             <p class="mission-brief">${m.brief}</p>
@@ -306,7 +291,9 @@ export class Hub {
           </div>
           <div class="mission-action">${action}</div>
         </article>`;
-    }).join("");
+          })
+          .join("")
+      : `<p class="empty">Ops is still scanning the sector. Advance a day for fresh leads.</p>`;
 
     const stores = g.stores;
     const total = stores.reduce((s, i) => s + i.value, 0);
@@ -353,7 +340,7 @@ export class Hub {
       <section class="squad-block">
         <h2>Campaign Health</h2>
         <div class="big-meter"><span class="big-fill" style="width:${h}%;background:${color}"></span></div>
-        <p class="muted">Sector integrity at <strong>${h}</strong>. The invasion advances <strong>${TUNING.doomPerDay}</strong> each day. Reach 0 and the sector falls. Complete <strong>The Hive Core</strong> to win.</p>
+        <p class="muted">Sector integrity at <strong>${h}</strong>. The invasion advances <strong>${TUNING.doomPerDay}</strong> each day. Reach 0 and the sector falls. Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
         <div class="card-foot">
           <span class="cost">Day ${g.day}</span>
           <button class="btn" data-action="advance">Advance the day ▸</button>
@@ -369,7 +356,7 @@ export class Hub {
 
   _deployScreen() {
     const g = this.game;
-    const mission = MISSIONS.find((m) => m.id === this.deploy.missionId);
+    const mission = g.leads.find((l) => l.id === this.deploy.missionId);
     const roster = livingRoster(g);
     const sel = this.deploy.selected;
 
@@ -611,8 +598,8 @@ export class Hub {
 
   _launch() {
     const g = this.game;
-    const mission = MISSIONS.find((m) => m.id === this.deploy.missionId);
-    const level = LEVELS[mission.level];
+    const mission = g.leads.find((l) => l.id === this.deploy.missionId);
+    const level = mission.level;
     const squad = [];
     for (const s of livingRoster(g)) {
       if (!this.deploy.selected.has(s.id)) continue;
