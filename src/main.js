@@ -1,80 +1,45 @@
-// Side Scroller — built from scratch on the HTML5 Canvas API.
-// No dependencies, no build step. Open index.html in a browser (via a local
-// server) and it runs.
+// ---------------------------------------------------------------------------
+// APP ENTRY / SCENE MANAGER  (Phase 0 — one app, one state)
+//
+// One page, one game state, two scenes. The hub (DOM) and the mission (canvas)
+// share a single state object; this module owns the toggle between them. A
+// deploy in the hub carries a squad into a mission; the mission's result comes
+// back here, is applied to state, and is shown on the results screen.
+// ---------------------------------------------------------------------------
 
-import { Input } from "./input.js";
-import { Player } from "./player.js";
-import { WORLD, PLATFORMS } from "./world.js";
+import { createState, applyMissionResult } from "./game/state.js";
+import { Hub } from "./hub/hub.js";
+import { Mission } from "./mission/mission.js";
 
-const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById("game"));
-const ctx = canvas.getContext("2d");
+const hubRoot = document.getElementById("hub-root");
+const canvas = document.getElementById("game");
 
-const input = new Input();
-const player = new Player(100, 100);
+const game = createState();
 
-// Camera: world-space top-left corner of what we're viewing.
-const camera = { x: 0, y: 0 };
+// The mission scene calls back here when it resolves.
+const mission = new Mission(canvas, onMissionComplete);
 
-// ---- Fixed-timestep loop --------------------------------------------------
-// Physics updates at a constant rate (STEP seconds) regardless of the display
-// refresh rate, so jump height and run speed feel identical on every machine.
-// Rendering happens as often as the browser allows.
-const STEP = 1 / 60; // 60 physics updates per second
-let accumulator = 0;
-let lastTime = performance.now();
+// The hub launches missions through this small API.
+const hub = new Hub(hubRoot, game, {
+  startMission(missionDef, level, squad) {
+    showScene("mission");
+    mission.start(missionDef, level, squad);
+  },
+});
 
-function frame(now) {
-  let frameTime = (now - lastTime) / 1000;
-  lastTime = now;
-
-  // Guard against huge jumps (e.g. tabbing away and back).
-  if (frameTime > 0.25) frameTime = 0.25;
-
-  accumulator += frameTime;
-  while (accumulator >= STEP) {
-    update(STEP);
-    accumulator -= STEP;
-  }
-
-  render();
-  requestAnimationFrame(frame);
+function onMissionComplete(result) {
+  applyMissionResult(game, result);
+  showScene("hub");
+  hub.showResults(result);
 }
 
-function update(dt) {
-  player.update(dt, input, PLATFORMS);
-
-  // Camera follows the player, keeping them a bit left of center so you can
-  // see what's coming. Clamp so we never scroll past the world edges.
-  const targetX = player.x + player.w / 2 - canvas.width * 0.4;
-  camera.x = clamp(targetX, 0, WORLD.width - canvas.width);
-  camera.y = 0;
+// Toggle which surface is visible. The DOM hub and the canvas never render at
+// the same time, so input never crosses over.
+function showScene(name) {
+  const inMission = name === "mission";
+  canvas.style.display = inMission ? "block" : "none";
+  hubRoot.style.display = inMission ? "none" : "block";
 }
 
-function render() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  ctx.save();
-  ctx.translate(-Math.round(camera.x), -Math.round(camera.y));
-
-  // Platforms
-  ctx.fillStyle = "#0f3460";
-  for (const p of PLATFORMS) {
-    ctx.fillRect(p.x, p.y, p.w, p.h);
-  }
-
-  // Player
-  player.draw(ctx);
-
-  ctx.restore();
-
-  // HUD (drawn in screen space, not affected by the camera)
-  ctx.fillStyle = "#e0e0e0";
-  ctx.font = "14px monospace";
-  ctx.fillText("Arrow keys / A,D to move  •  Space / W / Up to jump", 12, 24);
-}
-
-function clamp(v, min, max) {
-  return v < min ? min : v > max ? max : v;
-}
-
-requestAnimationFrame(frame);
+showScene("hub");
+hub.render();
