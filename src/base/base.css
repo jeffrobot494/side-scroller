@@ -1,0 +1,311 @@
+/* Base hub styling — the feeling of looking into carved-out rooms and tunnels
+   deep under an underground command bunker. Concrete, earth, and thin strips of
+   artificial light; each room recedes into the dark via faux one-point
+   perspective. */
+
+:root {
+  --earth: #0b0908;      /* deep soil, page base */
+  --concrete: #171b21;   /* room surfaces */
+  --concrete-hi: #212832;
+  --line: #333d4a;       /* etched concrete seams */
+  --steel: #2a3644;
+  --text: #d8dee9;
+  --muted: #808b99;
+  --accent: #e94560;     /* alert red — interactive */
+  --light: #ffca7a;      /* warm strip lighting */
+  --glow: rgba(160, 200, 255, 0.10); /* cool overhead wash */
+  --credits: #f2c14e;
+  --good: #4caf72;
+  --bad: #e05a5a;
+  --track: #0a0e13;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+
+/* Underground: warm soil, no bright surface. A faint wash at the very top hints
+   at the shaft to the surface far above. */
+body {
+  background:
+    radial-gradient(120% 50% at 50% -20%, rgba(120, 150, 190, 0.06), transparent 55%),
+    linear-gradient(#10120f 0%, var(--earth) 45%, #060504 100%);
+  color: var(--text);
+}
+
+/* Grain/vignette overlay so corners fall into darkness like the far end of a
+   tunnel. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  background: radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+#app { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ---- Top bar: a reinforced concrete lintel with a light strip beneath ---- */
+.topbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 26px;
+  background:
+    linear-gradient(180deg, #1c222b, #12161c);
+  border-bottom: 1px solid #05070a;
+  box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.02);
+}
+/* the light strip */
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--light) 20%, var(--light) 80%, transparent);
+  opacity: 0.5;
+  box-shadow: 0 0 10px 1px rgba(255, 202, 122, 0.35);
+}
+.brand {
+  font-weight: 800;
+  letter-spacing: 4px;
+  font-size: 18px;
+  color: #eef2f7;
+  text-shadow: 0 1px 0 #000;
+}
+.resources { display: flex; align-items: center; gap: 18px; }
+.credits { color: var(--credits); font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 0 8px rgba(242, 193, 78, 0.25); }
+.roster-count { color: var(--muted); font-size: 14px; }
+
+/* ---- Layout ---- */
+.layout { flex: 1; display: grid; grid-template-columns: 250px 1fr; }
+
+/* ---- Locations: a vertical access shaft lined with room hatches ---- */
+.locations {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 14px;
+  background:
+    linear-gradient(90deg, #05060a 0%, #0e1218 12%, #12161d 100%);
+  border-right: 1px solid #05070a;
+}
+/* the shaft: a lit vertical line the hatches branch off of */
+.locations::before {
+  content: "";
+  position: absolute;
+  top: 24px; bottom: 24px; left: 26px;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, #3b4658 12%, #3b4658 88%, transparent);
+  box-shadow: 0 0 8px rgba(120, 160, 210, 0.15);
+}
+
+.loc {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: 18px;               /* room branches off the shaft */
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #46536604;
+  border-radius: 4px;
+  background: linear-gradient(180deg, var(--concrete-hi), var(--concrete));
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+/* the tunnel stub connecting each hatch to the shaft */
+.loc::before {
+  content: "";
+  position: absolute;
+  left: -18px;
+  top: 50%;
+  width: 18px;
+  height: 2px;
+  background: #2f3a49;
+}
+.loc:hover { transform: translateX(2px); border-color: #4a5a70; }
+.loc.active {
+  border-left-color: var(--light);
+  box-shadow: inset 3px 0 12px -4px rgba(255, 202, 122, 0.5), 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.loc-icon {
+  font-size: 22px;
+  line-height: 1;
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
+}
+.loc-text { display: flex; flex-direction: column; }
+.loc-label { font-weight: 600; letter-spacing: 0.5px; }
+.loc-staff { font-size: 12px; color: var(--muted); }
+
+/* ---- Panel: the interior of the selected room, receding into the dark ---- */
+.panel {
+  position: relative;
+  padding: 30px 34px;
+  overflow-y: auto;
+  isolation: isolate;
+}
+/* perspective back wall + overhead light + floor shadow, all behind content */
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(80% 55% at 50% -8%, var(--glow), transparent 60%),
+    linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.4) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'%3E%3Cg fill='none' stroke='%233b4d66' stroke-width='0.18'%3E%3Crect x='35' y='31' width='30' height='28'/%3E%3Cline x1='0' y1='0' x2='35' y2='31'/%3E%3Cline x1='100' y1='0' x2='65' y2='31'/%3E%3Cline x1='0' y1='100' x2='35' y2='59'/%3E%3Cline x1='100' y1='100' x2='65' y2='59'/%3E%3Cline x1='24' y1='78' x2='76' y2='78'/%3E%3Cline x1='30' y1='68' x2='70' y2='68'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: cover, cover, cover;
+  opacity: 0.85;
+}
+/* lift all real content above the perspective backdrop */
+.panel > * { position: relative; z-index: 1; }
+
+.location-header h1 { margin: 0 0 4px; font-size: 26px; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6); }
+.staff-line { margin: 0 0 8px; color: var(--muted); font-style: italic; }
+
+.placeholder {
+  margin-top: 44px;
+  padding: 48px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(20, 25, 32, 0.6), rgba(8, 10, 14, 0.6));
+}
+.muted { color: var(--muted); }
+
+/* ---- Flash message ---- */
+.flash {
+  margin-bottom: 18px;
+  padding: 10px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  font-size: 14px;
+  background: rgba(10, 14, 20, 0.7);
+}
+.flash-good { border-left-color: var(--good); color: #bfe6cd; }
+.flash-bad { border-left-color: var(--bad); color: #f0c2c2; }
+
+/* ---- Section headers: stencilled bunker labels ---- */
+.squad-block, .recruit-block { margin-top: 28px; }
+.squad-block h2, .recruit-block h2 {
+  font-size: 14px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: #9aa6b4;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+.count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  background: #223047;
+  color: var(--text);
+  font-size: 12px;
+}
+.empty { color: var(--muted); font-style: italic; padding: 10px 0; }
+
+/* ---- Soldier cards: dossier plates bolted to the wall ---- */
+.soldier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.soldier-card {
+  position: relative;
+  background: linear-gradient(180deg, var(--concrete-hi), #12161d);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+/* corner "bolts" */
+.soldier-card::before,
+.soldier-card::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: #46536a;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.soldier-card::before { left: 8px; }
+.soldier-card::after { right: 8px; }
+
+.card-head { display: flex; align-items: center; gap: 12px; }
+.portrait {
+  width: 48px; height: 48px;
+  border-radius: 4px;                 /* ID-photo square, not a web avatar */
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 16px; color: #fff;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 0 2px rgba(0, 0, 0, 0.4);
+}
+.name { font-weight: 700; font-size: 16px; }
+.callsign { color: var(--accent); font-weight: 600; }
+.sub { font-size: 12px; color: var(--muted); }
+.bio { margin: 0; font-size: 13px; line-height: 1.5; color: #b3bcc8; }
+
+/* stat bars */
+.stats { display: flex; flex-direction: column; gap: 6px; }
+.stat { display: grid; grid-template-columns: 52px 1fr 20px; align-items: center; gap: 8px; }
+.stat-label { font-size: 12px; color: var(--muted); }
+.stat-track { height: 7px; border-radius: 2px; background: var(--track); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5); }
+.stat-fill { display: block; height: 100%; background: linear-gradient(90deg, #3a6ea5, var(--accent)); }
+.stat-num { font-size: 12px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* traits */
+.traits { display: flex; flex-wrap: wrap; gap: 6px; }
+.trait {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: #202c3d;
+  color: #a9b6c6;
+  border: 1px solid var(--line);
+  letter-spacing: 0.3px;
+}
+
+/* card footer */
+.card-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 4px; }
+.cost { color: var(--credits); font-weight: 700; }
+.hire-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #f4586f, var(--accent));
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(233, 69, 96, 0.3);
+  transition: filter 0.12s, transform 0.1s;
+}
+.hire-btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
+.hire-btn:disabled { background: #2c313a; color: #7a808a; cursor: not-allowed; box-shadow: none; }
+.card-foot.enlisted { justify-content: flex-start; }
+.enlisted-tag { color: var(--good); font-weight: 700; font-size: 14px; }
+
+@media (max-width: 720px) {
+  .layout { grid-template-columns: 1fr; }
+  .locations { flex-direction: row; overflow-x: auto; }
+  .locations::before { display: none; }
+  .loc { margin-left: 0; }
+  .loc::before { display: none; }
+}
