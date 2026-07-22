@@ -74,6 +74,7 @@ function makeInstance(def, parent, root) {
     maxHealth: def.health ? def.health.max : null,
     vars: { ...def.vars },
     motion: def.motion ? { ...def.motion } : null,
+    aliveTime: 0,
     dash: null,
     moveOrder: null,
     ttl: def.life ? def.life.ttl : null,
@@ -144,11 +145,20 @@ export function updateSpecEnemy(root, dt, scene, ctx) {
 // track the fresh position).
 function updateTree(root, ent, dt, scene, ctx) {
   if (!ent.alive) return;
+  ent.aliveTime += dt;
   if (ent.telegraph > 0) ent.telegraph -= dt;
   if (ent.contactCooldown > 0) ent.contactCooldown -= dt;
 
   if (!ent.disabled) {
     moveEntity(root, ent, dt, scene);
+
+    // Flyers don't pass through platforms (grounded entities collide inside
+    // stepActor): projectile-likes die on terrain like plain projectiles;
+    // other flyers get pushed out. body.ghost opts a design out entirely.
+    if (ent.spec.body.gravity === 0 && !ent.spec.body.ghost && !isFollower(ent)) {
+      resolveFlyerTerrain(root, ent, scene, ctx);
+      if (!ent.alive) return;
+    }
 
     // lifetime
     if (ent.ttl !== null) {
@@ -195,9 +205,53 @@ function player(scene) {
 const cx = (e) => e.x + e.w / 2;
 const cy = (e) => e.y + e.h / 2;
 
+function isFollower(ent) {
+  return !!(ent.parent && ent.spec.link && ent.spec.link.followParent && !ent.detached);
+}
+
+// Terrain response for a flying entity overlapping a platform. Projectile-likes
+// (contact.destroySelf) are destroyed — consistent with plain projectiles dying
+// on walls in combat.js, and it makes cover work against homing missiles; their
+// on.destroy still fires (a seeker bursts into shards against a wall). Anything
+// else is pushed out along the smallest overlap axis. A short spawn grace keeps
+// an emitter flush against a wall from killing its own shot on frame one.
+function resolveFlyerTerrain(root, ent, scene, ctx) {
+  for (const p of scene.platforms) {
+    if (!overlaps(ent, p)) continue;
+    const con = ent.spec.contact;
+    if (con && con.destroySelf) {
+      if (ent.aliveTime > 0.08) {
+        ctx.spark && ctx.spark(ent.x + ent.w / 2, ent.y + ent.h / 2, ent.color, 5, 110);
+        killEntity(root, ent, null, scene, ctx);
+      }
+      return;
+    }
+    const pushUp = ent.y + ent.h - p.y;
+    const pushDown = p.y + p.h - ent.y;
+    const pushLeft = ent.x + ent.w - p.x;
+    const pushRight = p.x + p.w - ent.x;
+    const min = Math.min(pushUp, pushDown, pushLeft, pushRight);
+    if (min === pushUp) {
+      ent.y -= pushUp;
+      ent.anchorY -= pushUp; // hover recomputes y from its anchor — move it too, or it re-penetrates
+      if (ent.vy > 0) ent.vy = 0;
+    } else if (min === pushDown) {
+      ent.y += pushDown;
+      ent.anchorY += pushDown;
+      if (ent.vy < 0) ent.vy = 0;
+    } else if (min === pushLeft) {
+      ent.x -= pushLeft;
+      if (ent.vx > 0) ent.vx = 0;
+    } else {
+      ent.x += pushRight;
+      if (ent.vx < 0) ent.vx = 0;
+    }
+  }
+}
+
 function moveEntity(root, ent, dt, scene) {
   // followers ride their parent; no independent physics
-  if (ent.parent && ent.spec.link && ent.spec.link.followParent && !ent.detached) {
+  if (isFollower(ent)) {
     const p = ent.parent;
     ent.x = p.x + p.w / 2 + ent.spec.at[0] - ent.w / 2;
     ent.y = p.y + p.h / 2 + ent.spec.at[1] - ent.h / 2;

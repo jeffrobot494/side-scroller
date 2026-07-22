@@ -143,7 +143,7 @@ export function vocabularyDoc() {
     `Top level: { v:${SPEC_VERSION}, id, name, threat (1-2000), role (${ROLES.join("|")}), tier (1-5), limits, vars, defs, root, brain }`,
     `Every entity (root, children, defs entries) may have: ${ENTITY_KEYS.join(", ")}.`,
     `  visual: { shape: ${VISUAL_SHAPES.join("|")}, size: [w,h] px, color: "#hex" }`,
-    `  body: { w, h, gravity (0=flies, 1=falls) } — defaults to visual size`,
+    `  body: { w, h, gravity (0=flies, 1=falls), ghost (true = passes through platforms; default false) } — size defaults to visual size. Platforms block everyone else; flying entities with contact.destroySelf (missiles) are destroyed on terrain.`,
     `  health: { max } — omit for indestructible decoration; root MUST have health`,
     `  motion: one of ${Object.keys(MOTIONS).join(", ")} with params, e.g. ${JSON.stringify({ type: "keepDistance", ...MOTIONS.keepDistance.params })}`,
     `  contact: { damage, destroySelf?, knockback? } — touch damage to the player`,

@@ -171,6 +171,63 @@ export default async function run(t) {
     t.ok("ttl: expired entities are culled", !root.spawned.includes(sp));
   }
 
+  // ---- flyers vs platforms ------------------------------------------------
+  {
+    // a flying chaser driving at a wall must be stopped by it, not pass through
+    const scene = makeScene();
+    const wall = { x: 600, y: 200, w: 40, h: 300 };
+    scene.platforms.push(wall);
+    const spec = normalizeSpec({
+      id: "flier_wall",
+      root: { health: { max: 20 }, visual: { size: [24, 24] }, motion: { type: "chase", speed: 220 }, body: { gravity: 0 } },
+    });
+    const root = instantiate(spec, 300, 300);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, 4);
+    t.ok("terrain: flying enemy blocked by a platform", root.x + root.w <= wall.x + 1);
+
+    // same chaser with body.ghost passes through
+    const ghost = normalizeSpec({
+      id: "ghost_flier",
+      root: { health: { max: 20 }, visual: { size: [24, 24] }, motion: { type: "chase", speed: 220 }, body: { gravity: 0, ghost: true } },
+    });
+    const g = instantiate(ghost, 300, 300);
+    const { ctx: gctx } = makeCtx(() => g);
+    sim(g, scene, gctx, 4);
+    t.ok("terrain: ghost flyer passes through", g.x > wall.x + wall.w);
+  }
+
+  {
+    // a homing seeker (contact.destroySelf) dies on terrain — and its
+    // on.destroy still fires (cover works against missiles)
+    const scene = makeScene();
+    scene.platforms.push({ x: 600, y: 200, w: 40, h: 300 }); // wall between spawn and player
+    const nspec = normalizeSpec({
+      id: "seeker_wall",
+      defs: {
+        missile: {
+          visual: { size: [14, 14] },
+          health: { max: 2 },
+          life: { ttl: 8 },
+          motion: { type: "home", speed: 260, turnRate: 3 },
+          contact: { damage: 5, destroySelf: true },
+          on: { destroy: [{ signal: "hitWall" }] },
+        },
+      },
+      root: { health: { max: 30 }, visual: { size: [30, 30] }, emitters: { m: { ref: "missile" } }, body: { gravity: 0 }, motion: { type: "hover" } },
+    });
+    const root = instantiate(nspec, 300, 260);
+    const { ctx } = makeCtx(() => root);
+    const missile = spawnFromDef(root, "missile", 400, 300, { vx: 260, vy: 0, depth: 1 }, scene, ctx);
+    let signaled = false;
+    const origPush = root.pendingSignals.push.bind(root.pendingSignals);
+    root.pendingSignals.push = (s) => { if (s === "hitWall") signaled = true; return origPush(s); };
+    sim(root, scene, ctx, 2.5);
+    t.ok("terrain: homing missile destroyed by a platform", missile && !missile.alive);
+    t.ok("terrain: missile death event fired on wall impact", signaled);
+    t.ok("terrain: missile never crossed the wall", !missile || missile.x < 640);
+  }
+
   // ---- dry-run gate -------------------------------------------------------
   for (const tpl of TEMPLATES) {
     const res = dryRunSpec(normalizeSpec(tpl));

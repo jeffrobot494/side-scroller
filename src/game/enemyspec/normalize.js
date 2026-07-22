@@ -62,6 +62,7 @@ function normalizeEntity(e, { isRoot }) {
   if (body.gravity === undefined) {
     body.gravity = motion && FLYING_MOTIONS.includes(motion.type) ? 0 : 1;
   }
+  body.ghost = !!body.ghost; // true = passes through platforms (phasing designs)
   out.body = body;
   if (motion) out.motion = motion;
 
