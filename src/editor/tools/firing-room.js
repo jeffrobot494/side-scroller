@@ -18,6 +18,7 @@ import { Soldier } from "../../mission/entities.js";
 import { stepActor } from "../../mission/entities.js";
 import { fire } from "../../mission/ai.js";
 import { updateProjectiles, updateStatuses } from "../../mission/combat.js";
+import { MissionInput } from "../../mission/input.js";
 
 export function createFiringRoom(container, onBack) {
   const customs = listCustomWeapons();
@@ -45,10 +46,13 @@ export function createFiringRoom(container, onBack) {
         <label class="lg-field">Dummies <output id="fr-countval">4</output>
           <input type="range" data-fr="count" min="1" max="6" step="1" value="4" />
         </label>
-        <label class="lg-field lg-boss">Auto-fire
-          <button type="button" role="switch" class="toggle on" data-fr="auto"><span class="knob"></span></button>
+        <label class="lg-field">Mode
+          <select data-fr="mode">
+            <option value="auto">Auto-fire range</option>
+            <option value="manual">Manual — drive it</option>
+          </select>
         </label>
-        <label class="lg-field lg-boss">Moving
+        <label class="lg-field lg-boss">Moving dummies
           <button type="button" role="switch" class="toggle" data-fr="moving"><span class="knob"></span></button>
         </label>
         <button class="btn btn-alt" data-fr="reset">Reset</button>
@@ -66,7 +70,8 @@ export function createFiringRoom(container, onBack) {
   const canvas = $("#fr-canvas");
   const ctx = canvas.getContext("2d");
 
-  const state = { weapon: ARSENAL[0], count: 4, auto: true, moving: false };
+  const state = { weapon: ARSENAL[0], count: 4, mode: "auto", moving: false };
+  const input = new MissionInput();
   const particles = [];
   const stats = { dealt: 0, elapsed: 0 };
 
@@ -125,7 +130,21 @@ export function createFiringRoom(container, onBack) {
     stats.elapsed += dt;
     if (shooter.fireCooldown > 0) shooter.fireCooldown -= dt;
     if (shooter.muzzleFlash > 0) shooter.muzzleFlash -= dt;
-    if (state.auto) fire(scene, shooter, { x: 1, y: 0 }, "player", dt, 1);
+
+    if (state.mode === "manual") {
+      // Player-driven, reusing the real mission controls.
+      shooter.setCrouch(input.isDown("crouch"));
+      const move = (input.isDown("right") ? 1 : 0) - (input.isDown("left") ? 1 : 0);
+      shooter.aimUp = input.isDown("aimUp") && !shooter.crouched;
+      shooter.applyMovement(dt, move, input.isDown("jump"));
+      const wantFire = shooter.weapon.auto ? input.isDown("fire") : input.justPressed("fire");
+      if (wantFire) fire(scene, shooter, shooter.fireDir(), "player", dt, 1);
+      stepActor(shooter, dt, world, scene.platforms);
+    } else {
+      // Stationary auto-fire range.
+      if (shooter.crouched) shooter.setCrouch(false);
+      fire(scene, shooter, { x: 1, y: 0 }, "player", dt, 1);
+    }
 
     for (const d of scene.enemies) {
       if (!d.alive) { d._respawn -= dt; if (d._respawn <= 0) resetDummy(d); continue; }
@@ -197,6 +216,13 @@ export function createFiringRoom(container, onBack) {
 
     ctx.fillStyle = "rgba(190,200,215,0.5)"; ctx.font = "10px system-ui, sans-serif";
     ctx.fillText("real combat — fire() + combat.js", 8, 14);
+
+    if (state.mode === "manual") {
+      ctx.fillStyle = "rgba(7,11,19,0.72)"; ctx.fillRect(0, canvas.height - 18, canvas.width, 18);
+      ctx.fillStyle = "rgba(200,210,224,0.85)"; ctx.font = "10px system-ui, sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("A / D  move      W  aim up      S  crouch      SPACE  jump      J  fire", canvas.width / 2, canvas.height - 5);
+      ctx.textAlign = "left";
+    }
   }
 
   function drawFlames(ctx, x, y, w) {
@@ -229,9 +255,17 @@ export function createFiringRoom(container, onBack) {
   }
 
   // ---- events ------------------------------------------------------------
+  function setMode(mode) {
+    state.mode = mode;
+    if (mode === "manual") input.enable();
+    else input.disable();
+    buildScene(); // fresh shooter: standing, facing right, at the start mark
+  }
+
   container.addEventListener("change", (e) => {
     const t = e.target;
     if (t.dataset.fr === "weapon") { state.weapon = byId[t.value] || ARSENAL[0]; buildScene(); refreshEffects(); }
+    else if (t.dataset.fr === "mode") setMode(t.value);
   });
   container.addEventListener("input", (e) => {
     const t = e.target;
@@ -242,7 +276,6 @@ export function createFiringRoom(container, onBack) {
     if (!el) return;
     switch (el.dataset.fr) {
       case "back": onBack(); break;
-      case "auto": state.auto = el.classList.toggle("on"); break;
       case "moving": state.moving = el.classList.toggle("on"); break;
       case "reset": buildScene(); break;
     }
@@ -268,6 +301,7 @@ export function createFiringRoom(container, onBack) {
   return {
     dispose() {
       running = false;
+      input.disable(); // remove key handlers so they don't leak into the editor
       if (raf != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
     },
   };

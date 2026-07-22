@@ -132,6 +132,10 @@ export function ctx2d() {
 
 export function installDom() {
   globalThis.window = globalThis.window || globalThis;
+  // MissionInput binds key handlers on window; provide no-op listeners so tools
+  // that use it mount/dispose cleanly under node.
+  if (!globalThis.addEventListener) globalThis.addEventListener = () => {};
+  if (!globalThis.removeEventListener) globalThis.removeEventListener = () => {};
   globalThis.document = { createElement: makeEl, getElementById: () => makeEl(), body: makeEl() };
   globalThis.requestAnimationFrame = () => 1;
   globalThis.cancelAnimationFrame = () => {};

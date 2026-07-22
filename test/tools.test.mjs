@@ -7,6 +7,7 @@ import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
 import { createFiringRoom } from "../src/editor/tools/firing-room.js";
 import { Enemy, Soldier, stepActor } from "../src/mission/entities.js";
 import { updateEnemy } from "../src/mission/ai.js";
+import { MissionInput } from "../src/mission/input.js";
 
 function mountable(t, name, factory) {
   installDom();
@@ -48,4 +49,16 @@ export default async function run(t) {
     if (scene.projectiles.length > 0) fired = true;
   }
   t.ok("real AI: shooter produces a projectile", fired);
+
+  // MissionInput (drives the Firing Room's manual mode) maps keys + cleans up.
+  {
+    const inp = new MissionInput();
+    inp.enable(); // harness provides no-op window listeners
+    inp._set({ code: "KeyD", preventDefault() {} }, true);
+    inp._set({ code: "KeyS", preventDefault() {} }, true);
+    t.ok("input: D → right", inp.isDown("right"));
+    t.ok("input: S → crouch", inp.isDown("crouch"));
+    inp.disable();
+    t.ok("input: disable clears state", !inp.isDown("right") && !inp.isDown("crouch"));
+  }
 }
