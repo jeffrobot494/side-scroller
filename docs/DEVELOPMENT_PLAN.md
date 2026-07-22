@@ -6,6 +6,14 @@
 > **Companion docs:** [GDD](GDD.md).
 > **Last updated:** 2026-07-21
 >
+> **NOTE (later than this doc):** the game has moved past this vertical-slice
+> plan — missions are now procedurally generated (leads board), the editor has
+> GUI tools (Weapon/Enemy Designers, Level Generator, Firing Room), the weapon
+> effect library + a 24-weapon arsenal, and a crouch mechanic. For the current
+> state see `CLAUDE.md` (“Current status”) and `docs/LEVEL-GENERATION.md` +
+> `docs/ASSET-GENERATION.md` for the active roadmap. The status below describes
+> the original slice only.
+>
 > **STATUS: vertical slice built (Phases 0–5 + 7).** The whole loop runs as a
 > single-page app: hire → deploy → run-and-gun mission with companions and
 > permadeath → results → sell loot → commission a weapon in Engineering →

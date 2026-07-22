@@ -5,6 +5,30 @@ strategy hub in DOM, with content authored as plain-data JS and (increasingly)
 generated. Design vision and the big plans live in `docs/` (`GDD.md`,
 `DEVELOPMENT_PLAN.md`, `LEVEL-GENERATION.md`, `ASSET-GENERATION.md`).
 
+## Current status
+
+Playable end to end, and built well beyond the original "vertical slice" (the
+STATUS blurbs in `DEVELOPMENT_PLAN.md`/`README.md` predate the items below — this
+section + the tests are the source of truth for what currently exists):
+
+- **Missions are generated, not a fixed list.** Operations surfaces procedurally
+  generated **leads** (`state.leads`); pick one → deploy → its generated `level`
+  loads (`loadMission` unchanged). Difficulty/enemy budgets scale with campaign
+  pressure; a boss lead (`winsCampaign`) appears after enough wins. This is
+  Slice 1 of `docs/LEVEL-GENERATION.md` (no LLM yet); later slices add the LLM.
+- **Editor tools** (`editor.html` → Tools): Weapon Designer, Enemy Designer,
+  Level Generator (seed → schematic preview), Firing Room (test any weapon vs
+  dummies — auto-fire or manual WASD drive). Settings tab is schema-driven config.
+- **Weapon effects:** a 9-kind library (damage/burn/slow/knockback/explode/chain
+  + pellets/pierce/homing) priced by `weaponcost.js`; a 24-weapon `arsenal.js`;
+  combat resolved in the shared `mission/combat.js`. Known gap: the Weapon
+  Designer's add-effect UI still only offers damage/burn.
+- **Crouch:** hold S/↓ to kneel (lower hitbox to dodge fire + let allies shoot
+  over you); enemies aim at standing height so crouch ducks under.
+- **Player2 (LLM + image gen) is NOT wired yet** — the next big dependency,
+  shared by level-gen Slice 2 and the asset-generation plan
+  (`docs/ASSET-GENERATION.md`). Client exists in `src/player2/` but is unused.
+
 ## Running it (no build step)
 
 Static site — serve the folder and open a page. No bundler, no transpile.
