@@ -28,7 +28,7 @@ let activeTool = null; // the mounted tool instance ({ dispose })
 
 const TOOLS = [
   { id: "weapon", label: "Weapon Designer", desc: "Compose weapons from primitives, watch them fire, and check them against the cost budget." },
-  { id: "enemy", label: "Enemy Designer", desc: "Tune archetype stats and behavior; watch the real AI drive it in a live preview." },
+  { id: "enemy", label: "Enemy Designer", desc: "Compose EnemySpec enemies — prompt the LLM or build by hand (parts, brains, emitters) — validate, preview, and save to the library." },
   { id: "levelgen", label: "Level Generator", desc: "Generate procedural missions from a seed; preview the layout and check the threat budget." },
   { id: "firing", label: "Firing Room", desc: "Fire any weapon at respawning dummies or waves of real enemies on a platformed range." },
   { id: "controls", label: "Controls", desc: "Rebind keyboard controls (move, jump, fire, reload, …); gamepad uses built-in defaults." },

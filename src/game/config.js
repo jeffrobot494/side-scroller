@@ -7,7 +7,7 @@
 // …). Overrides persist to localStorage; `exportConfig()` gives you JSON to
 // paste into these defaults to make a change permanent.
 //
-// `type`:  bool | range | enum
+// `type`:  bool | range | enum | text
 // Where a value is READ decides how "live" it is — friendlyFire is read per
 // shot (instant); gravity is read at mission start (applies next deploy).
 // ---------------------------------------------------------------------------
@@ -129,6 +129,18 @@ export const SCHEMA = [
     ],
   },
   {
+    title: "Player2 / AI",
+    items: [
+      {
+        key: "player2GameClientId",
+        label: "Game client id",
+        type: "text",
+        default: "",
+        help: "Your game's client id from the Player2 Developer Dashboard. Used by the Enemy Designer's Generate button (requires the Player2 app running).",
+      },
+    ],
+  },
+  {
     title: "Generation",
     items: [
       {
@@ -182,6 +194,7 @@ function coerce(item, v) {
     return clamp(n, item.min, item.max);
   }
   if (item.type === "enum") return item.options.includes(v) ? v : item.default;
+  if (item.type === "text") return typeof v === "string" ? v : String(v ?? item.default);
   return v;
 }
 

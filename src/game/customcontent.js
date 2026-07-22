@@ -109,6 +109,31 @@ export function customWeaponMap() {
   return mapOf(readStore(WEAPON_KEY));
 }
 
+// ---- enemy specs (the EnemySpec library) ----------------------------------
+// Composed EnemySpec enemies authored in the new Enemy Designer (manual or
+// LLM-generated). Deliberately a SEPARATE store from the legacy flat enemies
+// above: nothing in loadMission/the game pages reads this yet, so the creation
+// system can evolve without touching missions (docs/enemy_creation_system_plan.md).
+// Specs saved here are validated by the Designer before they land.
+
+const ENEMYSPEC_KEY = "sidescroller.enemyspecs.v1";
+
+export function listEnemySpecs() {
+  return readStore(ENEMYSPEC_KEY);
+}
+
+export function saveEnemySpec(spec) {
+  return saveInto(ENEMYSPEC_KEY, spec, [], "custom_spec");
+}
+
+export function deleteEnemySpec(id) {
+  return deleteFrom(ENEMYSPEC_KEY, id);
+}
+
+export function enemySpecMap() {
+  return mapOf(readStore(ENEMYSPEC_KEY));
+}
+
 // ---- enemies --------------------------------------------------------------
 
 export function listCustomEnemies() {

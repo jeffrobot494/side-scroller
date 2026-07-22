@@ -24,6 +24,16 @@ export default async function run(t) {
   t.ok("enemies: delete works", cc.deleteCustomEnemy("drone_2").ok);
   t.ok("stores are independent", cc.listCustomWeapons().length >= 1 && cc.listCustomEnemies().length === 1);
 
+  // ---- enemy specs (EnemySpec library — separate store) ----
+  t.eq("specs: empty list initially", cc.listEnemySpecs(), []);
+  const spec = { v: 1, id: "mine_layer", name: "Mine Layer", threat: 90, role: "artillery", tier: 2, root: { health: { max: 40 } } };
+  t.ok("specs: save ok+id", cc.saveEnemySpec(spec).ok && cc.enemySpecMap().mine_layer.name === "Mine Layer");
+  cc.saveEnemySpec({ ...spec, name: "Mine Layer II" });
+  t.ok("specs: same id upserts", cc.enemySpecMap().mine_layer.name === "Mine Layer II");
+  t.eq("specs: one entry after upsert", cc.listEnemySpecs().length, 1);
+  t.ok("specs: store separate from legacy enemies", !cc.customEnemyMap().mine_layer);
+  t.ok("specs: delete works", cc.deleteEnemySpec("mine_layer").ok && cc.listEnemySpecs().length === 0);
+
   // ---- guarded without localStorage ----
   const saved = globalThis.localStorage;
   delete globalThis.localStorage;

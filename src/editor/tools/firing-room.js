@@ -13,13 +13,19 @@
 // ---------------------------------------------------------------------------
 
 import { ARSENAL } from "../../game/arsenal.js";
-import { listCustomWeapons, customEnemyMap } from "../../game/customcontent.js";
+import { listCustomWeapons, customEnemyMap, enemySpecMap } from "../../game/customcontent.js";
 import { ENEMIES } from "../../game/content.js";
 import { dps, weaponCost, tierFor } from "../../game/weaponcost.js";
 import { Soldier, Enemy, stepActor, startReload, tickReload, overlaps } from "../../mission/entities.js";
 import { fire, updateEnemy, aimAccuracy } from "../../mission/ai.js";
 import { updateProjectiles, updateStatuses } from "../../mission/combat.js";
 import { drawProjectile } from "../../mission/render.js";
+import { normalizeSpec } from "../../game/enemyspec/normalize.js";
+import {
+  instantiate as instantiateSpec, updateSpecEnemy,
+  applyDamage as specDamage, killEntity as specKill, collidables,
+} from "../../mission/enemyspec/runtime.js";
+import { drawSpecEnemy } from "../../mission/enemyspec/render.js";
 import { MissionInput } from "../../mission/input.js";
 import { config } from "../../game/config.js";
 
@@ -29,6 +35,9 @@ export function createFiringRoom(container, onBack) {
   for (const w of [...ARSENAL, ...customs]) byId[w.id] = w;
   const enemyDefs = { ...ENEMIES, ...customEnemyMap() };
   const enemyList = Object.values(enemyDefs);
+  // Designed EnemySpec enemies (the Enemy Designer's library) — spawnable waves
+  // driven by the spec runtime; select values are "spec:<id>".
+  const specList = Object.values(enemySpecMap());
 
   const opt = (w) => `<option value="${w.id}">${escapeHtml(w.name)} — ${weaponCost(w)}</option>`;
   const tierGroup = (n) => `<optgroup label="Tier ${["I", "II", "III"][n - 1]}">${ARSENAL.filter((w) => w.tier === n).map(opt).join("")}</optgroup>`;
@@ -57,6 +66,7 @@ export function createFiringRoom(container, onBack) {
         <label class="lg-field" id="fr-enemyfield" style="display:none">Enemy
           <select data-fr="enemytype">
             ${enemyList.map((e) => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("")}
+            ${specList.length ? `<optgroup label="Designed (EnemySpec)">${specList.map((s) => `<option value="spec:${s.id}">${escapeHtml(s.name || s.id)}</option>`).join("")}</optgroup>` : ""}
           </select>
         </label>
         <label class="lg-field">Count <output id="fr-countval">4</output>
@@ -114,6 +124,7 @@ export function createFiringRoom(container, onBack) {
   ];
 
   let scene, shooter;
+  let specRoots = []; // live EnemySpec trees when a designed enemy is the target
 
   function buildScene() {
     shooter = new Soldier({ id: "you", name: "Range", callsign: "RNG", stats: { health: 8, aim: state.aim, speed: 6 } }, state.weapon, 46, GROUND - 46);
@@ -132,6 +143,23 @@ export function createFiringRoom(container, onBack) {
   // (Re)populate scene.enemies with the current target set.
   function spawnTargets() {
     scene.enemies = [];
+    specRoots = [];
+
+    // Designed EnemySpec waves — instantiate the real runtime trees; their
+    // damageable parts land in scene.enemies each frame via collidables().
+    if (state.targets === "enemies" && String(state.enemyType).startsWith("spec:")) {
+      const sp = enemySpecMap()[String(state.enemyType).slice(5)];
+      if (sp) {
+        const n = normalizeSpec(sp);
+        for (let i = 0; i < state.count; i++) {
+          const a = ANCHORS[i % ANCHORS.length];
+          specRoots.push(instantiateSpec(n, a.x, a.y - n.root.body.h));
+        }
+        scene.enemies = specRoots.flatMap((r) => collidables(r));
+      }
+      return;
+    }
+
     for (let i = 0; i < state.count; i++) {
       const a = ANCHORS[i % ANCHORS.length];
       if (state.targets === "enemies") {
@@ -168,13 +196,20 @@ export function createFiringRoom(container, onBack) {
     friendlyFire: false,
     damageMult: 1,
     damage(t, a, o) {
+      // EnemySpec parts route through the spec runtime so links/signals/phases fire.
+      if (t.kind === "spec") {
+        if (a > 0 && o && o.kind === "soldier") stats.dealt += a;
+        specDamage(t.root, t, a, o, scene, cctx);
+        return;
+      }
       t.health -= a; t.hitFlash = 0.12;
       // Only credit the player's on-target damage (enemy shots hitting the shooter don't count).
       if (a > 0 && t.kind === "enemy") stats.dealt += a;
       if (t.health <= 0 && t.alive) cctx.kill(t, o);
     },
-    kill(t) {
+    kill(t, o) {
       if (!t.alive) return;
+      if (t.kind === "spec") { specKill(t.root, t, o, scene, cctx); return; }
       t.alive = false;
       burst(t.x + t.w / 2, t.y + t.h / 2, t.color || "#c9d4e6", 16, 240);
       if (t.kind === "soldier") { respawnShooter(); return; } // test bed: no permadeath
@@ -240,7 +275,13 @@ export function createFiringRoom(container, onBack) {
       fire(scene, shooter, { x: 1, y: 0 }, "player", dt, acc);
     }
 
+    // Designed EnemySpec waves: the runtime drives them; refresh the target list
+    // (parts die, seekers spawn) every frame.
+    for (const r of specRoots) if (r.alive) updateSpecEnemy(r, dt, scene, cctx);
+    if (specRoots.length) scene.enemies = specRoots.flatMap((r) => (r.alive ? collidables(r) : []));
+
     for (const d of scene.enemies) {
+      if (d.kind === "spec") continue; // updated above by the spec runtime
       if (d.fireCooldown > 0) d.fireCooldown -= dt;
       if (d.contactCooldown > 0) d.contactCooldown -= dt;
       if (d.muzzleFlash > 0) d.muzzleFlash -= dt;
@@ -278,7 +319,7 @@ export function createFiringRoom(container, onBack) {
 
     // Wave cleared? enable the Respawn button.
     if (state.targets === "enemies") {
-      const anyAlive = scene.enemies.some((e) => e.alive);
+      const anyAlive = specRoots.length ? specRoots.some((r) => r.alive) : scene.enemies.some((e) => e.alive);
       const btn = $("#fr-wave");
       if (btn) btn.disabled = anyAlive;
     }
@@ -318,8 +359,12 @@ export function createFiringRoom(container, onBack) {
       if (hf < 1) { ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(shooter.x, shooter.y - 7, shooter.w, 4); ctx.fillStyle = "#7ad7ff"; ctx.fillRect(shooter.x, shooter.y - 7, shooter.w * hf, 4); }
     }
 
+    // designed EnemySpec targets (parts, telegraphs, spawned entities)
+    for (const r of specRoots) if (r.alive) drawSpecEnemy(ctx, r, stats.elapsed);
+
     // targets
     for (const d of scene.enemies) {
+      if (d.kind === "spec") continue; // drawn above
       if (!d.alive) continue;
       const slowed = d.slow && d.slow.time > 0;
       ctx.fillStyle = d.hitFlash > 0 ? "#fff" : slowed ? "#7fb8dc" : (d.color || "#c98a5a");

@@ -34,6 +34,16 @@ export default async function run(t) {
   mountable(t, "level-generator", createLevelGenerator);
   mountable(t, "firing-room", createFiringRoom);
 
+  // With a saved EnemySpec in the library, both tools still mount (the Firing
+  // Room renders the "Designed" optgroup; the Designer lists the library row).
+  {
+    const { saveEnemySpec } = await import("../src/game/customcontent.js");
+    const { TEMPLATE_BY_ID } = await import("../src/game/enemyspec/templates.js");
+    saveEnemySpec(JSON.parse(JSON.stringify(TEMPLATE_BY_ID.tpl_shooter)));
+    mountable(t, "enemy-designer (with library)", createEnemyDesigner);
+    mountable(t, "firing-room (with spec library)", createFiringRoom);
+  }
+
   // Real AI: a shooter telegraphs then fires (the preview's building blocks).
   const data = { id: "s1", name: "Rook", callsign: "RK", stats: { health: 5, aim: 5, speed: 5 } };
   const w = { id: "rifle", name: "R", fireMode: "projectile", fireRate: 7, spread: 0, projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 1 }, effects: [] };

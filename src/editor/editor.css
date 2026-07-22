@@ -273,3 +273,31 @@
 .cm-rebind { padding: 4px 12px; }
 .cm-capturing { background: rgba(122,215,255,0.08); }
 .cm-capturing .cm-key { color: #7ad7ff; font-style: italic; }
+
+/* ==========================================================================
+   ENEMY DESIGNER (EnemySpec)
+   ========================================================================== */
+.es-createbar {
+  border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+  background: rgba(20,25,32,0.5); margin-bottom: 18px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.es-prompt {
+  width: 100%; resize: vertical; min-height: 44px;
+  background: var(--track); color: var(--text); border: 1px solid var(--line);
+  border-radius: 5px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+}
+.es-createbtns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.es-createbtns .ed-msg { flex: 1; min-width: 160px; }
+.es-tpl { margin-left: auto; }
+.es-tpl select { min-width: 160px; }
+.es-json { min-height: 260px; font-size: 12px; }
+.es-errors {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; font-family: ui-monospace, Menlo, monospace;
+}
+.es-errors li { color: var(--bad); padding-left: 14px; text-indent: -14px; }
+.es-errors li::before { content: "✗ "; }
+.es-errors li.ok { color: var(--good); }
+.es-errors li.ok::before { content: ""; }
