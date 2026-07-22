@@ -17,12 +17,23 @@ section + the tests are the source of truth for what currently exists):
   pressure; a boss lead (`winsCampaign`) appears after enough wins. This is
   Slice 1 of `docs/LEVEL-GENERATION.md` (no LLM yet); later slices add the LLM.
 - **Editor tools** (`editor.html` → Tools): Weapon Designer, Enemy Designer,
-  Level Generator (seed → schematic preview), Firing Room (test any weapon vs
-  dummies — auto-fire or manual WASD drive). Settings tab is schema-driven config.
+  Level Generator (seed → schematic preview), Firing Room (bigger platformed
+  range: fire any weapon at respawning dummies OR waves of real enemies — an
+  Aim slider + auto-fire/manual drive), Controls (rebind keys). Settings tab is
+  schema-driven config.
 - **Weapon effects:** a 9-kind library (damage/burn/slow/knockback/explode/chain
   + pellets/pierce/homing) priced by `weaponcost.js`; a 24-weapon `arsenal.js`;
-  combat resolved in the shared `mission/combat.js`. Known gap: the Weapon
-  Designer's add-effect UI still only offers damage/burn.
+  combat resolved in the shared `mission/combat.js`. Weapons also carry
+  `magazine`/`reloadTime` (press R to reload; 20% move speed while reloading),
+  `projectile.gravity` (arc — rockets/grenades lob), and `projectile.shape`
+  (6 looks, drawn by the shared `mission/render.js`). The **Aim** stat now
+  drives spread for everyone (tighter with higher Aim; `config.aimSpread`).
+  Known gap: the Weapon Designer's add-effect UI still only offers damage/burn.
+- **Controls + aim:** key bindings live in `src/game/controlmap.js` (remap in the
+  editor's Controls tool); `MissionInput` also polls a gamepad (fixed standard-
+  mapping defaults) and the mouse. Manual aim (`config.aimMode`: mouse/gamepad/
+  auto/keyboard) sets a soldier's `aimVec`; `keyboard` = the legacy up/forward
+  scheme. Note: the drawn gun still points by facing, not the aim vector.
 - **Crouch:** hold S/↓ to kneel (lower hitbox to dodge fire + let allies shoot
   over you); enemies aim at standing height so crouch ducks under.
 - **Player2 (LLM + image gen) is NOT wired yet** — the next big dependency,
@@ -72,12 +83,17 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   by the game; overrides persist to localStorage.
 - `src/game/customcontent.js` — editor-authored weapons/enemies, guarded
   localStorage; merged into the armory (`createState`) and `loadMission`.
+- `src/game/controlmap.js` — remappable key bindings + fixed gamepad defaults,
+  guarded-localStorage singleton (same pattern as `config.js`). `input.js` and
+  the editor's Controls tool read/write it; keys are NOT hardcoded anymore.
 - `src/game/gen/` + `enemycost.js` — procedural level generation (seeded RNG,
   jump-reachability, threat-cost model, `generateLevel`). Deterministic per seed.
 - `src/mission/` — Canvas run-and-gun: `entities.js` (physics, `loadMission`,
-  `Enemy`/`Soldier`/`Projectile`), `ai.js` (`updateEnemy`, `fire`), `combat.js`
-  (shared projectile + effect resolution, used by the mission AND the editor's
-  Firing Room so the tool tests real behavior), `mission.js` scene, input.
+  `Enemy`/`Soldier`/`Projectile`, ammo + `startReload`/`tickReload`), `ai.js`
+  (`updateEnemy`, `fire` — ammo-gated, `aimAccuracy`), `combat.js` (shared
+  projectile + effect resolution incl. gravity, used by the mission AND the
+  Firing Room), `render.js` (shared `drawProjectile` by shape), `input.js`
+  (`MissionInput`: config-driven keys + gamepad poll + mouse), `mission.js` scene.
 - `src/game/weaponcost.js` + `arsenal.js` — the effect cost model (value effects
   damage/burn/slow/knockback/explode/chain; delivery modifiers pellets/pierce/
   homing) and the 24-weapon arsenal authored against it.

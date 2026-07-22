@@ -71,6 +71,49 @@ export const SCHEMA = [
     ],
   },
   {
+    title: "Controls / aim",
+    items: [
+      {
+        key: "aimMode",
+        label: "Aim mode",
+        type: "enum",
+        options: ["mouse", "gamepad", "auto", "keyboard"],
+        default: "mouse",
+        help: "How the controlled soldier aims. mouse = point with the cursor; gamepad = right stick; auto = stick if a pad is active else mouse; keyboard = the old up/forward scheme. Live.",
+      },
+      {
+        key: "aimSpread",
+        label: "Aim spread",
+        type: "range",
+        default: 0.12,
+        min: 0,
+        max: 0.4,
+        step: 0.01,
+        help: "The spread constant scaled by a shooter's Aim stat — higher Aim shoots tighter. 0 = perfectly accurate regardless of Aim. Live.",
+      },
+      {
+        key: "reloadSpeedMult",
+        label: "Reload move speed ×",
+        type: "range",
+        default: 0.2,
+        min: 0,
+        max: 1,
+        step: 0.05,
+        help: "How much of normal run speed you keep while reloading. Live.",
+      },
+      {
+        key: "padDeadzone",
+        label: "Gamepad deadzone",
+        type: "range",
+        default: 0.25,
+        min: 0,
+        max: 0.6,
+        step: 0.05,
+        help: "Stick movement below this fraction is ignored (drift guard). Live.",
+      },
+    ],
+  },
+  {
     title: "Campaign",
     items: [
       {

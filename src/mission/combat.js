@@ -106,6 +106,10 @@ function advance(p, dt, scene) {
       p.vy = Math.sin(na) * speed;
     }
   }
+  // Arc: a projectile with gravity>0 falls under a fraction of world gravity, so
+  // lobbed weapons (rockets, grenades) drop. gravity===0 (the default) leaves
+  // every existing weapon on a straight line, unchanged.
+  if (p.gravity > 0) p.vy += p.gravity * scene.world.gravity * dt;
   p.x += p.vx * dt;
   p.y += p.vy * dt;
 }

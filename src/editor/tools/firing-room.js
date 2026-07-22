@@ -1,29 +1,34 @@
 // ---------------------------------------------------------------------------
 // FIRING ROOM — a weapons test range in the editor's Tools tab.
 //
-// Pick any arsenal or custom weapon and watch a shooter auto-fire it at a row of
-// respawning dummies, driven by the REAL combat code: the same fire() (pellets,
-// spread), updateProjectiles (pierce, homing, walls), and effect resolution
-// (damage, burn, slow, knockback, explode, chain) the live mission runs. So what
-// you see here is exactly what the weapon does in a mission. Live readout of the
-// weapon's tier, budget, theoretical DPS, and observed DPS on target.
+// Pick any arsenal or custom weapon and fire it — at infinitely-respawning
+// dummies, or at a wave of REAL enemies (the actual Enemy AI: chargers rush,
+// shooters/turrets shoot back). Driven by the same combat code the live mission
+// runs: fire() (pellets, spread, magazine), updateProjectiles (gravity, pierce,
+// homing, walls), updateEnemy (AI), and shared effect resolution. So what you see
+// here is exactly what the weapon does in a mission. Platforms let you test arc
+// and elevation; an Aim slider shows how the Aim stat tightens spread.
 //
 // createFiringRoom(container, onBack) → { dispose() }
 // ---------------------------------------------------------------------------
 
 import { ARSENAL } from "../../game/arsenal.js";
-import { listCustomWeapons } from "../../game/customcontent.js";
+import { listCustomWeapons, customEnemyMap } from "../../game/customcontent.js";
+import { ENEMIES } from "../../game/content.js";
 import { dps, weaponCost, tierFor } from "../../game/weaponcost.js";
-import { Soldier } from "../../mission/entities.js";
-import { stepActor } from "../../mission/entities.js";
-import { fire } from "../../mission/ai.js";
+import { Soldier, Enemy, stepActor, startReload, tickReload, overlaps } from "../../mission/entities.js";
+import { fire, updateEnemy, aimAccuracy } from "../../mission/ai.js";
 import { updateProjectiles, updateStatuses } from "../../mission/combat.js";
+import { drawProjectile } from "../../mission/render.js";
 import { MissionInput } from "../../mission/input.js";
+import { config } from "../../game/config.js";
 
 export function createFiringRoom(container, onBack) {
   const customs = listCustomWeapons();
   const byId = {};
   for (const w of [...ARSENAL, ...customs]) byId[w.id] = w;
+  const enemyDefs = { ...ENEMIES, ...customEnemyMap() };
+  const enemyList = Object.values(enemyDefs);
 
   const opt = (w) => `<option value="${w.id}">${escapeHtml(w.name)} — ${weaponCost(w)}</option>`;
   const tierGroup = (n) => `<optgroup label="Tier ${["I", "II", "III"][n - 1]}">${ARSENAL.filter((w) => w.tier === n).map(opt).join("")}</optgroup>`;
@@ -43,8 +48,22 @@ export function createFiringRoom(container, onBack) {
             ${customs.length ? `<optgroup label="Custom">${customs.map(opt).join("")}</optgroup>` : ""}
           </select>
         </label>
-        <label class="lg-field">Dummies <output id="fr-countval">4</output>
-          <input type="range" data-fr="count" min="1" max="6" step="1" value="4" />
+        <label class="lg-field">Targets
+          <select data-fr="targets">
+            <option value="dummies">Dummies (respawn)</option>
+            <option value="enemies">Enemies (waves)</option>
+          </select>
+        </label>
+        <label class="lg-field" id="fr-enemyfield" style="display:none">Enemy
+          <select data-fr="enemytype">
+            ${enemyList.map((e) => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="lg-field">Count <output id="fr-countval">4</output>
+          <input type="range" data-fr="count" min="1" max="8" step="1" value="4" />
+        </label>
+        <label class="lg-field">Aim <output id="fr-aimval">8</output>
+          <input type="range" data-fr="aim" min="1" max="10" step="1" value="8" />
         </label>
         <label class="lg-field">Mode
           <select data-fr="mode">
@@ -55,10 +74,11 @@ export function createFiringRoom(container, onBack) {
         <label class="lg-field lg-boss">Moving dummies
           <button type="button" role="switch" class="toggle" data-fr="moving"><span class="knob"></span></button>
         </label>
+        <button class="btn" data-fr="wave" id="fr-wave" style="display:none">Respawn wave</button>
         <button class="btn btn-alt" data-fr="reset">Reset</button>
       </div>
 
-      <canvas class="lg-canvas fr-canvas" id="fr-canvas" width="840" height="240"></canvas>
+      <canvas class="lg-canvas fr-canvas" id="fr-canvas" width="960" height="420"></canvas>
 
       <div class="lg-out">
         <div class="lg-report" id="fr-stats"></div>
@@ -70,7 +90,7 @@ export function createFiringRoom(container, onBack) {
   const canvas = $("#fr-canvas");
   const ctx = canvas.getContext("2d");
 
-  const state = { weapon: ARSENAL[0], count: 4, mode: "auto", moving: false };
+  const state = { weapon: ARSENAL[0], count: 4, aim: 8, mode: "auto", moving: false, targets: "dummies", enemyType: enemyList[0] && enemyList[0].id };
   const input = new MissionInput();
   const particles = [];
   const stats = { dealt: 0, elapsed: 0 };
@@ -79,41 +99,87 @@ export function createFiringRoom(container, onBack) {
   const W = canvas.width, H = canvas.height;
   const GROUND = H - 40;
   const world = { gravity: 1600, width: W, height: H };
+
+  // Ground + back wall + a few perches to test elevation and arc.
+  const PERCHES = [
+    { x: 470, y: 300, w: 150, h: 16 },
+    { x: 700, y: 220, w: 150, h: 16 },
+    { x: 330, y: 190, w: 130, h: 16 },
+  ];
+  // Stand-points across the ground and on top of each perch. Enemies/dummies
+  // spawn here (feet on the surface, y = surfaceY - height — the levelgen rule).
+  const ANCHORS = [
+    { x: 430, y: GROUND }, { x: 610, y: GROUND }, { x: 790, y: GROUND }, { x: 900, y: GROUND },
+    { x: 545, y: 300 }, { x: 775, y: 220 }, { x: 395, y: 190 },
+  ];
+
   let scene, shooter;
 
   function buildScene() {
-    shooter = new Soldier({ id: "you", name: "Range", callsign: "RNG", stats: { health: 8, aim: 8, speed: 6 } }, state.weapon, 46, GROUND - 46);
-    const dummies = [];
-    const gap = Math.min(96, (W - 120 - 360) / Math.max(1, state.count - 1 || 1));
-    for (let i = 0; i < state.count; i++) dummies.push(makeDummy(360 + i * (state.count > 1 ? gap : 0)));
+    shooter = new Soldier({ id: "you", name: "Range", callsign: "RNG", stats: { health: 8, aim: state.aim, speed: 6 } }, state.weapon, 46, GROUND - 46);
     scene = {
       world,
-      platforms: [{ x: 0, y: GROUND, w: W, h: 40 }, { x: W - 6, y: 0, w: 8, h: H }], // ground + back wall
+      platforms: [{ x: 0, y: GROUND, w: W, h: 40 }, { x: W - 6, y: 0, w: 8, h: H }, ...PERCHES],
       soldiers: [shooter],
-      enemies: dummies,
+      enemies: [],
       projectiles: [],
     };
+    spawnTargets();
     stats.dealt = 0;
     stats.elapsed = 0;
   }
 
-  function makeDummy(x) {
-    return { kind: "enemy", x, y: GROUND - 46, w: 32, h: 46, vx: 0, vy: 0, onGround: false, alive: true,
-      health: 70, maxHealth: 70, hitFlash: 0, facing: -1, color: "#c98a5a", slow: null, burn: null, _home: x, _respawn: 0, _dir: 1 };
+  // (Re)populate scene.enemies with the current target set.
+  function spawnTargets() {
+    scene.enemies = [];
+    for (let i = 0; i < state.count; i++) {
+      const a = ANCHORS[i % ANCHORS.length];
+      if (state.targets === "enemies") {
+        const def = enemyDefs[state.enemyType] || enemyList[0];
+        if (!def) continue;
+        const e = new Enemy(def, a.x, a.y - def.h);
+        e.contactCooldown = 0;
+        scene.enemies.push(e);
+      } else {
+        scene.enemies.push(makeDummy(a.x, a.y));
+      }
+    }
+  }
+
+  function makeDummy(x, surfaceY) {
+    const h = 46;
+    return { kind: "enemy", x, y: surfaceY - h, w: 32, h, vx: 0, vy: 0, onGround: false, alive: true,
+      health: 70, maxHealth: 70, hitFlash: 0, facing: -1, color: "#c98a5a", slow: null, burn: null,
+      _home: x, _surfaceY: surfaceY, _respawn: 0, _dir: 1 };
   }
   function resetDummy(d) {
-    d.health = d.maxHealth; d.alive = true; d.x = d._home; d.y = GROUND - 46;
+    d.health = d.maxHealth; d.alive = true; d.x = d._home; d.y = d._surfaceY - d.h;
     d.vx = 0; d.vy = 0; d.slow = null; d.burn = null; d.hitFlash = 0; d._respawn = 0;
+  }
+
+  function respawnShooter() {
+    shooter.health = shooter.maxHealth; shooter.alive = true;
+    shooter.x = 46; shooter.y = GROUND - shooter.h; shooter.vx = 0; shooter.vy = 0;
+    shooter.burn = null; shooter.slow = null; shooter.reloading = 0;
+    shooter.ammo = shooter.weapon && shooter.weapon.magazine ? shooter.weapon.magazine : Infinity;
   }
 
   const cctx = {
     friendlyFire: false,
     damageMult: 1,
-    damage(t, a) {
-      t.health -= a; t.hitFlash = 0.12; if (a > 0) stats.dealt += a;
-      if (t.health <= 0 && t.alive) cctx.kill(t);
+    damage(t, a, o) {
+      t.health -= a; t.hitFlash = 0.12;
+      // Only credit the player's on-target damage (enemy shots hitting the shooter don't count).
+      if (a > 0 && t.kind === "enemy") stats.dealt += a;
+      if (t.health <= 0 && t.alive) cctx.kill(t, o);
     },
-    kill(t) { if (!t.alive) return; t.alive = false; burst(t.x + t.w / 2, t.y + t.h / 2, t.color, 16, 240); t._respawn = 0.7; },
+    kill(t) {
+      if (!t.alive) return;
+      t.alive = false;
+      burst(t.x + t.w / 2, t.y + t.h / 2, t.color || "#c9d4e6", 16, 240);
+      if (t.kind === "soldier") { respawnShooter(); return; } // test bed: no permadeath
+      if (t._respawn !== undefined) t._respawn = 0.7; // dummies respawn; wave enemies stay down
+    },
     spark(x, y, c, n, s) { burst(x, y, c, n, s); },
     burst(x, y, c, n, s) { burst(x, y, c, n, s); },
   };
@@ -125,36 +191,83 @@ export function createFiringRoom(container, onBack) {
     }
   }
 
+  // Resolve manual aim for the shooter from config.aimMode (mouse/gamepad/auto);
+  // "keyboard" keeps the old aim-up scheme. Sets aimVec/aimUp/facing.
+  function resolveAim() {
+    const mode = config.aimMode;
+    if (mode === "keyboard") {
+      shooter.aimVec = null;
+      shooter.aimUp = input.isDown("aimUp") && !shooter.crouched;
+      return;
+    }
+    shooter.aimUp = false;
+    const src = input.aimSource(mode);
+    if (!src) { shooter.aimVec = null; return; }
+    let dx, dy;
+    if (src.type === "stick") { dx = src.x; dy = src.y; }
+    else { dx = src.x - (shooter.x + shooter.w / 2); dy = src.y - (shooter.y + shooter.h * 0.42); }
+    const len = Math.hypot(dx, dy);
+    if (len < 0.001) { shooter.aimVec = null; return; }
+    shooter.aimVec = { x: dx / len, y: dy / len };
+    shooter.facing = shooter.aimVec.x >= 0 ? 1 : -1;
+  }
+
   // ---- simulation --------------------------------------------------------
   function step(dt) {
     stats.elapsed += dt;
+    input.pollGamepad();
     if (shooter.fireCooldown > 0) shooter.fireCooldown -= dt;
     if (shooter.muzzleFlash > 0) shooter.muzzleFlash -= dt;
+    tickReload(shooter, dt);
+
+    const acc = aimAccuracy(state.aim);
 
     if (state.mode === "manual") {
       // Player-driven, reusing the real mission controls.
       shooter.setCrouch(input.isDown("crouch"));
       const move = (input.isDown("right") ? 1 : 0) - (input.isDown("left") ? 1 : 0);
-      shooter.aimUp = input.isDown("aimUp") && !shooter.crouched;
+      resolveAim();
       shooter.applyMovement(dt, move, input.isDown("jump"));
+      if (input.justPressed("reload")) startReload(shooter);
       const wantFire = shooter.weapon.auto ? input.isDown("fire") : input.justPressed("fire");
-      if (wantFire) fire(scene, shooter, shooter.fireDir(), "player", dt, 1);
+      if (wantFire) fire(scene, shooter, shooter.fireDir(), "player", dt, acc);
       stepActor(shooter, dt, world, scene.platforms);
     } else {
-      // Stationary auto-fire range.
+      // Stationary auto-fire range: auto-reload so the DPS readout keeps flowing.
       if (shooter.crouched) shooter.setCrouch(false);
-      fire(scene, shooter, { x: 1, y: 0 }, "player", dt, 1);
+      shooter.aimVec = null; shooter.aimUp = false;
+      if (shooter.ammo <= 0 && shooter.reloading <= 0) startReload(shooter);
+      fire(scene, shooter, { x: 1, y: 0 }, "player", dt, acc);
     }
 
     for (const d of scene.enemies) {
-      if (!d.alive) { d._respawn -= dt; if (d._respawn <= 0) resetDummy(d); continue; }
-      if (state.moving) {
-        if (d.x < d._home - 60) d._dir = 1; else if (d.x > d._home + 60) d._dir = -1;
-        d.vx = 70 * d._dir;
-      } else {
-        d.vx *= 0.85; // ease knockback back to rest
+      if (d.fireCooldown > 0) d.fireCooldown -= dt;
+      if (d.contactCooldown > 0) d.contactCooldown -= dt;
+      if (d.muzzleFlash > 0) d.muzzleFlash -= dt;
+      if (d.reloading !== undefined) tickReload(d, dt);
+
+      if (!d.alive) {
+        if (d._respawn !== undefined) { d._respawn -= dt; if (d._respawn <= 0) resetDummy(d); }
+        continue;
       }
-      stepActor(d, dt, world, scene.platforms);
+
+      if (state.targets === "enemies") {
+        updateEnemy(d, dt, scene);
+        stepActor(d, dt, world, scene.platforms);
+        // contact damage (chargers)
+        if (d.def && d.def.contactDamage > 0 && (d.contactCooldown || 0) <= 0 && shooter.alive && overlaps(d, shooter)) {
+          cctx.damage(shooter, d.def.contactDamage, d);
+          d.contactCooldown = 0.6;
+        }
+      } else {
+        if (state.moving) {
+          if (d.x < d._home - 60) d._dir = 1; else if (d.x > d._home + 60) d._dir = -1;
+          d.vx = 70 * d._dir;
+        } else {
+          d.vx *= 0.85; // ease knockback back to rest
+        }
+        stepActor(d, dt, world, scene.platforms);
+      }
     }
 
     updateProjectiles(scene, dt, cctx);
@@ -162,6 +275,13 @@ export function createFiringRoom(container, onBack) {
 
     for (const p of particles) { p.vy += 500 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
     for (let i = particles.length - 1; i >= 0; i--) if (particles[i].life <= 0) particles.splice(i, 1);
+
+    // Wave cleared? enable the Respawn button.
+    if (state.targets === "enemies") {
+      const anyAlive = scene.enemies.some((e) => e.alive);
+      const btn = $("#fr-wave");
+      if (btn) btn.disabled = anyAlive;
+    }
 
     refreshStats();
   }
@@ -178,36 +298,44 @@ export function createFiringRoom(container, onBack) {
     ctx.fillStyle = "#22303f"; ctx.fillRect(0, GROUND, W, H - GROUND);
     ctx.fillStyle = "#6fd3ff"; ctx.fillRect(0, GROUND, W, 2);
     ctx.fillStyle = "#1a2735"; ctx.fillRect(W - 6, 0, 6, GROUND);
+    // perches
+    for (const p of PERCHES) {
+      ctx.fillStyle = "#26384a"; ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillStyle = "#6fd3ff"; ctx.fillRect(p.x, p.y, p.w, 2);
+      ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(p.x, p.y + p.h - 2, p.w, 2);
+    }
 
     // shooter
-    ctx.fillStyle = "#7ad7ff"; roundRect(ctx, shooter.x, shooter.y, shooter.w, shooter.h, 5); ctx.fill();
-    ctx.fillStyle = "#0b0f18"; ctx.fillRect(shooter.x + shooter.w - 2, shooter.y + shooter.h * 0.42, 18, 5);
-    if (shooter.muzzleFlash > 0) { ctx.fillStyle = shooter.muzzleColor || "#ffd36a"; ctx.beginPath(); ctx.arc(shooter.x + shooter.w + 16, shooter.y + shooter.h * 0.42 + 2, 4, 0, Math.PI * 2); ctx.fill(); }
+    if (shooter.alive) {
+      ctx.fillStyle = shooter.hitFlash > 0 ? "#fff" : "#7ad7ff"; roundRect(ctx, shooter.x, shooter.y, shooter.w, shooter.h, 5); ctx.fill();
+      // barrel points along aim
+      const gd = shooter.fireDir(); const gl = Math.hypot(gd.x, gd.y) || 1;
+      const bx = shooter.x + shooter.w / 2, by = shooter.y + shooter.h * 0.42;
+      ctx.strokeStyle = "#0b0f18"; ctx.lineWidth = 5; ctx.beginPath();
+      ctx.moveTo(bx, by); ctx.lineTo(bx + (gd.x / gl) * 18, by + (gd.y / gl) * 18); ctx.stroke();
+      if (shooter.muzzleFlash > 0) { ctx.fillStyle = shooter.muzzleColor || "#ffd36a"; ctx.beginPath(); ctx.arc(bx + (gd.x / gl) * 20, by + (gd.y / gl) * 20, 4, 0, Math.PI * 2); ctx.fill(); }
+      const hf = Math.max(0, shooter.health / shooter.maxHealth);
+      if (hf < 1) { ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(shooter.x, shooter.y - 7, shooter.w, 4); ctx.fillStyle = "#7ad7ff"; ctx.fillRect(shooter.x, shooter.y - 7, shooter.w * hf, 4); }
+    }
 
-    // dummies
+    // targets
     for (const d of scene.enemies) {
       if (!d.alive) continue;
       const slowed = d.slow && d.slow.time > 0;
-      ctx.fillStyle = d.hitFlash > 0 ? "#fff" : slowed ? "#7fb8dc" : d.color;
+      ctx.fillStyle = d.hitFlash > 0 ? "#fff" : slowed ? "#7fb8dc" : (d.color || "#c98a5a");
       roundRect(ctx, d.x, d.y, d.w, d.h, 5); ctx.fill();
+      // winding-up telegraph for real shooters
+      if (d.windup > 0) { ctx.strokeStyle = "rgba(255,90,90,0.7)"; ctx.lineWidth = 2; roundRect(ctx, d.x - 3, d.y - 3, d.w + 6, d.h + 6, 5); ctx.stroke(); }
       ctx.fillStyle = "#0b0f18"; ctx.fillRect(d.x + 6, d.y + 12, d.w - 12, 3);
       if (d.burn) drawFlames(ctx, d.x, d.y, d.w);
-      // health bar
       const frac = Math.max(0, d.health / d.maxHealth);
       ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(d.x, d.y - 7, d.w, 4);
       ctx.fillStyle = frac > 0.5 ? "#57c98a" : frac > 0.25 ? "#e0a24e" : "#e05a5a";
       ctx.fillRect(d.x, d.y - 7, d.w * frac, 4);
     }
 
-    // projectiles
-    ctx.save(); ctx.shadowBlur = 8;
-    for (const p of scene.projectiles) {
-      ctx.shadowColor = p.color; ctx.fillStyle = p.color;
-      const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
-      if (p.w >= 12 && p.h >= 12) { ctx.beginPath(); ctx.arc(cx, cy, Math.max(p.w, p.h) / 2, 0, Math.PI * 2); ctx.fill(); }
-      else { roundRect(ctx, p.x, cy - p.h / 2, p.w, p.h, p.h / 2); ctx.fill(); }
-    }
-    ctx.restore();
+    // projectiles (shared renderer — shape + gravity aware)
+    for (const p of scene.projectiles) drawProjectile(ctx, p);
 
     // particles
     ctx.save(); ctx.globalCompositeOperation = "lighter";
@@ -218,9 +346,10 @@ export function createFiringRoom(container, onBack) {
     ctx.fillText("real combat — fire() + combat.js", 8, 14);
 
     if (state.mode === "manual") {
-      ctx.fillStyle = "rgba(7,11,19,0.72)"; ctx.fillRect(0, canvas.height - 18, canvas.width, 18);
+      ctx.fillStyle = "rgba(7,11,19,0.72)"; ctx.fillRect(0, H - 18, W, 18);
       ctx.fillStyle = "rgba(200,210,224,0.85)"; ctx.font = "10px system-ui, sans-serif"; ctx.textAlign = "center";
-      ctx.fillText("A / D  move      W  aim up      S  crouch      SPACE  jump      J  fire", canvas.width / 2, canvas.height - 5);
+      const aimHint = config.aimMode === "keyboard" ? "W aim up" : "MOUSE aim";
+      ctx.fillText(`A / D move   ${aimHint}   S crouch   SPACE jump   J / CLICK fire   R reload`, W / 2, H - 5);
       ctx.textAlign = "left";
     }
   }
@@ -242,10 +371,12 @@ export function createFiringRoom(container, onBack) {
     $("#fr-tier").textContent = `${w.name} · ${tier ? tier.name : "over budget"}`;
     const obs = stats.elapsed > 0.4 ? Math.round(stats.dealt / stats.elapsed) : 0;
     const tile = (label, val) => `<div class="lg-tile"><span>${label}</span><b>${val}</b></div>`;
+    const ammo = shooter.reloading > 0 ? "reloading…" : (w.magazine ? `${Math.max(0, shooter.ammo)}/${w.magazine}` : "∞");
     $("#fr-stats").innerHTML =
       tile("Budget", weaponCost(w)) +
       tile("Theory DPS", Math.round(dps(w))) +
       tile("On-target DPS", obs) +
+      tile("Ammo", ammo) +
       tile("Fire rate", w.fireRate + "/s") +
       tile("Auto", w.auto ? "yes" : "semi");
   }
@@ -257,19 +388,29 @@ export function createFiringRoom(container, onBack) {
   // ---- events ------------------------------------------------------------
   function setMode(mode) {
     state.mode = mode;
-    if (mode === "manual") input.enable();
+    if (mode === "manual") input.enable(canvas); // canvas → mouse aim + click fire
     else input.disable();
     buildScene(); // fresh shooter: standing, facing right, at the start mark
+  }
+
+  function setTargets(kind) {
+    state.targets = kind;
+    $("#fr-enemyfield").style.display = kind === "enemies" ? "" : "none";
+    $("#fr-wave").style.display = kind === "enemies" ? "" : "none";
+    buildScene();
   }
 
   container.addEventListener("change", (e) => {
     const t = e.target;
     if (t.dataset.fr === "weapon") { state.weapon = byId[t.value] || ARSENAL[0]; buildScene(); refreshEffects(); }
     else if (t.dataset.fr === "mode") setMode(t.value);
+    else if (t.dataset.fr === "targets") setTargets(t.value);
+    else if (t.dataset.fr === "enemytype") { state.enemyType = t.value; buildScene(); }
   });
   container.addEventListener("input", (e) => {
     const t = e.target;
     if (t.dataset.fr === "count") { state.count = +t.value; $("#fr-countval").textContent = t.value; buildScene(); }
+    else if (t.dataset.fr === "aim") { state.aim = +t.value; $("#fr-aimval").textContent = t.value; if (shooter) shooter.data.stats.aim = state.aim; }
   });
   container.addEventListener("click", (e) => {
     const el = e.target.closest("[data-fr]");
@@ -277,6 +418,7 @@ export function createFiringRoom(container, onBack) {
     switch (el.dataset.fr) {
       case "back": onBack(); break;
       case "moving": state.moving = el.classList.toggle("on"); break;
+      case "wave": spawnTargets(); break;
       case "reset": buildScene(); break;
     }
   });

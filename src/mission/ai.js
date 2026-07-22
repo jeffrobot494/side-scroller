@@ -8,7 +8,15 @@
 // by the player, companions, and enemies.
 // ---------------------------------------------------------------------------
 
-import { Projectile } from "./entities.js";
+import { Projectile, startReload } from "./entities.js";
+import { config } from "../game/config.js";
+
+// Map a 1..10 Aim stat to a 0..1 accuracy (10 = perfectly tight, 1 = loosest).
+// Feeds the spread penalty in fire() so higher-Aim shooters group tighter.
+export function aimAccuracy(aim) {
+  const a = (((aim ?? 5) - 1) / 9);
+  return a < 0 ? 0 : a > 1 ? 1 : a;
+}
 
 // Ranged enemies aim at a fixed height above a soldier's feet (upper torso of a
 // standing soldier), NOT the soldier's live centre. So dropping to a crouch —
@@ -36,9 +44,14 @@ function dist(a, b) {
 // AI passes a value derived from the aim stat.
 export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   if (shooter.fireCooldown > 0) return false;
+  // Empty magazine or mid-reload → nothing happens (you must reload).
+  if (shooter.reloading > 0) return false;
+  if (shooter.ammo !== undefined && shooter.ammo <= 0) return false;
 
   const w = shooter.weapon;
   shooter.fireCooldown = 1 / w.fireRate;
+  // One trigger pull spends one round (a shotgun's pellets are still one shell).
+  if (w.magazine && shooter.ammo !== undefined && shooter.ammo !== Infinity) shooter.ammo -= 1;
 
   let dx = dir.x;
   let dy = dir.y;
@@ -52,8 +65,9 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   const count = pellets ? Math.max(1, pellets.count || 1) : 1;
   const arc = pellets ? (pellets.spread ?? 0.12) : 0;
 
-  // spread: the weapon's own spread plus an accuracy penalty (+ the pellet arc)
-  const spread = (w.spread || 0) + (1 - accuracy) * 0.12 + arc;
+  // spread: the weapon's own spread plus an Aim-driven accuracy penalty (scaled
+  // by config.aimSpread) plus the pellet arc.
+  const spread = (w.spread || 0) + (1 - accuracy) * config.aimSpread + arc;
   const spec = w.projectile;
 
   for (let i = 0; i < count; i++) {
@@ -77,6 +91,12 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   shooter.muzzleDir = { x: dx, y: dy };
   shooter.muzzleColor = spec.color;
   return true;
+}
+
+// AI can't press a reload key, so it reloads itself the instant it runs dry.
+// (Built-in enemies use magazine-less weapons, so this is a no-op for them.)
+function autoReload(actor) {
+  if (actor.weapon && actor.weapon.magazine && actor.ammo <= 0 && actor.reloading <= 0) startReload(actor);
 }
 
 // nearest living member of a list to `from`
@@ -109,6 +129,7 @@ function canEngage(shooter, target, range) {
 // and open fire on any enemy they can line up.
 export function updateCompanion(soldier, dt, scene, leader) {
   if (!soldier.alive) return;
+  autoReload(soldier); // companions reload themselves when they run dry
 
   const c = center(soldier);
   const target = nearest(soldier, scene.enemies);
@@ -123,8 +144,7 @@ export function updateCompanion(soldier, dt, scene, leader) {
     // keep a little standoff distance so companions don't body-block
     if (target.d > 240) move = soldier.facing;
     soldier.aimUp = false;
-    const accuracy = 0.5 + soldier.data.stats.aim * 0.05;
-    fire(scene, soldier, { x: soldier.facing, y: 0 }, "player", dt, accuracy);
+    fire(scene, soldier, { x: soldier.facing, y: 0 }, "player", dt, aimAccuracy(soldier.data.stats.aim));
   } else if (leader && leader !== soldier) {
     const lc = center(leader);
     const gap = lc.x - c.x;
@@ -139,6 +159,7 @@ export function updateCompanion(soldier, dt, scene, leader) {
 // ---- Enemy AI -------------------------------------------------------------
 export function updateEnemy(enemy, dt, scene) {
   if (!enemy.alive) return;
+  autoReload(enemy);
   const found = nearest(enemy, scene.soldiers);
 
   if (!found || found.d > enemy.def.detectRange) {

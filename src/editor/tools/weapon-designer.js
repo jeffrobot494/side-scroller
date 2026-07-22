@@ -12,16 +12,22 @@
 
 import { effectCost, dps, validate, finalizeWeapon, TIERS } from "../../game/weaponcost.js";
 import { listCustomWeapons, saveCustomWeapon, deleteCustomWeapon } from "../../game/customcontent.js";
+import { drawProjectile, PROJECTILE_SHAPES } from "../../mission/render.js";
 
-// Numeric fields rendered as sliders (path into the weapon object).
+// Numeric fields rendered as sliders (path into the weapon object). The first
+// FIRE_COUNT live in the "Fire" section; the rest in "Projectile".
 const FIELDS = [
   { path: "fireRate", label: "Fire rate", min: 0.5, max: 15, step: 0.5, unit: "/s" },
   { path: "spread", label: "Spread", min: 0, max: 0.15, step: 0.005, unit: "rad" },
+  { path: "magazine", label: "Magazine (0 = unlimited)", min: 0, max: 60, step: 1, unit: "rnds" },
+  { path: "reloadTime", label: "Reload time", min: 0.5, max: 4, step: 0.1, unit: "s" },
   { path: "projectile.speed", label: "Projectile speed", min: 200, max: 1600, step: 20, unit: "px/s" },
   { path: "projectile.w", label: "Projectile width", min: 4, max: 28, step: 1, unit: "px" },
   { path: "projectile.h", label: "Projectile height", min: 2, max: 20, step: 1, unit: "px" },
   { path: "projectile.life", label: "Projectile life", min: 0.3, max: 2.5, step: 0.1, unit: "s" },
+  { path: "projectile.gravity", label: "Gravity / arc", min: 0, max: 1, step: 0.05, unit: "" },
 ];
+const FIRE_COUNT = 4; // FIELDS[0..3] render under "Fire", the rest under "Projectile"
 
 export function createWeaponDesigner(container, onBack) {
   const weapon = {
@@ -31,7 +37,9 @@ export function createWeaponDesigner(container, onBack) {
     fireRate: 6,
     auto: true,
     spread: 0.02,
-    projectile: { speed: 850, w: 12, h: 5, color: "#ffd36a", life: 1 },
+    magazine: 12,
+    reloadTime: 1.5,
+    projectile: { speed: 850, w: 12, h: 5, color: "#ffd36a", life: 1, gravity: 0, shape: "bullet" },
     effects: [{ kind: "damage", amount: 10 }],
   };
   let tierId = TIERS[1].id;
@@ -51,14 +59,18 @@ export function createWeaponDesigner(container, onBack) {
             <div class="cfg-meta"><span class="cfg-label">Automatic</span><span class="cfg-help">Hold to fire vs. one shot per press.</span></div>
             <div class="cfg-control"><button type="button" role="switch" class="toggle${weapon.auto ? " on" : ""}" data-wd="auto"><span class="knob"></span></button></div>
           </div>
-          ${FIELDS.slice(0, 2).map((f) => fieldRow(f, get(weapon, f.path))).join("")}
+          ${FIELDS.slice(0, FIRE_COUNT).map((f) => fieldRow(f, get(weapon, f.path))).join("")}
 
           <h3 class="wd-h">Projectile</h3>
           <div class="cfg-row wd-row">
             <div class="cfg-meta"><span class="cfg-label">Colour</span></div>
             <div class="cfg-control"><input type="color" data-wd="color" value="${weapon.projectile.color}" /></div>
           </div>
-          ${FIELDS.slice(2).map((f) => fieldRow(f, get(weapon, f.path))).join("")}
+          <div class="cfg-row wd-row">
+            <div class="cfg-meta"><span class="cfg-label">Shape</span></div>
+            <div class="cfg-control"><select data-wd="shape">${PROJECTILE_SHAPES.map((s) => `<option value="${s}"${s === weapon.projectile.shape ? " selected" : ""}>${s}</option>`).join("")}</select></div>
+          </div>
+          ${FIELDS.slice(FIRE_COUNT).map((f) => fieldRow(f, get(weapon, f.path))).join("")}
 
           <h3 class="wd-h">Effects</h3>
           <div class="wd-effects" id="wd-effects"></div>
@@ -189,6 +201,7 @@ export function createWeaponDesigner(container, onBack) {
   container.addEventListener("change", (e) => {
     const t = e.target;
     if (t.dataset.wd === "tier") { tierId = t.value; refresh(); }
+    else if (t.dataset.wd === "shape") { weapon.projectile.shape = t.value; refresh(); }
     else if (t.dataset.wd === "fx-kind") {
       const i = +t.dataset.idx;
       weapon.effects[i] = t.value === "burn" ? { kind: "burn", dps: 6, duration: 3 } : { kind: "damage", amount: 10 };
@@ -246,7 +259,7 @@ export function createWeaponDesigner(container, onBack) {
     if (pv.spawn <= 0) {
       pv.spawn = 1 / Math.max(0.5, weapon.fireRate);
       const p = weapon.projectile;
-      pv.proj.push({ x: shooterX + 18, y: canvas.height / 2, vx: p.speed, w: p.w, h: p.h, color: p.color });
+      pv.proj.push({ x: shooterX + 18, y: canvas.height / 2, vx: p.speed, w: p.w, h: p.h, color: p.color, shape: p.shape });
       if (pv.proj.length > 40) pv.proj.shift();
     }
     for (const p of pv.proj) p.x += p.vx * dt;
@@ -300,14 +313,8 @@ export function createWeaponDesigner(container, onBack) {
       ctx.restore();
     }
 
-    // projectiles
-    ctx.save(); ctx.shadowBlur = 10;
-    for (const p of pv.proj) {
-      ctx.shadowColor = p.color; ctx.fillStyle = p.color;
-      if (p.w >= 12 && p.h >= 12) { ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(p.w, p.h) / 2, 0, Math.PI * 2); ctx.fill(); }
-      else { roundRect(ctx, p.x, p.y - p.h / 2, p.w, p.h, p.h / 2); ctx.fill(); }
-    }
-    ctx.restore();
+    // projectiles (shared renderer; pv.proj tracks y as center → shift to top-left)
+    for (const p of pv.proj) drawProjectile(ctx, { x: p.x - p.w / 2, y: p.y - p.h / 2, w: p.w, h: p.h, color: p.color, vx: p.vx, vy: 0, shape: p.shape });
 
     // sparks
     ctx.save(); ctx.globalCompositeOperation = "lighter";

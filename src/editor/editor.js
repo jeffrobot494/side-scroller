@@ -19,6 +19,7 @@ import { createWeaponDesigner } from "./tools/weapon-designer.js";
 import { createEnemyDesigner } from "./tools/enemy-designer.js";
 import { createLevelGenerator } from "./tools/level-generator.js";
 import { createFiringRoom } from "./tools/firing-room.js";
+import { createControlsMapper } from "./tools/controls-mapper.js";
 
 const root = document.getElementById("editor");
 let tab = "settings";
@@ -29,7 +30,8 @@ const TOOLS = [
   { id: "weapon", label: "Weapon Designer", desc: "Compose weapons from primitives, watch them fire, and check them against the cost budget." },
   { id: "enemy", label: "Enemy Designer", desc: "Tune archetype stats and behavior; watch the real AI drive it in a live preview." },
   { id: "levelgen", label: "Level Generator", desc: "Generate procedural missions from a seed; preview the layout and check the threat budget." },
-  { id: "firing", label: "Firing Room", desc: "Auto-fire any arsenal or custom weapon at dummies using the real combat code." },
+  { id: "firing", label: "Firing Room", desc: "Fire any weapon at respawning dummies or waves of real enemies on a platformed range." },
+  { id: "controls", label: "Controls", desc: "Rebind keyboard controls (move, jump, fire, reload, …); gamepad uses built-in defaults." },
   { label: "Level Editor", desc: "Place platforms, spawns, loot, and the exit on a canvas." },
 ];
 
@@ -43,7 +45,7 @@ function disposeTool() {
 function render() {
   disposeTool();
 
-  const MOUNTABLE = ["weapon", "enemy", "levelgen", "firing"];
+  const MOUNTABLE = ["weapon", "enemy", "levelgen", "firing", "controls"];
   let body;
   if (tab === "settings") body = settingsView();
   else if (MOUNTABLE.includes(toolId)) body = `<div id="tool-host" class="tool-host"></div>`;
@@ -64,7 +66,7 @@ function render() {
   if (tab === "tools" && MOUNTABLE.includes(toolId)) {
     const host = document.getElementById("tool-host");
     const back = () => { toolId = null; render(); };
-    const factory = { weapon: createWeaponDesigner, enemy: createEnemyDesigner, levelgen: createLevelGenerator, firing: createFiringRoom }[toolId];
+    const factory = { weapon: createWeaponDesigner, enemy: createEnemyDesigner, levelgen: createLevelGenerator, firing: createFiringRoom, controls: createControlsMapper }[toolId];
     activeTool = factory(host, back);
   }
 }

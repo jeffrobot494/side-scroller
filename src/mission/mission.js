@@ -8,9 +8,10 @@
 // ---------------------------------------------------------------------------
 
 import { MissionInput } from "./input.js";
-import { loadMission, stepActor, overlaps, clamp, Loot } from "./entities.js";
-import { fire, updateCompanion, updateEnemy } from "./ai.js";
+import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload } from "./entities.js";
+import { fire, updateCompanion, updateEnemy, aimAccuracy } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
+import { drawProjectile } from "./render.js";
 import { config } from "../game/config.js";
 
 const STEP = 1 / 60;
@@ -55,7 +56,7 @@ export class Mission {
     this.motes = this._makeMotes(46); // drifting ambient spores
     this.damageFlash = 0; // red vignette pulse when the controlled soldier is hit
 
-    this.input.enable();
+    this.input.enable(this.canvas); // pass canvas for mouse aim + click-to-fire
     this.running = true;
     this.accumulator = 0;
     this.lastTime = performance.now();
@@ -74,6 +75,8 @@ export class Mission {
     let ft = (now - this.lastTime) / 1000;
     this.lastTime = now;
     if (ft > 0.25) ft = 0.25;
+
+    this.input.pollGamepad(); // once per rendered frame, before the sim steps
 
     this.accumulator += ft;
     while (this.accumulator >= STEP) {
@@ -113,11 +116,13 @@ export class Mission {
     for (const s of scene.soldiers) {
       if (s.fireCooldown > 0) s.fireCooldown -= dt;
       if (s.muzzleFlash > 0) s.muzzleFlash -= dt;
+      tickReload(s, dt);
     }
     for (const e of scene.enemies) {
       if (e.fireCooldown > 0) e.fireCooldown -= dt;
       if (e.contactCooldown > 0) e.contactCooldown -= dt;
       if (e.muzzleFlash > 0) e.muzzleFlash -= dt;
+      tickReload(e, dt);
     }
 
     this._handleControl();
@@ -159,18 +164,47 @@ export class Mission {
         s.setCrouch(this.input.isDown("crouch"));
         const move =
           (this.input.isDown("right") ? 1 : 0) - (this.input.isDown("left") ? 1 : 0);
-        s.aimUp = this.input.isDown("aimUp") && !s.crouched;
+        this._applyAim(s);
         s.applyMovement(dt, move, this.input.isDown("jump"));
+        if (this.input.justPressed("reload")) startReload(s);
         const wantFire = s.weapon.auto
           ? this.input.isDown("fire")
           : this.input.justPressed("fire");
-        if (wantFire && fire(scene, s, s.fireDir(), "player", dt, 1)) this.shake = Math.min(0.5, this.shake + 0.12);
+        const acc = aimAccuracy(s.data.stats.aim);
+        if (wantFire && fire(scene, s, s.fireDir(), "player", dt, acc)) this.shake = Math.min(0.5, this.shake + 0.12);
       } else {
         s.setCrouch(false); // companions never kneel; a swapped-away soldier stands back up
         updateCompanion(s, dt, scene, leader);
       }
       stepActor(s, dt, scene.world, scene.platforms);
     }
+  }
+
+  // Resolve how the controlled soldier `s` aims this frame from config.aimMode.
+  // keyboard: the legacy up/forward scheme. mouse/gamepad/auto: a free aimVec.
+  _applyAim(s) {
+    const mode = config.aimMode;
+    if (mode === "keyboard") {
+      s.aimVec = null;
+      s.aimUp = this.input.isDown("aimUp") && !s.crouched;
+      return;
+    }
+    s.aimUp = false;
+    const src = this.input.aimSource(mode);
+    if (!src) { s.aimVec = null; return; }
+    let dx, dy;
+    if (src.type === "stick") {
+      dx = src.x; dy = src.y;
+    } else {
+      // mouse: canvas point → world (add camera) → direction from the muzzle
+      const mx = s.x + s.w / 2, my = s.y + s.h * 0.42;
+      dx = src.x + this.camera.x - mx;
+      dy = src.y + this.camera.y - my;
+    }
+    const len = Math.hypot(dx, dy);
+    if (len < 0.001) { s.aimVec = null; return; }
+    s.aimVec = { x: dx / len, y: dy / len };
+    s.facing = s.aimVec.x >= 0 ? 1 : -1;
   }
 
   _updateEnemies(dt) {
@@ -554,10 +588,8 @@ export class Mission {
       // visor
       ctx.fillStyle = flash ? "#ffffff" : "#7ad7ff";
       ctx.fillRect(dir > 0 ? cx + 1 : x + w * 0.24, y + h * 0.08, w * 0.26, h * 0.1);
-      // gun braced forward, low
-      ctx.fillStyle = "#0b0f18";
-      if (dir > 0) ctx.fillRect(cx, gy, gunLen, 5);
-      else ctx.fillRect(cx - gunLen, gy, gunLen, 5);
+      // gun braced forward, low (points along manual aim when active)
+      this._drawGun(ctx, s, cx, gy, gunLen, y, h);
     } else {
       // legs
       ctx.fillStyle = dark;
@@ -579,16 +611,39 @@ export class Mission {
       // visor
       ctx.fillStyle = flash ? "#ffffff" : "#7ad7ff";
       ctx.fillRect(dir > 0 ? cx - 1 : x + w * 0.26, y + h * 0.12, w * 0.28, h * 0.08);
-      // weapon
-      ctx.fillStyle = "#0b0f18";
-      if (s.aimUp) ctx.fillRect(cx - 2, y - 8, 4, h * 0.42);
-      else if (dir > 0) ctx.fillRect(cx, gy, gunLen, 5);
-      else ctx.fillRect(cx - gunLen, gy, gunLen, 5);
+      // weapon (points along manual aim when active, else up/forward)
+      this._drawGun(ctx, s, cx, gy, gunLen, y, h);
     }
 
-    if (s.muzzleFlash > 0) this._drawMuzzle(ctx, s, s.aimUp ? { x: cx, y: y - 10 } : { x: dir > 0 ? x + w + 4 : x - 4, y: gy + 2 });
+    if (s.muzzleFlash > 0) this._drawMuzzle(ctx, s, this._gunTip(s, cx, gy, gunLen, y));
     if (s.burn) this._drawBurn(ctx, x, y, w, h);
     this._healthBar(x, y - 8, w, s.health / s.maxHealth, controlled ? "#7ad7ff" : "#6fcf97");
+  }
+
+  // Draw the soldier's gun as a barrel from the shoulder pivot. Manual aim
+  // (aimVec) rotates it to the aimed direction; otherwise the legacy up/forward.
+  _drawGun(ctx, s, cx, gy, gunLen, y, h) {
+    ctx.fillStyle = "#0b0f18";
+    if (s.aimVec) {
+      ctx.save();
+      ctx.translate(cx, gy);
+      ctx.rotate(Math.atan2(s.aimVec.y, s.aimVec.x));
+      ctx.fillRect(0, -2.5, gunLen, 5);
+      ctx.restore();
+    } else if (s.aimUp) {
+      ctx.fillRect(cx - 2, y - 8, 4, h * 0.42);
+    } else if (s.facing > 0) {
+      ctx.fillRect(cx, gy, gunLen, 5);
+    } else {
+      ctx.fillRect(cx - gunLen, gy, gunLen, 5);
+    }
+  }
+
+  // Barrel-tip point (where the muzzle flash sits) for the current aim.
+  _gunTip(s, cx, gy, gunLen, y) {
+    if (s.aimVec) return { x: cx + s.aimVec.x * gunLen, y: gy + s.aimVec.y * gunLen };
+    if (s.aimUp) return { x: cx, y: y - 10 };
+    return { x: s.facing > 0 ? cx + gunLen : cx - gunLen, y: gy };
   }
 
   _drawEnemy(e) {
@@ -731,31 +786,7 @@ export class Mission {
   }
 
   _drawProjectile(p) {
-    const ctx = this.ctx;
-    const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
-    ctx.save();
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = p.color;
-    ctx.fillStyle = p.color;
-    if (p.w >= 12 && p.h >= 12) {
-      // plasma orb
-      const r = Math.max(p.w, p.h) / 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.4, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      // bullet with a bright core + faint trail
-      const dir = Math.sign(p.vx) || 1;
-      this._roundRect(ctx, p.x - dir * 4, cy - p.h / 2, p.w + 6, p.h, p.h / 2);
-      ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(p.x, cy - 1, p.w, 2);
-    }
-    ctx.restore();
+    drawProjectile(this.ctx, p);
   }
 
   _drawParticles(ctx) {
@@ -877,6 +908,19 @@ export class Mission {
     ctx.fillStyle = "#f2c14e";
     ctx.font = "12px system-ui, sans-serif";
     ctx.fillText(`◈  Loot recovered: ${lootCount}`, W - 16, 46);
+
+    // ammo / reload readout for the controlled soldier (only for magazine guns)
+    const cur = this.currentSoldier();
+    if (cur && cur.alive && cur.weapon && cur.weapon.magazine) {
+      ctx.font = "bold 14px system-ui, sans-serif";
+      if (cur.reloading > 0) {
+        ctx.fillStyle = "#ffb15a";
+        ctx.fillText("RELOADING…", W - 16, 70);
+      } else {
+        ctx.fillStyle = cur.ammo <= 0 ? "#ff6a6a" : "#e6ecf5";
+        ctx.fillText(`⦿  ${cur.ammo} / ${cur.weapon.magazine}`, W - 16, 70);
+      }
+    }
     ctx.textAlign = "left";
 
     // controls strip (bottom)
@@ -885,8 +929,9 @@ export class Mission {
     ctx.fillStyle = "rgba(190,200,215,0.7)";
     ctx.font = "11px system-ui, sans-serif";
     ctx.textAlign = "center";
+    const aimHint = config.aimMode === "keyboard" ? "W  aim up" : "MOUSE  aim";
     ctx.fillText(
-      "A / D  move      W  aim up      S  crouch      SPACE  jump      J  fire      TAB  swap soldier",
+      `A / D  move      ${aimHint}      S  crouch      SPACE  jump      J / CLICK  fire      R  reload      TAB  swap`,
       W / 2,
       H - 7
     );

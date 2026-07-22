@@ -263,3 +263,13 @@
   .cfg-row { grid-template-columns: 1fr; gap: 10px; }
   .cfg-control { justify-content: flex-start; }
 }
+
+/* ---- Controls mapper -------------------------------------------------- */
+.cm-table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 14px; }
+.cm-table th { text-align: left; color: #8894a6; font-weight: 600; padding: 6px 10px; border-bottom: 1px solid rgba(90,110,140,0.25); }
+.cm-table td { padding: 8px 10px; border-bottom: 1px solid rgba(90,110,140,0.12); }
+.cm-key { font-family: ui-monospace, monospace; color: #e6ecf5; }
+.cm-pad { color: #8894a6; }
+.cm-rebind { padding: 4px 12px; }
+.cm-capturing { background: rgba(122,215,255,0.08); }
+.cm-capturing .cm-key { color: #7ad7ff; font-style: italic; }

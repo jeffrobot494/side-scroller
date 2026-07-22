@@ -105,6 +105,11 @@ export class Soldier {
 
     this.fireCooldown = 0;
     this.aimUp = false;
+    this.aimVec = null; // set by manual aim; overrides fireDir when present
+    // Magazine + reload. weapon.magazine (shots per mag) enables it; a weapon
+    // without one has effectively unlimited ammo and never reloads.
+    this.ammo = weapon && weapon.magazine ? weapon.magazine : Infinity;
+    this.reloading = 0; // seconds left in an active reload
     this.burn = null; // active { dps, time } status
     this.hitFlash = 0;
     this.kills = 0;
@@ -146,8 +151,10 @@ export class Soldier {
       return;
     }
     if (move !== 0) {
+      // Reloading slows you to a fraction of run speed (config.reloadSpeedMult).
+      const top = config.runSpeed * (this.reloading > 0 ? config.reloadSpeedMult : 1);
       this.vx += move * SOLDIER_TUNING.accel * dt;
-      this.vx = clamp(this.vx, -config.runSpeed, config.runSpeed);
+      this.vx = clamp(this.vx, -top, top);
       this.facing = move > 0 ? 1 : -1;
     } else {
       const drop = SOLDIER_TUNING.friction * dt;
@@ -160,9 +167,35 @@ export class Soldier {
     }
   }
 
-  // Direction this soldier is currently aiming (unit-ish vector).
+  // Direction this soldier is currently aiming (unit-ish vector). Manual aim
+  // (mouse / stick) sets aimVec and takes priority; otherwise fall back to the
+  // keyboard up/forward scheme.
   fireDir() {
+    if (this.aimVec) return this.aimVec;
     return this.aimUp ? { x: 0, y: -1 } : { x: this.facing, y: 0 };
+  }
+}
+
+// ---- magazine / reload helpers (shared by mission + Firing Room) ----------
+
+// Begin a reload if the actor has a magazine, isn't already reloading, and the
+// mag isn't already full. Returns true if a reload actually started.
+export function startReload(actor) {
+  const w = actor.weapon;
+  if (!w || !w.magazine) return false;
+  if (actor.reloading > 0 || actor.ammo >= w.magazine) return false;
+  actor.reloading = w.reloadTime || 1.5;
+  return true;
+}
+
+// Tick an in-progress reload; refills the magazine when it completes.
+export function tickReload(actor, dt) {
+  if (actor.reloading > 0) {
+    actor.reloading -= dt;
+    if (actor.reloading <= 0) {
+      actor.reloading = 0;
+      actor.ammo = actor.weapon.magazine;
+    }
   }
 }
 
@@ -191,6 +224,8 @@ export class Enemy {
     this.weapon = def.weapon ? WEAPONS[def.weapon] : null;
     this.fireCooldown = 0;
     this.windup = 0; // >0 while telegraphing a shot
+    this.ammo = this.weapon && this.weapon.magazine ? this.weapon.magazine : Infinity;
+    this.reloading = 0;
     this.burn = null;
     this.hitFlash = 0;
   }
@@ -210,6 +245,8 @@ export class Projectile {
     this.h = spec.h;
     this.color = spec.color;
     this.life = spec.life;
+    this.gravity = spec.gravity || 0; // fraction of world gravity (0 = straight)
+    this.shape = spec.shape || null; // render look; null → derived from size
     this.team = team;
     this.effects = effects;
     this.owner = owner;
