@@ -22,6 +22,9 @@ export function normalizeSpec(spec) {
   s.threat = s.threat ?? 50;
   s.role = s.role || "skirmisher";
   s.tier = s.tier ?? 1;
+  // default intelligence from the brain's sophistication: a utility (scored-
+  // decision) brain reads as 3, a scripted one as 2 (see the schema rubric)
+  s.intelligence = s.intelligence ?? (s.brain && s.brain.mode === "utility" ? 3 : 2);
   s.vars = s.vars || {};
   s.defs = s.defs || {};
 

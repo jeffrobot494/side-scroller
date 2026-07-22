@@ -225,6 +225,7 @@ export function createEnemyDesigner(container, onBack) {
       ${selectRow("role", "Role", ROLES, spec.role || "skirmisher")}
       ${sliderRow("tier", "Tier", spec.tier ?? 1, 1, 5, 1)}
       ${sliderRow("threat", "Threat cost", spec.threat ?? 50, 10, 600, 10)}
+      ${sliderRow("intelligence", "Intelligence", spec.intelligence ?? 2, 1, 5, 1)}
 
       <h3 class="wd-h">Body</h3>
       ${selectRow("shape", "Shape", VISUAL_SHAPES, vis.shape || "box")}
@@ -272,6 +273,7 @@ export function createEnemyDesigner(container, onBack) {
       case "role": spec.role = value; break;
       case "tier": spec.tier = +value; break;
       case "threat": spec.threat = +value; break;
+      case "intelligence": spec.intelligence = +value; break;
       case "shape": root.visual = { ...(root.visual || {}), shape: value }; break;
       case "color": root.visual = { ...(root.visual || {}), color: value }; break;
       case "w": case "h": {
@@ -335,7 +337,7 @@ export function createEnemyDesigner(container, onBack) {
       ? saved.map((s) => `
           <div class="wd-saved-row" data-id="${s.id}">
             <span class="wd-saved-name">${escapeHtml(s.name || s.id)}</span>
-            <span class="wd-saved-budget">${escapeHtml(s.role || "?")} · t${s.tier ?? 1} · ${s.threat ?? "—"}</span>
+            <span class="wd-saved-budget">${escapeHtml(s.role || "?")} · t${s.tier ?? 1} · int ${s.intelligence ?? "—"} · ${s.threat ?? "—"}</span>
             <button class="btn btn-ghost" data-es="load-saved" data-id="${s.id}">Load</button>
             <button class="wd-fx-x" data-es="del-saved" data-id="${s.id}" title="Delete">×</button>
           </div>`).join("")

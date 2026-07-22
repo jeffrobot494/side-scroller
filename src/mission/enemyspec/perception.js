@@ -58,6 +58,7 @@ export function updateSense(root, scene, dt) {
     m.timeSinceSeen = 0;
     m.lastSeenX = px;
     m.lastSeenY = py;
+    m.seenOnce = true; // gates the "lastSeen" move target — no memory, no hunt
   }
   s.timeSinceSeen = m.timeSinceSeen;
   s.lastSeenX = m.lastSeenX;

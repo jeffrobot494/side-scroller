@@ -30,7 +30,9 @@ export default async function run(t) {
   // ---- prompt is built from the live vocabulary ---------------------------
   const prompt = buildSystemPrompt();
   t.ok("prompt: carries the vocabulary", prompt.includes("keepDistance") && prompt.includes("maxSpawnsPerSecond"));
-  t.ok("prompt: carries few-shot examples", prompt.includes("tpl_boss_moth") && prompt.includes("tpl_duelist"));
+  t.ok("prompt: carries few-shot examples", prompt.includes("tpl_boss_moth") && prompt.includes("tpl_sky_duelist"));
+  t.ok("prompt: carries the intelligence rubric", prompt.includes("intelligence rubric") && prompt.includes("aim \"landing\""));
+  t.ok("prompt: documents relative targets", prompt.includes("offset:[along,up]") && prompt.includes("lastSeen"));
 
   // ---- clean first-pass accept -------------------------------------------
   {

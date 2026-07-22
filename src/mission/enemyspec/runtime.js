@@ -321,7 +321,7 @@ function applyMotion(root, ent, m, dt, scene, target, flying) {
       ent.vx *= 0.8;
       break;
     case "moveTo": {
-      const at = resolveTargetPoint(root, ent, m.target, scene, target);
+      const at = resolveTargetPoint(root, ent, m.target, scene, target, m.offset);
       if (at) steerToward(ent, at.x, at.y, m.speed, flying);
       break;
     }
@@ -386,8 +386,17 @@ function applyMotion(root, ent, m, dt, scene, target, flying) {
     }
     case "hover": {
       ent.hoverPhase += (m.rate || 2.4) * dt;
-      const baseY = ent.anchorY;
-      ent.y = baseY + Math.sin(ent.hoverPhase) * (m.amplitude || 14);
+      // altitude-hold: ease the bob anchor toward `altitude` px between the
+      // underside and the ground below — climbs over perches, descends past
+      // them. altitude: null keeps the legacy spawn-anchored bob.
+      if (typeof m.altitude === "number") {
+        const groundTop = groundTopBelow(ent, scene);
+        const desired = groundTop - m.altitude - ent.h;
+        const climb = (m.climbSpeed ?? 90) * dt;
+        const dy = desired - ent.anchorY;
+        ent.anchorY += Math.max(-climb, Math.min(climb, dy));
+      }
+      ent.y = ent.anchorY + Math.sin(ent.hoverPhase) * (m.amplitude || 14);
       if (target) {
         const dx = cx(target) - cx(ent);
         ent.vx = Math.abs(dx) > 30 ? Math.sign(dx) * (m.driftSpeed || 40) : 0;
@@ -398,12 +407,39 @@ function applyMotion(root, ent, m, dt, scene, target, flying) {
   }
 }
 
-function resolveTargetPoint(root, ent, target, scene, playerEnt) {
-  if (Array.isArray(target)) return { x: target[0], y: target[1] };
-  if (target === "player" && playerEnt) return { x: cx(playerEnt), y: cy(playerEnt) };
-  if (target === "parent" && ent.parent) return { x: cx(ent.parent), y: cy(ent.parent) };
-  if (target === "spawn") return { x: ent.anchorX + ent.w / 2, y: ent.anchorY + ent.h / 2 };
-  return null;
+// Resolve a moveTo/dash target to a world point. `offset: [along, up]` shifts
+// the point along the entity→target line (positive = PAST the target — the
+// fly-through strafing point; negative = a standoff short of it) and
+// vertically (negative = above). "lastSeen" is the perception memory — null
+// until the player has actually been seen once.
+function resolveTargetPoint(root, ent, target, scene, playerEnt, offset) {
+  let base = null;
+  if (Array.isArray(target)) base = { x: target[0], y: target[1] };
+  else if (target === "player" && playerEnt) base = { x: cx(playerEnt), y: cy(playerEnt) };
+  else if (target === "parent" && ent.parent) base = { x: cx(ent.parent), y: cy(ent.parent) };
+  else if (target === "spawn") base = { x: ent.anchorX + ent.w / 2, y: ent.anchorY + ent.h / 2 };
+  else if (target === "lastSeen" && root.memory && root.memory.seenOnce) {
+    base = { x: root.memory.lastSeenX, y: root.memory.lastSeenY };
+  }
+  if (!base) return null;
+  if (Array.isArray(offset) && offset.length === 2) {
+    const dx = base.x - cx(ent);
+    const dy = base.y - cy(ent);
+    const len = Math.hypot(dx, dy) || 1;
+    base = { x: base.x + (dx / len) * offset[0], y: base.y + offset[1] };
+  }
+  return base;
+}
+
+// Top of the ground directly beneath a flying entity's center (world bottom if
+// nothing is below) — the reference surface for hover's altitude-hold.
+function groundTopBelow(ent, scene) {
+  const midX = ent.x + ent.w / 2;
+  let best = scene.world.height;
+  for (const p of scene.platforms) {
+    if (midX >= p.x && midX <= p.x + p.w && p.y >= ent.y + ent.h / 2 && p.y < best) best = p.y;
+  }
+  return best;
 }
 
 // ---- entity lookup / selectors -------------------------------------------
@@ -555,19 +591,39 @@ export function execStep(root, self, step, scene, ctx) {
     case "moveTo": {
       const at = args.at
         ? { x: args.at[0], y: args.at[1] }
-        : resolveTargetPoint(root, self, args.target, scene, player(scene));
+        : resolveTargetPoint(root, self, args.target, scene, player(scene), args.offset);
       if (!at) return null;
       self.moveOrder = { x: at.x, y: at.y, speed: args.speed || 160, timeout: args.timeout || 3 };
       return { kind: "move" };
     }
     case "dash": {
       const t = player(scene);
-      let dir;
-      if (args.away && t) dir = Math.sign(cx(self) - cx(t)) || 1;
-      else if (t) dir = Math.sign(cx(t) - cx(self)) || self.facing;
-      else dir = self.facing;
-      const dy = t && self.spec.body.gravity === 0 ? Math.sign(cy(t) - cy(self)) : 0;
-      self.dash = { vx: dir * (args.speed || 300) * (args.away ? 1 : 1), vy: dy * (args.speed || 300) * 0.4, t: args.duration };
+      const flying = self.spec.body.gravity === 0;
+      const speed = args.speed || 300;
+      let ux, uy;
+      // aimed dash: at a resolved point (offset past the player = a strafing pass)
+      if (args.target || args.at || args.offset) {
+        const at = args.at
+          ? { x: args.at[0], y: args.at[1] }
+          : resolveTargetPoint(root, self, args.target || "player", scene, t, args.offset);
+        if (at) {
+          const dx = at.x - cx(self);
+          const dy = at.y - cy(self);
+          const len = Math.hypot(dx, dy) || 1;
+          ux = dx / len;
+          uy = flying ? dy / len : 0;
+        }
+      }
+      if (ux === undefined) {
+        // simple toward/away burst
+        let dir;
+        if (args.away && t) dir = Math.sign(cx(self) - cx(t)) || 1;
+        else if (t) dir = Math.sign(cx(t) - cx(self)) || self.facing;
+        else dir = self.facing;
+        ux = dir;
+        uy = t && flying ? Math.sign(cy(t) - cy(self)) * 0.4 : 0;
+      }
+      self.dash = { vx: ux * speed, vy: uy * speed, t: args.duration };
       return { kind: "time", t: args.duration };
     }
     case "jump":

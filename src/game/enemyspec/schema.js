@@ -20,8 +20,10 @@
 export const SPEC_VERSION = 1;
 
 // Top-level EnemySpec keys. threat/role/tier are the explicit placement metadata
-// (enemycost.js reads `threat` directly when present).
-export const SPEC_KEYS = ["v", "id", "name", "threat", "role", "tier", "limits", "vars", "defs", "root", "brain"];
+// (enemycost.js reads `threat` directly when present). `intelligence` (1–5)
+// rates HOW SMART the behavior is — separate from threat, which prices how
+// DANGEROUS it is (see the rubric in vocabularyDoc; smarter ≠ harder).
+export const SPEC_KEYS = ["v", "id", "name", "threat", "role", "tier", "intelligence", "limits", "vars", "defs", "root", "brain"];
 
 // Tactical roles — used by the Designer, the LLM prompt, and (later) placement.
 export const ROLES = ["fodder", "charger", "skirmisher", "artillery", "tank", "support", "elite", "boss"];
@@ -48,7 +50,10 @@ export const MOTIONS = {
   keepDistance: { params: { min: 240, max: 420, speed: 140 } },
   home:         { params: { speed: 180, turnRate: 3 } }, // rad/s steering toward player
   orbit:        { params: { around: "parent", radius: 90, degPerSec: 90 } },
-  hover:        { params: { amplitude: 14, rate: 2.4, driftSpeed: 40 } }, // bob + slow drift to player x
+  // bob + slow drift toward the player's x, holding `altitude` px between the
+  // entity's underside and the ground directly below (climbs over perches,
+  // descends past them); altitude: null = anchor at the spawn height instead.
+  hover:        { params: { amplitude: 14, rate: 2.4, driftSpeed: 40, altitude: 150, climbSpeed: 90 } },
 };
 export const FLYING_MOTIONS = ["velocity", "moveTo", "home", "orbit", "hover"];
 export const MOTION_TARGETS = ["player", "parent", "spawn"];
@@ -116,6 +121,7 @@ export const MAX_ENTITIES = 24; // authored entities per spec (root + children +
 export const RANGES = {
   threat: [1, 2000],
   tier: [1, 5],
+  intelligence: [1, 5],
   "health.max": [1, 5000],
   "visual.size": [4, 400],
   "body.gravity": [0, 2],
@@ -140,7 +146,7 @@ export const PROJECTILE_KEYS = ["speed", "w", "h", "color", "life", "shape", "gr
 export function vocabularyDoc() {
   return [
     `EnemySpec JSON format (sparse — omit anything default):`,
-    `Top level: { v:${SPEC_VERSION}, id, name, threat (1-2000), role (${ROLES.join("|")}), tier (1-5), limits, vars, defs, root, brain }`,
+    `Top level: { v:${SPEC_VERSION}, id, name, threat (1-2000), role (${ROLES.join("|")}), tier (1-5), intelligence (1-5), limits, vars, defs, root, brain }`,
     `Every entity (root, children, defs entries) may have: ${ENTITY_KEYS.join(", ")}.`,
     `  visual: { shape: ${VISUAL_SHAPES.join("|")}, size: [w,h] px, color: "#hex" }`,
     `  body: { w, h, gravity (0=flies, 1=falls), ghost (true = passes through platforms; default false) } — size defaults to visual size. Platforms block everyone else; flying entities with contact.destroySelf (missiles) are destroyed on terrain.`,
@@ -156,9 +162,17 @@ export function vocabularyDoc() {
     `  utility state: { actions:[{ id, when?:"expr", score:"expr"|number, windup?, steps:[actions], recovery?, cooldown? }], decisionInterval? }`,
     `Actions (one key per step, named args): ${Object.keys(ACTIONS).join(", ")}.`,
     `  Blocking (occupy the track for a duration): wait, telegraph, moveTo, dash. Every looping track needs at least one.`,
+    `  moveTo/dash targets: "player", "parent", "spawn", "lastSeen" (where the player was last visible), or at:[x,y]. Optional offset:[along,up] — along is on the line toward the target (positive = a point PAST it → fly-through strafing passes; negative = standoff short of it), up is vertical (negative = above). e.g. { moveTo: { target:"player", offset:[-260,-140], speed:260 } } = a firing perch above and short of the player; { moveTo: { target:"player", offset:[240,0], speed:420 } } = a strafing pass through them.`,
     `  fire: { emitter: "<name>" or "<childId>.<name>", count, pattern: ${PATTERNS.join("|")}, spreadDeg, aim: ${AIM_STYLES.join("|")} }`,
     `  spawn: { ref: "<defId>", count, pattern, speed }`,
     `Expressions (strings): arithmetic/comparison/boolean over self.hpPct, self.x/y, self.vars.*, root.vars.*, player.x/y/vx/vy/isGrounded, arena.time/width, sense.los/dist/playerAbove/playerBelow/playerApproaching/cornered/timeSinceSeen, and functions ${EXPR_FUNCTIONS.join(", ")}. No scripting.`,
     `limits: { maxAlive<=${LIMIT_CAPS.maxAlive}, maxSpawnsPerSecond<=${LIMIT_CAPS.maxSpawnsPerSecond}, maxSpawnDepth<=${LIMIT_CAPS.maxSpawnDepth} } — engine-enforced.`,
+    `intelligence rubric — HOW SMART the behavior reads, NOT how hard it hits (damage/hp/attack rate belong in threat):`,
+    `  1: scripted tracks, aim "current", no sense.* usage — pure pattern.`,
+    `  2: tracks with multiple states/telegraph variety, position changes (patrol/standoffs).`,
+    `  3: utility brain, aim "lead", actions gated on sense.dist/sense.los.`,
+    `  4: + sense.playerApproaching/cornered, "lastSeen" repositioning, retreat-when-hurt actions, decisionInterval <= 0.3.`,
+    `  5: + aim "landing", hunts via sense.timeSinceSeen, varies range/altitude per action, punishable committed attacks.`,
+    `Match the brain to the declared intelligence.`,
   ].join("\n");
 }

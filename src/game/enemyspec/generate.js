@@ -23,8 +23,9 @@ import { dryRunSpec } from "./dryrun.js";
 import { TEMPLATE_BY_ID } from "./templates.js";
 
 // Few-shots: one simple tracks enemy, one multi-part boss (shows children/defs/
-// signals), one utility brain (shows scored actions + sense.*).
-const FEWSHOT_IDS = ["tpl_shooter", "tpl_boss_moth", "tpl_duelist"];
+// signals), one utility brain (the Sky Duelist also demonstrates flight —
+// altitude hover, relative-target strafing passes, lastSeen hunting).
+const FEWSHOT_IDS = ["tpl_shooter", "tpl_boss_moth", "tpl_sky_duelist"];
 
 export function buildSystemPrompt() {
   const examples = FEWSHOT_IDS.map(

@@ -228,6 +228,73 @@ export default async function run(t) {
     t.ok("terrain: missile never crossed the wall", !missile || missile.x < 640);
   }
 
+  // ---- hover altitude-hold ------------------------------------------------
+  {
+    // spawned at ground level, a default hover climbs until its underside sits
+    // ~altitude px above the ground beneath it
+    const scene = makeScene();
+    const spec = normalizeSpec({ id: "alt", root: { health: { max: 20 }, visual: { size: [30, 20] }, motion: { type: "hover" } } });
+    t.eq("hover: altitude default present", spec.root.motion.altitude, 150);
+    const root = instantiate(spec, 300, 480);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, 4);
+    const underside = 500 - (root.y + root.h); // ground top is 500
+    t.ok(`hover: holds ~150px altitude (got ${Math.round(underside)})`, Math.abs(underside - 150) <= 30);
+
+    // altitude: null keeps the legacy spawn-anchored bob
+    const anchored = normalizeSpec({ id: "anch", root: { health: { max: 20 }, visual: { size: [30, 20] }, motion: { type: "hover", altitude: null } } });
+    const a = instantiate(anchored, 300, 200);
+    const { ctx: actx } = makeCtx(() => a);
+    sim(a, scene, actx, 3);
+    t.ok("hover: altitude null stays spawn-anchored", Math.abs(a.y - 200) < 40);
+  }
+
+  // ---- relative targets ---------------------------------------------------
+  {
+    // moveTo { target: "player", offset: [220, 0] } is a point PAST the player
+    // — the enemy flies through and beyond them (the strafing-pass primitive)
+    const scene = makeScene();
+    const spec = normalizeSpec({
+      id: "pass",
+      root: { health: { max: 20 }, visual: { size: [24, 16] }, body: { gravity: 0 }, motion: { type: "static" } },
+      brain: {
+        start: "s",
+        states: { s: { tracks: [{ id: "t", loop: false, steps: [{ moveTo: { target: "player", offset: [220, 0], speed: 600, timeout: 4 } }] }] } },
+      },
+    });
+    const root = instantiate(spec, 300, 300);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, 3);
+    t.ok("offset: enemy flew past the player", root.x + root.w / 2 > 950); // player center ≈ 915
+  }
+
+  {
+    // "lastSeen" resolves to perception memory — and is null (no move) until
+    // the player has actually been seen
+    const mk = () =>
+      normalizeSpec({
+        id: "hunter",
+        root: { health: { max: 20 }, visual: { size: [24, 16] }, body: { gravity: 0 }, motion: { type: "static" } },
+        brain: {
+          start: "s",
+          states: { s: { tracks: [{ id: "t", loop: false, steps: [{ moveTo: { target: "lastSeen", speed: 400, timeout: 3 } }] }] } },
+        },
+      });
+
+    const seen = makeScene();
+    const root = instantiate(mk(), 300, 300);
+    const { ctx } = makeCtx(() => root);
+    sim(root, seen, ctx, 2.5);
+    t.ok("lastSeen: hunts toward the remembered position", root.x + root.w / 2 > 700);
+
+    const blind = makeScene();
+    blind.platforms.push({ x: 600, y: 0, w: 40, h: 500 }); // full wall — never seen
+    const b = instantiate(mk(), 300, 300);
+    const { ctx: bctx } = makeCtx(() => b);
+    sim(b, blind, bctx, 2);
+    t.ok("lastSeen: no memory → no hunt", Math.abs(b.x - 300) < 30);
+  }
+
   // ---- dry-run gate -------------------------------------------------------
   for (const tpl of TEMPLATES) {
     const res = dryRunSpec(normalizeSpec(tpl));

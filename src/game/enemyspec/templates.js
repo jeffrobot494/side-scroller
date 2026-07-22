@@ -17,6 +17,7 @@ export const TEMPLATES = [
     threat: 50,
     role: "charger",
     tier: 1,
+    intelligence: 1,
     root: {
       id: "root",
       tags: ["enemy"],
@@ -35,6 +36,7 @@ export const TEMPLATES = [
     threat: 70,
     role: "artillery",
     tier: 1,
+    intelligence: 2,
     root: {
       id: "root",
       tags: ["enemy"],
@@ -73,6 +75,7 @@ export const TEMPLATES = [
     threat: 65,
     role: "skirmisher",
     tier: 1,
+    intelligence: 2,
     root: {
       id: "root",
       tags: ["enemy", "flying"],
@@ -112,6 +115,7 @@ export const TEMPLATES = [
     threat: 320,
     role: "boss",
     tier: 3,
+    intelligence: 2,
     limits: { maxAlive: 24, maxSpawnsPerSecond: 10, maxSpawnDepth: 3 },
     vars: { rage: 0 },
     defs: {
@@ -242,6 +246,7 @@ export const TEMPLATES = [
     threat: 110,
     role: "elite",
     tier: 2,
+    intelligence: 4,
     root: {
       id: "root",
       tags: ["enemy"],
@@ -290,6 +295,136 @@ export const TEMPLATES = [
               id: "hold",
               score: 0.5,
               steps: [{ wait: 0.3 }],
+            },
+          ],
+        },
+      },
+    },
+  },
+  // -- 6. Strafe Raider (intelligence 2, tracks): the scripted flying attack
+  //    pattern — climb to a standoff above the player, telegraph, then dive
+  //    THROUGH them on a firing pass and come around. Readable and learnable;
+  //    built entirely from moveTo/dash relative targets, no bespoke motion.
+  {
+    v: 1,
+    id: "tpl_raider",
+    name: "Strafe Raider",
+    threat: 85,
+    role: "skirmisher",
+    tier: 2,
+    intelligence: 2,
+    root: {
+      id: "root",
+      tags: ["enemy", "flying"],
+      visual: { shape: "diamond", size: [34, 20], color: "#e0975a" },
+      body: { gravity: 0 },
+      health: { max: 36 },
+      motion: { type: "static" },
+      emitters: {
+        gun: { at: [0, 8], projectile: { speed: 540, w: 10, h: 5, color: "#ffcf5c", life: 1.6, damage: 8, shape: "bullet" } },
+      },
+    },
+    brain: {
+      start: "racetrack",
+      states: {
+        racetrack: {
+          tracks: [
+            {
+              id: "pass",
+              loop: true,
+              steps: [
+                { moveTo: { target: "player", offset: [-240, -150], speed: 300, timeout: 2.5 } },
+                { telegraph: { time: 0.45 } },
+                { fire: { emitter: "gun", pattern: "aimed" } },
+                { dash: { target: "player", offset: [260, -10], speed: 480, duration: 0.55 } },
+                { fire: { emitter: "gun", pattern: "aimed" } },
+                { wait: { range: [0.6, 1.1] } },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  },
+
+  // -- 7. Sky Duelist (intelligence 4, utility): the smart flyer — hovers at
+  //    altitude, strafe-runs when it likes the angle, snipes with lead from
+  //    far, climbs away when hurt or pressured, and hunts your last-seen
+  //    position when it loses you. Same primitives as the Raider; the brain
+  //    is the intelligence.
+  {
+    v: 1,
+    id: "tpl_sky_duelist",
+    name: "Sky Duelist",
+    threat: 120,
+    role: "elite",
+    tier: 2,
+    intelligence: 4,
+    root: {
+      id: "root",
+      tags: ["enemy", "flying"],
+      visual: { shape: "ellipse", size: [40, 26], color: "#5ad0b8" },
+      health: { max: 60 },
+      motion: { type: "hover", amplitude: 10, rate: 2, driftSpeed: 30, altitude: 170 },
+      emitters: {
+        gun: { at: [0, 6], projectile: { speed: 600, w: 10, h: 5, color: "#8affc1", life: 1.6, damage: 9, shape: "bolt" } },
+      },
+    },
+    brain: {
+      mode: "utility",
+      start: "sky",
+      states: {
+        sky: {
+          decisionInterval: 0.25,
+          actions: [
+            {
+              id: "strafeRun",
+              when: "sense.los && sense.dist > 180 && sense.dist < 520",
+              score: "1.5 + 1.2 * (sense.dist < 380)",
+              windup: 0.4,
+              steps: [
+                { dash: { target: "player", offset: [240, 0], speed: 500, duration: 0.55 } },
+                { fire: { emitter: "gun", pattern: "aimed", aim: "lead" } },
+              ],
+              recovery: 0.5,
+              cooldown: 2.2,
+            },
+            {
+              id: "hoverSnipe",
+              when: "sense.los && sense.dist >= 520",
+              score: 1.2,
+              windup: 0.3,
+              steps: [{ fire: { emitter: "gun", pattern: "aimed", aim: "lead" } }],
+              recovery: 0.2,
+              cooldown: 1,
+            },
+            {
+              id: "peelOff",
+              when: "sense.los && sense.dist <= 180",
+              score: 1.6,
+              steps: [{ moveTo: { target: "player", offset: [-300, -170], speed: 420, timeout: 1.4 } }],
+              recovery: 0.2,
+              cooldown: 1,
+            },
+            {
+              id: "climbAway",
+              when: "self.hpPct < 0.45 || (sense.playerApproaching && sense.dist < 220)",
+              score: "2.2 + 2 * sense.playerApproaching",
+              steps: [{ moveTo: { target: "player", offset: [-320, -190], speed: 380, timeout: 1.6 } }],
+              recovery: 0.2,
+              cooldown: 1.8,
+            },
+            {
+              id: "hunt",
+              when: "!sense.los && sense.timeSinceSeen > 1",
+              score: 1.8,
+              steps: [{ moveTo: { target: "lastSeen", speed: 300, timeout: 2 } }],
+              cooldown: 1.5,
+            },
+            {
+              id: "drift",
+              score: 0.4,
+              steps: [{ wait: 0.35 }],
             },
           ],
         },

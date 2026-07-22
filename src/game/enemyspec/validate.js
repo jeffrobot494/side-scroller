@@ -37,6 +37,7 @@ export function validateSpec(spec) {
   if (spec.role !== undefined && !ROLES.includes(spec.role)) err("role", `role must be one of ${ROLES.join(", ")}`);
   checkRange(err, "threat", spec.threat, RANGES.threat);
   checkRange(err, "tier", spec.tier, RANGES.tier);
+  checkRange(err, "intelligence", spec.intelligence, RANGES.intelligence);
   if (!spec.root || typeof spec.root !== "object") return { ok: false, errors };
   if (!spec.root.health || typeof spec.root.health.max !== "number") {
     err("root.health", "root must have health: { max } (the enemy must be killable)");
@@ -299,10 +300,22 @@ function checkAction(err, name, args, path, refs, owner) {
     }
     case "moveTo":
       if (!args || (!args.target && !args.at)) err(path, "moveTo needs { target } or { at: [x, y] }");
+      checkOffset(err, args, path);
       break;
     case "dash":
       if (!args || !(args.duration > 0)) err(path, "dash needs { duration > 0 }");
+      checkOffset(err, args, path);
       break;
+  }
+}
+
+// moveTo/dash may carry offset: [along, up] — along the line to the target
+// (positive = past it), up vertical. Two numbers or nothing.
+function checkOffset(err, args, path) {
+  if (!args || args.offset === undefined) return;
+  const o = args.offset;
+  if (!Array.isArray(o) || o.length !== 2 || o.some((v) => typeof v !== "number")) {
+    err(`${path}.offset`, "offset must be [along, up] (two numbers)");
   }
 }
 

@@ -54,6 +54,15 @@ export default async function run(t) {
   t.eq("normalize: bare damage → effects", np.root.emitters.g.projectile.effects, [{ kind: "damage", amount: 5 }]);
   t.ok("normalize: does not mutate input", !TEMPLATES[0].root.body);
 
+  // ---- intelligence rating ------------------------------------------------
+  t.eq("intelligence: tracks brain defaults to 2", normalizeSpec({ id: "x", root: { health: { max: 10 } } }).intelligence, 2);
+  const utilSpec = { id: "x", root: { health: { max: 10 } }, brain: { mode: "utility", start: "s", states: { s: { actions: [{ id: "a", score: 1, steps: [{ wait: 0.2 }] }] } } } };
+  t.eq("intelligence: utility brain defaults to 3", normalizeSpec(utilSpec).intelligence, 3);
+  t.ok("intelligence: out of range rejected", hasErr(validateSpec({ id: "x", intelligence: 9, root: { health: { max: 10 } } }), "intelligence"));
+  for (const tpl of TEMPLATES) {
+    t.ok(`intelligence: ${tpl.id} rated 1-5`, tpl.intelligence >= 1 && tpl.intelligence <= 5);
+  }
+
   // ---- validation catches -------------------------------------------------
   t.ok("validate: rejects non-object", !validateSpec(null).ok);
   t.ok("validate: missing root", hasErr(validateSpec({ id: "x" }), "root"));

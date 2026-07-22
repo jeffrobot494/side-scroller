@@ -140,6 +140,26 @@ export default async function run(t) {
     t.eq("utility: cooldown allows exactly one use", nukes, 1);
   }
 
+  // ---- sky duelist: the intelligent flyer template ------------------------
+  {
+    const scene = makeScene(700, 454);
+    const root = instantiate(normalizeSpec(TEMPLATE_BY_ID["tpl_sky_duelist"]), 260, 240);
+    const { ctx } = makeCtx(() => root);
+
+    let maxX = root.x;
+    let minDist = Infinity;
+    for (let i = 0; i < Math.round(6 / STEP); i++) {
+      updateSpecEnemy(root, STEP, scene, ctx);
+      maxX = Math.max(maxX, root.x);
+      minDist = Math.min(minDist, Math.abs(root.x + root.w / 2 - 715));
+    }
+
+    t.ok("sky duelist: fires in flight", scene.projectiles.length > 0);
+    t.ok("sky duelist: stays airborne", root.y + root.h < 480);
+    t.ok("sky duelist: closes in on the player (strafe runs)", minDist < 300);
+    t.ok("sky duelist: uses multiple actions", Object.keys(root.brainState.cooldowns).length >= 2);
+  }
+
   // ---- utility + ambient tracks coexist ----------------------------------
   {
     const spec = normalizeSpec({
