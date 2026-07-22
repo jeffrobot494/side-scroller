@@ -36,9 +36,21 @@ section + the tests are the source of truth for what currently exists):
   scheme. Note: the drawn gun still points by facing, not the aim vector.
 - **Crouch:** hold S/↓ to kneel (lower hitbox to dodge fire + let allies shoot
   over you); enemies aim at standing height so crouch ducks under.
-- **Player2 (LLM + image gen) is NOT wired yet** — the next big dependency,
-  shared by level-gen Slice 2 and the asset-generation plan
-  (`docs/ASSET-GENERATION.md`). Client exists in `src/player2/` but is unused.
+- **Enemy creation system (EnemySpec):** a full entity-composition enemy format
+  + runtime (`src/game/enemyspec/` = schema/expr/validate/normalize/templates/
+  dryrun/generate; `src/mission/enemyspec/` = runtime/brain/perception/render):
+  nested destructible parts, projectiles-as-entities, 10 motion controllers,
+  fire patterns, events/signals, tracks + utility (scored-action) brains,
+  perception/memory, engine-enforced spawn limits. The **Enemy Designer** was
+  rebuilt around it (template/form/JSON authoring + LLM generate via Player2
+  chat completions + live real-runtime preview + library) and the **Firing
+  Room** spawns saved specs as waves. Plan: `docs/enemy_creation_system_plan.md`.
+  NOT yet wired into missions/levelgen — the legacy 3-archetype enemies still
+  drive gameplay; that integration is a deliberate later task.
+- **Player2 is partially wired:** the Enemy Designer's Generate button uses
+  `src/player2/client.js` chat completions (needs the app + a client id in the
+  config `player2GameClientId`). Image gen and the rest remain unused — still
+  the dependency for level-gen Slice 2 and `docs/ASSET-GENERATION.md`.
 
 ## Running it (no build step)
 
