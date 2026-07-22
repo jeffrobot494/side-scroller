@@ -10,8 +10,19 @@
 
 import { Projectile } from "./entities.js";
 
+// Ranged enemies aim at a fixed height above a soldier's feet (upper torso of a
+// standing soldier), NOT the soldier's live centre. So dropping to a crouch —
+// which lowers the hitbox below this line — makes their shots sail overhead.
+const AIM_HEIGHT = 34;
+
 function center(e) {
   return { x: e.x + e.w / 2, y: e.y + e.h / 2 };
+}
+
+// Point a shooter aims at: horizontally the target's centre, vertically a fixed
+// standing height off its feet (so crouch ducks under it).
+function aimPoint(target) {
+  return { x: target.x + target.w / 2, y: target.y + target.h - AIM_HEIGHT };
 }
 function dist(a, b) {
   const c = center(a);
@@ -177,7 +188,8 @@ function tryTelegraphedShot(enemy, target, dt, scene) {
   if (enemy.windup > 0) {
     enemy.windup -= dt;
     if (enemy.windup <= 0 && inRange) {
-      const dir = { x: t.x - c.x, y: t.y - c.y };
+      const aim = aimPoint(target);
+      const dir = { x: aim.x - c.x, y: aim.y - c.y };
       // force cooldown ready so the shot fires now
       enemy.fireCooldown = 0;
       fire(scene, enemy, dir, "enemy", dt, 0.85);

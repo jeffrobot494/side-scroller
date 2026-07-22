@@ -72,6 +72,12 @@ const SOLDIER_TUNING = {
   friction: 3000,
 };
 
+// Standing vs kneeling height. Crouching drops the hitbox low enough that shots
+// aimed at standing height (see ai.js AIM_HEIGHT) sail over, and an ally firing
+// from behind clears the crouched soldier's head.
+export const STAND_H = 46;
+export const CROUCH_H = 22;
+
 export class Soldier {
   // `data` is a roster soldier (id, name, stats, ...); `weapon` is a WEAPONS entry.
   constructor(data, weapon, x, y) {
@@ -85,11 +91,12 @@ export class Soldier {
     this.x = x;
     this.y = y;
     this.w = 30;
-    this.h = 46;
+    this.h = STAND_H;
     this.vx = 0;
     this.vy = 0;
     this.onGround = false;
     this.facing = 1; // 1 right, -1 left
+    this.crouched = false;
 
     // Health scales off the soldier's health stat (1–10 → 60–150 hp).
     this.maxHealth = 50 + data.stats.health * 10;
@@ -111,8 +118,33 @@ export class Soldier {
     return `hsl(${h} 65% 58%)`;
   }
 
+  // Drop to / rise from one knee. Adjusts height and shifts y so the feet stay
+  // planted on the ground (feet = y + h is preserved across the change).
+  setCrouch(want) {
+    want = !!want && this.alive;
+    if (want === this.crouched) return;
+    const dh = STAND_H - CROUCH_H;
+    if (want) {
+      this.crouched = true;
+      this.h = CROUCH_H;
+      this.y += dh;
+    } else {
+      this.crouched = false;
+      this.h = STAND_H;
+      this.y -= dh;
+    }
+  }
+
   applyMovement(dt, move, jump) {
     if (!this.alive) return;
+    // Kneeling: you can pivot to face either way, but not run or jump.
+    if (this.crouched) {
+      if (move !== 0) this.facing = move > 0 ? 1 : -1;
+      const drop = SOLDIER_TUNING.friction * dt;
+      if (Math.abs(this.vx) <= drop) this.vx = 0;
+      else this.vx -= Math.sign(this.vx) * drop;
+      return;
+    }
     if (move !== 0) {
       this.vx += move * SOLDIER_TUNING.accel * dt;
       this.vx = clamp(this.vx, -config.runSpeed, config.runSpeed);

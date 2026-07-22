@@ -156,15 +156,17 @@ export class Mission {
       if (!s.alive) continue;
       if (s === leader) {
         // Player control.
+        s.setCrouch(this.input.isDown("crouch"));
         const move =
           (this.input.isDown("right") ? 1 : 0) - (this.input.isDown("left") ? 1 : 0);
-        s.aimUp = this.input.isDown("aimUp");
+        s.aimUp = this.input.isDown("aimUp") && !s.crouched;
         s.applyMovement(dt, move, this.input.isDown("jump"));
         const wantFire = s.weapon.auto
           ? this.input.isDown("fire")
           : this.input.justPressed("fire");
         if (wantFire && fire(scene, s, s.fireDir(), "player", dt, 1)) this.shake = Math.min(0.5, this.shake + 0.12);
       } else {
+        s.setCrouch(false); // companions never kneel; a swapped-away soldier stands back up
         updateCompanion(s, dt, scene, leader);
       }
       stepActor(s, dt, scene.world, scene.platforms);
@@ -530,32 +532,59 @@ export class Mission {
     const base = flash ? "#ffffff" : s.color;
     const dark = flash ? "#ffffff" : this._shade(s.color, -22);
 
-    // legs
-    ctx.fillStyle = dark;
-    ctx.fillRect(x + w * 0.2, y + h * 0.62, w * 0.22, h * 0.38);
-    ctx.fillRect(x + w * 0.58, y + h * 0.62, w * 0.22, h * 0.38);
-    // backpack
-    ctx.fillStyle = this._shade(s.color, -34);
-    ctx.fillRect(dir > 0 ? x - 2 : x + w - 4, y + h * 0.3, 6, h * 0.3);
-    // torso
-    ctx.fillStyle = base;
-    this._roundRect(ctx, x + w * 0.16, y + h * 0.28, w * 0.68, h * 0.4, 4);
-    ctx.fill();
-    ctx.fillStyle = this._shade(s.color, 20);
-    ctx.fillRect(cx - 1, y + h * 0.3, 2, h * 0.34);
-    // helmet
-    ctx.fillStyle = dark;
-    this._roundRect(ctx, x + w * 0.24, y + h * 0.05, w * 0.52, h * 0.26, 5);
-    ctx.fill();
-    // visor
-    ctx.fillStyle = flash ? "#ffffff" : "#7ad7ff";
-    ctx.fillRect(dir > 0 ? cx - 1 : x + w * 0.26, y + h * 0.12, w * 0.28, h * 0.08);
-    // weapon
-    ctx.fillStyle = "#0b0f18";
     const gunLen = w * 0.62, gy = y + h * 0.42;
-    if (s.aimUp) ctx.fillRect(cx - 2, y - 8, 4, h * 0.42);
-    else if (dir > 0) ctx.fillRect(cx, gy, gunLen, 5);
-    else ctx.fillRect(cx - gunLen, gy, gunLen, 5);
+
+    if (s.crouched) {
+      // Kneeling: back leg folded along the ground, forward knee up, hunched
+      // torso, gun braced low — a short silhouette shots pass over.
+      ctx.fillStyle = dark;
+      ctx.fillRect(x + w * 0.12, y + h * 0.62, w * 0.6, h * 0.38); // folded shin along the ground
+      ctx.fillRect(dir > 0 ? x + w * 0.5 : x + w * 0.24, y + h * 0.44, w * 0.26, h * 0.56); // forward knee
+      // backpack
+      ctx.fillStyle = this._shade(s.color, -34);
+      ctx.fillRect(dir > 0 ? x - 1 : x + w - 5, y + h * 0.16, 6, h * 0.42);
+      // hunched torso
+      ctx.fillStyle = base;
+      this._roundRect(ctx, x + w * 0.18, y + h * 0.16, w * 0.64, h * 0.5, 4);
+      ctx.fill();
+      // helmet
+      ctx.fillStyle = dark;
+      this._roundRect(ctx, dir > 0 ? x + w * 0.32 : x + w * 0.2, y, w * 0.48, h * 0.34, 4);
+      ctx.fill();
+      // visor
+      ctx.fillStyle = flash ? "#ffffff" : "#7ad7ff";
+      ctx.fillRect(dir > 0 ? cx + 1 : x + w * 0.24, y + h * 0.08, w * 0.26, h * 0.1);
+      // gun braced forward, low
+      ctx.fillStyle = "#0b0f18";
+      if (dir > 0) ctx.fillRect(cx, gy, gunLen, 5);
+      else ctx.fillRect(cx - gunLen, gy, gunLen, 5);
+    } else {
+      // legs
+      ctx.fillStyle = dark;
+      ctx.fillRect(x + w * 0.2, y + h * 0.62, w * 0.22, h * 0.38);
+      ctx.fillRect(x + w * 0.58, y + h * 0.62, w * 0.22, h * 0.38);
+      // backpack
+      ctx.fillStyle = this._shade(s.color, -34);
+      ctx.fillRect(dir > 0 ? x - 2 : x + w - 4, y + h * 0.3, 6, h * 0.3);
+      // torso
+      ctx.fillStyle = base;
+      this._roundRect(ctx, x + w * 0.16, y + h * 0.28, w * 0.68, h * 0.4, 4);
+      ctx.fill();
+      ctx.fillStyle = this._shade(s.color, 20);
+      ctx.fillRect(cx - 1, y + h * 0.3, 2, h * 0.34);
+      // helmet
+      ctx.fillStyle = dark;
+      this._roundRect(ctx, x + w * 0.24, y + h * 0.05, w * 0.52, h * 0.26, 5);
+      ctx.fill();
+      // visor
+      ctx.fillStyle = flash ? "#ffffff" : "#7ad7ff";
+      ctx.fillRect(dir > 0 ? cx - 1 : x + w * 0.26, y + h * 0.12, w * 0.28, h * 0.08);
+      // weapon
+      ctx.fillStyle = "#0b0f18";
+      if (s.aimUp) ctx.fillRect(cx - 2, y - 8, 4, h * 0.42);
+      else if (dir > 0) ctx.fillRect(cx, gy, gunLen, 5);
+      else ctx.fillRect(cx - gunLen, gy, gunLen, 5);
+    }
 
     if (s.muzzleFlash > 0) this._drawMuzzle(ctx, s, s.aimUp ? { x: cx, y: y - 10 } : { x: dir > 0 ? x + w + 4 : x - 4, y: gy + 2 });
     if (s.burn) this._drawBurn(ctx, x, y, w, h);
@@ -857,7 +886,7 @@ export class Mission {
     ctx.font = "11px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(
-      "A / D  move          W  aim up          SPACE  jump          J  fire          TAB  swap soldier",
+      "A / D  move      W  aim up      S  crouch      SPACE  jump      J  fire      TAB  swap soldier",
       W / 2,
       H - 7
     );

@@ -10,6 +10,8 @@ const KEY_MAP = {
   KeyD: "right",
   ArrowUp: "aimUp",
   KeyW: "aimUp",
+  ArrowDown: "crouch",
+  KeyS: "crouch",
   Space: "jump",
   KeyJ: "fire",
   KeyK: "swap",
