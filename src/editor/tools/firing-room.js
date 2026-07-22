@@ -151,9 +151,13 @@ export function createFiringRoom(container, onBack) {
       const sp = enemySpecMap()[String(state.enemyType).slice(5)];
       if (sp) {
         const n = normalizeSpec(sp);
+        // Flyers (gravity 0) anchor their motion at the spawn point — put them
+        // up in the air, not feet-on-the-floor like grounded enemies.
+        const flying = n.root.body.gravity === 0;
         for (let i = 0; i < state.count; i++) {
           const a = ANCHORS[i % ANCHORS.length];
-          specRoots.push(instantiateSpec(n, a.x, a.y - n.root.body.h));
+          const y = flying ? Math.max(24, a.y - n.root.body.h - 140) : a.y - n.root.body.h;
+          specRoots.push(instantiateSpec(n, a.x, y));
         }
         scene.enemies = specRoots.flatMap((r) => collidables(r));
       }
