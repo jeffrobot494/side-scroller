@@ -759,6 +759,10 @@ function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin
   let base = from.facing >= 0 ? 0 : Math.PI;
   if (t && pattern !== "single") {
     let tx = cx(t);
+    // Aim at the target's centre. For a soldier this tracks their live centre,
+    // which drops when they crouch — so crouching ducks a shot already in flight
+    // (aimed at the standing centre) but is NOT permanent cover: the next shot
+    // re-aims at the lower crouched centre.
     let ty = cy(t);
     if (aim === "lead" || aim === "landing") {
       const pt = 0.15 + root.rng() * 0.3;

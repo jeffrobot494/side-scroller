@@ -2,22 +2,23 @@
 // FIRING ROOM — a weapons test range in the editor's Tools tab.
 //
 // Pick any arsenal or custom weapon and fire it — at infinitely-respawning
-// dummies, or at a wave of REAL enemies (the actual Enemy AI: chargers rush,
-// shooters/turrets shoot back). Driven by the same combat code the live mission
-// runs: fire() (pellets, spread, magazine), updateProjectiles (gravity, pierce,
-// homing, walls), updateEnemy (AI), and shared effect resolution. So what you see
-// here is exactly what the weapon does in a mission. Platforms let you test arc
-// and elevation; an Aim slider shows how the Aim stat tightens spread.
+// dummies, or at a wave of REAL EnemySpec enemies (the built-in mission roster
+// or the Enemy Designer's saved library), driven by the real spec runtime.
+// Driven by the same combat code the live mission runs: fire() (pellets, spread,
+// magazine), updateProjectiles (gravity, pierce, homing, walls), updateSpecEnemy
+// (AI), and shared effect resolution. So what you see here is exactly what the
+// weapon does in a mission. Platforms let you test arc and elevation; an Aim
+// slider shows how the Aim stat tightens spread.
 //
 // createFiringRoom(container, onBack) → { dispose() }
 // ---------------------------------------------------------------------------
 
 import { ARSENAL } from "../../game/arsenal.js";
-import { listCustomWeapons, customEnemyMap, enemySpecMap } from "../../game/customcontent.js";
-import { ENEMIES } from "../../game/content.js";
+import { listCustomWeapons, enemySpecMap } from "../../game/customcontent.js";
+import { MISSION_ENEMY_SPECS } from "../../game/enemyspecs.js";
 import { dps, weaponCost, tierFor } from "../../game/weaponcost.js";
-import { Soldier, Enemy, stepActor, startReload, tickReload, overlaps } from "../../mission/entities.js";
-import { fire, updateEnemy, aimAccuracy } from "../../mission/ai.js";
+import { Soldier, stepActor, startReload, tickReload } from "../../mission/entities.js";
+import { fire, aimAccuracy } from "../../mission/ai.js";
 import { updateProjectiles, updateStatuses } from "../../mission/combat.js";
 import { drawProjectile } from "../../mission/render.js";
 import { normalizeSpec } from "../../game/enemyspec/normalize.js";
@@ -33,11 +34,13 @@ export function createFiringRoom(container, onBack) {
   const customs = listCustomWeapons();
   const byId = {};
   for (const w of [...ARSENAL, ...customs]) byId[w.id] = w;
-  const enemyDefs = { ...ENEMIES, ...customEnemyMap() };
-  const enemyList = Object.values(enemyDefs);
-  // Designed EnemySpec enemies (the Enemy Designer's library) — spawnable waves
-  // driven by the spec runtime; select values are "spec:<id>".
-  const specList = Object.values(enemySpecMap());
+  // Wave enemies are all EnemySpec now: the built-in mission roster plus the
+  // Enemy Designer's saved library. Every option is a "spec:<id>" value driven
+  // by the spec runtime. `specSource` resolves an id back to its raw spec.
+  const builtinSpecs = MISSION_ENEMY_SPECS;
+  const savedSpecs = Object.values(enemySpecMap());
+  const specSource = {};
+  for (const s of [...builtinSpecs, ...savedSpecs]) specSource[s.id] = s;
 
   const opt = (w) => `<option value="${w.id}">${escapeHtml(w.name)} — ${weaponCost(w)}</option>`;
   const tierGroup = (n) => `<optgroup label="Tier ${["I", "II", "III"][n - 1]}">${ARSENAL.filter((w) => w.tier === n).map(opt).join("")}</optgroup>`;
@@ -65,8 +68,8 @@ export function createFiringRoom(container, onBack) {
         </label>
         <label class="lg-field" id="fr-enemyfield" style="display:none">Enemy
           <select data-fr="enemytype">
-            ${enemyList.map((e) => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join("")}
-            ${specList.length ? `<optgroup label="Designed (EnemySpec)">${specList.map((s) => `<option value="spec:${s.id}">${escapeHtml(s.name || s.id)}</option>`).join("")}</optgroup>` : ""}
+            <optgroup label="Mission enemies">${builtinSpecs.map((s) => `<option value="spec:${s.id}">${escapeHtml(s.name || s.id)}</option>`).join("")}</optgroup>
+            ${savedSpecs.length ? `<optgroup label="Designed (EnemySpec)">${savedSpecs.map((s) => `<option value="spec:${s.id}">${escapeHtml(s.name || s.id)}</option>`).join("")}</optgroup>` : ""}
           </select>
         </label>
         <label class="lg-field">Count <output id="fr-countval">4</output>
@@ -100,7 +103,7 @@ export function createFiringRoom(container, onBack) {
   const canvas = $("#fr-canvas");
   const ctx = canvas.getContext("2d");
 
-  const state = { weapon: ARSENAL[0], count: 4, aim: 8, mode: "auto", moving: false, targets: "dummies", enemyType: enemyList[0] && enemyList[0].id };
+  const state = { weapon: ARSENAL[0], count: 4, aim: 8, mode: "auto", moving: false, targets: "dummies", enemyType: builtinSpecs[0] && `spec:${builtinSpecs[0].id}` };
   const input = new MissionInput();
   const particles = [];
   const stats = { dealt: 0, elapsed: 0 };
@@ -128,6 +131,7 @@ export function createFiringRoom(container, onBack) {
 
   function buildScene() {
     shooter = new Soldier({ id: "you", name: "Range", callsign: "RNG", stats: { health: 8, aim: state.aim, speed: 6 } }, state.weapon, 46, GROUND - 46);
+    shooter.magsLeft = Infinity; // weapon-test sandbox: never run dry
     scene = {
       world,
       platforms: [{ x: 0, y: GROUND, w: W, h: 40 }, { x: W - 6, y: 0, w: 8, h: H }, ...PERCHES],
@@ -145,10 +149,10 @@ export function createFiringRoom(container, onBack) {
     scene.enemies = [];
     specRoots = [];
 
-    // Designed EnemySpec waves — instantiate the real runtime trees; their
+    // Enemy waves are EnemySpec trees driven by the real runtime; their
     // damageable parts land in scene.enemies each frame via collidables().
-    if (state.targets === "enemies" && String(state.enemyType).startsWith("spec:")) {
-      const sp = enemySpecMap()[String(state.enemyType).slice(5)];
+    if (state.targets === "enemies") {
+      const sp = specSource[String(state.enemyType).replace(/^spec:/, "")];
       if (sp) {
         const n = normalizeSpec(sp);
         // Flyers (gravity 0) anchor their motion at the spawn point — put them
@@ -166,15 +170,7 @@ export function createFiringRoom(container, onBack) {
 
     for (let i = 0; i < state.count; i++) {
       const a = ANCHORS[i % ANCHORS.length];
-      if (state.targets === "enemies") {
-        const def = enemyDefs[state.enemyType] || enemyList[0];
-        if (!def) continue;
-        const e = new Enemy(def, a.x, a.y - def.h);
-        e.contactCooldown = 0;
-        scene.enemies.push(e);
-      } else {
-        scene.enemies.push(makeDummy(a.x, a.y));
-      }
+      scene.enemies.push(makeDummy(a.x, a.y));
     }
   }
 
@@ -194,6 +190,7 @@ export function createFiringRoom(container, onBack) {
     shooter.x = 46; shooter.y = GROUND - shooter.h; shooter.vx = 0; shooter.vy = 0;
     shooter.burn = null; shooter.slow = null; shooter.reloading = 0;
     shooter.ammo = shooter.weapon && shooter.weapon.magazine ? shooter.weapon.magazine : Infinity;
+    shooter.magsLeft = Infinity; // weapon-test sandbox: never run dry
   }
 
   const cctx = {
@@ -284,35 +281,20 @@ export function createFiringRoom(container, onBack) {
     for (const r of specRoots) if (r.alive) updateSpecEnemy(r, dt, scene, cctx);
     if (specRoots.length) scene.enemies = specRoots.flatMap((r) => (r.alive ? collidables(r) : []));
 
+    // Non-spec targets are the respawning dummies (spec parts are updated above).
     for (const d of scene.enemies) {
-      if (d.kind === "spec") continue; // updated above by the spec runtime
-      if (d.fireCooldown > 0) d.fireCooldown -= dt;
-      if (d.contactCooldown > 0) d.contactCooldown -= dt;
-      if (d.muzzleFlash > 0) d.muzzleFlash -= dt;
-      if (d.reloading !== undefined) tickReload(d, dt);
-
+      if (d.kind === "spec") continue;
       if (!d.alive) {
         if (d._respawn !== undefined) { d._respawn -= dt; if (d._respawn <= 0) resetDummy(d); }
         continue;
       }
-
-      if (state.targets === "enemies") {
-        updateEnemy(d, dt, scene);
-        stepActor(d, dt, world, scene.platforms);
-        // contact damage (chargers)
-        if (d.def && d.def.contactDamage > 0 && (d.contactCooldown || 0) <= 0 && shooter.alive && overlaps(d, shooter)) {
-          cctx.damage(shooter, d.def.contactDamage, d);
-          d.contactCooldown = 0.6;
-        }
+      if (state.moving) {
+        if (d.x < d._home - 60) d._dir = 1; else if (d.x > d._home + 60) d._dir = -1;
+        d.vx = 70 * d._dir;
       } else {
-        if (state.moving) {
-          if (d.x < d._home - 60) d._dir = 1; else if (d.x > d._home + 60) d._dir = -1;
-          d.vx = 70 * d._dir;
-        } else {
-          d.vx *= 0.85; // ease knockback back to rest
-        }
-        stepActor(d, dt, world, scene.platforms);
+        d.vx *= 0.85; // ease knockback back to rest
       }
+      stepActor(d, dt, world, scene.platforms);
     }
 
     updateProjectiles(scene, dt, cctx);

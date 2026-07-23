@@ -1,6 +1,10 @@
-// Crouch: hitbox geometry, movement lock, dodging enemy fire, ally clearance.
-import { Soldier, Enemy, overlaps, STAND_H, CROUCH_H } from "../src/mission/entities.js";
-import { updateEnemy } from "../src/mission/ai.js";
+// Crouch: hitbox geometry, movement lock, incoming fire, ally clearance.
+// EnemySpec enemies aim at the target's live centre, so crouching lets you duck a
+// shot already in flight (aimed at your standing centre) and shrinks your target,
+// but is NOT permanent immunity — the gunner re-aims at your lower crouched centre.
+import { Soldier, overlaps, STAND_H, CROUCH_H } from "../src/mission/entities.js";
+import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
+import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { updateProjectiles, updateStatuses } from "../src/mission/combat.js";
 import { makeRng } from "../src/game/gen/rng.js";
 
@@ -15,21 +19,35 @@ function makeTarget(crouch) {
   return s;
 }
 
-// Total damage a stationary turret lands on the soldier over a fixed run. Seeds
+// A stationary EnemySpec gunner that streams aimed shots at the player.
+const GUNNER = normalizeSpec({
+  v: 1, id: "test_gunner", name: "Test Gunner", threat: 50,
+  root: {
+    id: "root", tags: ["enemy"],
+    visual: { shape: "box", size: [38, 38], color: "#f00" },
+    health: { max: 1e9 },
+    motion: { type: "static" },
+    emitters: { gun: { at: [0, 0], projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 1, damage: 5, gravity: 0 } } },
+  },
+  brain: { start: "fire", states: { fire: { tracks: [{ id: "g", loop: true, steps: [
+    { fire: { emitter: "gun", pattern: "aimed" } },
+    { wait: 0.05 },
+  ] }] } } },
+});
+
+// Total damage the gunner lands on the soldier over a fixed run. Seeds
 // Math.random so the shot-spread stream is identical between calls — the only
 // difference is the soldier's stance, which isolates the crouch effect.
 function turretDamage(soldier, seed) {
   const real = Math.random;
   Math.random = makeRng(seed);
   try {
-    const def = { id: "t", name: "Turret", color: "#f00", w: 38, h: 38, health: 40, behavior: "turret", speed: 0, contactDamage: 0, detectRange: 900, weapon: "plasma", windup: 0.4, loot: { name: "L", value: 1 } };
-    const turret = new Enemy(def, 600, G - 38);
-    const scene = { world: { gravity: 1600, width: 1000, height: 340 }, platforms: [{ x: 0, y: G, w: 1000, h: 40 }], soldiers: [soldier], enemies: [turret], projectiles: [] };
+    const gunner = instantiate(GUNNER, 600, G - 38);
+    const scene = { world: { gravity: 1600, width: 1000, height: 340 }, platforms: [{ x: 0, y: G, w: 1000, h: 40 }], soldiers: [soldier], enemies: [], projectiles: [] };
     let dealt = 0;
     const ctx = { friendlyFire: false, damageMult: 1, damage(t, a) { t.health -= a; dealt += a; }, kill() {}, spark() {}, burst() {} };
     for (let i = 0; i < 300; i++) {
-      updateEnemy(turret, 0.03, scene);
-      if (turret.fireCooldown > 0) turret.fireCooldown -= 0.03;
+      updateSpecEnemy(gunner, 0.03, scene, ctx);
       updateProjectiles(scene, 0.03, ctx);
       updateStatuses(scene, 0.03, ctx);
     }
@@ -67,14 +85,17 @@ export default async function run(t) {
     t.ok("crouched pivots the other way", s.facing === -1);
   }
 
-  // ---- the dodge: crouching sharply reduces incoming fire (same shot stream) ----
+  // ---- crouch shrinks the target but is NOT permanent immunity ----
+  // The gunner aims at the soldier's live centre, so a crouched soldier is a
+  // smaller target (takes less over a run) yet still gets hit — kneeling never
+  // grants permanent cover, it just re-aims at the lower centre next shot.
   {
     const SEED = 20260721;
     const standDmg = turretDamage(makeTarget(false), SEED);
     const crouchDmg = turretDamage(makeTarget(true), SEED);
     t.ok(`standing takes heavy fire (${standDmg})`, standDmg > 0);
-    t.ok(`crouch dodges some of it (${crouchDmg} < ${standDmg})`, crouchDmg < standDmg);
-    t.ok(`crouch cuts incoming fire by ≥50% (${crouchDmg} vs ${standDmg})`, crouchDmg <= standDmg * 0.5);
+    t.ok(`crouch still gets hit — not permanent immunity (${crouchDmg})`, crouchDmg > 0);
+    t.ok(`crouch is a smaller target, takes less (${crouchDmg} < ${standDmg})`, crouchDmg < standDmg);
   }
 
   // ---- ally clearance: a shot at standing torso height clears a crouched head ----

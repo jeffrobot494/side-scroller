@@ -58,6 +58,27 @@ export default async function run(t) {
     t.ok("no-mag: startReload is a no-op", startReload(shooter) === false);
   }
 
+  // ---- finite magazines (config.soldierMagazines) -------------------------
+  {
+    const prevMags = config.soldierMagazines;
+    config.soldierMagazines = 2; // 1 loaded + 1 spare
+    const w = { fireRate: 100, spread: 0, magazine: 3, reloadTime: 0.1, projectile: { speed: 800, w: 8, h: 4, color: "#fff", life: 1 }, effects: [] };
+    const shooter = makeShooter(w);
+    t.eq("mags: spares = soldierMagazines - 1", shooter.magsLeft, 1);
+
+    const finishReload = () => { startReload(shooter); for (let i = 0; i < 50 && shooter.reloading > 0; i++) tickReload(shooter, 0.016); };
+    shooter.ammo = 0;
+    finishReload();
+    t.ok("mags: first reload consumes the spare", shooter.ammo === 3 && shooter.magsLeft === 0);
+
+    shooter.ammo = 0;
+    t.ok("mags: no spares left blocks reload", startReload(shooter) === false);
+    finishReload();
+    t.ok("mags: dry when out of spares and ammo", shooter.ammo === 0 && shooter.magsLeft === 0);
+
+    config.soldierMagazines = prevMags;
+  }
+
   // ---- reload movement penalty -------------------------------------------
   {
     const w = { fireRate: 5, spread: 0, magazine: 5, reloadTime: 2, projectile: { speed: 800, w: 8, h: 4, color: "#fff", life: 1 }, effects: [] };

@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // BEHAVIOR + COMBAT HELPERS  (Phases 2–4)
 //
-// Companion AI (follow the controlled soldier, shoot what they can see) and the
-// enemy archetypes (charger, repositioning shooter, turret). Behaviors are
-// driven entirely by parameters on the entity's def — no live LLM control.
-// Also home to `fire()`, the one place a weapon turns into projectiles, shared
-// by the player, companions, and enemies.
+// Companion AI (follow the controlled soldier, shoot what they can see) plus
+// `fire()`, the one place a weapon turns into projectiles, shared by the player,
+// companions, and EnemySpec enemies. Enemy behavior itself lives in the
+// EnemySpec runtime (src/mission/enemyspec/) — the legacy charger/shooter/turret
+// archetypes were retired when EnemySpec was wired into missions.
 // ---------------------------------------------------------------------------
 
 import { Projectile, startReload } from "./entities.js";
@@ -18,20 +18,10 @@ export function aimAccuracy(aim) {
   return a < 0 ? 0 : a > 1 ? 1 : a;
 }
 
-// Ranged enemies aim at a fixed height above a soldier's feet (upper torso of a
-// standing soldier), NOT the soldier's live centre. So dropping to a crouch —
-// which lowers the hitbox below this line — makes their shots sail overhead.
-const AIM_HEIGHT = 34;
-
 function center(e) {
   return { x: e.x + e.w / 2, y: e.y + e.h / 2 };
 }
 
-// Point a shooter aims at: horizontally the target's centre, vertically a fixed
-// standing height off its feet (so crouch ducks under it).
-function aimPoint(target) {
-  return { x: target.x + target.w / 2, y: target.y + target.h - AIM_HEIGHT };
-}
 function dist(a, b) {
   const c = center(a);
   const d = center(b);
@@ -114,16 +104,6 @@ function nearest(from, list) {
   return best ? { target: best, d: bestD } : null;
 }
 
-// A rough "can shoot it" test: within range and roughly level (so shots fired
-// horizontally connect). Kept generous — run-and-gun wants aggression.
-function canEngage(shooter, target, range) {
-  const c = center(shooter);
-  const t = center(target);
-  if (Math.abs(c.x - t.x) > range) return false;
-  if (Math.abs(c.y - t.y) > 70) return false;
-  return true;
-}
-
 // ---- Companion AI ---------------------------------------------------------
 // leader is the currently-controlled soldier. Companions keep loose formation
 // and open fire on any enemy they can line up.
@@ -154,72 +134,4 @@ export function updateCompanion(soldier, dt, scene, leader) {
   }
 
   soldier.applyMovement(dt, move, jump);
-}
-
-// ---- Enemy AI -------------------------------------------------------------
-export function updateEnemy(enemy, dt, scene) {
-  if (!enemy.alive) return;
-  autoReload(enemy);
-  const found = nearest(enemy, scene.soldiers);
-
-  if (!found || found.d > enemy.def.detectRange) {
-    // idle: bleed off horizontal speed (gravity/collision still runs in the
-    // scene's stepActor pass afterward)
-    enemy.vx *= 0.8;
-    return;
-  }
-
-  const target = found.target;
-  const c = center(enemy);
-  const t = center(target);
-  enemy.facing = t.x >= c.x ? 1 : -1;
-
-  switch (enemy.def.behavior) {
-    case "charger":
-      // barrel straight at the target; damage is dealt on contact by the scene
-      enemy.vx = enemy.facing * enemy.def.speed;
-      // hop over low obstacles / up to the target
-      if (enemy.onGround && (t.y < c.y - 40 || Math.abs(enemy.vx) < 5)) enemy.vy = -560;
-      break;
-
-    case "shooter": {
-      // hold preferred range: advance if far, retreat if crowded
-      const range = enemy.def.preferredRange;
-      if (found.d > range + 60) enemy.vx = enemy.facing * enemy.def.speed;
-      else if (found.d < range - 90) enemy.vx = -enemy.facing * enemy.def.speed;
-      else enemy.vx *= 0.7;
-      tryTelegraphedShot(enemy, target, dt, scene);
-      break;
-    }
-
-    case "turret":
-      enemy.vx = 0;
-      tryTelegraphedShot(enemy, target, dt, scene);
-      break;
-  }
-}
-
-// A ranged enemy winds up (a visible telegraph) before each shot, then fires
-// toward the target if still lined up.
-function tryTelegraphedShot(enemy, target, dt, scene) {
-  const c = center(enemy);
-  const t = center(target);
-  const inRange = canEngage(enemy, target, enemy.def.detectRange);
-
-  if (enemy.windup > 0) {
-    enemy.windup -= dt;
-    if (enemy.windup <= 0 && inRange) {
-      const aim = aimPoint(target);
-      const dir = { x: aim.x - c.x, y: aim.y - c.y };
-      // force cooldown ready so the shot fires now
-      enemy.fireCooldown = 0;
-      fire(scene, enemy, dir, "enemy", dt, 0.85);
-      enemy.fireCooldown = 1 / enemy.weapon.fireRate;
-    }
-    return;
-  }
-
-  if (inRange && enemy.fireCooldown <= 0) {
-    enemy.windup = enemy.def.windup; // begin telegraph
-  }
 }

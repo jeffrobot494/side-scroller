@@ -4,6 +4,7 @@ import { jumpEnvelope } from "../src/game/gen/reach.js";
 import * as ec from "../src/game/enemycost.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { ENEMIES } from "../src/game/content.js";
+import { missionSpecById, missionRoster } from "../src/game/enemyspecs.js";
 
 export default async function run(t) {
   // ---- rng ----
@@ -35,6 +36,7 @@ export default async function run(t) {
   t.ok("cost: budgetFor scales with pressure", ec.budgetFor("medium", 2) === ec.budgetFor("medium", 1) * 2);
   t.ok("cost: validatePlacement legal within budget", ec.validatePlacement([ENEMIES.drone, ENEMIES.drone], 200).legal);
   t.ok("cost: validatePlacement flags over budget", !ec.validatePlacement([ENEMIES.sentinel], 10).legal);
+  t.ok("cost: spec descriptor scores by its authored threat", ec.enemyThreat({ isSpec: true, threat: 120 }) === 120);
 
   // ---- generateLevel ----
   const g1 = generateLevel({ seed: 4242, difficulty: "medium", length: "medium" });
@@ -48,7 +50,7 @@ export default async function run(t) {
   t.ok("gen: exit inside world bounds", L.exit.x > 0 && L.exit.x + L.exit.w < L.world.width);
   t.ok("gen: spawn left of exit", L.playerSpawn.x < L.exit.x);
   t.ok("gen: at least one enemy", L.enemies.length >= 1);
-  t.ok("gen: every enemy type resolves", L.enemies.every((e) => ENEMIES[e.type]));
+  t.ok("gen: every enemy type resolves to a built-in spec", L.enemies.every((e) => missionSpecById[e.type]));
   t.ok("gen: no enemy in spawn safe zone", L.enemies.every((e) => e.x >= 380));
   t.ok("gen: report budget respected", g1.report.legal && g1.report.spent <= g1.report.budget);
   t.ok("gen: report traversable", g1.report.traversable === true);
@@ -87,6 +89,31 @@ export default async function run(t) {
   t.ok("gen: terrain includes solid boxes", sawBox);
   t.ok("gen: terrain climbs past the single-jump ceiling", sawHigh);
 
+  // ---- low jump ceiling degrades gracefully (never a dead-flat level) ----
+  // A low Jump strength / high Gravity shrinks the reachable rise; the generator
+  // must still place short, reachable perches instead of bailing to flat ground
+  // (the regression that made every level a bare plane). Only a truly unjumpable
+  // config stays flat.
+  {
+    const lowPhys = { gravity: 4000, jumpSpeed: 720, runSpeed: 320 }; // maxRise ≈ 65
+    const envLow = jumpEnvelope(lowPhys);
+    let flat = 0, tooHigh = 0, notTrav = 0;
+    for (let s = 1; s <= 12; s++) {
+      const r = generateLevel({ seed: s * 13, physics: lowPhys });
+      const perches = r.level.platforms.slice(1);
+      if (perches.length === 0) flat++;
+      if (!r.report.traversable || r.report.unreachable !== 0) notTrav++;
+      // low jump ⇒ no chaining, so every perch must sit within a single jump
+      for (const p of perches) if ((500 - p.y) > envLow.maxRise + 0.5) tooHigh++;
+    }
+    t.ok("gen: low jump ceiling still produces platforms (not flat)", flat === 0);
+    t.ok("gen: low-jump perches stay within a single jump", tooHigh === 0);
+    t.ok("gen: low-jump levels remain traversable", notTrav === 0);
+    // ...but a jump too low to clear anything correctly stays flat
+    const tiny = generateLevel({ seed: 7, physics: { gravity: 2000, jumpSpeed: 300, runSpeed: 320 } });
+    t.ok("gen: an unjumpable config stays flat (ground slab only)", tiny.level.platforms.length === 1);
+  }
+
   t.ok("gen: higher difficulty spends more threat", generateLevel({ seed: 99, difficulty: "high" }).report.spent > generateLevel({ seed: 99, difficulty: "low" }).report.spent);
 
   const boss = generateLevel({ seed: 77, boss: true });
@@ -95,6 +122,7 @@ export default async function run(t) {
   t.ok("gen: boss budget exceeds normal extreme", boss.report.budget > ec.budgetFor("extreme", 1));
   t.ok("gen: boss artifact worth more", boss.level.artifact.value > g1.level.artifact.value);
 
-  t.ok("gen: custom roster respected", generateLevel({ seed: 3, difficulty: "high", roster: [ENEMIES.drone] }).level.enemies.every((e) => e.type === "drone"));
+  const oneSpec = missionRoster().find((d) => d.id === "husk_charger");
+  t.ok("gen: custom roster respected", generateLevel({ seed: 3, difficulty: "high", roster: [oneSpec] }).level.enemies.every((e) => e.type === "husk_charger"));
   t.ok("gen: mission is MISSION-shaped", g1.mission.id && g1.mission.name && g1.mission.brief && g1.mission.difficulty);
 }

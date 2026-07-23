@@ -16,7 +16,8 @@ export default async function run(t) {
   const lead = g.leads[0];
   const m = loadMission(lead.level, [{ data: soldier, weapon }]);
   t.ok("generated level loads (world/platforms/exit)", m.world && m.platforms.length >= 1 && m.exit);
-  t.ok("all generated enemies instantiate", m.enemies.length === lead.level.enemies.length && m.enemies.every((e) => e.name));
+  t.ok("all generated enemies instantiate as spec roots", m.specRoots.length === lead.level.enemies.length && m.specRoots.every((r) => r.kind === "spec" && r.alive));
+  t.ok("scene.enemies exposes collidable spec parts", m.enemies.length >= m.specRoots.length && m.enemies.every((e) => e.kind === "spec"));
   t.ok("continuous ground slab present", m.platforms[0].x === 0 && m.platforms[0].w === m.world.width);
   t.eq("soldier hp = base + stat×per-point (10+5×2)", m.soldiers[0].maxHealth, 20);
 

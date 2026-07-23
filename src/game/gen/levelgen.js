@@ -23,7 +23,7 @@
 // ---------------------------------------------------------------------------
 
 import { config } from "../config.js";
-import { ENEMIES } from "../content.js";
+import { missionRoster } from "../enemyspecs.js";
 import { makeRng, int, range, snap, pick, shuffle } from "./rng.js";
 import { jumpEnvelope } from "./reach.js";
 import { enemyThreat, budgetFor, validatePlacement, DIFFICULTY } from "../enemycost.js";
@@ -66,7 +66,9 @@ export function generateLevel(params = {}) {
 
   const difficulty = params.boss ? "extreme" : (params.difficulty || "medium");
   const length = params.length || "medium";
-  const roster = (params.roster && params.roster.length ? params.roster : Object.values(ENEMIES));
+  // Default roster = the built-in EnemySpec mission enemies (boss leads include
+  // the boss). A caller (the editor's generator playground, tests) can override.
+  const roster = (params.roster && params.roster.length ? params.roster : missionRoster({ boss: !!params.boss }));
   const scale = params.scale || 1;
 
   const physics = params.physics || {
@@ -184,6 +186,9 @@ const SOLDIER_W = 30; // mission soldier hitbox (entities.js)
 const SOLDIER_H = 46; // standing height — drives walk-under/stand clearances
 const HEADROOM = SOLDIER_H + 4; // vertical room required to stand or walk somewhere
 const CHAIN_MIN = 72; // min chained rise: 72 − 20 thickness = 52px ≥ SOLDIER_H
+const MIN_PERCH_RISE = 24; // shortest perch worth placing; below this a low-jump
+// level stays flat (you basically can't clear anything). Above it, perch/box
+// heights scale down to the jump ceiling instead of the level going flat.
 
 function layTerrain(rng, env, width, exitX) {
   const groups = []; // one array of platforms per structure (cull unit)
@@ -193,7 +198,12 @@ function layTerrain(rng, env, width, exitX) {
   const span = end - start;
   const hop = Math.min(env.maxRise - 20, 122); // single jump up, with apex margin
   const step = Math.min(env.maxRise - 40, 92); // chained jump, piece to piece
-  if (span < 260 || hop < 60) return { groups, droppedPerches: 0 };
+  // A low jump ceiling (low Jump strength / high Gravity) shrinks `hop`. Rather
+  // than bail to a dead-flat level, keep placing short perches + low boxes whose
+  // heights scale to `hop` in the builders; chained structures (stair/tower)
+  // simply won't roll because `chains` needs headroom. Only give up when even a
+  // minimal perch is unreachable.
+  if (span < 260 || hop < MIN_PERCH_RISE) return { groups, droppedPerches: 0 };
 
   const tiers = Math.max(1, Math.round(config.genMaxTiers ?? 3));
   const density = config.genPlatformDensity ?? 0.8;
@@ -227,7 +237,10 @@ function perch(rng, x0, x1, hop) {
   const w = Math.min(snap(int(rng, 120, 240), 10), x1 - x0);
   if (w < 80) return null;
   const x = snap(range(rng, x0, x1 - w), 10);
-  return [{ x, y: GROUND_TOP - int(rng, 60, hop), w, h: PERCH_H }];
+  // Height floor is normally 60; it drops toward MIN_PERCH_RISE only when a low
+  // jump ceiling forces short perches (identical to before whenever hop ≥ 68).
+  const lo = Math.min(60, Math.max(MIN_PERCH_RISE, hop - 8));
+  return [{ x, y: GROUND_TOP - int(rng, lo, hop), w, h: PERCH_H }];
 }
 
 // A solid block sitting on the ground — cover you hop onto or over.
@@ -235,7 +248,10 @@ function groundBox(rng, x0, x1, hop) {
   const w = Math.min(snap(int(rng, 80, 170), 10), x1 - x0);
   if (w < 60) return null;
   const x = snap(range(rng, x0, x1 - w), 10);
-  const h = int(rng, 40, Math.max(40, hop - 10));
+  // Box top must stay hoppable (≤ hop) or it becomes an unclearable wall. Height
+  // is normally 40..hop-10; both ends shrink to fit a low hop.
+  const lo = Math.min(40, hop);
+  const h = int(rng, lo, Math.max(lo, hop - 10));
   return [{ x, y: GROUND_TOP - h, w, h }];
 }
 

@@ -1,4 +1,4 @@
-// Custom content store (weapons + enemies), armory merge, loadMission enemy merge.
+// Custom content store (weapons + enemies), armory merge, EnemySpec mission load.
 import * as cc from "../src/game/customcontent.js";
 import { createState } from "../src/game/state.js";
 import { loadMission } from "../src/mission/entities.js";
@@ -51,11 +51,17 @@ export default async function run(t) {
   t.ok("armory: includes custom weapon", s.armory.some((w) => w.id === "zapper"));
   t.ok("armory: custom weapon is a clone", s.armory.find((w) => w.id === "zapper") !== cc.customWeaponMap().zapper);
 
-  // ---- loadMission resolves a custom enemy type ----
-  cc.saveCustomEnemy({ id: "wraith", name: "Wraith", color: "#88f", w: 30, h: 44, health: 55, behavior: "shooter", speed: 160, contactDamage: 6, detectRange: 700, preferredRange: 320, weapon: "plasma", windup: 0.5, loot: { name: "Ectoplasm", value: 60 } });
-  const level = { world: { width: 1000, height: 540, gravity: 2000 }, platforms: [{ x: 0, y: 500, w: 1000, h: 40 }], playerSpawn: { x: 100, y: 400 }, enemies: [{ type: "wraith", x: 500, y: 454 }, { type: "drone", x: 700, y: 454 }], exit: { x: 900, y: 380, w: 60, h: 120 }, artifact: null };
+  // ---- loadMission builds EnemySpec roots from built-in mission enemy ids ----
+  // Missions are 100% EnemySpec now: each placement { type, x, y } resolves to a
+  // built-in spec, instantiates a runtime tree, and its damageable parts feed
+  // scene.enemies. An unknown type falls back to a built-in (fallback discipline).
+  const level = { world: { width: 1000, height: 540, gravity: 2000 }, platforms: [{ x: 0, y: 500, w: 1000, h: 40 }], playerSpawn: { x: 100, y: 400 }, enemies: [{ type: "husk_charger", x: 500, y: 454 }, { type: "spore_wisp", x: 700, y: 454 }, { type: "no_such_enemy", x: 850, y: 454 }], exit: { x: 900, y: 380, w: 60, h: 120 }, artifact: null };
   const m = loadMission(level, []);
-  t.ok("loadMission: custom enemy resolves", m.enemies[0] && m.enemies[0].name === "Wraith");
-  t.ok("loadMission: custom enemy carries its weapon", m.enemies[0].weapon && m.enemies[0].weapon.id === "plasma");
-  t.ok("loadMission: built-in enemy still resolves", m.enemies[1] && m.enemies[1].name === "Skitter Drone");
+  t.ok("loadMission: one spec root per placement", m.specRoots.length === 3);
+  t.ok("loadMission: roots are spec entities", m.specRoots.every((r) => r.kind === "spec"));
+  t.ok("loadMission: scene.enemies are collidable spec parts", m.enemies.length >= 3 && m.enemies.every((e) => e.kind === "spec"));
+  t.ok("loadMission: grounded enemy spawns at its placement", m.specRoots[0].y === 454);
+  t.ok("loadMission: flying enemy is lifted airborne", m.specRoots[1].y < 454);
+  t.ok("loadMission: unknown type falls back to a built-in", m.specRoots[2].alive === true);
+  t.ok("loadMission: kill loot derives from threat", !!m.specRoots[0].loot && m.specRoots[0].loot.value > 0);
 }

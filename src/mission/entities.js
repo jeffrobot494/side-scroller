@@ -7,9 +7,9 @@
 // same way.
 // ---------------------------------------------------------------------------
 
-import { WEAPONS, ENEMIES } from "../game/content.js";
-import { customEnemyMap } from "../game/customcontent.js";
 import { config } from "../game/config.js";
+import { missionSpecById, specIsFlying } from "../game/enemyspecs.js";
+import { instantiate as instantiateSpec, collidables } from "./enemyspec/runtime.js";
 
 const MAX_FALL = 1200;
 
@@ -111,6 +111,10 @@ export class Soldier {
     // without one has effectively unlimited ammo and never reloads.
     this.ammo = weapon && weapon.magazine ? weapon.magazine : Infinity;
     this.reloading = 0; // seconds left in an active reload
+    // Spare mags brought into the level (config.soldierMagazines total, one of
+    // which starts loaded). Each completed reload consumes one; at 0 the
+    // soldier can no longer reload.
+    this.magsLeft = Math.max(0, config.soldierMagazines - 1);
     this.burn = null; // active { dps, time } status
     this.hitFlash = 0;
     this.kills = 0;
@@ -179,58 +183,36 @@ export class Soldier {
 
 // ---- magazine / reload helpers (shared by mission + Firing Room) ----------
 
-// Begin a reload if the actor has a magazine, isn't already reloading, and the
-// mag isn't already full. Returns true if a reload actually started.
+// Begin a reload if the actor has a magazine, a spare mag to load, isn't
+// already reloading, and the mag isn't already full. Returns true if a reload
+// actually started. Actors without a magsLeft field (e.g. spec enemies) have
+// unlimited spares.
 export function startReload(actor) {
   const w = actor.weapon;
   if (!w || !w.magazine) return false;
   if (actor.reloading > 0 || actor.ammo >= w.magazine) return false;
+  if (actor.magsLeft !== undefined && actor.magsLeft <= 0) return false;
   actor.reloading = w.reloadTime || 1.5;
   return true;
 }
 
-// Tick an in-progress reload; refills the magazine when it completes.
+// Tick an in-progress reload; refills the magazine (consuming a spare) when it
+// completes.
 export function tickReload(actor, dt) {
   if (actor.reloading > 0) {
     actor.reloading -= dt;
     if (actor.reloading <= 0) {
       actor.reloading = 0;
       actor.ammo = actor.weapon.magazine;
+      if (actor.magsLeft !== undefined && actor.magsLeft !== Infinity)
+        actor.magsLeft -= 1;
     }
   }
 }
 
-// ---- Enemy ----------------------------------------------------------------
-
-export class Enemy {
-  constructor(def, x, y) {
-    this.kind = "enemy";
-    this.def = def;
-    this.name = def.name;
-    this.color = def.color;
-
-    this.x = x;
-    this.y = y;
-    this.w = def.w;
-    this.h = def.h;
-    this.vx = 0;
-    this.vy = 0;
-    this.onGround = false;
-    this.facing = -1;
-
-    this.maxHealth = def.health;
-    this.health = def.health;
-    this.alive = true;
-
-    this.weapon = def.weapon ? WEAPONS[def.weapon] : null;
-    this.fireCooldown = 0;
-    this.windup = 0; // >0 while telegraphing a shot
-    this.ammo = this.weapon && this.weapon.magazine ? this.weapon.magazine : Infinity;
-    this.reloading = 0;
-    this.burn = null;
-    this.hitFlash = 0;
-  }
-}
+// (The legacy flat Enemy class was retired when missions moved to EnemySpec:
+// mission enemies are spec entity trees — see src/mission/enemyspec/runtime.js
+// and loadMission above. The Firing Room's dummy targets are plain literals.)
 
 // ---- Projectile -----------------------------------------------------------
 
@@ -275,17 +257,31 @@ export class Loot {
 // Instantiate a live mission world from a level definition + the deployed squad.
 // `squad` is an array of { data, weapon } chosen in the deploy screen.
 
+// Airborne spawn lift for flying enemies: their motion anchors at the spawn
+// point, so lift them off the placement surface into the air (mirrors the
+// Firing Room). Grounded enemies spawn feet-on-surface at the placed y.
+const FLY_ALTITUDE = 140;
+
 export function loadMission(level, squad) {
   const soldiers = squad.map((s, i) =>
     new Soldier(s.data, s.weapon, level.playerSpawn.x + i * 44, level.playerSpawn.y)
   );
 
-  // Custom (editor-authored) enemy types resolve alongside the built-ins, so a
-  // level can place `type: "<custom id>"` once the Level Editor (or a hand edit)
-  // references it. Custom ids win ties only if they collide, which they can't:
-  // saveCustomEnemy mints ids unique across the ENEMIES keys.
-  const defs = { ...ENEMIES, ...customEnemyMap() };
-  const enemies = level.enemies.map((e) => new Enemy(defs[e.type], e.x, e.y));
+  // Every mission enemy is an EnemySpec instance. A placement { type, x, y }
+  // resolves to a built-in spec (missionSpecById); an unknown type falls back to
+  // the cheapest built-in so a bad level still spawns something (fallback
+  // discipline). Each root carries `loot` (value derived from its threat) for
+  // the drop on death; the flat damageable parts feed scene.enemies.
+  const specRoots = level.enemies.map((e) => {
+    const nspec = missionSpecById[e.type] || missionSpecById.husk_charger;
+    const y = specIsFlying(nspec) ? Math.max(24, e.y - FLY_ALTITUDE) : e.y;
+    const root = instantiateSpec(nspec, e.x, y);
+    root.loot = {
+      name: `${nspec.name} core`,
+      value: Math.round((nspec.threat ?? 50) * config.lootPerThreat),
+    };
+    return root;
+  });
 
   return {
     // gravity comes from config (editable) rather than the level's own value
@@ -294,7 +290,8 @@ export function loadMission(level, squad) {
     exit: { ...level.exit },
     artifact: level.artifact ? { ...level.artifact } : null,
     soldiers,
-    enemies,
+    specRoots,
+    enemies: specRoots.flatMap((r) => collidables(r)),
     projectiles: [],
     loot: [],
   };

@@ -8,10 +8,11 @@
 // ---------------------------------------------------------------------------
 
 import { RECRUIT_POOL } from "./soldiers.js";
-import { WEAPONS, ENEMIES, BLUEPRINTS, TUNING } from "./content.js";
+import { WEAPONS, BLUEPRINTS, TUNING } from "./content.js";
 import { config } from "./config.js";
-import { listCustomWeapons, customEnemyMap } from "./customcontent.js";
+import { listCustomWeapons } from "./customcontent.js";
 import { generateLevel } from "./gen/levelgen.js";
+import { missionRoster } from "./enemyspecs.js";
 
 let nextId = 1;
 const uid = (p) => `${p}_${nextId++}`;
@@ -78,11 +79,6 @@ function pickDifficulty(scale) {
   return "medium";
 }
 
-// Legal enemy roster for generation = built-ins + editor-authored custom enemies.
-function genRoster() {
-  return Object.values({ ...ENEMIES, ...customEnemyMap() });
-}
-
 function makeLead(state, opts = {}) {
   const seed = (Math.random() * 1e9) | 0;
   const scale = pressureScale(state);
@@ -91,7 +87,9 @@ function makeLead(state, opts = {}) {
     boss: !!opts.boss,
     difficulty: opts.boss ? undefined : pickDifficulty(scale),
     length: LENGTHS[(Math.random() * LENGTHS.length) | 0],
-    roster: genRoster(),
+    // Enemy roster = the built-in EnemySpec mission enemies (boss leads add the
+    // boss). Generated missions are 100% spec-driven.
+    roster: missionRoster({ boss: !!opts.boss }),
     scale,
   });
   return { ...mission, level, report };

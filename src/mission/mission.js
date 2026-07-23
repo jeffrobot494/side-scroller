@@ -9,9 +9,14 @@
 
 import { MissionInput } from "./input.js";
 import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload } from "./entities.js";
-import { fire, updateCompanion, updateEnemy, aimAccuracy } from "./ai.js";
+import { fire, updateCompanion, aimAccuracy } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
 import { drawProjectile } from "./render.js";
+import {
+  updateSpecEnemy, collidables,
+  applyDamage as specDamage, killEntity as specKill,
+} from "./enemyspec/runtime.js";
+import { drawSpecEnemy } from "./enemyspec/render.js";
 import { config } from "../game/config.js";
 
 const STEP = 1 / 60;
@@ -113,16 +118,11 @@ export class Mission {
     }
 
     // Central fire-cooldown tick for every shooter (so semi-auto stays honest).
+    // Spec enemies tick their own timers inside the runtime (updateSpecEnemy).
     for (const s of scene.soldiers) {
       if (s.fireCooldown > 0) s.fireCooldown -= dt;
       if (s.muzzleFlash > 0) s.muzzleFlash -= dt;
       tickReload(s, dt);
-    }
-    for (const e of scene.enemies) {
-      if (e.fireCooldown > 0) e.fireCooldown -= dt;
-      if (e.contactCooldown > 0) e.contactCooldown -= dt;
-      if (e.muzzleFlash > 0) e.muzzleFlash -= dt;
-      tickReload(e, dt);
     }
 
     this._handleControl();
@@ -209,22 +209,28 @@ export class Mission {
 
   _updateEnemies(dt) {
     const scene = this.scene;
-    for (const e of scene.enemies) {
-      if (!e.alive) continue;
-      updateEnemy(e, dt, scene);
-      stepActor(e, dt, scene.world, scene.platforms);
-
-      // Contact damage (chargers). One hit per soldier per cooldown.
-      if (e.def.contactDamage > 0 && (e.contactCooldown || 0) <= 0) {
-        for (const s of scene.soldiers) {
-          if (s.alive && overlaps(e, s)) {
-            this._damage(s, e.def.contactDamage, e);
-            e.contactCooldown = 0.6;
-            break;
-          }
-        }
-      }
+    // Every mission enemy is an EnemySpec root: the runtime drives movement, the
+    // brain, contact damage to soldiers, and enemy-team projectile fire.
+    for (const r of scene.specRoots) {
+      if (r.alive) updateSpecEnemy(r, dt, scene, this._ctx);
     }
+
+    // Root-death bookkeeping (once per root): kill credit, loot drop, burst.
+    // A part/child dying never counts — only the root (the "enemy").
+    for (const r of scene.specRoots) {
+      if (r.alive || r._counted) continue;
+      r._counted = true;
+      const killer = r._lastAttacker;
+      if (killer && killer.kind === "soldier") killer.kills += 1;
+      const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+      this._burst(cx, cy, r.color || "#e05a5a", 18, 260);
+      if (r.loot) scene.loot.push(new Loot(r.loot, cx - 10, r.y));
+      this.shake = Math.min(0.7, this.shake + 0.3);
+    }
+
+    // Rebuild the flat damageable set combat.js hits (parts die, seekers spawn).
+    // MUST run before _updateProjectiles, which reads scene.enemies.
+    scene.enemies = scene.specRoots.flatMap((r) => (r.alive ? collidables(r) : []));
   }
 
   _updateProjectiles(dt) {
@@ -232,6 +238,14 @@ export class Mission {
   }
 
   _damage(target, amount, owner) {
+    // EnemySpec parts route through the runtime so link/signal/phase cascades
+    // fire; kill credit + loot are handled by root-death polling in
+    // _updateEnemies. Track the last soldier to hit this tree for that credit.
+    if (target.kind === "spec") {
+      if (amount > 0 && owner) target.root._lastAttacker = owner;
+      specDamage(target.root, target, amount, owner, this.scene, this._ctx);
+      return;
+    }
     if (!target.alive) return;
     target.health -= amount;
     target.hitFlash = 0.12;
@@ -244,26 +258,19 @@ export class Mission {
   }
 
   _kill(target, owner) {
+    // Spec kill (e.g. lethal burn routed via combat.js ctx.kill).
+    if (target.kind === "spec") {
+      if (owner) target.root._lastAttacker = owner;
+      specKill(target.root, target, owner, this.scene, this._ctx);
+      return;
+    }
     if (!target.alive) return;
     target.alive = false;
     const cx = target.x + target.w / 2;
     const cy = target.y + target.h / 2;
-    if (target.kind === "enemy") {
-      if (owner && owner.kind === "soldier") owner.kills += 1;
-      this._burst(cx, cy, target.color, 18, 260);
-      this._dropLoot(target);
-      this.shake = Math.min(0.7, this.shake + 0.3);
-    } else {
-      // a soldier falling — a heavier, colder burst
-      this._burst(cx, cy, "#c9d4e6", 22, 300);
-      this.shake = Math.min(0.9, this.shake + 0.5);
-    }
-  }
-
-  _dropLoot(enemy) {
-    const item = enemy.def.loot;
-    if (!item) return;
-    this.scene.loot.push(new Loot(item, enemy.x + enemy.w / 2 - 10, enemy.y));
+    // a soldier falling — a heavier, colder burst (enemies are spec-handled)
+    this._burst(cx, cy, "#c9d4e6", 22, 300);
+    this.shake = Math.min(0.9, this.shake + 0.5);
   }
 
   _updateStatuses(dt) {
@@ -411,7 +418,7 @@ export class Mission {
     this._drawPlatforms(ctx, scene);
     this._drawExit(ctx, scene.exit);
     for (const l of scene.loot) this._drawLoot(ctx, l);
-    for (const e of scene.enemies) this._drawEnemy(e);
+    for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time);
     for (const p of scene.projectiles) this._drawProjectile(p);
     for (const s of scene.soldiers) this._drawSoldier(s, s === this.currentSoldier());
     this._drawParticles(ctx);
@@ -646,128 +653,6 @@ export class Mission {
     return { x: s.facing > 0 ? cx + gunLen : cx - gunLen, y: gy };
   }
 
-  _drawEnemy(e) {
-    const ctx = this.ctx;
-    if (!e.alive) return;
-    const x = Math.round(e.x), y = Math.round(e.y), w = e.w, h = e.h, cx = x + w / 2, cy = y + h / 2;
-
-    this._shadow(ctx, cx, y + h, w * 0.85);
-
-    const charging = e.windup > 0;
-    if (charging) {
-      const p = 0.5 + 0.5 * Math.sin(this.time * 30);
-      this._glow(ctx, cx, cy, w * 0.9 + p * 10, "rgba(255,80,80,0.35)");
-    }
-    const flash = e.hitFlash > 0;
-    const body = flash ? "#ffffff" : e.color;
-
-    switch (e.def.behavior) {
-      case "charger": this._drawDrone(ctx, e, x, y, w, h, cx, cy, body, flash); break;
-      case "shooter": this._drawSentinel(ctx, e, x, y, w, h, cx, body, flash); break;
-      case "turret": this._drawTurret(ctx, e, x, y, w, h, cx, body, flash); break;
-    }
-
-    if (charging) {
-      ctx.strokeStyle = "rgba(255,90,90,0.7)";
-      ctx.lineWidth = 2;
-      this._roundRect(ctx, x - 3, y - 3, w + 6, h + 6, 5);
-      ctx.stroke();
-    }
-    if (e.burn) this._drawBurn(ctx, x, y, w, h);
-    if (e.muzzleFlash > 0)
-      this._drawMuzzle(ctx, e, { x: e.facing > 0 ? x + w + 4 : x - 4, y: y + h * 0.42 });
-    if (e.health < e.maxHealth) this._healthBar(x, y - 8, w, e.health / e.maxHealth, "#ff6a6a");
-  }
-
-  _drawDrone(ctx, e, x, y, w, h, cx, cy, body, flash) {
-    const bob = Math.sin(this.time * 8 + e.x) * 2;
-    ctx.save();
-    ctx.translate(cx, cy + bob);
-    // wings / struts
-    ctx.fillStyle = this._shade(e.color, -36);
-    ctx.fillRect(-w * 0.6, -3, w * 1.2, 6);
-    // body diamond
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.moveTo(0, -h * 0.5);
-    ctx.lineTo(w * 0.5, 0);
-    ctx.lineTo(0, h * 0.5);
-    ctx.lineTo(-w * 0.5, 0);
-    ctx.closePath();
-    ctx.fill();
-    // eye
-    const ex = e.facing > 0 ? 5 : -5;
-    this._glow(ctx, ex, -2, 9, "rgba(255,120,60,0.6)");
-    ctx.fillStyle = "#2a0d0d";
-    ctx.beginPath();
-    ctx.arc(ex, -2, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = flash ? "#ffffff" : "#ff5a4a";
-    ctx.beginPath();
-    ctx.arc(ex + (e.facing > 0 ? 1 : -1), -2, 2.4, 0, Math.PI * 2);
-    ctx.fill();
-    // thruster
-    ctx.fillStyle = `rgba(120,200,255,${0.35 + 0.3 * Math.random()})`;
-    ctx.beginPath();
-    ctx.moveTo(-4, h * 0.4);
-    ctx.lineTo(0, h * 0.62 + Math.random() * 4);
-    ctx.lineTo(4, h * 0.4);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  _drawSentinel(ctx, e, x, y, w, h, cx, body, flash) {
-    // legs
-    ctx.fillStyle = this._shade(e.color, -42);
-    ctx.fillRect(x + w * 0.2, y + h * 0.6, w * 0.16, h * 0.4);
-    ctx.fillRect(x + w * 0.64, y + h * 0.6, w * 0.16, h * 0.4);
-    // torso
-    ctx.fillStyle = body;
-    this._roundRect(ctx, x + w * 0.15, y + h * 0.2, w * 0.7, h * 0.45, 5);
-    ctx.fill();
-    // core
-    const p = 0.5 + 0.5 * Math.sin(this.time * 4);
-    this._glow(ctx, cx, y + h * 0.4, 12 + p * 4, "rgba(180,90,255,0.6)");
-    ctx.fillStyle = flash ? "#ffffff" : "#d98cff";
-    ctx.beginPath();
-    ctx.arc(cx, y + h * 0.4, 5, 0, Math.PI * 2);
-    ctx.fill();
-    // head
-    ctx.fillStyle = this._shade(e.color, -26);
-    this._roundRect(ctx, x + w * 0.3, y, w * 0.4, h * 0.22, 4);
-    ctx.fill();
-    ctx.fillStyle = "#ff7ad0";
-    ctx.fillRect(e.facing > 0 ? cx : x + w * 0.32, y + h * 0.07, w * 0.2, 3);
-    // arm cannon
-    ctx.fillStyle = "#1a1030";
-    if (e.facing > 0) ctx.fillRect(cx, y + h * 0.32, w * 0.6, 6);
-    else ctx.fillRect(cx - w * 0.6, y + h * 0.32, w * 0.6, 6);
-  }
-
-  _drawTurret(ctx, e, x, y, w, h, cx, body, flash) {
-    // base
-    ctx.fillStyle = this._shade(e.color, -38);
-    this._roundRect(ctx, x + w * 0.1, y + h * 0.55, w * 0.8, h * 0.45, 4);
-    ctx.fill();
-    // dome
-    ctx.fillStyle = body;
-    ctx.beginPath();
-    ctx.arc(cx, y + h * 0.55, w * 0.42, Math.PI, 0);
-    ctx.fill();
-    // barrel
-    ctx.fillStyle = "#141018";
-    const by = y + h * 0.42;
-    if (e.facing > 0) ctx.fillRect(cx, by, w * 0.55, 7);
-    else ctx.fillRect(cx - w * 0.55, by, w * 0.55, 7);
-    // lens
-    const p = 0.5 + 0.5 * Math.sin(this.time * 3);
-    this._glow(ctx, cx, y + h * 0.5, 10 + p * 3, "rgba(255,150,60,0.6)");
-    ctx.fillStyle = flash ? "#ffffff" : "#ffb15a";
-    ctx.beginPath();
-    ctx.arc(cx, y + h * 0.5, 5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   _drawMuzzle(ctx, shooter, at) {
     const col = shooter.muzzleColor || "#ffd36a";
     this._glow(ctx, at.x, at.y, 15, this._alpha(col, 0.85));
@@ -917,8 +802,14 @@ export class Mission {
         ctx.fillStyle = "#ffb15a";
         ctx.fillText("RELOADING…", W - 16, 70);
       } else {
+        const dry = cur.ammo <= 0 && cur.magsLeft <= 0;
         ctx.fillStyle = cur.ammo <= 0 ? "#ff6a6a" : "#e6ecf5";
-        ctx.fillText(`⦿  ${cur.ammo} / ${cur.weapon.magazine}`, W - 16, 70);
+        ctx.fillText(
+          dry
+            ? `⦿  OUT OF AMMO`
+            : `⦿  ${cur.ammo} / ${cur.weapon.magazine}  ▮×${cur.magsLeft}`,
+          W - 16, 70
+        );
       }
     }
     ctx.textAlign = "left";

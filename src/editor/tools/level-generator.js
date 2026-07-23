@@ -11,13 +11,18 @@
 // ---------------------------------------------------------------------------
 
 import { generateLevel, DIFFICULTY, BIOMES } from "../../game/gen/levelgen.js";
-import { ENEMIES } from "../../game/content.js";
-import { customEnemyMap } from "../../game/customcontent.js";
+import { missionRoster } from "../../game/enemyspecs.js";
 
 const LENGTHS = ["short", "medium", "long"];
 
 export function createLevelGenerator(container, onBack) {
-  const rosterDefs = { ...ENEMIES, ...customEnemyMap() };
+  // The built-in EnemySpec mission roster the game actually generates against.
+  // Chips list the normal enemies; the boss descriptor is added only when the
+  // Boss toggle is on (matching state.js). enemyDef() resolves either for the
+  // schematic. All roster entries carry id/name/behavior/threat (see enemyspecs).
+  const rosterList = missionRoster();
+  const bossDesc = missionRoster({ boss: true }).find((d) => !rosterList.some((r) => r.id === d.id));
+  const rosterDefs = Object.fromEntries([...rosterList, ...(bossDesc ? [bossDesc] : [])].map((d) => [d.id, d]));
   const params = {
     seed: (Math.random() * 1e9) | 0,
     difficulty: "medium",
@@ -25,7 +30,7 @@ export function createLevelGenerator(container, onBack) {
     boss: false,
     scale: 1,
     biome: "", // "" = auto
-    roster: new Set(Object.keys(rosterDefs)),
+    roster: new Set(rosterList.map((d) => d.id)),
   };
   let result = null;
 
@@ -63,8 +68,8 @@ export function createLevelGenerator(container, onBack) {
 
       <div class="lg-roster" id="lg-roster">
         <span class="lg-roster-label">Roster:</span>
-        ${Object.keys(rosterDefs)
-          .map((id) => `<label class="lg-chip"><input type="checkbox" data-lg-enemy="${id}" checked /> ${escapeHtml(rosterDefs[id].name || id)}</label>`)
+        ${rosterList
+          .map((d) => `<label class="lg-chip"><input type="checkbox" data-lg-enemy="${d.id}" checked /> ${escapeHtml(d.name || d.id)}</label>`)
           .join("")}
       </div>
 
@@ -91,8 +96,10 @@ export function createLevelGenerator(container, onBack) {
   const ctx = canvas.getContext("2d");
 
   function currentRoster() {
-    const defs = Object.keys(rosterDefs).filter((id) => params.roster.has(id)).map((id) => rosterDefs[id]);
-    return defs.length ? defs : Object.values(rosterDefs);
+    const defs = rosterList.filter((d) => params.roster.has(d.id));
+    const base = defs.length ? defs : rosterList;
+    // A boss lead adds the boss to the pool so the generator can frame it in.
+    return params.boss && bossDesc ? [...base, bossDesc] : base;
   }
 
   function generate() {
@@ -179,7 +186,7 @@ export function createLevelGenerator(container, onBack) {
     ctx.fillText(`seed ${level.id.replace("gen_", "")} · scale ${x1(params.scale)}`, 8, 14);
   }
 
-  function enemyDef(type) { return rosterDefs[type] || ENEMIES[type]; }
+  function enemyDef(type) { return rosterDefs[type] || rosterList[0]; }
 
   // ---- events -------------------------------------------------------------
   container.addEventListener("input", (e) => {

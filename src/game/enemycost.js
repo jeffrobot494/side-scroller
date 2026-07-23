@@ -43,6 +43,9 @@ const BY_ID = Object.fromEntries(DIFFICULTY.map((d) => [d.id, d]));
 // defaults to the built-in WEAPONS.
 export function enemyThreat(def, weapons = WEAPONS) {
   if (!def) return 0;
+  // EnemySpec roster descriptors carry their authored threat directly (they have
+  // no flat stat block to score); trust it.
+  if (def.isSpec) return Math.round((def.threat ?? 50) * K.global);
   const base = (def.health || 0) * K.health;
   const melee = (def.contactDamage || 0) * K.contact * (1 + (def.speed || 0) * K.contactSpeed);
 
