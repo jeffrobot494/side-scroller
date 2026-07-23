@@ -115,8 +115,9 @@ export function createLevelGenerator(container, onBack) {
     const tile = (label, val) => `<div class="lg-tile"><span>${label}</span><b>${val}</b></div>`;
     $("#lg-report").innerHTML =
       tile("Enemies", r.enemyCount) +
-      tile("Perches", r.perchCount) +
+      tile("Platforms", r.perchCount) +
       tile("Dropped", r.droppedPerches) +
+      tile("Unreachable", r.unreachable ?? 0) +
       tile("World", r.width + "px") +
       tile("Jump ceiling", r.maxRise + "px") +
       tile("Difficulty", r.boss ? "boss" : r.difficulty);
@@ -140,7 +141,8 @@ export function createLevelGenerator(container, onBack) {
     g.addColorStop(0, "#0c1424"); g.addColorStop(1, "#161f2a");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 
-    // reachability ceiling (maxRise above ground) — perches must sit below it
+    // single-jump ceiling (maxRise above ground) — structures may climb past
+    // it via chained jumps, but every FIRST piece starts below this line
     const groundTop = level.platforms[0].y;
     const ceilY = Y(groundTop - report.maxRise);
     ctx.strokeStyle = "rgba(122,215,255,0.35)"; ctx.setLineDash([5, 5]); ctx.lineWidth = 1;

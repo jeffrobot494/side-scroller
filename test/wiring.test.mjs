@@ -18,6 +18,7 @@ export default async function run(t) {
   t.ok("generated level loads (world/platforms/exit)", m.world && m.platforms.length >= 1 && m.exit);
   t.ok("all generated enemies instantiate", m.enemies.length === lead.level.enemies.length && m.enemies.every((e) => e.name));
   t.ok("continuous ground slab present", m.platforms[0].x === 0 && m.platforms[0].w === m.world.width);
+  t.eq("soldier hp = base + stat×per-point (10+5×2)", m.soldiers[0].maxHealth, 20);
 
   const h0 = g.campaignHealth;
   st.applyMissionResult(g, winResult(lead.id, { loot: [{ name: "X", value: 50 }] }));

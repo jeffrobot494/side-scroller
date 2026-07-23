@@ -98,8 +98,9 @@ export class Soldier {
     this.facing = 1; // 1 right, -1 left
     this.crouched = false;
 
-    // Health scales off the soldier's health stat (1–10 → 60–150 hp).
-    this.maxHealth = 50 + data.stats.health * 10;
+    // Health scales off the soldier's health stat via config knobs
+    // (defaults: 10 + 2×stat → 12–30 hp for a 1–10 stat).
+    this.maxHealth = config.soldierBaseHp + data.stats.health * config.soldierHpPerHealth;
     this.health = this.maxHealth;
     this.alive = true;
 

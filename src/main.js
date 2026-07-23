@@ -10,11 +10,16 @@
 import { createState, applyMissionResult } from "./game/state.js";
 import { Hub } from "./hub/hub.js";
 import { Mission } from "./mission/mission.js";
+import { createHubAmbient } from "./hub/ambient.js";
 
 const hubRoot = document.getElementById("hub-root");
 const canvas = document.getElementById("game");
 
 const game = createState();
+
+// Ambient crew walking behind the hub DOM (paused + hidden during missions).
+const ambient = createHubAmbient(game);
+document.body.insertBefore(ambient.el, hubRoot);
 
 // The mission scene calls back here when it resolves.
 const mission = new Mission(canvas, onMissionComplete);
@@ -39,6 +44,7 @@ function showScene(name) {
   const inMission = name === "mission";
   canvas.style.display = inMission ? "block" : "none";
   hubRoot.style.display = inMission ? "none" : "block";
+  ambient.setVisible(!inMission);
 }
 
 showScene("hub");

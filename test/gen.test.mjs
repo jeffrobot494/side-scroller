@@ -53,8 +53,25 @@ export default async function run(t) {
   t.ok("gen: report budget respected", g1.report.legal && g1.report.spent <= g1.report.budget);
   t.ok("gen: report traversable", g1.report.traversable === true);
 
+  t.ok("gen: medium width in doubled band", L.world.width >= 6000 && L.world.width <= 6800);
+  t.ok("gen: no unreachable platforms (report)", L && g1.report.unreachable === 0);
+
+  // Terrain: chained structures may climb past the single-jump ceiling, but
+  // every platform must be chain-reachable; variety should include solid
+  // boxes (h > 20) and multi-tier height somewhere across seeds.
+  let badReach = 0, sawBox = false, sawHigh = false;
   const envG = jumpEnvelope({ gravity: L.world.gravity, jumpSpeed: 720, runSpeed: 320 });
-  t.ok("gen: all perches within jump envelope", L.platforms.slice(1).every((p) => 500 - p.y <= envG.maxRise && 500 - p.y > 0));
+  for (let s = 1; s <= 15; s++) {
+    const r = generateLevel({ seed: s * 101 });
+    if (r.report.unreachable !== 0 || !r.report.traversable) badReach++;
+    for (const p of r.level.platforms.slice(1)) {
+      if (p.h > 20) sawBox = true;
+      if (500 - p.y > envG.maxRise) sawHigh = true;
+    }
+  }
+  t.ok("gen: 15 seeds → every platform chain-reachable", badReach === 0);
+  t.ok("gen: terrain includes solid boxes", sawBox);
+  t.ok("gen: terrain climbs past the single-jump ceiling", sawHigh);
 
   t.ok("gen: higher difficulty spends more threat", generateLevel({ seed: 99, difficulty: "high" }).report.spent > generateLevel({ seed: 99, difficulty: "low" }).report.spent);
 

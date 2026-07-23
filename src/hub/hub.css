@@ -46,6 +46,16 @@ body::after {
 
 #app { min-height: 100vh; display: flex; flex-direction: column; }
 
+/* Ambient crew canvas: full-viewport, behind the hub DOM. The hub's translucent
+   panel backdrops let the little figures show through where the room opens up. */
+#hub-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+#hub-root { position: relative; z-index: 1; }
+
 /* ---- Top bar: a reinforced concrete lintel with a light strip beneath ---- */
 .topbar {
   position: relative;
