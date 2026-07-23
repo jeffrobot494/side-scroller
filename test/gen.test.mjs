@@ -57,19 +57,33 @@ export default async function run(t) {
   t.ok("gen: no unreachable platforms (report)", L && g1.report.unreachable === 0);
 
   // Terrain: chained structures may climb past the single-jump ceiling, but
-  // every platform must be chain-reachable; variety should include solid
-  // boxes (h > 20) and multi-tier height somewhere across seeds.
-  let badReach = 0, sawBox = false, sawHigh = false;
+  // every platform must be reachable BY THE SOLDIER'S BODY and the level must
+  // stay walkable end to end. Alongside the engine's own audit fields, run an
+  // INDEPENDENT wall check (don't let the auditor grade itself): any piece too
+  // low to walk under (clearance < 46) must keep ≥ 30px of open-sky landing on
+  // its merged top surface, or it's an impassable wall.
+  let badReach = 0, walls = 0, sawBox = false, sawHigh = false;
   const envG = jumpEnvelope({ gravity: L.world.gravity, jumpSpeed: 720, runSpeed: 320 });
-  for (let s = 1; s <= 15; s++) {
+  for (let s = 1; s <= 40; s++) {
     const r = generateLevel({ seed: s * 101 });
     if (r.report.unreachable !== 0 || !r.report.traversable) badReach++;
-    for (const p of r.level.platforms.slice(1)) {
+    const els = r.level.platforms.slice(1);
+    for (const p of els) {
       if (p.h > 20) sawBox = true;
       if (500 - p.y > envG.maxRise) sawHigh = true;
+      if (500 - (p.y + p.h) >= 46) continue; // walk-under is open — not a wall
+      let x0 = p.x, x1 = p.x + p.w; // merge same-top neighbors (box + arm)
+      for (const q of els) if (q !== p && q.y === p.y && q.x <= x1 && q.x + q.w >= x0) { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x + q.w); }
+      let segs = [[x0, x1]];
+      for (const q of els) {
+        if (q.y >= p.y || p.y - (q.y + q.h) >= 46) continue;
+        segs = segs.flatMap(([a, b]) => { const o = []; if (q.x > a) o.push([a, Math.min(b, q.x)]); if (q.x + q.w < b) o.push([Math.max(a, q.x + q.w), b]); return o; });
+      }
+      if (Math.max(0, ...segs.map(([a, b]) => b - a)) < 30) walls++;
     }
   }
-  t.ok("gen: 15 seeds → every platform chain-reachable", badReach === 0);
+  t.ok("gen: 40 seeds → every platform body-reachable + level traversable", badReach === 0);
+  t.ok("gen: 40 seeds → no impassable walls (independent check)", walls === 0);
   t.ok("gen: terrain includes solid boxes", sawBox);
   t.ok("gen: terrain climbs past the single-jump ceiling", sawHigh);
 

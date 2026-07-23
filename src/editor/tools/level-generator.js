@@ -118,6 +118,7 @@ export function createLevelGenerator(container, onBack) {
       tile("Platforms", r.perchCount) +
       tile("Dropped", r.droppedPerches) +
       tile("Unreachable", r.unreachable ?? 0) +
+      tile("Culled", r.culledStructures ?? 0) +
       tile("World", r.width + "px") +
       tile("Jump ceiling", r.maxRise + "px") +
       tile("Difficulty", r.boss ? "boss" : r.difficulty);

@@ -87,7 +87,22 @@ export function generateLevel(params = {}) {
   const platforms = [{ x: 0, y: GROUND_TOP, w: width, h: GROUND_H }]; // continuous ground
   const exit = { x: width - EXIT_W - 80, y: GROUND_TOP - EXIT_H, w: EXIT_W, h: EXIT_H };
 
-  const { perches, droppedPerches } = layTerrain(rng, env, width, exit.x);
+  const { groups, droppedPerches } = layTerrain(rng, env, width, exit.x);
+
+  // Hard guarantee: audit the geometry against the soldier's real body and a
+  // spawn→exit route; cull whole structures until the level verifies clean.
+  // Builders aim for zero culls — a cull means a builder bug worth a look.
+  let audit = auditGeometry(platforms[0], groups, env, exit);
+  let culled = 0;
+  while ((!audit.traversable || audit.offenders.length) && groups.length) {
+    const gi = audit.offenders.length
+      ? groups.findIndex((g) => g.includes(audit.offenders[0]))
+      : groups.length - 1;
+    groups.splice(gi < 0 ? groups.length - 1 : gi, 1);
+    culled++;
+    audit = auditGeometry(platforms[0], groups, env, exit);
+  }
+  const perches = groups.flat();
   for (const p of perches) platforms.push(p);
 
   // ---- enemies -----------------------------------------------------------
@@ -137,8 +152,9 @@ export function generateLevel(params = {}) {
     perchCount: perches.length,
     droppedPerches,
     maxRise: Math.round(env.maxRise),
-    unreachable: countUnreachable(platforms, env),
-    traversable: true, // continuous ground → always
+    unreachable: audit.unreachable,
+    culledStructures: culled,
+    traversable: audit.traversable,
   };
 
   return { level, mission, report };
@@ -151,39 +167,46 @@ export function generateLevel(params = {}) {
 // get one structure of five kinds: a lone perch, a solid ground box, a
 // staircase, a zigzag tower, or an L-shape (box + arm + optional floater).
 //
-// Reachability is guaranteed by construction against the jump envelope:
+// Reachability is guaranteed by construction against the jump envelope AND the
+// soldier's actual body (30×46 — platforms are solid, so standing room,
+// walk-under clearance, and landing width all matter, not just jump math):
 //  - the first piece of every structure tops out within `hop` (one jump from
-//    the ground);
-//  - each chained piece rises at most `step` above the piece below it, where
-//    step < maxRise leaves horizontal reach to spare (see env.maxRunTo);
+//    the ground, with a real apex margin so the jump isn't frame-perfect);
+//  - each chained piece rises 72..step above the piece below it — at least
+//    CHAIN_MIN so the gap between stacked tops (rise − thickness) always fits
+//    a standing soldier, at most `step` to leave horizontal reach to spare;
 //  - config.genMaxTiers caps how many chained jumps a structure may climb.
-// Ground traversal also survives every structure: solid boxes are at most
-// `hop` tall (hop over them), and thin pieces either top out within `hop`
-// (hop over) or sit high enough to walk under.
+// After assembly, auditGeometry() re-verifies all of it body-aware (including
+// a spawn→exit ground route) and generateLevel culls any structure that fails
+// — builders aim for zero culls; the audit is the hard guarantee.
 const MAX_STACK_RISE = 380; // absolute height cap — keeps headroom in the 540px world
+const SOLDIER_W = 30; // mission soldier hitbox (entities.js)
+const SOLDIER_H = 46; // standing height — drives walk-under/stand clearances
+const HEADROOM = SOLDIER_H + 4; // vertical room required to stand or walk somewhere
+const CHAIN_MIN = 72; // min chained rise: 72 − 20 thickness = 52px ≥ SOLDIER_H
 
 function layTerrain(rng, env, width, exitX) {
-  const perches = [];
+  const groups = []; // one array of platforms per structure (cull unit)
   let dropped = 0;
   const start = SPAWN_SAFE;
   const end = exitX - 160;
   const span = end - start;
-  const hop = Math.min(env.maxRise - 8, 122); // single jump up from the ground
+  const hop = Math.min(env.maxRise - 20, 122); // single jump up, with apex margin
   const step = Math.min(env.maxRise - 40, 92); // chained jump, piece to piece
-  if (span < 260 || hop < 60) return { perches, droppedPerches: 0 };
+  if (span < 260 || hop < 60) return { groups, droppedPerches: 0 };
 
   const tiers = Math.max(1, Math.round(config.genMaxTiers ?? 3));
   const density = config.genPlatformDensity ?? 0.8;
   const spacing = config.genStructureSpacing ?? 460;
-  const chains = tiers >= 2 && step >= 50; // is there envelope room to stack at all?
+  const chains = tiers >= 2 && step >= CHAIN_MIN; // envelope room for safe stacking?
 
   const slots = Math.max(2, Math.min(14, Math.floor(span / spacing)));
   const slotW = span / slots;
 
   for (let i = 0; i < slots; i++) {
     if (rng() >= density) continue; // open ground for rhythm
-    const x0 = snap(start + i * slotW + 10, 10);
-    const x1 = snap(start + (i + 1) * slotW - 10, 10);
+    const x0 = snap(start + i * slotW + 30, 10);
+    const x1 = snap(start + (i + 1) * slotW - 30, 10);
 
     const roll = rng();
     let plats;
@@ -194,9 +217,9 @@ function layTerrain(rng, env, width, exitX) {
     else plats = perch(rng, x0, x1, hop);
 
     if (!plats || !plats.length) { dropped++; continue; }
-    for (const p of plats) perches.push(p);
+    groups.push(plats);
   }
-  return { perches, droppedPerches: dropped };
+  return { groups, droppedPerches: dropped };
 }
 
 // One floating platform within a single jump of the ground.
@@ -229,7 +252,7 @@ function stair(rng, x0, x1, hop, step, tiers) {
     if (x + w > x1) break;
     plats.push({ x, y: GROUND_TOP - rise, w, h: PERCH_H });
     x += w + int(rng, 10, 40);
-    rise = Math.min(rise + int(rng, 50, step), MAX_STACK_RISE);
+    rise = Math.min(rise + int(rng, CHAIN_MIN, step), MAX_STACK_RISE);
   }
   if (plats.length < 2) return plats.length ? plats : null;
   if (rng() < 0.5) {
@@ -255,7 +278,7 @@ function tower(rng, x0, x1, hop, step, tiers) {
   const layers = int(rng, 1, Math.max(1, tiers - 1));
   let px = x;
   for (let i = 0; i < layers; i++) {
-    rise = Math.min(rise + int(rng, 55, step), MAX_STACK_RISE);
+    rise = Math.min(rise + int(rng, CHAIN_MIN, step), MAX_STACK_RISE);
     const w = snap(int(rng, 110, 160), 10);
     let nx = snap(px + dir * int(rng, 70, 110), 10);
     if (nx < x0) nx = x0;
@@ -267,14 +290,17 @@ function tower(rng, x0, x1, hop, step, tiers) {
   return plats;
 }
 
-// A solid box with a thin arm off its top — reads as an L. When stacking is
-// allowed, sometimes a floater hangs one more chained jump above the arm's
-// far end.
+// A solid box with a thin arm off its top — reads as an L. The box is at least
+// 72 tall so the arm's underside (bh − 20 ≥ 52) always leaves walk-under room.
+// When stacking is allowed, sometimes a floater hangs one more chained jump
+// above the arm — hugging the BOX end, so the arm's far tip keeps ≥60px of
+// open-sky landing (the tip is the hop-on approach; covering it was the
+// impossible-wall bug).
 function lShape(rng, x0, x1, hop, step, chains) {
   const bw = snap(int(rng, 60, 100), 10);
   const armW = snap(int(rng, 90, 160), 10);
-  if (x1 - x0 < bw + armW + 20) return groundBox(rng, x0, x1, hop); // no room for the arm
-  const bh = int(rng, 60, Math.max(60, hop - 10));
+  if (hop < 82 || x1 - x0 < bw + armW + 20) return groundBox(rng, x0, x1, hop);
+  const bh = int(rng, 72, Math.max(72, hop - 10));
   const side = rng() < 0.5 ? -1 : 1; // which way the arm points
   const bx = side === 1
     ? snap(range(rng, x0, x1 - bw - armW - 10), 10)
@@ -284,47 +310,78 @@ function lShape(rng, x0, x1, hop, step, chains) {
     ? { x: bx + bw, y: by, w: armW, h: PERCH_H }
     : { x: bx - armW, y: by, w: armW, h: PERCH_H };
   const plats = [{ x: bx, y: by, w: bw, h: bh }, arm];
-  if (chains && rng() < 0.55) {
-    const fw = snap(int(rng, 90, 130), 10);
-    const rise = Math.min(bh + int(rng, 50, step), MAX_STACK_RISE);
-    let fx = side === 1 ? arm.x + arm.w - fw : arm.x;
+  if (chains && armW >= 120 && rng() < 0.55) {
+    const fw = Math.max(60, Math.min(snap(int(rng, 90, 130), 10), armW - 60));
+    const rise = Math.min(bh + int(rng, CHAIN_MIN, step), MAX_STACK_RISE);
+    let fx = side === 1 ? arm.x : arm.x + arm.w - fw; // box end, tip stays open
     fx = snap(Math.min(Math.max(fx, x0), x1 - fw), 10);
     plats.push({ x: fx, y: GROUND_TOP - rise, w: fw, h: PERCH_H });
   }
   return plats;
 }
 
-// Sanity net over the assembled geometry: fixpoint-walk platform tops from the
-// ground slab and count elevated platforms no reachable surface can jump to.
-// The builders guarantee 0 by construction; the report (and tests) surface it
-// so a regression or hand-tuned physics that breaks a level is visible.
-function countUnreachable(platforms, env) {
-  const reached = [platforms[0]];
-  const todo = platforms.slice(1);
-  let grew = true;
-  while (grew && todo.length) {
-    grew = false;
-    for (let i = todo.length - 1; i >= 0; i--) {
-      const p = todo[i];
-      if (reached.some((q) => canJump(q, p, env))) {
-        reached.push(p);
-        todo.splice(i, 1);
-        grew = true;
-      }
+// Body-aware geometry audit. The old validator treated jumps as point-to-point
+// geometry and certified levels with impossible walls; this one models the
+// soldier's actual body:
+//  - a platform top is only usable where a 30-wide soldier can STAND with ≥50px
+//    of headroom (solid pieces above/beside cut the usable span);
+//  - jumps connect usable stand segments through the envelope (maxRunTo);
+//  - `traversable` = a soldier can actually get from the spawn to the exit.
+// Returns { traversable, unreachable, offenders } where offenders are the
+// platforms no usable, reachable stand segment exists for — generateLevel
+// culls the structures that own them.
+function auditGeometry(ground, groups, env, exit) {
+  const plats = [ground, ...groups.flat()];
+
+  // Usable stand segments per platform, in soldier-left-edge space: start from
+  // [x, x+w−30], then cut out spans where a piece above leaves < HEADROOM.
+  const nodes = [];
+  for (const p of plats) {
+    let segs = [[p.x, p.x + p.w - SOLDIER_W]];
+    for (const q of plats) {
+      if (q === p || q.y >= p.y) continue;
+      if (p.y - (q.y + q.h) >= HEADROOM) continue;
+      segs = cutSegs(segs, q.x - SOLDIER_W, q.x + q.w);
+    }
+    for (const [a, b] of segs) if (b - a >= 6) nodes.push({ p, a, b });
+  }
+
+  // Flood-fill from the spawn's ground segment through jumpable/droppable links.
+  const start = nodes.find((n) => n.p === ground && n.a <= SPAWN_X && SPAWN_X <= n.b + SOLDIER_W);
+  const reached = new Set(start ? [start] : []);
+  const queue = start ? [start] : [];
+  while (queue.length) {
+    const na = queue.pop();
+    for (const nb of nodes) {
+      if (reached.has(nb)) continue;
+      const dh = na.p.y - nb.p.y; // >0 = target segment sits higher
+      if (dh > env.maxRise) continue;
+      const reach = dh > 0 ? env.maxRunTo(dh) : env.flatReach;
+      if (reach < 0) continue;
+      const gap = Math.max(nb.a - na.b, na.a - nb.b, 0);
+      if (gap > reach) continue;
+      reached.add(nb);
+      queue.push(nb);
     }
   }
-  return todo.length;
+
+  const reachedPlats = new Set([...reached].map((n) => n.p));
+  const offenders = plats.slice(1).filter((p) => !reachedPlats.has(p));
+  const traversable = [...reached].some(
+    (n) => n.p === ground && n.b + SOLDIER_W >= exit.x && n.a <= exit.x + exit.w
+  );
+  return { traversable, unreachable: offenders.length, offenders };
 }
 
-// Can an actor standing on q's top reach p's top? Vertical rise must fit the
-// envelope; the horizontal gap between the two spans must fit the reach left
-// at that rise (full flat reach when dropping down).
-function canJump(q, p, env) {
-  const dh = q.y - p.y; // how far p's top sits above q's top
-  if (dh > env.maxRise) return false;
-  const gap = Math.max(p.x - (q.x + q.w), q.x - (p.x + p.w), 0);
-  const reach = dh > 0 ? env.maxRunTo(dh) : env.flatReach;
-  return reach >= 0 && gap <= reach;
+// Remove [lo, hi] from a list of [a, b] intervals.
+function cutSegs(segs, lo, hi) {
+  const out = [];
+  for (const [a, b] of segs) {
+    if (hi <= a || lo >= b) { out.push([a, b]); continue; }
+    if (lo > a) out.push([a, lo]);
+    if (hi < b) out.push([hi, b]);
+  }
+  return out;
 }
 
 // Candidate stand points: the top of each perch, plus a spaced set of ground
