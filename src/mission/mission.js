@@ -341,6 +341,10 @@ export class Mission {
       survivors,
       casualties,
       killsBySoldier,
+      woundsBySoldier: this.scene.soldiers.map((s) => ({
+        id: s.id,
+        wounds: Math.max(0, Math.round(s.maxHealth - s.health)),
+      })),
       loot: success ? this.scene.collected || [] : [],
       kills,
     };

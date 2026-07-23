@@ -138,6 +138,7 @@ export function hire(state, id) {
   state.money -= rec.cost;
   rec.status = "roster";
   rec.weaponId = "carbine"; // standard issue on enlistment
+  rec.wounds = 0; // enlists at full health
   state.recruits.splice(i, 1);
   state.roster.push(rec);
   note(state, `Enlisted ${rec.name}.`);
@@ -194,6 +195,16 @@ export function advanceDay(state) {
     note(state, `${bp.name} rolled off the line — added to the armory.`);
   }
 
+  // Soldiers mend at base: each rest day recovers config.healPerDay of wounds.
+  const heal = config.healPerDay;
+  if (heal > 0) {
+    for (const s of state.roster) {
+      if (s.status !== "dead" && s.wounds > 0) {
+        s.wounds = Math.max(0, s.wounds - heal);
+      }
+    }
+  }
+
   // Doom clock: the invasion advances whether or not you acted.
   state.campaignHealth = Math.max(0, state.campaignHealth - config.doomPerDay);
   if (state.campaignHealth <= TUNING.loseAt) {
@@ -208,7 +219,7 @@ export function advanceDay(state) {
 // A deploy carries a chosen squad into the mission; applyMissionResult carries
 // the outcome back. `result` shape (from the mission scene):
 //   { success, missionId, casualties: [soldierId], survivors: [soldierId],
-//     loot: [{name,value}], kills }
+//     woundsBySoldier: [{id, wounds}], loot: [{name,value}], kills }
 
 export function applyMissionResult(state, result) {
   const mission = state.leads.find((l) => l.id === result.missionId);
@@ -228,6 +239,9 @@ export function applyMissionResult(state, result) {
       s.status = "roster";
       const k = (result.killsBySoldier || []).find((e) => e.id === id);
       if (k) s.record.kills += k.kills;
+      // Carry any damage taken back to base as persistent wounds.
+      const w = (result.woundsBySoldier || []).find((e) => e.id === id);
+      if (w) s.wounds = w.wounds;
     }
   }
   // Drop the dead from the roster entirely.

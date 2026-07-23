@@ -16,6 +16,7 @@ import {
   livingRoster,
 } from "../game/state.js";
 import { BLUEPRINTS, WEAPONS, TUNING } from "../game/content.js";
+import { soldierMaxHp } from "../game/soldiers.js";
 
 const LOCATIONS = [
   { id: "barracks", label: "Barracks", icon: "🪖", staff: "Sgt. Bishop" },
@@ -185,6 +186,12 @@ export class Hub {
       s.record && s.record.missions
         ? `<div class="record">${s.record.missions} missions · ${s.record.kills} kills</div>`
         : "";
+    // Roster soldiers carry persistent wounds; recruits are always at full HP.
+    const max = soldierMaxHp(s);
+    const hp =
+      !hireable
+        ? `<div class="record">HP ${max - (s.wounds || 0)} / ${max}</div>`
+        : "";
     return `
       <article class="soldier-card">
         <div class="card-head">
@@ -197,6 +204,7 @@ export class Hub {
         <p class="bio">${s.bio}</p>
         <div class="stats">${Object.keys(STAT_LABELS).map((k) => statBar(k, s.stats[k])).join("")}</div>
         <div class="traits">${s.traits.map((t) => `<span class="trait">${t}</span>`).join("")}</div>
+        ${hp}
         ${rec}
         ${
           hireable
@@ -375,7 +383,7 @@ export class Hub {
               <div class="portrait" style="background:${portraitColor(s.name)}">${initials(s)}</div>
               <div class="who">
                 <div class="name">${s.name}</div>
-                <div class="sub">Aim ${s.stats.aim} · Health ${s.stats.health} · Speed ${s.stats.speed}</div>
+                <div class="sub">Aim ${s.stats.aim} · Health ${s.stats.health} · Speed ${s.stats.speed} · HP ${soldierMaxHp(s) - (s.wounds || 0)}/${soldierMaxHp(s)}</div>
               </div>
             </div>
             <div class="deploy-controls">

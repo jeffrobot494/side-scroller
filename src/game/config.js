@@ -166,6 +166,16 @@ export const SCHEMA = [
         step: 1,
         help: "Campaign health lost each day. 0 disables the doom clock.",
       },
+      {
+        key: "healPerDay",
+        label: "Heal / day at base",
+        type: "range",
+        default: 1,
+        min: 0,
+        max: 10,
+        step: 1,
+        help: "HP a resting soldier recovers each day at base. 0 disables healing.",
+      },
     ],
   },
   {

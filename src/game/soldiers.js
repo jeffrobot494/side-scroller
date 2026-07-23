@@ -21,9 +21,21 @@
 //   cost:     credits to hire
 //   status:   "recruit" | "roster" | "deployed" | "dead"
 //   record:   { missions, kills } — filled in over a career
+//   wounds:   persistent damage carried between missions/days (0 = full health).
+//             Current HP is derived: soldierMaxHp(s) - wounds. Set to 0 on hire,
+//             written back from a mission result, and healed down at base.
 // }
 //
 // Stats are placeholder-tuned; they'll get wired to run-and-gun combat later.
+
+import { config } from "./config.js";
+
+// Max HP a soldier can have, derived from their Health stat and the config knobs
+// (defaults: 10 + 2×stat → 12–30 hp for a 1–10 stat). Kept here so the mission
+// entity, the hub display, and any HP readout all share one formula.
+export function soldierMaxHp(soldier) {
+  return config.soldierBaseHp + soldier.stats.health * config.soldierHpPerHealth;
+}
 
 export const RECRUIT_POOL = [
   {

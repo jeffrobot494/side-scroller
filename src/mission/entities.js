@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { config } from "../game/config.js";
+import { soldierMaxHp } from "../game/soldiers.js";
 import { missionSpecById, specIsFlying } from "../game/enemyspecs.js";
 import { instantiate as instantiateSpec, collidables } from "./enemyspec/runtime.js";
 
@@ -99,9 +100,11 @@ export class Soldier {
     this.crouched = false;
 
     // Health scales off the soldier's health stat via config knobs
-    // (defaults: 10 + 2×stat → 12–30 hp for a 1–10 stat).
-    this.maxHealth = config.soldierBaseHp + data.stats.health * config.soldierHpPerHealth;
-    this.health = this.maxHealth;
+    // (defaults: 10 + 2×stat → 12–30 hp for a 1–10 stat). Persistent wounds
+    // carried from prior missions/days deduct from the starting HP (clamped ≥1
+    // so a badly hurt soldier still deploys alive).
+    this.maxHealth = soldierMaxHp(data);
+    this.health = Math.max(1, this.maxHealth - (data.wounds || 0));
     this.alive = true;
 
     this.fireCooldown = 0;
