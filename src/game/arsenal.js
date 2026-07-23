@@ -1,7 +1,9 @@
 // ---------------------------------------------------------------------------
-// ARSENAL — 24 hand-authored weapons spanning the effect library and the three
-// tech tiers. Composed from the same primitives the Weapon Designer exposes and
-// priced by weaponcost.js, so every entry is a legal, drop-in armory weapon.
+// ARSENAL — THE weapon library: 24 hand-authored player weapons spanning the
+// effect library and the three tech tiers, plus the enemy weapons. Composed
+// from the same primitives the Weapon Designer exposes and priced by
+// weaponcost.js, so every entry is a legal, drop-in armory weapon. content.js
+// re-exports the whole set as the id-keyed `WEAPONS` map the game looks up.
 //
 // Effect kinds in play: damage, burn, slow, knockback, explode, chain (value)
 // and pellets, pierce, homing (delivery). `tier` (1..3) is metadata for grouping
@@ -96,6 +98,17 @@ const RAW = [
     effects: [{ kind: "damage", amount: 70 }, { kind: "knockback", force: 250 }, { kind: "pierce", count: 2 }] },
 ];
 
+// ---- Enemy weapons ---------------------------------------------------------
+// Slower, telegraphed projectiles the player can dodge. Kept out of ARSENAL so
+// the Firing Room / shop never list them; enemy defs reference them by id
+// (`weapon: "plasma"`) through the WEAPONS map. No magazine = never reloads.
+const ENEMY_RAW = [
+  { id: "plasma", name: "Plasma Caster", enemy: true, fireRate: 1.1, auto: true, spread: 0.04,
+    projectile: { speed: 460, w: 14, h: 14, color: "#8affc1", life: 2.2, shape: "orb" },
+    effects: [{ kind: "damage", amount: 14 }] },
+];
+
 export const ARSENAL = RAW.map((w) => finalizeWeapon({ ...w, fireMode: "projectile" }));
+export const ENEMY_WEAPONS = ENEMY_RAW.map((w) => finalizeWeapon({ ...w, fireMode: "projectile" }));
 
 export const ARSENAL_BY_ID = Object.fromEntries(ARSENAL.map((w) => [w.id, w]));

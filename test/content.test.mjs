@@ -7,7 +7,7 @@ export default async function run(t) {
   // ---- weapons ----
   t.eq("weapons: empty list initially", cc.listCustomWeapons(), []);
   t.ok("weapons: save returns ok+id", (() => { const r = cc.saveCustomWeapon({ id: "flamer", name: "Flamer", budgetSpent: 30, effects: [] }); return r.ok && r.id === "flamer"; })());
-  t.ok("weapons: collision with WEAPONS key suffixes", cc.saveCustomWeapon({ id: "rifle", name: "Not Rifle", budgetSpent: 5, effects: [] }).id === "rifle_2");
+  t.ok("weapons: collision with WEAPONS key suffixes", cc.saveCustomWeapon({ id: "carbine", name: "Not Carbine", budgetSpent: 5, effects: [] }).id === "carbine_2");
   cc.saveCustomWeapon({ id: "flamer", name: "Flamer v2", budgetSpent: 40, effects: [] });
   t.ok("weapons: same id upserts", cc.customWeaponMap().flamer.name === "Flamer v2");
   t.eq("weapons: two entries after upsert", cc.listCustomWeapons().length, 2);
@@ -47,7 +47,7 @@ export default async function run(t) {
   globalThis.localStorage.clear();
   cc.saveCustomWeapon({ id: "zapper", name: "Zapper", budgetSpent: 22, effects: [{ kind: "damage", amount: 22, cost: 22 }] });
   const s = createState();
-  t.ok("armory: rifle first", s.armory[0].id === "rifle");
+  t.ok("armory: standard-issue carbine first", s.armory[0].id === "carbine" && s.armory[0].magazine > 0);
   t.ok("armory: includes custom weapon", s.armory.some((w) => w.id === "zapper"));
   t.ok("armory: custom weapon is a clone", s.armory.find((w) => w.id === "zapper") !== cc.customWeaponMap().zapper);
 

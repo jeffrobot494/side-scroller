@@ -29,7 +29,7 @@ export function createState() {
     // issue; commissioned blueprints append here when they finish building;
     // weapons authored in the editor's Weapon Designer load in here too (read at
     // load time — reload the game to pick up ones saved after this state began).
-    armory: [structuredClone(WEAPONS.rifle), ...listCustomWeapons().map((w) => structuredClone(w))],
+    armory: [structuredClone(WEAPONS.carbine), ...listCustomWeapons().map((w) => structuredClone(w))],
 
     // Recovered-but-unsold loot: { name, value } entries from missions.
     stores: [],
@@ -139,7 +139,7 @@ export function hire(state, id) {
 
   state.money -= rec.cost;
   rec.status = "roster";
-  rec.weaponId = "rifle"; // standard issue on enlistment
+  rec.weaponId = "carbine"; // standard issue on enlistment
   state.recruits.splice(i, 1);
   state.roster.push(rec);
   note(state, `Enlisted ${rec.name}.`);

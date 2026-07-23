@@ -363,7 +363,7 @@ export class Hub {
     const cards = roster
       .map((s) => {
         const chosen = sel.has(s.id);
-        const wId = this.deploy.weapons[s.id] || s.weaponId || "rifle";
+        const wId = this.deploy.weapons[s.id] || s.weaponId || "carbine";
         const options = g.armory
           .map(
             (w) => `<option value="${w.id}" ${w.id === wId ? "selected" : ""}>${w.name}</option>`
@@ -603,8 +603,8 @@ export class Hub {
     const squad = [];
     for (const s of livingRoster(g)) {
       if (!this.deploy.selected.has(s.id)) continue;
-      const wId = this.deploy.weapons[s.id] || s.weaponId || "rifle";
-      const weapon = g.armory.find((w) => w.id === wId) || WEAPONS.rifle;
+      const wId = this.deploy.weapons[s.id] || s.weaponId || "carbine";
+      const weapon = g.armory.find((w) => w.id === wId) || WEAPONS.carbine;
       s.record.missions += 1;
       squad.push({ data: s, weapon });
     }

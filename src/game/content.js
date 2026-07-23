@@ -2,7 +2,7 @@
 // CONTENT LIBRARY  (Phase 1 — data-driven entities)
 //
 // Everything the engine plays is data composed from a small primitive library:
-//   - WEAPONS   fire behavior + effect primitives (each effect carries a `cost`)
+//   - WEAPONS   id-keyed weapon map (data lives in arsenal.js; re-exported here)
 //   - ENEMIES   stat blocks + a named behavior + the loot they drop
 //   - LEVELS    world size, platforms, spawns, enemy placements, the exit
 //   - MISSIONS  meta wrapper around a level: rewards, unlocks, threat impact
@@ -15,59 +15,15 @@
 // generated-content path will validate against (GDD §5.1).
 // ---------------------------------------------------------------------------
 
+import { ARSENAL, ENEMY_WEAPONS } from "./arsenal.js";
+
 // ---- WEAPONS --------------------------------------------------------------
-// fireMode "projectile" is the only mode in the slice. `auto` = hold to fire.
-// effects apply to whatever a projectile hits. `damage` is instant; `burn` is a
-// damage-over-time status. Every effect declares its `cost` for the budget check.
+// The single weapon library lives in arsenal.js (24 player weapons + enemy
+// weapons, all priced by weaponcost.js). Re-exported here as the id-keyed map
+// the rest of the game looks weapons up in (enemy defs, custom-id collision
+// checks, armory seeding).
 
-export const WEAPONS = {
-  rifle: {
-    id: "rifle",
-    name: "M-7 Rifle",
-    fireMode: "projectile",
-    fireRate: 7, // shots per second
-    auto: true,
-    spread: 0, // radians of random deviation (player weapons are precise)
-    projectile: { speed: 950, w: 12, h: 4, color: "#ffd36a", life: 1.0 },
-    effects: [{ kind: "damage", amount: 12, cost: 12 }],
-    budgetSpent: 12,
-  },
-  pistol: {
-    id: "pistol",
-    name: "Sidearm",
-    fireMode: "projectile",
-    fireRate: 4,
-    auto: false,
-    spread: 0,
-    projectile: { speed: 820, w: 10, h: 4, color: "#ffe08a", life: 0.9 },
-    effects: [{ kind: "damage", amount: 9, cost: 9 }],
-    budgetSpent: 9,
-  },
-  smg: {
-    id: "smg",
-    name: "PDW Compact",
-    fireMode: "projectile",
-    fireRate: 13,
-    auto: true,
-    spread: 0.03,
-    projectile: { speed: 900, w: 9, h: 4, color: "#ffcf5c", life: 0.7 },
-    effects: [{ kind: "damage", amount: 6, cost: 6 }],
-    budgetSpent: 6,
-  },
-
-  // Enemy weapons (slower, telegraphed projectiles the player can dodge).
-  plasma: {
-    id: "plasma",
-    name: "Plasma Caster",
-    fireMode: "projectile",
-    fireRate: 1.1,
-    auto: true,
-    spread: 0.04,
-    projectile: { speed: 460, w: 14, h: 14, color: "#8affc1", life: 2.2 },
-    effects: [{ kind: "damage", amount: 14, cost: 14 }],
-    budgetSpent: 14,
-  },
-};
+export const WEAPONS = Object.fromEntries([...ARSENAL, ...ENEMY_WEAPONS].map((w) => [w.id, w]));
 
 // ---- ENEMIES --------------------------------------------------------------
 // behavior names map to functions in ai.js. contactDamage applies on touch.
@@ -252,10 +208,9 @@ export const MISSIONS = [
 ];
 
 // ---- BLUEPRINTS -----------------------------------------------------------
-// What Dr. Halden can commission in Engineering. Each is a legal weapon JSON
-// composed from primitives, with a credit cost and a build time in days. This
-// is the hand-authored stand-in for the LLM authoring path (Phase 6): the
-// generated weapon will drop into the armory as this exact shape.
+// What Dr. Halden can commission in Engineering. Each references a weapon from
+// the arsenal by id (single source — no drifting inline copies), with a credit
+// cost and a build time in days. Commission clones the weapon into the armory.
 
 export const BLUEPRINTS = [
   {
@@ -264,20 +219,7 @@ export const BLUEPRINTS = [
     prompt: '"A rifle that sets them on fire."',
     cost: 220,
     buildDays: 2,
-    weapon: {
-      id: "incinerator",
-      name: "Incinerator",
-      fireMode: "projectile",
-      fireRate: 5,
-      auto: true,
-      spread: 0.02,
-      projectile: { speed: 820, w: 14, h: 6, color: "#ff8a3a", life: 0.9 },
-      effects: [
-        { kind: "damage", amount: 8, cost: 8 },
-        { kind: "burn", dps: 6, duration: 3, cost: 14 },
-      ],
-      budgetSpent: 22,
-    },
+    weapon: WEAPONS.incinerator,
   },
   {
     id: "bp_railgun",
@@ -285,17 +227,7 @@ export const BLUEPRINTS = [
     prompt: '"One shot, one kill. Make it hit like a truck."',
     cost: 300,
     buildDays: 3,
-    weapon: {
-      id: "railgun",
-      name: "Railgun",
-      fireMode: "projectile",
-      fireRate: 1.6,
-      auto: false,
-      spread: 0,
-      projectile: { speed: 1400, w: 22, h: 5, color: "#7ad7ff", life: 1.2 },
-      effects: [{ kind: "damage", amount: 44, cost: 44 }],
-      budgetSpent: 44,
-    },
+    weapon: WEAPONS.railgun,
   },
 ];
 
