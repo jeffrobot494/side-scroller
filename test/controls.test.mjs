@@ -1,7 +1,8 @@
 // Control mapping (remap + persistence), MissionInput sources (mouse/gamepad),
 // the shared projectile renderer's shape defaulting, and the Controls tool mount.
 import { installDom, makeEl } from "./harness.mjs";
-import { keyBindings, DEFAULT_KEYS, setKeyBinding, resetKeys, bindingsForAction } from "../src/game/controlmap.js";
+import { keyBindings, DEFAULT_KEYS, setKeyBinding, resetKeys, bindingsForAction,
+  padBindings, DEFAULT_PAD, setPadButton, setPadAxis, resetPad, padButtonsForAction } from "../src/game/controlmap.js";
 import { MissionInput } from "../src/mission/input.js";
 import { defaultShape } from "../src/mission/render.js";
 import { createControlsMapper } from "../src/editor/tools/controls-mapper.js";
@@ -23,6 +24,29 @@ export default async function run(t) {
   resetKeys();
   t.ok("reset: back to defaults", JSON.stringify(keyBindings) === JSON.stringify(DEFAULT_KEYS));
   t.ok("reset: persistence cleared", (typeof localStorage !== "undefined") && localStorage.getItem("sidescroller.controls.v1") === null);
+
+  // ---- padBindings defaults + rebind (button + axis) + reset --------------
+  t.ok("pad: default button 0 → jump", padBindings.buttons[0] === "jump");
+  t.ok("pad: default button 7 → fire", padBindings.buttons[7] === "fire");
+  t.ok("pad: default axes", padBindings.moveAxis === 0 && padBindings.aimAxisX === 2 && padBindings.aimAxisY === 3);
+
+  setPadButton(4, "fire");
+  t.ok("pad rebind: button 4 now fires", padBindings.buttons[4] === "fire");
+  t.ok("pad rebind: action's old button (7) cleared", padBindings.buttons[7] === undefined);
+  t.ok("pad rebind: padButtonsForAction reflects it", padButtonsForAction("fire").includes("4"));
+
+  // rebinding a button that drove another action steals it
+  setPadButton(0, "swap");
+  t.ok("pad rebind: button 0 moved from jump to swap", padBindings.buttons[0] === "swap");
+
+  setPadAxis("aimAxisX", 5);
+  t.ok("pad rebind: aimAxisX → 5", padBindings.aimAxisX === 5);
+  setPadAxis("aimAxisX", NaN);
+  t.ok("pad rebind: NaN axis ignored", padBindings.aimAxisX === 5);
+
+  resetPad();
+  t.ok("pad reset: back to defaults", JSON.stringify(padBindings) === JSON.stringify(DEFAULT_PAD));
+  t.ok("pad reset: persistence cleared", (typeof localStorage !== "undefined") && localStorage.getItem("sidescroller.pad.v1") === null);
 
   // ---- MissionInput: keyboard reads live bindings ------------------------
   {
@@ -65,6 +89,14 @@ export default async function run(t) {
       t.ok("gamepad: button 0 → jump held", inp.isDown("jump"));
       t.ok("gamepad: left stick → right", inp.isDown("right"));
       t.ok("gamepad: right stick → aim active", inp.aimStick.active && inp.aimSource("gamepad").type === "stick");
+
+      // Rebind button 0 to swap; the same stubbed press should now drive swap.
+      setPadButton(0, "swap");
+      const inp2 = new MissionInput();
+      inp2.pollGamepad();
+      t.ok("gamepad: rebound button 0 → swap", inp2.isDown("swap") && !inp2.isDown("jump"));
+      resetPad(); // leave global pad state clean for other suites
+
       globalThis.navigator = realNav;
     }
   }

@@ -4,10 +4,10 @@
 // The single source of truth for "which physical input triggers which logical
 // action". Mirrors config.js: a live singleton every input consumer reads, with
 // overrides persisted to localStorage (guarded, so node imports never throw).
-// The editor's Controls tool rebinds keys through setKeyBinding()/resetKeys();
-// the game and Firing Room read `keyBindings` live so a remap applies without a
-// reload. Gamepad bindings are fixed this pass (sensible standard-mapping
-// defaults) — DEFAULT_PAD is data so it's easy to make remappable later.
+// The editor's Controls tool rebinds keys through setKeyBinding()/resetKeys()
+// and the gamepad through setPadButton()/setPadAxis()/resetPad(); the game and
+// Firing Room read `keyBindings`/`padBindings` live so a remap applies without a
+// reload. DEFAULT_PAD holds the standard-mapping defaults padBindings merges over.
 // ---------------------------------------------------------------------------
 
 // Logical actions the action layer understands. `reload` is new (magazine/reload).
@@ -63,44 +63,43 @@ export const DEFAULT_PAD = {
   aimAxisY: 3, // right stick Y → aim
 };
 
-// Read-only human summary of a gamepad button for the tool (which button drives
-// each action). Derived from DEFAULT_PAD so it can't drift.
-export const PAD_LABELS = (() => {
-  const names = { 0: "A", 1: "B", 2: "X", 3: "Y", 7: "R-Trigger", 12: "D-pad ↑", 13: "D-pad ↓", 14: "D-pad ←", 15: "D-pad →" };
-  const byAction = {};
-  for (const [btn, action] of Object.entries(DEFAULT_PAD.buttons)) {
-    (byAction[action] || (byAction[action] = [])).push(names[btn] || `Btn ${btn}`);
-  }
-  byAction.left = (byAction.left || []).concat("L-Stick ←");
-  byAction.right = (byAction.right || []).concat("L-Stick →");
-  return byAction;
-})();
+// Human names for gamepad buttons / axes (W3C "standard" mapping). Exported so
+// the Controls tool can label whatever the live padBindings point at.
+const PAD_BUTTON_NAMES = { 0: "A", 1: "B", 2: "X", 3: "Y", 7: "R-Trigger", 12: "D-pad ↑", 13: "D-pad ↓", 14: "D-pad ←", 15: "D-pad →" };
+export const AXIS_NAMES = { 0: "L-Stick X", 1: "L-Stick Y", 2: "R-Stick X", 3: "R-Stick Y" };
+export function padButtonName(index) {
+  return PAD_BUTTON_NAMES[index] || `Btn ${index}`;
+}
+export function padAxisName(index) {
+  return AXIS_NAMES[index] || `Axis ${index}`;
+}
 
 const STORAGE_KEY = "sidescroller.controls.v1";
+const PAD_STORAGE_KEY = "sidescroller.pad.v1";
 
 // ---- guarded persistence --------------------------------------------------
 
-function readStore() {
+function readStore(key) {
   try {
     if (typeof localStorage === "undefined") return null;
-    return JSON.parse(localStorage.getItem(STORAGE_KEY));
+    return JSON.parse(localStorage.getItem(key));
   } catch {
     return null;
   }
 }
 
-function writeStore(obj) {
+function writeStore(key, obj) {
   try {
     if (typeof localStorage === "undefined") return;
-    if (obj) localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-    else localStorage.removeItem(STORAGE_KEY);
+    if (obj) localStorage.setItem(key, JSON.stringify(obj));
+    else localStorage.removeItem(key);
   } catch {
     /* private mode / unavailable — rebinds just won't persist */
   }
 }
 
 function load() {
-  const saved = readStore();
+  const saved = readStore(STORAGE_KEY);
   // Only accept saved codes that map to a real action; fall back to defaults.
   if (saved && typeof saved === "object") {
     const clean = {};
@@ -116,8 +115,8 @@ export const keyBindings = load();
 
 function persist() {
   // Persist the full map only when it differs from the default; otherwise clear.
-  if (JSON.stringify(keyBindings) === JSON.stringify(DEFAULT_KEYS)) writeStore(null);
-  else writeStore(keyBindings);
+  if (JSON.stringify(keyBindings) === JSON.stringify(DEFAULT_KEYS)) writeStore(STORAGE_KEY, null);
+  else writeStore(STORAGE_KEY, keyBindings);
 }
 
 // Codes currently bound to `action`.
@@ -141,4 +140,73 @@ export function resetKeys() {
   for (const c of Object.keys(keyBindings)) delete keyBindings[c];
   Object.assign(keyBindings, DEFAULT_KEYS);
   persist();
+}
+
+// ---- gamepad bindings -----------------------------------------------------
+// Mirrors the keyboard side: a live singleton (buttons + axis slots) merged over
+// DEFAULT_PAD, persisted to its own storage key. input.js reads it live.
+
+function clonePad(src) {
+  return { buttons: { ...src.buttons }, moveAxis: src.moveAxis, aimAxisX: src.aimAxisX, aimAxisY: src.aimAxisY };
+}
+
+function loadPad() {
+  const pad = clonePad(DEFAULT_PAD);
+  const saved = readStore(PAD_STORAGE_KEY);
+  if (saved && typeof saved === "object") {
+    // Buttons: only accept indices that map to a real action.
+    if (saved.buttons && typeof saved.buttons === "object") {
+      const clean = {};
+      for (const idx in saved.buttons) if (ACTIONS.includes(saved.buttons[idx])) clean[idx] = saved.buttons[idx];
+      if (Object.keys(clean).length) pad.buttons = clean;
+    }
+    // Axis slots: only accept finite numbers.
+    for (const slot of ["moveAxis", "aimAxisX", "aimAxisY"]) {
+      if (Number.isFinite(saved[slot])) pad[slot] = saved[slot];
+    }
+  }
+  return pad;
+}
+
+// The live pad map every input consumer reads. Mutated in place so importers see
+// changes without re-importing.
+export const padBindings = loadPad();
+
+function persistPad() {
+  if (JSON.stringify(padBindings) === JSON.stringify(DEFAULT_PAD)) writeStore(PAD_STORAGE_KEY, null);
+  else writeStore(PAD_STORAGE_KEY, padBindings);
+}
+
+// Button indices currently bound to `action`.
+export function padButtonsForAction(action) {
+  return Object.keys(padBindings.buttons).filter((idx) => padBindings.buttons[idx] === action);
+}
+
+// Rebind: make button `index` the (single) button for `action` — clears the
+// action's other buttons and steals `index` from whatever it drove. Mirrors
+// setKeyBinding so the tool behaves predictably.
+export function setPadButton(index, action) {
+  if (!ACTIONS.includes(action)) return;
+  for (const i of Object.keys(padBindings.buttons)) {
+    if (padBindings.buttons[i] === action || String(i) === String(index)) delete padBindings.buttons[i];
+  }
+  padBindings.buttons[index] = action;
+  persistPad();
+}
+
+// Point an axis slot ("moveAxis" | "aimAxisX" | "aimAxisY") at `axisIndex`.
+export function setPadAxis(slot, axisIndex) {
+  if (slot !== "moveAxis" && slot !== "aimAxisX" && slot !== "aimAxisY") return;
+  if (!Number.isFinite(axisIndex)) return;
+  padBindings[slot] = axisIndex;
+  persistPad();
+}
+
+export function resetPad() {
+  const def = clonePad(DEFAULT_PAD);
+  padBindings.buttons = def.buttons;
+  padBindings.moveAxis = def.moveAxis;
+  padBindings.aimAxisX = def.aimAxisX;
+  padBindings.aimAxisY = def.aimAxisY;
+  persistPad();
 }

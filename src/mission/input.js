@@ -1,10 +1,10 @@
 // Input for the action layer. Folds three sources into one logical action state
-// (held + edge-triggered): remappable keyboard (via controlmap.js), gamepad
-// (fixed standard-mapping defaults, polled each frame), and mouse (position for
+// (held + edge-triggered): remappable keyboard and gamepad (both via
+// controlmap.js — buttons + axes; polled each frame), and mouse (position for
 // aim + left button for fire). The mission scene owns an instance and enables/
 // disables it on enter/exit so handling never leaks into the hub DOM.
 
-import { keyBindings, DEFAULT_PAD } from "../game/controlmap.js";
+import { keyBindings, padBindings } from "../game/controlmap.js";
 import { config } from "../game/config.js";
 
 export class MissionInput {
@@ -100,14 +100,14 @@ export class MissionInput {
     }
 
     const held = {};
-    for (const [idx, action] of Object.entries(DEFAULT_PAD.buttons)) {
+    for (const [idx, action] of Object.entries(padBindings.buttons)) {
       const btn = pad.buttons[idx];
       const on = !!(btn && (btn.pressed || btn.value > 0.5));
       if (on) held[action] = true;
     }
 
     const dz = config.padDeadzone ?? 0.25;
-    const mx = pad.axes[DEFAULT_PAD.moveAxis] || 0;
+    const mx = pad.axes[padBindings.moveAxis] || 0;
     if (mx > dz) held.right = true;
     else if (mx < -dz) held.left = true;
 
@@ -117,8 +117,8 @@ export class MissionInput {
     this.padActions = held;
 
     // Right stick → aim vector (past the deadzone).
-    const ax = pad.axes[DEFAULT_PAD.aimAxisX] || 0;
-    const ay = pad.axes[DEFAULT_PAD.aimAxisY] || 0;
+    const ax = pad.axes[padBindings.aimAxisX] || 0;
+    const ay = pad.axes[padBindings.aimAxisY] || 0;
     if (Math.hypot(ax, ay) >= dz) {
       this.aimStick.x = ax;
       this.aimStick.y = ay;
