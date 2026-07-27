@@ -147,16 +147,15 @@ attacks the three real gaps.
   nearest-first. This retires `firstLiving`/`player(scene)` and **fixes the
   squad-fixation bug** — enemies now target the nearest soldier, not
   `soldiers[0]`. Covered by `test/enemyspec-targeting.test.mjs`.
-- **Deferred (its own task):** actually routing companions through the spec
-  runtime. Companions are `Soldier` objects, not spec entity-trees, and there is
-  no companion brain to run yet, so wiring it now would be dead/speculative code.
-  This carries with it anchor-sense (`sense.anchorX/Y/Dist` = the leader, so a
-  brain can express "stay near the leader"), a default companion spec that
-  reproduces today's `updateCompanion`, and the Enemy Designer allegiance toggle.
-  `updateCompanion` stays the companion behavior until then — nothing regresses.
+- **Deferred (tracked separately):** actually routing companions through the
+  agent brain. Companions are `Soldier` objects, not spec entity-trees, and the
+  clean way to unify them with enemies is a brain/body split — the brain emits
+  body-agnostic intents, a per-body locomotor actuates them. That refactor has
+  its own plan in **`docs/LOCOMOTOR-REFACTOR.md`** (its Slice L3 is where
+  companions join the shared brain). Until then `updateCompanion` stays the
+  companion behavior — nothing regresses.
 - Net: the *targeting* half of the brain is now allegiance-agnostic and the real
-  bug is fixed; the *companion-as-agent* half waits for a brain worth running
-  (Slices 1–3) so it can be built and tested against something real.
+  bug is fixed; the *companion-as-agent* half is gated on the locomotor refactor.
 
 **Slice 1 — Build the Behavior Lab** (observability + time control + levers +
 metrics). Ships the scoreboard/LOS/sense overlays and frame-step. Everything
