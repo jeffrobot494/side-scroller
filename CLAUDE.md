@@ -21,15 +21,15 @@ section + the tests are the source of truth for what currently exists):
   range: fire any weapon at respawning dummies OR waves of real enemies — an
   Aim slider + auto-fire/manual drive), Controls (rebind keys). Settings tab is
   schema-driven config; the **Sound tab** is the mixer + the cue bank.
-- **Sound (Slice 1 of `docs/SOUND.md`):** `src/audio/` — a cue catalog
+- **Sound (Slices 1–3 of `docs/SOUND.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
   overrides in localStorage), and the WebAudio engine (`engine.js`: buses, voice
   pool, pan + distance falloff, gesture unlock). The whole game triggers through
   ONE hook, `scene.sound(cueId, {x, y})`, installed by the Mission and the Firing
   Room; unset headlessly, so tests stay silent and unchanged. Cue ids resolve up
-  the dots (`weapon.fire.pellet` → `weapon.fire` → silence), which is how Slices
-  2–3 will add per-weapon / per-EnemySpec sounds without touching call sites.
+  the dots (`weapon.fire.pellet` → `weapon.fire` → silence), which is how the
+  per-weapon / per-EnemySpec layers below attach without touching call sites.
   Sounds today are made-up beeps; real clips slot into the same cues (Slice 4).
   **Slice 2 (per-weapon):** `weaponSound(weapon, kind, team) → { cue, gain }` in
   `audio/cues.js` is the ONE place that picks a weapon's cue and level
@@ -44,7 +44,14 @@ section + the tests are the source of truth for what currently exists):
   `editor/sound-picker.js`) has a cue picker + `×` level slider per slot, and
   writes sparsely — gain 1 stays a plain string, no assignment writes no key.
   Caveat: the Designer cannot load a built-in weapon, so rebalancing the arsenal
-  means Copy JSON → paste into `arsenal.js`.
+  means Copy JSON → paste into `arsenal.js` (rework planned in
+  `docs/WEAPON-DESIGNER.md`).
+  **Slice 3 (per-enemy):** an EnemySpec carries `sounds: { fire, hurt, death,
+  part }` (same slot shape; `specSound()`), an emitter carries `sound`
+  (`emitterSound()`, overriding the spec's `fire`), and `sound` is an action in
+  the `ACTIONS` table for bespoke moments — additive on top of the defaults.
+  Cue ids are validated against the catalog and listed in `vocabularyDoc()` so
+  the LLM can assign them without inventing names.
 - **Weapon effects:** a 9-kind library (damage/burn/slow/knockback/explode/chain
   + pellets/pierce/homing) priced by `weaponcost.js`; a 24-weapon `arsenal.js`;
   combat resolved in the shared `mission/combat.js`. Weapons also carry
@@ -71,6 +78,10 @@ section + the tests are the source of truth for what currently exists):
   Room** spawns saved specs as waves. Plan: `docs/enemy_creation_system_plan.md`.
   NOT yet wired into missions/levelgen — the legacy 3-archetype enemies still
   drive gameplay; that integration is a deliberate later task.
+  **Known issue:** `on.spawn` handlers run from `instantiate()`, which has no
+  scene, so `fire`/`spawn`/`sound` there are silently skipped (they used to
+  crash). Fix = defer the spawn event to the first update; see "Known issues" in
+  `docs/SOUND.md`.
 - **Player2 is partially wired:** the Enemy Designer's Generate button uses
   `src/player2/client.js` chat completions (needs the app + a client id in the
   config `player2GameClientId`). Image gen and the rest remain unused — still

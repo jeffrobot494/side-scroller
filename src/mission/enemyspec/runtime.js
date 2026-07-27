@@ -22,6 +22,7 @@
 import { stepActor, overlaps, Projectile } from "../entities.js";
 import { tickBrain } from "./brain.js";
 import { updateSense } from "./perception.js";
+import { specSound, emitterSound } from "../../audio/cues.js";
 
 const WALL_EPS = 4;
 
@@ -131,6 +132,7 @@ export function makeTrackStates(state) {
 
 export function updateSpecEnemy(root, dt, scene, ctx) {
   if (!root.alive) return;
+  cacheHost(root, scene, ctx);
   root.age += dt;
   updateSense(root, scene, dt);
   tickBrain(root, dt, scene, ctx);
@@ -493,17 +495,22 @@ function allAlive(root) {
 
 export function applyDamage(root, ent, amount, owner, scene, ctx) {
   if (!ent.alive || ent.disabled || ent.health === null) return;
+  cacheHost(root, scene, ctx);
   ent.health -= amount;
   ent.hitFlash = 0.12;
   fireEvent(root, ent, "damage", { amount });
   if (ent.health <= 0) killEntity(root, ent, owner, scene, ctx);
-  else if (amount > 0) scene.sound && scene.sound("enemy.hurt", { x: cx(ent), y: cy(ent) });
+  else if (amount > 0 && scene.sound) {
+    const hurt = specSound(root.specTop, "hurt");
+    scene.sound(hurt.cue, { x: cx(ent), y: cy(ent), gain: hurt.gain });
+  }
 }
 
 // Death cascade: own destroy event → link policy for children → parent
 // childDestroyed. Killing the root kills the whole tree (spawned entities live
 // on — a dying boss's missiles don't vanish mid-air).
 export function killEntity(root, ent, owner, scene, ctx) {
+  cacheHost(root, scene, ctx);
   if (!ent.alive) return;
   ent.alive = false;
   fireEvent(root, ent, "destroy", { owner });
@@ -536,7 +543,10 @@ export function killEntity(root, ent, owner, scene, ctx) {
   // Root deaths are announced by the mission's own root-death polling (which
   // also owns kill credit + loot); here we only voice destructible PARTS, so a
   // dying enemy isn't double-reported.
-  if (!ent.isRoot && ent.maxHealth) scene.sound && scene.sound("enemy.part", { x: cx(ent), y: cy(ent) });
+  if (!ent.isRoot && ent.maxHealth && scene.sound) {
+    const part = specSound(root.specTop, "part");
+    scene.sound(part.cue, { x: cx(ent), y: cy(ent), gain: part.gain });
+  }
 }
 
 function removeSilently(ent) {
@@ -552,6 +562,19 @@ function detachChild(root, ent) {
 }
 
 // ---- events + signals -----------------------------------------------------
+
+// Event handlers and signal handlers run OUTSIDE the normal step pump, so they
+// read the host off the root rather than taking it as an argument. Refresh that
+// cache at every entry point that has a host — previously only execStep did, so
+// an `on: { damage: [...] }` handler silently no-opped on any enemy whose brain
+// had not yet run a step (motion-only enemies never ran one at all).
+//
+// `instantiate` still fires `on.spawn` with no host — there genuinely isn't one
+// yet — so scene-touching actions there are skipped, not crashed.
+function cacheHost(root, scene, ctx) {
+  if (scene) root._scene = scene;
+  if (ctx) root._ctx = ctx;
+}
 
 export function fireEvent(root, ent, name, payload) {
   const steps = ent.spec.on && ent.spec.on[name];
@@ -637,6 +660,19 @@ export function execStep(root, self, step, scene, ctx) {
     case "fire":
       doFire(root, self, args, scene, ctx);
       return null;
+    case "sound": {
+      const id = typeof args === "string" ? args : args && args.id;
+      // `scene` is undefined for on.spawn handlers (instantiate fires them
+      // before any scene exists), so guard it like every other call site.
+      if (id && scene && scene.sound) {
+        scene.sound(id, {
+          x: cx(self), y: cy(self),
+          gain: (args && args.gain) ?? 1,
+          pitch: (args && args.pitch) ?? 1,
+        });
+      }
+      return null;
+    }
     case "spawn": {
       const count = args.count || 1;
       const speed = args.speed || 200;
@@ -739,8 +775,10 @@ function doFire(root, self, args, scene, ctx) {
   owner.muzzleFlash = 0.055;
   owner.muzzleColor = def.projectile ? def.projectile.color : "#ff8a5a";
   // One cue per fire ACTION, not per angle — a 9-shot fan is one report.
-  // `def.sound` is the Slice 3 per-emitter override.
-  scene.sound && scene.sound(def.sound || "weapon.fire.enemy", { x: ox, y: oy });
+  if (scene.sound) {
+    const shot = emitterSound(root.specTop, def);
+    scene.sound(shot.cue, { x: ox, y: oy, gain: shot.gain });
+  }
 }
 
 function resolveEmitter(root, self, ref) {

@@ -55,6 +55,9 @@ const LURK_GUNNER = {
 
 const SPORE_WISP = {
   v: 1, id: "spore_wisp", name: "Spore Wisp", threat: 65, role: "skirmisher", tier: 1, intelligence: 2,
+  // A drifting sac lobbing spores — lighter than the ground troops, and a soft
+  // hiss rather than the generic enemy report.
+  sounds: { fire: { cue: "weapon.fire.wave", gain: 0.8 }, hurt: { gain: 0.75 }, death: { gain: 0.8 } },
   root: {
     id: "root", tags: ["enemy", "flying"],
     visual: { shape: "ellipse", size: [36, 24], color: "#5ac8e0" },
@@ -78,6 +81,7 @@ const SPORE_WISP = {
 
 const STRAFE_RAIDER = {
   v: 1, id: "strafe_raider", name: "Strafe Raider", threat: 85, role: "skirmisher", tier: 2, intelligence: 2,
+  sounds: { hurt: { gain: 0.8 }, death: { gain: 0.85 } },
   root: {
     id: "root", tags: ["enemy", "flying"],
     visual: { shape: "diamond", size: [34, 20], color: "#e0975a" },
@@ -105,6 +109,7 @@ const STRAFE_RAIDER = {
 
 const COWARD_DUELIST = {
   v: 1, id: "cowardly_duelist", name: "Cowardly Duelist", threat: 110, role: "elite", tier: 2, intelligence: 4,
+  sounds: { hurt: { gain: 1.1 }, death: { gain: 1.25 } },
   root: {
     id: "root", tags: ["enemy"],
     visual: { shape: "box", size: [26, 44], color: "#e0b95a" },
@@ -131,6 +136,7 @@ const COWARD_DUELIST = {
 
 const SKY_DUELIST = {
   v: 1, id: "sky_duelist", name: "Sky Duelist", threat: 120, role: "elite", tier: 2, intelligence: 4,
+  sounds: { hurt: { gain: 1.1 }, death: { gain: 1.25 } },
   root: {
     id: "root", tags: ["enemy", "flying"],
     visual: { shape: "ellipse", size: [40, 26], color: "#5ad0b8" },

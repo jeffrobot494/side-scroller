@@ -1,6 +1,6 @@
 # Sound — system design & slice plan
 
-Status: Slices 1–2 built. Slices 3–4 designed, unbuilt. Build in slices; each is
+Status: Slices 1–3 built. Slice 4 designed, unbuilt. Build in slices; each is
 independently usable and leaves the game shippable. Refine as we go.
 
 Today the game is silent. The target is a small, data-driven audio layer that
@@ -199,6 +199,60 @@ in-editor candidates. Note that Player2 offers `/music/generate_job` for music b
 **no sound-effect endpoint** — procedural synth is not a placeholder for SFX, it
 is the plan until clips are sourced by hand.
 
+## Gotchas found the hard way
+
+Each of these cost a debugging session. They are not obvious from the code.
+
+- **A `wave: "noise"` cue ignores `freq`/`freqEnd`.** `filterHz` is its only
+  pitch control (see above). The Sound page greys the dead sliders out.
+- **`play()` must stand the context up itself.** Relying on `armUnlock`'s
+  listener was a real bug: the editor's `audition()` always called `unlock()`
+  directly, so the Sound tab worked while the whole game stayed silent. Any new
+  entry point that makes noise needs the same self-unlock.
+- **Changing a cue's `filterHz` changes its level too.** A steeper filter removes
+  energy; revisit `gain` after any cutoff move on a noise cue.
+- **EnemySpec `on.spawn` handlers have no host.** `instantiate()` fires them
+  before a scene exists, so `sound` (and `fire`, and `spawn`) are skipped there.
+  This is an OPEN limitation, not a fix — see "Known issues" below.
+- **Event handlers read the host cached on the root**, refreshed by `cacheHost()`
+  in `updateSpecEnemy`/`applyDamage`/`killEntity`. Before Slice 3 only `execStep`
+  cached it, so `on: { damage: [...] }` silently no-opped on any enemy whose
+  brain had not yet run a step — a motion-only enemy never fired one at all.
+
+## Known issues (open)
+
+- **`on.spawn` cannot run scene-touching actions.** `instantiate(nspec, x, y)`
+  takes no scene, so `fire`/`spawn`/`sound` in an `on.spawn` handler are skipped.
+  Before Slice 3 they *crashed* (`Cannot read properties of undefined (reading
+  'soldiers')`); they now fail safe. An LLM-generated enemy could plausibly emit
+  one. The real fix is to defer the spawn event to the first `updateSpecEnemy`,
+  which has a host — deliberately not done yet because it shifts when `on.spawn`
+  side effects land, which could change existing enemy behaviour.
+
+## Testing audio headlessly
+
+`renderSynth` is pure, so waveform/envelope/filter behaviour is tested directly.
+For the engine, `test/audio.test.mjs` installs a **mock `AudioContext`** on
+`window` and drives the real playback path — self-unlock, suspended-context
+resume, cue cooldowns, distance falloff, voice caps. That works only because
+`engine.js` looks the constructor up **lazily** instead of capturing it at module
+load; keep it that way. The mock block runs last in the suite because the context
+it installs stays live for the rest of the run.
+
+To check what the game actually emits, drive the real `Mission`/spec runtime with
+a `scene.sound` spy that records `[cue, opts]` — that is how both Slice 3 runtime
+bugs were caught, and it is far more reliable than reasoning about call sites.
+
+## Adding a new cue
+
+1. Add it to `CUES` in `src/audio/cues.js` (id, label, bus, help).
+2. Add a matching entry to `DEFAULT_BANK` in `bank.js` — the test suite asserts
+   both directions, so a catalogued cue with no entry (or vice versa) fails.
+3. Trigger it via `scene.sound(id, { x, y, gain })`, guarded with
+   `scene.sound && …` so headless callers stay silent.
+4. Dotted ids resolve upward, so `foo.bar.baz` needs no entry of its own if
+   `foo.bar` exists — that is how per-shape and per-team variants attach.
+
 ## Slices
 
 **Slice 1 — engine, bank, and the core cues.** *(built)*
@@ -219,9 +273,18 @@ the identical control and the identical vocabulary. Assignments are stored
 sparsely — an untouched weapon exports no `sounds` block at all — and cost no
 budget, like `magazine` and `shape`.
 
-**Slice 3 — enemies.** A `sound` action in the EnemySpec `ACTIONS` table plus
-`emitters[].sound`; validator and normalizer support; a picker in the Enemy
-Designer; the cue catalog exposed through `vocabularyDoc()` for the LLM.
+**Slice 3 — enemies.** *(built)*
+Top-level `sounds: { fire, hurt, death, part }` on an EnemySpec (same slot shape
+as a weapon, resolved by `specSound()`), per-emitter `sound` overriding the spec's
+`fire` slot (`emitterSound()`), and a `sound` action in `ACTIONS` for moments the
+slots do not cover. The validator checks every cue id against the catalog — an
+invented id resolves to silence, the one failure an author or the LLM would never
+notice. `vocabularyDoc()` now lists the closed cue set and the action, so a
+generated enemy can assign sounds without inventing names. The Enemy Designer
+gets the same picker + `×` level rows as the Weapon Designer, and its live
+preview installs `scene.sound`, so an enemy can be auditioned in motion. Four of
+the six built-in specs carry gain-only overrides so a wisp does not land as hard
+as an elite duelist.
 
 **Slice 4 — real clips.** `manifest.js` + a loader that prefers `src` over
 `synth`; an in-editor drop zone with IndexedDB candidates and an audition-in-

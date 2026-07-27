@@ -149,19 +149,62 @@ function derivedCue(weapon, kind, team) {
 }
 
 /**
+ * Normalise one authored slot against the cue it falls back to. Shared by
+ * weapons and EnemySpec enemies so both accept the identical shape:
+ *   "cue.id"  |  { cue?, gain? }  |  absent
+ */
+export function resolveSlot(slot, fallbackCue) {
+  if (typeof slot === "string" && slot) return { cue: slot, gain: 1 };
+  if (slot && typeof slot === "object")
+    return { cue: slot.cue || fallbackCue, gain: coerceGain(slot.gain ?? 1) };
+  return { cue: fallbackCue, gain: 1 };
+}
+
+/**
  * Resolve one of a weapon's sound slots.
  * @returns {{ cue: string|null, gain: number }} — cue is null only for an
  *   unknown `kind`; gain is always a usable multiplier (defaults to 1).
  */
 export function weaponSound(weapon, kind, team = "player") {
-  const slot = weapon && weapon.sounds && weapon.sounds[kind];
   const derived = derivedCue(weapon, kind, team);
   if (!derived) return { cue: null, gain: 1 };
+  return resolveSlot(weapon && weapon.sounds && weapon.sounds[kind], derived);
+}
 
-  if (typeof slot === "string" && slot) return { cue: slot, gain: 1 };
-  if (slot && typeof slot === "object")
-    return { cue: slot.cue || derived, gain: coerceGain(slot.gain ?? 1) };
-  return { cue: derived, gain: 1 };
+// ---- EnemySpec resolution --------------------------------------------------
+// An enemy's voice, in the same slot shape as a weapon's. Every slot has an
+// engine default, so an unauthored enemy still sounds like something — the same
+// always-playable rule that governs art and generated content.
+//
+// `fire` is the fallback for ALL of a spec's emitters; an individual emitter can
+// override it with its own `sound` (a boss's cannon vs. its chaff gun).
+export const SPEC_SOUND_KINDS = ["fire", "hurt", "death", "part"];
+
+const SPEC_KIND_BASE = {
+  fire: "weapon.fire.enemy",
+  hurt: "enemy.hurt",
+  death: "enemy.death",
+  part: "enemy.part",
+};
+
+/** @param spec the TOP-LEVEL EnemySpec (root.specTop at runtime), not an entity. */
+export function specSound(spec, kind) {
+  const base = SPEC_KIND_BASE[kind];
+  if (!base) return { cue: null, gain: 1 };
+  return resolveSlot(spec && spec.sounds && spec.sounds[kind], base);
+}
+
+/**
+ * The cue an emitter fires with: its own `sound`, else the spec's `fire` slot,
+ * else the generic enemy shot. An emitter's gain REPLACES the spec-level gain
+ * rather than compounding with it — two multipliers on one shot is impossible
+ * to reason about while tuning.
+ */
+export function emitterSound(spec, emitterDef) {
+  const specFire = specSound(spec, "fire");
+  const slot = emitterDef && emitterDef.sound;
+  if (slot === undefined || slot === null) return specFire;
+  return resolveSlot(slot, specFire.cue);
 }
 
 /** Just the cue id — the common case, and what the designer's hint shows. */

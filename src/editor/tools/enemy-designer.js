@@ -20,6 +20,15 @@
 // ---------------------------------------------------------------------------
 
 import { ROLES, VISUAL_SHAPES, MOTIONS } from "../../game/enemyspec/schema.js";
+
+// The spec-level sound slots. Every one has an engine default, so this section
+// is entirely optional — an enemy with no `sounds` block still sounds right.
+const SOUND_ROWS = [
+  { kind: "fire", label: "Shot", help: "Default for every emitter. A single emitter can still override it in the JSON below." },
+  { kind: "hurt", label: "Hurt", help: "Damaged but not killed. Throttled hard — hits are frequent." },
+  { kind: "death", label: "Destroyed", help: "The enemy (the root) dies." },
+  { kind: "part", label: "Part destroyed", help: "A destructible child part breaks off." },
+];
 import { validateSpec } from "../../game/enemyspec/validate.js";
 import { normalizeSpec } from "../../game/enemyspec/normalize.js";
 import { TEMPLATES, TEMPLATE_BY_ID } from "../../game/enemyspec/templates.js";
@@ -27,6 +36,9 @@ import { generateEnemySpec, accept } from "../../game/enemyspec/generate.js";
 import { listEnemySpecs, saveEnemySpec, deleteEnemySpec } from "../../game/customcontent.js";
 import { instantiate, updateSpecEnemy, applyDamage, collidables } from "../../mission/enemyspec/runtime.js";
 import { drawSpecEnemy } from "../../mission/enemyspec/render.js";
+import { cuePickerRowHTML, auditionCue, fmtGain } from "../sound-picker.js";
+import { audio } from "../../audio/engine.js";
+import { specSound, SPEC_SOUND_KINDS } from "../../audio/cues.js";
 import { updateProjectiles, updateStatuses } from "../../mission/combat.js";
 import { drawProjectile } from "../../mission/render.js";
 import { Player2Client } from "../../player2/client.js";
@@ -113,6 +125,9 @@ export function createEnemyDesigner(container, onBack) {
     burn: null, slow: null, crouched: false,
   };
   const scene = {
+    // Same hook the mission and Firing Room install (docs/SOUND.md), so the
+    // preview plays the enemy's authored voice as it moves and fires.
+    sound: (cue, opts) => audio.play(cue, opts),
     world: { width: WORLD_W, height: WORLD_H, gravity: 2000 },
     platforms: [
       { x: 0, y: GROUND_Y, w: WORLD_W, h: 60 },
@@ -251,14 +266,56 @@ export function createEnemyDesigner(container, onBack) {
              <div class="cfg-control"><button class="btn btn-alt" data-es="addgun">+ Add basic gun</button></div>
            </div>`}
 
+      <h3 class="wd-h">Sound</h3>
+      <p class="wd-saved-note">
+        Every slot has an engine default, so leaving these on <strong>Auto</strong> is fine — this is for
+        giving one enemy its own voice. The <strong>×</strong> slider sets this enemy's level for that cue.
+        For sounds at a specific moment (a telegraph, a phase change) use the <code>sound</code> action in
+        the JSON below instead.
+      </p>
+      <div id="es-sounds"></div>
+
       <h3 class="wd-h">Full spec (authoritative)</h3>
       <p class="wd-saved-note">Parts, brains, emitters, events, utility actions — everything lives here. Edits apply once they parse; errors list below.</p>
       <textarea id="es-json" class="ed-json wd-json es-json" spellcheck="false"></textarea>
       <ul class="es-errors" id="es-errors"></ul>`;
 
+    const host = $("#es-sounds");
+    if (host) {
+      host.innerHTML = SOUND_ROWS.map((r) =>
+        cuePickerRowHTML({
+          ...r,
+          value: slotCue(r.kind),
+          gain: specSound(spec, r.kind).gain,
+          resolved: specSound({}, r.kind).cue,
+        })
+      ).join("");
+    }
+
     const ta = $("#es-json");
     if (ta) ta.value = JSON.stringify(spec, null, 2);
     renderErrors();
+  }
+
+  // The explicitly ASSIGNED cue ("" = Auto), which is what the select shows.
+  function slotCue(kind) {
+    const slot = spec.sounds && spec.sounds[kind];
+    if (typeof slot === "string") return slot;
+    return (slot && slot.cue) || "";
+  }
+
+  // Stored sparsely so an untouched enemy exports no `sounds` block, and a
+  // cue-only choice stays a plain string.
+  function writeSlot(kind, cue, gain) {
+    if (!SPEC_SOUND_KINDS.includes(kind)) return;
+    const sounds = spec.sounds || (spec.sounds = {});
+    if (gain === 1) {
+      if (cue) sounds[kind] = cue;
+      else delete sounds[kind];
+    } else {
+      sounds[kind] = cue ? { cue, gain } : { gain };
+    }
+    if (!Object.keys(sounds).length) delete spec.sounds;
   }
 
   function gunOf() {
@@ -432,6 +489,15 @@ export function createEnemyDesigner(container, onBack) {
       jsonTimer = setTimeout(() => applyJson(t.value), 400);
       return;
     }
+    if (t.dataset.cueGain !== undefined) {
+      const kind = t.dataset.cueGain;
+      const g = Number(t.value);
+      writeSlot(kind, slotCue(kind), g);
+      const out = container.querySelector(`[data-cue-gain-out="${kind}"]`);
+      if (out) out.textContent = fmtGain(g);
+      refresh({ rebuildForm: false, rewriteJson: true });
+      return;
+    }
     if (t.dataset.esf) {
       applyFormField(t.dataset.esf, t.value);
       const out = container.querySelector(`[data-val-for="${t.dataset.esf}"]`);
@@ -442,6 +508,11 @@ export function createEnemyDesigner(container, onBack) {
 
   container.addEventListener("change", (e) => {
     const t = e.target;
+    if (t.dataset.cue !== undefined) {
+      writeSlot(t.dataset.cue, t.value, specSound(spec, t.dataset.cue).gain);
+      refresh({ rebuildForm: true, rewriteJson: true });
+      return;
+    }
     if (t.dataset.esf) {
       applyFormField(t.dataset.esf, t.value);
       refresh({ rebuildForm: true, rewriteJson: true });
@@ -452,6 +523,12 @@ export function createEnemyDesigner(container, onBack) {
   });
 
   container.addEventListener("click", (e) => {
+    const pick = e.target.closest("[data-cue-play]");
+    if (pick) {
+      const slot = specSound(spec, pick.dataset.cuePlay);
+      auditionCue(slot.cue, slot.gain);
+      return;
+    }
     const el = e.target.closest("[data-es]");
     if (!el) return;
     switch (el.dataset.es) {

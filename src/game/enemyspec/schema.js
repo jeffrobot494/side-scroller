@@ -17,13 +17,15 @@
 //              { enter, actions, decisionInterval, transitions } (utility mode)
 // ---------------------------------------------------------------------------
 
+import { CUE_IDS } from "../../audio/cues.js";
+
 export const SPEC_VERSION = 1;
 
 // Top-level EnemySpec keys. threat/role/tier are the explicit placement metadata
 // (enemycost.js reads `threat` directly when present). `intelligence` (1–5)
 // rates HOW SMART the behavior is — separate from threat, which prices how
 // DANGEROUS it is (see the rubric in vocabularyDoc; smarter ≠ harder).
-export const SPEC_KEYS = ["v", "id", "name", "threat", "role", "tier", "intelligence", "limits", "vars", "defs", "root", "brain"];
+export const SPEC_KEYS = ["v", "id", "name", "threat", "role", "tier", "intelligence", "limits", "vars", "defs", "root", "brain", "sounds"];
 
 // Tactical roles — used by the Designer, the LLM prompt, and (later) placement.
 export const ROLES = ["fodder", "charger", "skirmisher", "artillery", "tank", "support", "elite", "boss"];
@@ -74,6 +76,7 @@ export const ACTIONS = {
   add:       { blocking: false }, // { add: { target, value } }
   mul:       { blocking: false }, // { mul: { target, value } }
   signal:    { blocking: false }, // { signal: "name" } or { signal: { name } }
+  sound:     { blocking: false }, // { sound: "cue.id" } or { sound: { id, gain?, pitch? } }
   destroy:   { blocking: false }, // { destroy: { target?: "self"|<entityId> } }
   detach:    { blocking: false }, // { detach: { target?: "self"|<entityId> } }
   enable:    { blocking: false }, // { enable: { target } }  (un-disable an entity)
@@ -153,14 +156,17 @@ export function vocabularyDoc() {
     `  health: { max } — omit for indestructible decoration; root MUST have health`,
     `  motion: one of ${Object.keys(MOTIONS).join(", ")} with params, e.g. ${JSON.stringify({ type: "keepDistance", ...MOTIONS.keepDistance.params })}`,
     `  contact: { damage, destroySelf?, knockback? } — touch damage to the player`,
-    `  emitters: { <name>: { at:[dx,dy], ref:"<defId>" | projectile:{ speed,w,h,color,life,damage,effects? } } }`,
+    `  emitters: { <name>: { at:[dx,dy], ref:"<defId>" | projectile:{ speed,w,h,color,life,damage,effects? }, sound?: "<cueId>"|{cue,gain} } }`,
     `  children: [entities], at: [dx,dy] offset from parent`,
     `  on: { ${EVENTS.join("|")}|${SIGNAL_PREFIX}<name>: [actions] }`,
     `  life: { ttl: seconds }, vars: {}, link: { onParentDeath|onOwnDeath: ${LINK_POLICIES.join("|")}, transformTo? }`,
     `Brain: { mode: "tracks"|"utility", start: "<stateId>", states: { <id>: state } }`,
     `  tracks state: { enter:[actions], tracks:[{ id, loop, steps:[actions] }], transitions:[{ when:"expr"|event:"<signal>", to:"<stateId>" }] }`,
     `  utility state: { actions:[{ id, when?:"expr", score:"expr"|number, windup?, steps:[actions], recovery?, cooldown? }], decisionInterval? }`,
+    `Top-level sounds (all optional; every one has an engine default so an enemy with no sounds block still sounds right): { fire, hurt, death, part } — each "<cueId>" or { cue?, gain? } where gain is 0-2. \`fire\` is the default for every emitter; an emitter's own \`sound\` beats it.`,
     `Actions (one key per step, named args): ${Object.keys(ACTIONS).join(", ")}.`,
+    `  sound: { id: "<cueId>", gain?: 0-2, pitch?: >0 } (or just { sound: "<cueId>" }) — plays a cue at the entity. Use it for moments the defaults do not cover: a telegraph, a phase change, a signal handler. Do NOT use it for plain hurt/death; those already sound via the top-level slots and would double up.`,
+    `Sound cue ids (the closed set — never invent one): ${CUE_IDS.join(", ")}.`,
     `  Blocking (occupy the track for a duration): wait, telegraph, moveTo, dash. Every looping track needs at least one.`,
     `  moveTo/dash targets: "player", "parent", "spawn", "lastSeen" (where the player was last visible), or at:[x,y]. Optional offset:[along,up] — along is on the line toward the target (positive = a point PAST it → fly-through strafing passes; negative = standoff short of it), up is vertical (negative = above). e.g. { moveTo: { target:"player", offset:[-260,-140], speed:260 } } = a firing perch above and short of the player; { moveTo: { target:"player", offset:[240,0], speed:420 } } = a strafing pass through them.`,
     `  fire: { emitter: "<name>" or "<childId>.<name>", count, pattern: ${PATTERNS.join("|")}, spreadDeg, aim: ${AIM_STYLES.join("|")} }`,

@@ -19,6 +19,29 @@ import {
   RANGES, MAX_TREE_DEPTH, MAX_ENTITIES,
 } from "./schema.js";
 import { parseExpr } from "./expr.js";
+import { CUE_IDS, SPEC_SOUND_KINDS } from "../../audio/cues.js";
+
+// A sound slot: "cue.id" or { cue?, gain? }. Shared by the top-level `sounds`
+// block and an emitter's `sound`. Cue ids are validated against the catalog —
+// an invented id would resolve to silence, and silence is the one failure the
+// author (or the LLM) would never notice.
+function checkSoundSlot(err, slot, path) {
+  if (slot === undefined || slot === null) return;
+  const id = typeof slot === "string" ? slot : slot && typeof slot === "object" ? slot.cue : null;
+  if (typeof slot !== "string" && (typeof slot !== "object" || Array.isArray(slot))) {
+    err(path, 'sound must be a cue id string or { cue?, gain? }');
+    return;
+  }
+  if (id !== undefined && id !== null && !CUE_IDS.includes(id)) {
+    err(`${path}${typeof slot === "string" ? "" : ".cue"}`, `unknown sound cue '${id}'`);
+  }
+  if (typeof slot === "object") {
+    if (slot.cue === undefined && slot.gain === undefined) err(path, "sound needs a cue and/or a gain");
+    if (slot.gain !== undefined && (typeof slot.gain !== "number" || slot.gain < 0 || slot.gain > 2)) {
+      err(`${path}.gain`, "gain must be a number 0-2");
+    }
+  }
+}
 
 export function validateSpec(spec) {
   const errors = [];
@@ -38,6 +61,16 @@ export function validateSpec(spec) {
   checkRange(err, "threat", spec.threat, RANGES.threat);
   checkRange(err, "tier", spec.tier, RANGES.tier);
   checkRange(err, "intelligence", spec.intelligence, RANGES.intelligence);
+  if (spec.sounds !== undefined) {
+    if (!spec.sounds || typeof spec.sounds !== "object" || Array.isArray(spec.sounds)) {
+      err("sounds", "sounds must be an object");
+    } else {
+      for (const [kind, slot] of Object.entries(spec.sounds)) {
+        if (!SPEC_SOUND_KINDS.includes(kind)) err(`sounds.${kind}`, `unknown sound slot '${kind}' (have: ${SPEC_SOUND_KINDS.join(", ")})`);
+        else checkSoundSlot(err, slot, `sounds.${kind}`);
+      }
+    }
+  }
   if (!spec.root || typeof spec.root !== "object") return { ok: false, errors };
   if (!spec.root.health || typeof spec.root.health.max !== "number") {
     err("root.health", "root must have health: { max } (the enemy must be killable)");
@@ -127,6 +160,7 @@ function checkEntity(err, e, path, refs) {
       if (!em || typeof em !== "object") { err(p, "emitter must be an object"); continue; }
       if (em.ref !== undefined && !refs.defIds.has(em.ref)) err(`${p}.ref`, `emitter ref '${em.ref}' not found in defs`);
       if (!em.ref && !em.projectile) err(p, "emitter needs either ref (a def) or projectile ({ speed, damage, … })");
+      checkSoundSlot(err, em.sound, `${p}.sound`);
       if (em.projectile) {
         checkRange(err, `${p}.projectile.speed`, em.projectile.speed, RANGES["projectile.speed"]);
         checkRange(err, `${p}.projectile.life`, em.projectile.life, RANGES["projectile.life"]);
@@ -282,6 +316,16 @@ function checkAction(err, name, args, path, refs, owner) {
     case "signal": {
       const s = typeof args === "string" ? args : args && args.name;
       if (!s) err(path, "signal needs a name");
+      break;
+    }
+    case "sound": {
+      const id = typeof args === "string" ? args : args && args.id;
+      if (!id) { err(path, 'sound needs a cue id — { sound: "enemy.hurt" } or { sound: { id } }'); break; }
+      if (!CUE_IDS.includes(id)) err(typeof args === "string" ? path : `${path}.id`, `unknown sound cue '${id}'`);
+      if (args && typeof args === "object") {
+        if (args.gain !== undefined && (typeof args.gain !== "number" || args.gain < 0 || args.gain > 2)) err(`${path}.gain`, "gain must be a number 0-2");
+        if (args.pitch !== undefined && (typeof args.pitch !== "number" || args.pitch <= 0)) err(`${path}.pitch`, "pitch must be a positive number");
+      }
       break;
     }
     case "destroy": case "detach": case "enable": case "disable":

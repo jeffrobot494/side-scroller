@@ -19,6 +19,7 @@ import {
 import { drawSpecEnemy } from "./enemyspec/render.js";
 import { config } from "../game/config.js";
 import { audio } from "../audio/engine.js";
+import { specSound } from "../audio/cues.js";
 
 const STEP = 1 / 60;
 
@@ -240,7 +241,10 @@ export class Mission {
       if (killer && killer.kind === "soldier") killer.kills += 1;
       const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
       this._burst(cx, cy, r.color || "#e05a5a", 18, 260);
-      scene.sound("enemy.death", { x: cx, y: cy });
+      // Root death is announced here (not in the runtime) because this is where
+      // kill credit and loot are settled; the cue still comes from the spec.
+      const death = specSound(r.specTop, "death");
+      scene.sound(death.cue, { x: cx, y: cy, gain: death.gain });
       if (r.loot) scene.loot.push(new Loot(r.loot, cx - 10, r.y));
       this.shake = Math.min(0.7, this.shake + 0.3);
     }

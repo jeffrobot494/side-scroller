@@ -294,6 +294,111 @@ export default async function run(t) {
     t.eq("an explicit cue + gain survives storage", weaponSound(loaded, "impact"), { cue: "impact.hit.pellet", gain: 1.5 });
   }
 
+  // ---- Slice 3: EnemySpec sounds ------------------------------------------
+  {
+    const { specSound, emitterSound } = await import("../src/audio/cues.js");
+    const { validateSpec } = await import("../src/game/enemyspec/validate.js");
+    const { ACTIONS, SPEC_KEYS, vocabularyDoc } = await import("../src/game/enemyspec/schema.js");
+    const { MISSION_ENEMY_SPECS } = await import("../src/game/enemyspecs.js");
+
+    // Every slot has an engine default, so an unauthored enemy still sounds.
+    t.eq("an unauthored enemy uses the default hurt", specSound({}, "hurt"), { cue: "enemy.hurt", gain: 1 });
+    t.eq("…and the default death", specSound({}, "death").cue, "enemy.death");
+    t.eq("…and the default part", specSound({}, "part").cue, "enemy.part");
+    t.eq("…and the generic enemy shot", specSound({}, "fire").cue, "weapon.fire.enemy");
+    t.eq("an unknown slot yields no cue", specSound({}, "nope"), { cue: null, gain: 1 });
+
+    // Slots take the same shapes weapons do.
+    t.eq("a string slot", specSound({ sounds: { death: "impact.explode" } }, "death"), { cue: "impact.explode", gain: 1 });
+    t.eq("a gain-only slot keeps the default cue",
+      specSound({ sounds: { hurt: { gain: 0.5 } } }, "hurt"), { cue: "enemy.hurt", gain: 0.5 });
+    t.eq("a gain is clamped", specSound({ sounds: { hurt: { gain: 50 } } }, "hurt").gain, 2);
+
+    // An emitter inherits the spec's `fire` slot, and can override it.
+    const spec = { sounds: { fire: { cue: "weapon.fire.bolt", gain: 0.6 } } };
+    t.eq("an emitter inherits the spec fire slot", emitterSound(spec, {}), { cue: "weapon.fire.bolt", gain: 0.6 });
+    t.eq("an emitter with no spec slot gets the generic shot", emitterSound({}, {}).cue, "weapon.fire.enemy");
+    t.eq("an emitter overrides the cue", emitterSound(spec, { sound: "impact.explode" }), { cue: "impact.explode", gain: 1 });
+    // Gain REPLACES rather than compounding — two multipliers on one shot would
+    // be impossible to reason about while tuning.
+    t.eq("an emitter gain replaces the spec gain",
+      emitterSound(spec, { sound: { gain: 1.5 } }), { cue: "weapon.fire.bolt", gain: 1.5 });
+
+    // The action joined the closed vocabulary, and the LLM prompt exposes it.
+    t.ok("sound is an action", !!ACTIONS.sound);
+    t.ok("sound is non-blocking", ACTIONS.sound.blocking === false);
+    t.ok("sounds is a top-level spec key", SPEC_KEYS.includes("sounds"));
+    const doc = vocabularyDoc();
+    t.ok("the vocabulary documents the sound action", doc.includes("sound:"));
+    t.ok("the vocabulary lists the closed cue set", doc.includes("weapon.fire.enemy") && doc.includes("enemy.death"));
+
+    // Validation: an invented cue resolves to silence, which is the one failure
+    // an author (or the LLM) would never notice — so it must be an error.
+    const base = (extra) => ({ v: 1, id: "t", name: "T", root: { id: "root", health: { max: 10 } }, ...extra });
+    const okSpec = (s) => validateSpec(s).ok;
+    t.ok("a valid sounds block passes", okSpec(base({ sounds: { hurt: "enemy.hurt", death: { cue: "impact.explode", gain: 1.4 } } })));
+    t.ok("an invented cue is rejected", !okSpec(base({ sounds: { hurt: "enemy.screech" } })));
+    t.ok("an unknown slot name is rejected", !okSpec(base({ sounds: { scream: "enemy.hurt" } })));
+    t.ok("an out-of-range gain is rejected", !okSpec(base({ sounds: { hurt: { gain: 9 } } })));
+    t.ok("a non-object sounds block is rejected", !okSpec(base({ sounds: "loud" })));
+    t.ok("an empty slot object is rejected", !okSpec(base({ sounds: { hurt: {} } })));
+    t.ok("a sound action passes", okSpec(base({ root: { id: "root", health: { max: 10 }, on: { spawn: [{ sound: "enemy.part" }] } } })));
+    t.ok("a sound action with args passes", okSpec(base({ root: { id: "root", health: { max: 10 }, on: { spawn: [{ sound: { id: "enemy.part", gain: 0.5, pitch: 1.2 } }] } } })));
+    t.ok("a sound action with an invented cue is rejected", !okSpec(base({ root: { id: "root", health: { max: 10 }, on: { spawn: [{ sound: "nope.nope" }] } } })));
+    t.ok("a sound action with no id is rejected", !okSpec(base({ root: { id: "root", health: { max: 10 }, on: { spawn: [{ sound: {} }] } } })));
+    t.ok("an emitter sound is validated too",
+      !okSpec(base({ root: { id: "root", health: { max: 10 }, emitters: { gun: { projectile: { speed: 300, damage: 5 }, sound: "nope.nope" } } } })));
+
+    // Live runtime: the cues must actually come out, at the authored level.
+    {
+      const { instantiate, updateSpecEnemy, applyDamage } = await import("../src/mission/enemyspec/runtime.js");
+      const { normalizeSpec } = await import("../src/game/enemyspec/normalize.js");
+      const heard = [];
+      const arena = {
+        world: { gravity: 1600, width: 2000, height: 600 },
+        platforms: [{ x: 0, y: 500, w: 2000, h: 40 }],
+        soldiers: [{ x: 400, y: 454, w: 20, h: 46, alive: true, vx: 0, vy: 0, kind: "soldier", health: 30 }],
+        enemies: [], projectiles: [],
+        sound: (id, o) => heard.push(`${id} x${o.gain ?? 1}`),
+      };
+      const noop = { damage() {}, kill() {}, spark() {}, burst() {} };
+
+      const wisp = instantiate(normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "spore_wisp")), 900, 300);
+      for (let i = 0; i < 400; i++) updateSpecEnemy(wisp, 1 / 60, arena, noop);
+      t.ok("a built-in enemy fires its authored emitter cue", heard.includes("weapon.fire.wave x0.8"));
+      t.eq("…and only that one shot cue", [...new Set(heard)], ["weapon.fire.wave x0.8"]);
+
+      heard.length = 0;
+      applyDamage(wisp, wisp, 5, null, arena, noop);
+      t.eq("hurt uses the spec's level", heard, ["enemy.hurt x0.75"]);
+
+      // REGRESSION: `on.spawn` handlers run from instantiate(), which has no
+      // scene. That used to crash the moment a handler touched one.
+      const spawner = normalizeSpec({
+        v: 1, id: "s", name: "S", threat: 10,
+        root: { id: "root", health: { max: 10 }, visual: { shape: "box", size: [10, 10] },
+                on: { spawn: [{ sound: "mission.start" }], damage: [{ sound: "impact.explode" }] } },
+      });
+      let threw = false;
+      let inst = null;
+      try { inst = instantiate(spawner, 0, 0); } catch { threw = true; }
+      t.ok("a sound in on.spawn does not crash instantiate", !threw);
+
+      // REGRESSION: event handlers read the host cached on the root. Only
+      // execStep used to set it, so a motion-only enemy never fired one.
+      heard.length = 0;
+      applyDamage(inst, inst, 1, null, arena, noop);
+      t.ok("an on.damage handler fires without the brain having run", heard.includes("impact.explode x1"));
+      t.ok("…alongside the default hurt cue", heard.includes("enemy.hurt x1"));
+    }
+
+    // The shipped roster must stay valid and must not all sound identical.
+    const invalid = MISSION_ENEMY_SPECS.filter((s) => !validateSpec(s).ok);
+    t.eq("every built-in spec still validates", invalid.map((s) => s.id), []);
+    const deaths = new Set(MISSION_ENEMY_SPECS.map((s) => `${specSound(s, "death").cue}@${specSound(s, "death").gain}`));
+    t.ok(`built-in enemies span several death levels (${deaths.size})`, deaths.size >= 3);
+  }
+
   // ---- engine: silent under node ------------------------------------------
   // There is no AudioContext here, so every entry point must be a harmless
   // no-op rather than a throw — this is what keeps every other suite green.
