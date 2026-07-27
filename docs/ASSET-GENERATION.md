@@ -1,3 +1,8 @@
+---
+status: plan
+tags: [assets, player2, art]
+---
+
 # Asset Generation — system design & slice plan
 
 Status: design agreed, unbuilt. Target system + incremental path. Build in slices;

@@ -1,3 +1,8 @@
+---
+status: plan
+tags: [enemies, llm]
+---
+
 # LLM-Driven Adaptive Enemy System
 
 ## Project Overview

@@ -1,3 +1,8 @@
+---
+status: built
+tags: [enemies, editor]
+---
+
 # Enemy Creation System: EnemySpec format + new Enemy Designer (LLM + manual)
 
 ## Context

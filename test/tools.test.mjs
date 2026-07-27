@@ -39,6 +39,29 @@ export default async function run(t) {
   // createX(container) → { dispose() } contract, so it gets the same bar.
   mountable(t, "sound-page", createSoundPage);
 
+  // The Weapon Designer re-renders its whole shell on load. That path rebuilds
+  // the canvas, the effect rows, the sound rows and the saved list in one go,
+  // so drive a real load and then keep using the tool: a missed re-query or a
+  // panel left unrendered surfaces as a throw here. (Whether the NEW canvas is
+  // the one being drawn into is invisible to this harness — that stays an
+  // eyeball check, per docs/WEAPON-DESIGNER.md.)
+  {
+    installDom();
+    let threw = null;
+    try {
+      const wd = createWeaponDesigner(makeEl(), () => {});
+      // scattergun exercises a delivery effect (pellets) through the schema
+      // rows and the preview's pellet fan; incinerator carries burn.
+      wd.load("builtin", "scattergun");
+      wd.load("builtin", "incinerator");
+      wd.dispose();
+    } catch (e) {
+      threw = e;
+    }
+    t.ok("weapon-designer: load re-renders without throwing", !threw);
+    if (threw) console.log("   ", threw && threw.stack);
+  }
+
   // With a saved EnemySpec in the library, both tools still mount (the Firing
   // Room renders the "Designed" optgroup; the Designer lists the library row).
   {

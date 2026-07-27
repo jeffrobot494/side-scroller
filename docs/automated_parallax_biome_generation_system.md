@@ -1,3 +1,8 @@
+---
+status: plan
+tags: [assets, parallax]
+---
+
 # Automated Parallax Biome Generation System
 
 ## 1. Document Purpose

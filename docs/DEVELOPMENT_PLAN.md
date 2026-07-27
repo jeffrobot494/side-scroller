@@ -1,3 +1,8 @@
+---
+status: reference
+tags: [roadmap]
+---
+
 # Development Plan — Vertical Slice
 
 > **Goal:** one complete, playable pass through the core loop that exercises every

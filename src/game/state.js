@@ -11,6 +11,7 @@ import { RECRUIT_POOL } from "./soldiers.js";
 import { WEAPONS, BLUEPRINTS, TUNING } from "./content.js";
 import { config } from "./config.js";
 import { listCustomWeapons } from "./customcontent.js";
+import { applyWeaponOverrides } from "./weaponoverrides.js";
 import { generateLevel } from "./gen/levelgen.js";
 import { missionRoster } from "./enemyspecs.js";
 
@@ -18,6 +19,11 @@ let nextId = 1;
 const uid = (p) => `${p}_${nextId++}`;
 
 export function createState() {
+  // Editor edits to BUILT-IN weapons are patches applied over arsenal.js, in
+  // place, so BLUEPRINTS (which hold direct references) see them too. Must run
+  // before the armory line below, which clones out of WEAPONS.
+  applyWeaponOverrides();
+
   const state = {
     day: 1,
     money: TUNING.startMoney,

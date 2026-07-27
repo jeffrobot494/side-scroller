@@ -1,3 +1,8 @@
+---
+status: plan
+tags: [enemies, ai]
+---
+
 # Making Enemies Smarter in a 2D Action Shooter-Platformer
 
 For a 2D action shooter-platformer, enemies usually feel “smart” when they **move deliberately, react believably, and create situations the player must read**. They do not need advanced AI.

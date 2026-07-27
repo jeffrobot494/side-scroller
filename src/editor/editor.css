@@ -132,6 +132,18 @@
   padding: 8px 12px; min-width: 240px;
 }
 .wd-id { color: var(--muted); font-size: 12px; font-family: ui-monospace, Menlo, monospace; }
+.wd-badge:empty { display: none; }
+.wd-badge {
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase; font-weight: 700;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px;
+  white-space: nowrap;
+}
+.wd-badge.on { color: var(--accent); border-color: var(--accent); }
+.wd-load { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.wd-load select {
+  background: var(--track); color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: 6px 8px; font-size: 13px; max-width: 220px;
+}
 
 .wd-grid { display: grid; grid-template-columns: 1fr 400px; gap: 28px; align-items: start; }
 
@@ -161,7 +173,15 @@
 .wd-mini-ctl { display: flex; align-items: center; gap: 8px; }
 .wd-mini-ctl input[type="range"] { flex: 1; accent-color: var(--accent); }
 .wd-empty { color: var(--muted); font-style: italic; font-size: 13px; }
-.wd-addfx { display: flex; gap: 10px; }
+.wd-addfx { display: flex; gap: 10px; align-items: center; }
+.wd-addfx select {
+  background: var(--track); color: var(--text); border: 1px solid var(--line);
+  border-radius: 4px; padding: 6px 10px; font-size: 13px; font-weight: 600;
+}
+.wd-addfx-note { font-size: 11px; color: var(--muted); }
+/* delivery effects multiply the others rather than adding their own cost */
+.wd-effect-delivery { border-style: dashed; }
+.wd-effect-delivery .wd-fx-cost { color: var(--accent); }
 
 /* side panel: preview + budget + export */
 .wd-side { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 20px; }
@@ -205,6 +225,8 @@
 }
 .wd-saved-name { font-weight: 600; color: var(--text); font-size: 13px; }
 .wd-saved-budget { color: var(--credits); font-size: 12px; font-weight: 700; margin-left: auto; }
+.wd-saved-row .wd-badge { margin-left: auto; }
+.wd-revert { font-size: 12px; padding: 4px 10px; }
 
 @media (max-width: 900px) { .wd-grid { grid-template-columns: 1fr; } .wd-side { position: static; } }
 

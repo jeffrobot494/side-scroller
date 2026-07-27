@@ -40,14 +40,101 @@ export const TIERS = [
   { id: "t3", name: "Tier III · Prototype", budget: 280 },
 ];
 
-const VALUE_KINDS = new Set(["damage", "burn", "slow", "knockback", "explode", "chain"]);
-const DELIVERY_KINDS = new Set(["pellets", "pierce", "homing"]);
+// ---------------------------------------------------------------------------
+// EFFECT_SCHEMA — THE effect vocabulary, as data.
+//
+// One entry per kind: what it's called, whether it's a value or a delivery
+// effect, the params it carries (with the range + label a slider needs), and
+// the defaults a freshly-added row starts at. The Weapon Designer renders its
+// rows straight off this, so adding a tenth effect kind is one entry here and
+// no UI work — the same "add a knob, get a control" contract as config.js.
+//
+// This is the SOURCE of the kind sets below, not a parallel list: `value`
+// decides which side a kind lands on, so the two can't drift apart.
+//
+// Ranges are authoring bounds for the designer's sliders and are wide enough to
+// express every weapon in arsenal.js (`step` is slider granularity, not a
+// validity rule — hand-authored values needn't sit on the grid).
+// ---------------------------------------------------------------------------
+
+export const EFFECT_SCHEMA = {
+  // ---- value: deal something on hit, priced per shot by effectCost ---------
+  damage: {
+    label: "Damage", value: true, defaults: { amount: 10 },
+    params: [{ key: "amount", label: "Amount", min: 1, max: 80, step: 1 }],
+  },
+  burn: {
+    label: "Burn (DoT)", value: true, defaults: { dps: 6, duration: 3 },
+    params: [
+      { key: "dps", label: "Damage/s", min: 1, max: 30, step: 1 },
+      { key: "duration", label: "Duration", min: 0.5, max: 8, step: 0.5, unit: "s" },
+    ],
+  },
+  slow: {
+    label: "Slow", value: true, defaults: { factor: 0.5, duration: 1.5 },
+    params: [
+      { key: "factor", label: "Speed ×", min: 0.1, max: 0.95, step: 0.05 },
+      { key: "duration", label: "Duration", min: 0.5, max: 8, step: 0.5, unit: "s" },
+    ],
+  },
+  knockback: {
+    label: "Knockback", value: true, defaults: { force: 200 },
+    params: [{ key: "force", label: "Force", min: 0, max: 600, step: 10 }],
+  },
+  explode: {
+    label: "Explode (AoE)", value: true, defaults: { amount: 40, radius: 150 },
+    params: [
+      { key: "amount", label: "Amount", min: 1, max: 100, step: 5 },
+      { key: "radius", label: "Radius", min: 40, max: 400, step: 10, unit: "px" },
+    ],
+  },
+  chain: {
+    label: "Chain", value: true, defaults: { amount: 8, jumps: 2, range: 240 },
+    params: [
+      { key: "amount", label: "Per jump", min: 1, max: 40, step: 1 },
+      { key: "jumps", label: "Jumps", min: 1, max: 6, step: 1 },
+      { key: "range", label: "Jump range", min: 60, max: 500, step: 10, unit: "px" },
+    ],
+  },
+
+  // ---- delivery: change how the shot lands; MULTIPLY the value above ------
+  pellets: {
+    label: "Pellets", value: false, defaults: { count: 5, spread: 0.13 },
+    params: [
+      { key: "count", label: "Pellets", min: 2, max: 12, step: 1 },
+      { key: "spread", label: "Arc", min: 0.02, max: 0.3, step: 0.01, unit: "rad" },
+    ],
+  },
+  pierce: {
+    label: "Pierce", value: false, defaults: { count: 1 },
+    params: [{ key: "count", label: "Extra targets", min: 1, max: 5, step: 1 }],
+  },
+  homing: {
+    label: "Homing", value: false, defaults: { turn: 3 },
+    params: [{ key: "turn", label: "Turn rate", min: 0.5, max: 8, step: 0.5, unit: "rad/s" }],
+  },
+};
+
+export const EFFECT_KINDS = Object.keys(EFFECT_SCHEMA);
+
+const VALUE_KINDS = new Set(EFFECT_KINDS.filter((k) => EFFECT_SCHEMA[k].value));
+const DELIVERY_KINDS = new Set(EFFECT_KINDS.filter((k) => !EFFECT_SCHEMA[k].value));
 
 export function isValueEffect(fx) {
   return VALUE_KINDS.has(fx.kind);
 }
 export function isDeliveryEffect(fx) {
   return DELIVERY_KINDS.has(fx.kind);
+}
+export function isDeliveryKind(kind) {
+  return DELIVERY_KINDS.has(kind);
+}
+
+// A freshly-added effect row: the kind plus its schema defaults. One place to
+// seed from, so the designer's "+ Effect" and a kind switch can't disagree.
+export function newEffect(kind) {
+  const spec = EFFECT_SCHEMA[kind];
+  return spec ? { kind, ...spec.defaults } : null;
 }
 
 function clamp(v, min, max) {

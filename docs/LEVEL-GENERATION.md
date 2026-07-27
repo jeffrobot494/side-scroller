@@ -1,3 +1,8 @@
+---
+status: built
+tags: [levelgen, missions]
+---
+
 # Level Generation — system design & slice plan
 
 Status: design agreed, unbuilt. This doc is the target system and the incremental

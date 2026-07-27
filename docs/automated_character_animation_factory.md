@@ -1,3 +1,8 @@
+---
+status: plan
+tags: [assets, animation]
+---
+
 # Automated Character Animation Factory
 
 The best fully automated system should **not require every character to pass through the same pipeline**. It should route each character through one of two production methods:

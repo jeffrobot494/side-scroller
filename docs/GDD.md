@@ -1,3 +1,8 @@
+---
+status: reference
+tags: [vision]
+---
+
 # Game Design Document
 
 > **Working title:** XCOM Task Force (side-scroller)

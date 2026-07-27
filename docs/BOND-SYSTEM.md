@@ -1,3 +1,8 @@
+---
+status: plan
+tags: [soldiers, meta]
+---
+
 # Bond System — soldier relationships, the Lounge, and the LLM as chronicler
 
 Soldiers get a bio when hired and a log line when they die; nothing happens in

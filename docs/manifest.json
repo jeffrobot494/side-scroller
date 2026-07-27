@@ -1,0 +1,17 @@
+{
+  "files": [
+    "ASSET-GENERATION.md",
+    "BOND-SYSTEM.md",
+    "DESIGN-APP.md",
+    "DEVELOPMENT_PLAN.md",
+    "GDD.md",
+    "LEVEL-GENERATION.md",
+    "SOUND.md",
+    "WEAPON-DESIGNER.md",
+    "automated_character_animation_factory.md",
+    "automated_parallax_biome_generation_system.md",
+    "enemy_creation_system_plan.md",
+    "llm_adaptive_enemy_system_plan_v2.md",
+    "smarter_enemy_ai_2d_action_shooter_platformer.md"
+  ]
+}

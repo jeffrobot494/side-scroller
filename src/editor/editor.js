@@ -21,7 +21,14 @@ import { createLevelGenerator } from "./tools/level-generator.js";
 import { createFiringRoom } from "./tools/firing-room.js";
 import { createControlsMapper } from "./tools/controls-mapper.js";
 import { createSoundPage } from "./sound-page.js";
+import { applyWeaponOverrides } from "../game/weaponoverrides.js";
 import { audio } from "../audio/engine.js";
+
+// Built-in weapons the Weapon Designer has overridden. The editor page needs
+// its own call because it never builds a game state: the Firing Room reads
+// ARSENAL straight from arsenal.js, so without this the tool that authored an
+// override would sit on a page that doesn't show it.
+applyWeaponOverrides();
 
 const root = document.getElementById("editor");
 let tab = "settings";

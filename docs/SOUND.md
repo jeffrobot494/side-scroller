@@ -1,3 +1,8 @@
+---
+status: built
+tags: [audio]
+---
+
 # Sound — system design & slice plan
 
 Status: Slices 1–3 built. Slice 4 designed, unbuilt. Build in slices; each is

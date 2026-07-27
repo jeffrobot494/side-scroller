@@ -3,7 +3,9 @@
 XCOM-like alien-invasion 2D side-scroller: run-and-gun missions on Canvas + a
 strategy hub in DOM, with content authored as plain-data JS and (increasingly)
 generated. Design vision and the big plans live in `docs/` (`GDD.md`,
-`DEVELOPMENT_PLAN.md`, `LEVEL-GENERATION.md`, `ASSET-GENERATION.md`).
+`DEVELOPMENT_PLAN.md`, `LEVEL-GENERATION.md`, `ASSET-GENERATION.md`, `SOUND.md`,
+`WEAPON-DESIGNER.md`). Docs marked *built* describe shipped behaviour; the rest
+are plans — `SOUND.md` also carries a **Known issues (open)** section.
 
 ## Current status
 
@@ -43,9 +45,9 @@ section + the tests are the source of truth for what currently exists):
   where shape ≠ how it fires. The Weapon Designer's Sound section (shared
   `editor/sound-picker.js`) has a cue picker + `×` level slider per slot, and
   writes sparsely — gain 1 stays a plain string, no assignment writes no key.
-  Caveat: the Designer cannot load a built-in weapon, so rebalancing the arsenal
-  means Copy JSON → paste into `arsenal.js` (rework planned in
-  `docs/WEAPON-DESIGNER.md`).
+  The Designer can now load and rebalance a built-in (see the Weapon Designer
+  entry below); Copy JSON → paste into `arsenal.js` is still how a change
+  becomes permanent.
   **Slice 3 (per-enemy):** an EnemySpec carries `sounds: { fire, hurt, death,
   part }` (same slot shape; `specSound()`), an emitter carries `sound`
   (`emitterSound()`, overriding the spec's `fire`), and `sound` is an action in
@@ -59,7 +61,18 @@ section + the tests are the source of truth for what currently exists):
   `projectile.gravity` (arc — rockets/grenades lob), and `projectile.shape`
   (6 looks, drawn by the shared `mission/render.js`). The **Aim** stat now
   drives spread for everyone (tighter with higher Aim; `config.aimSpread`).
-  Known gap: the Weapon Designer's add-effect UI still only offers damage/burn.
+- **Weapon Designer (reworked; `docs/WEAPON-DESIGNER.md` — built):** the effect
+  vocabulary is `EFFECT_SCHEMA` in `weaponcost.js` — label + params + ranges +
+  defaults per kind, and the source `VALUE_KINDS`/`DELIVERY_KINDS` derive from.
+  All 9 kinds are authorable (a tenth is one schema entry, no UI work), delivery
+  kinds are capped at one each (the runtime `.find()`s them) and show a `×`
+  multiplier instead of `cost 0`. Weapons **load** from `ARSENAL` or the custom
+  store, always cloned; the id is pinned once loaded, so Save overwrites instead
+  of re-slugging the name into a duplicate. Saving over a built-in writes an
+  **override** (`src/game/weaponoverrides.js`, its own store — NOT the custom
+  one, which would double-list it in the armory) applied in place over
+  `ARSENAL_BY_ID` by `applyWeaponOverrides()`, called from `createState()` and
+  `editor.js`. Revert restores a pristine snapshot with no reload.
 - **Controls + aim:** key bindings live in `src/game/controlmap.js` (remap in the
   editor's Controls tool); `MissionInput` also polls a gamepad (fixed standard-
   mapping defaults) and the mouse. Manual aim (`config.aimMode`: mouse/gamepad/
@@ -143,7 +156,13 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   (`MissionInput`: config-driven keys + gamepad poll + mouse), `mission.js` scene.
 - `src/game/weaponcost.js` + `arsenal.js` — the effect cost model (value effects
   damage/burn/slow/knockback/explode/chain; delivery modifiers pellets/pierce/
-  homing) and the 24-weapon arsenal authored against it.
+  homing) and the 24-weapon arsenal authored against it. `EFFECT_SCHEMA` here is
+  the effect vocabulary as data — add a kind = one entry, and the Weapon
+  Designer grows a control for it.
+- `src/game/weaponoverrides.js` — editor edits to BUILT-IN weapons, guarded
+  localStorage, applied in place over the shared `arsenal.js` objects (so
+  `WEAPONS` and `BLUEPRINTS`, which hold those references, see them). Separate
+  from `customcontent.js` on purpose; keeps a pristine snapshot for Revert.
 - `src/audio/` — the sound layer (`cues.js` catalog, `synth.js` pure renderer,
   `bank.js` registry, `engine.js` WebAudio). `engine.js` is guarded like
   localStorage is: no `AudioContext` (node) → every export is a silent no-op.
