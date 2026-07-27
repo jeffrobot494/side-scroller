@@ -25,7 +25,7 @@ real and proven, not a stub. Mapping it against the smarter-AI doc's ladder:
 |---|---|---|---|
 | 1 | Preferred combat ranges | **Done** | `keepDistance` motion; `moveTo` offsets (standoff/perch) |
 | 2 | Gap / wall awareness | **Partial** | `sense.groundAhead` (single front probe), `sense.los` (segment-vs-AABB). No gap-width, no reachability. |
-| 3 | Platform navigation links | **Missing** | only `chase`'s crude auto-hop (`vy=-560` when target is 40px up or vx stalls) |
+| 3 | Platform navigation links | **Missing** | only `chase`'s crude auto-hop (legged locomotor, `config.enemyHopImpulse` ≈560, when target is ~40px up). No reachability, no multi-tier pathing. This is Slice 2. |
 | 4 | Predictive, imperfect aim | **Done** | `patternAngles` current/lead/landing + randomized prediction time + jitter |
 | 5 | Last-known-position memory | **Done** | `sense.timeSinceSeen` / `lastSeenX/Y` / `seenOnce`; `moveTo target:"lastSeen"` |
 | 6 | Utility action selection | **Done** | `tickUtility`: `when` gates, numeric `score`+noise, cooldowns, decisionInterval, windup→steps→recovery, no mid-commit cancel |
@@ -47,11 +47,9 @@ simple fodder (scripted tracks, `aim:"current"`). So the ceiling is consistent:
 
 ### Concrete gaps and one real bug
 
-- **Squad fixation (bug).** Perception and movement both target
-  `firstLiving(scene.soldiers)` / `player(scene)` — the *first* living soldier in
-  the list, not the *nearest* or most threatening. With a 3-soldier squad, every
-  enemy fixates on soldier[0] regardless of who is closer or shooting them. Fix
-  belongs in Slice 0.
+- **Squad fixation (bug). — FIXED in Slice 0.** Was: perception/movement targeted
+  the *first* living soldier, so a whole wave fixated on `soldiers[0]`. Now
+  everything routes through `nearestHostile(root, scene)` (nearest, team-aware).
 - **Navigation is the dominant gap.** Enemies steer toward a point and hop
   crudely; they cannot decide *which platform to jump to* or path across a
   multi-elevation level. This is exactly the capability that matters as levels
@@ -60,11 +58,12 @@ simple fodder (scripted tracks, `aim:"current"`). So the ceiling is consistent:
   brains spamming in parallel — no turns, no flanking, no suppression.
 - **No player-reading.** Nothing tracks player habits, so no enemy can punish a
   repeated jump/dodge/camp.
-- **Companions are worse than enemies.** `updateCompanion` (`src/mission/ai.js`,
-  ~28 lines) ignores the entire perception+utility stack: follow the leader,
-  shoot the nearest enemy within 520px and a 70px vertical band, keep 240px
-  standoff, hop if the leader is above. No preferred range, no memory, no
-  navigation, no utility scoring.
+- **Companions are worse than enemies. — ADDRESSED in Slice 0 (via
+  LOCOMOTOR-REFACTOR L3).** Companions now default to the shared spec brain
+  (`config.companionBrain:"spec"`); the default companion spec still only escorts
+  + engages-when-level + holds a standoff, but it is now *data* on the same
+  perception/utility stack, so it inherits every improvement below (navigation,
+  coordination) for free. `updateCompanion` remains as the `"legacy"` fallback.
 - **Known, already-documented:** `on.spawn` handlers run with no scene
   (`fire`/`spawn`/`sound` skipped) — see SOUND.md "Known issues".
 
@@ -139,27 +138,64 @@ Slices are independently playable/testable and ordered by leverage. Items 1, 4,
 5, 6 of the ladder are already done, so this starts at the enablers and then
 attacks the three real gaps.
 
-**Slice 0 — Generalize the brain to an agent (refactor + bug fix). — DONE (core)**
-- **Done:** every spec instance carries a `team` (default `"enemy"`, set at
-  `instantiate`). Perception + movement + aim resolve their target through
+**Slice 0 — Generalize the brain to an agent (refactor + bug fix). — DONE.**
+- **Targeting (done):** every spec instance carries a `team` (default `"enemy"`,
+  set at `instantiate`). Perception + movement + aim resolve their target through
   `nearestHostile(root, scene)` (`perception.js`), which is team-aware (enemies
   hunt the squad; a `"player"`-team agent hunts the enemy roots) and
-  nearest-first. This retires `firstLiving`/`player(scene)` and **fixes the
+  nearest-first. This retires `firstLiving`/`player(scene)` and **fixed the
   squad-fixation bug** — enemies now target the nearest soldier, not
   `soldiers[0]`. Covered by `test/enemyspec-targeting.test.mjs`.
-- **Deferred (tracked separately):** actually routing companions through the
-  agent brain. Companions are `Soldier` objects, not spec entity-trees, and the
-  clean way to unify them with enemies is a brain/body split — the brain emits
-  body-agnostic intents, a per-body locomotor actuates them. That refactor has
-  its own plan in **`docs/LOCOMOTOR-REFACTOR.md`** (its Slice L3 is where
-  companions join the shared brain). Until then `updateCompanion` stays the
-  companion behavior — nothing regresses.
-- Net: the *targeting* half of the brain is now allegiance-agnostic and the real
-  bug is fixed; the *companion-as-agent* half is gated on the locomotor refactor.
+- **Companions on the shared brain (done via the locomotor refactor).**
+  `docs/LOCOMOTOR-REFACTOR.md` Slices L1–L3 are **built**: movement split into a
+  brain layer (body-agnostic MotionRequest intents) and a per-body **locomotor**
+  (`src/mission/locomotion.js`: `legged`/`flying`/`soldier`). A companion is now a
+  `Soldier` body driven by a `"player"`-team spec agent through the `soldier`
+  locomotor — see `updateCompanionSpec` (`src/mission/ai.js`), the default
+  companion spec (`src/game/companionspecs.js`), and `sense.anchorDist/anchorX/
+  anchorY` (the leader). **`config.companionBrain` defaults to `"spec"`**, so
+  companions run the shared brain in a normal mission; `"legacy"` restores the old
+  `updateCompanion` as a fallback.
+- Net: the whole agent brain (targeting + movement + companions) is now
+  allegiance-agnostic. Slice 1 can drop *either* team onto a level as agents.
 
 **Slice 1 — Build the Behavior Lab** (observability + time control + levers +
-metrics). Ships the scoreboard/LOS/sense overlays and frame-step. Everything
-after this is iterated *inside* the Lab; without it the work is blind.
+metrics). Everything after this is iterated *inside* the Lab; without it the work
+is blind.
+
+- **Where it goes / the recipe.** A new editor tool, `src/editor/tools/
+  behavior-lab.js`, exporting `createBehaviorLab(container, onBack) → { dispose()
+  }`. Register it in `src/editor/editor.js` exactly like the others: add the
+  import, a `TOOLS` entry `{ id:"behaviorlab", label, desc }`, the id to
+  `MOUNTABLE`, and to the `factory` map. Do one synchronous `draw()` at mount;
+  `dispose()` must cancel the rAF loop. **Model it on the Firing Room** (`src/
+  editor/tools/firing-room.js`) — it already sets up a Canvas arena, a mission-
+  style loop, spec-enemy waves, and the `scene.sound` hook; the Lab is its
+  observability-first cousin.
+- **What to reuse (all built and tested):** the mission/spec runtime
+  (`updateSpecEnemy`, `instantiate`, `collidables` in `src/mission/enemyspec/
+  runtime.js`), `combat.js`, the level generator (`src/game/gen/`, as the Level
+  Generator tool does), and — for a blue (companion) team — `updateCompanionSpec`
+  + `DEFAULT_COMPANION_SPEC`. Both teams are just spec agents differing by `team`
+  (`"enemy"` / `"player"`); scene needs `specRoots`, `soldiers`, `platforms`,
+  `world`, `projectiles` (see how `mission.js`/`firing-room.js` shape it).
+- **MVP first (land these, then accrete):** two authorable teams on a *generated*
+  (multi-elevation) level; time control (pause / step-one-frame / slow-mo); and
+  the observability overlays for a selected agent — **LOS line + `sense.*` readout
+  + the utility scoreboard** (every action's live `score`, its `when` gate, and
+  the winner). `tickUtility` (`brain.js`) already computes the scores; the only
+  work is exposing them (e.g. stash the last decision breakdown on
+  `root.brainState` and draw it). Also draw the current commitment (action +
+  windup/steps/recovery), move-order/dash target, and last-seen marker.
+- **Accrete later (do NOT block Slice 1 on these):** the metrics panel, the
+  scripted ghost-player, record/replay + A/B, and scenario presets. The roadmap
+  pulls the ghost-player in at Slice 4 and the metrics/replay feedback loop at
+  Slice 5 — Slice 1 only needs enough to *see* decisions and step time.
+- **Convention reminder:** numeric levers (decisionInterval scale, aim-error
+  scale, god-eye toggle, etc.) belong in the config `SCHEMA` so the editor
+  auto-generates their controls (CLAUDE.md "everything tweakable"). Guard any
+  `localStorage`. There is no browser in tests — verify a headless mount (one
+  `draw()`) and tell the user to eyeball the visuals.
 
 **Slice 2 — Navigation on complex geometry (the top gap).**
 - At level load, build a **reachability graph**: nodes = platform surfaces +
