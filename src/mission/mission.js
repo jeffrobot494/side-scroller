@@ -18,6 +18,7 @@ import {
 } from "./enemyspec/runtime.js";
 import { drawSpecEnemy } from "./enemyspec/render.js";
 import { config } from "../game/config.js";
+import { audio } from "../audio/engine.js";
 
 const STEP = 1 / 60;
 
@@ -54,6 +55,12 @@ export class Mission {
       burst: (x, y, c, n, s) => this._burst(x, y, c, n, s),
     };
 
+    // The one sound hook. Installed on the SCENE (not _ctx) because ai.js
+    // fire() takes a scene and no ctx — see docs/SOUND.md. Headless callers of
+    // loadMission never set it, so every `scene.sound && …` site stays silent.
+    this.scene.sound = (cue, opts) => audio.play(cue, opts);
+    audio.play("mission.start");
+
     // cosmetic-only state (never read by game logic)
     this.time = 0;
     this.shake = 0;
@@ -71,6 +78,7 @@ export class Mission {
   stop() {
     this.running = false;
     this.input.disable();
+    audio.stopAll(); // don't let a tail ring out over the results screen
   }
 
   // ---- loop ---------------------------------------------------------------
@@ -122,7 +130,7 @@ export class Mission {
     for (const s of scene.soldiers) {
       if (s.fireCooldown > 0) s.fireCooldown -= dt;
       if (s.muzzleFlash > 0) s.muzzleFlash -= dt;
-      tickReload(s, dt);
+      tickReload(s, dt, scene);
     }
 
     this._handleControl();
@@ -159,6 +167,9 @@ export class Mission {
 
     for (const s of scene.soldiers) {
       if (!s.alive) continue;
+      // Jump/land are read from the ground-contact transition around the physics
+      // step, so entities.js stays free of presentation concerns.
+      const wasGround = s.onGround;
       if (s === leader) {
         // Player control.
         s.setCrouch(this.input.isDown("crouch"));
@@ -166,7 +177,7 @@ export class Mission {
           (this.input.isDown("right") ? 1 : 0) - (this.input.isDown("left") ? 1 : 0);
         this._applyAim(s);
         s.applyMovement(dt, move, this.input.isDown("jump"));
-        if (this.input.justPressed("reload")) startReload(s);
+        if (this.input.justPressed("reload")) startReload(s, scene);
         const wantFire = s.weapon.auto
           ? this.input.isDown("fire")
           : this.input.justPressed("fire");
@@ -176,7 +187,12 @@ export class Mission {
         s.setCrouch(false); // companions never kneel; a swapped-away soldier stands back up
         updateCompanion(s, dt, scene, leader);
       }
+      const fallVy = s.vy;
       stepActor(s, dt, scene.world, scene.platforms);
+      const sx = s.x + s.w / 2;
+      if (wasGround && !s.onGround && s.vy < 0) scene.sound("soldier.jump", { x: sx, y: s.y });
+      // Only a real drop thuds — walking off a 20px lip shouldn't.
+      else if (!wasGround && s.onGround && fallVy > 260) scene.sound("soldier.land", { x: sx, y: s.y });
     }
   }
 
@@ -224,6 +240,7 @@ export class Mission {
       if (killer && killer.kind === "soldier") killer.kills += 1;
       const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
       this._burst(cx, cy, r.color || "#e05a5a", 18, 260);
+      scene.sound("enemy.death", { x: cx, y: cy });
       if (r.loot) scene.loot.push(new Loot(r.loot, cx - 10, r.y));
       this.shake = Math.min(0.7, this.shake + 0.3);
     }
@@ -249,6 +266,8 @@ export class Mission {
     if (!target.alive) return;
     target.health -= amount;
     target.hitFlash = 0.12;
+    if (amount > 0 && target.health > 0)
+      this.scene.sound("soldier.hurt", { x: target.x + target.w / 2, y: target.y });
     // A hit on the soldier you're controlling flashes the screen red.
     if (target === this.currentSoldier()) {
       this.damageFlash = 0.4;
@@ -270,6 +289,7 @@ export class Mission {
     const cy = target.y + target.h / 2;
     // a soldier falling — a heavier, colder burst (enemies are spec-handled)
     this._burst(cx, cy, "#c9d4e6", 22, 300);
+    this.scene.sound("soldier.death", { x: cx, y: cy });
     this.shake = Math.min(0.9, this.shake + 0.5);
   }
 
@@ -298,6 +318,7 @@ export class Mission {
           l.collected = true;
           scene.collected = scene.collected || [];
           scene.collected.push(l.item);
+          scene.sound("loot.pickup", { x: l.x, y: l.y });
           break;
         }
       }
@@ -349,6 +370,7 @@ export class Mission {
       kills,
     };
     this.endBanner = { success, timer: 1.6 };
+    audio.play(success ? "mission.win" : "mission.lose");
   }
 
   _finish() {
@@ -361,6 +383,8 @@ export class Mission {
     const targetX = s.x + s.w / 2 - this.canvas.width * 0.4;
     this.camera.x = clamp(targetX, 0, this.scene.world.width - this.canvas.width);
     this.camera.y = 0;
+    // Pan + distance falloff are measured from the middle of the viewport.
+    audio.setListener(this.camera.x + this.canvas.width / 2);
   }
 
   // ---- particles (cosmetic) ----------------------------------------------

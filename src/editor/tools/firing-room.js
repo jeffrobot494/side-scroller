@@ -28,6 +28,7 @@ import {
 } from "../../mission/enemyspec/runtime.js";
 import { drawSpecEnemy } from "../../mission/enemyspec/render.js";
 import { MissionInput } from "../../mission/input.js";
+import { audio } from "../../audio/engine.js";
 import { config } from "../../game/config.js";
 
 export function createFiringRoom(container, onBack) {
@@ -138,8 +139,12 @@ export function createFiringRoom(container, onBack) {
       soldiers: [shooter],
       enemies: [],
       projectiles: [],
+      // The range is the natural place to audition a weapon, so it installs the
+      // same sound hook the live mission does (see docs/SOUND.md).
+      sound: (cue, opts) => audio.play(cue, opts),
     };
     spawnTargets();
+    audio.setListener(W / 2); // fixed camera: the middle of the range is centre
     stats.dealt = 0;
     stats.elapsed = 0;
   }
@@ -254,7 +259,7 @@ export function createFiringRoom(container, onBack) {
     input.pollGamepad();
     if (shooter.fireCooldown > 0) shooter.fireCooldown -= dt;
     if (shooter.muzzleFlash > 0) shooter.muzzleFlash -= dt;
-    tickReload(shooter, dt);
+    tickReload(shooter, dt, scene);
 
     const acc = aimAccuracy(state.aim);
 
@@ -264,7 +269,7 @@ export function createFiringRoom(container, onBack) {
       const move = (input.isDown("right") ? 1 : 0) - (input.isDown("left") ? 1 : 0);
       resolveAim();
       shooter.applyMovement(dt, move, input.isDown("jump"));
-      if (input.justPressed("reload")) startReload(shooter);
+      if (input.justPressed("reload")) startReload(shooter, scene);
       const wantFire = shooter.weapon.auto ? input.isDown("fire") : input.justPressed("fire");
       if (wantFire) fire(scene, shooter, shooter.fireDir(), "player", dt, acc);
       stepActor(shooter, dt, world, scene.platforms);
@@ -272,7 +277,7 @@ export function createFiringRoom(container, onBack) {
       // Stationary auto-fire range: auto-reload so the DPS readout keeps flowing.
       if (shooter.crouched) shooter.setCrouch(false);
       shooter.aimVec = null; shooter.aimUp = false;
-      if (shooter.ammo <= 0 && shooter.reloading <= 0) startReload(shooter);
+      if (shooter.ammo <= 0 && shooter.reloading <= 0) startReload(shooter, scene);
       fire(scene, shooter, { x: 1, y: 0 }, "player", dt, acc);
     }
 
@@ -475,6 +480,7 @@ export function createFiringRoom(container, onBack) {
     dispose() {
       running = false;
       input.disable(); // remove key handlers so they don't leak into the editor
+      audio.stopAll(); // and don't leave the range ringing after leaving it
       if (raf != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
     },
   };

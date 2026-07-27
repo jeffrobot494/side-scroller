@@ -11,9 +11,23 @@ import { createState, applyMissionResult } from "./game/state.js";
 import { Hub } from "./hub/hub.js";
 import { Mission } from "./mission/mission.js";
 import { createHubAmbient } from "./hub/ambient.js";
+import { audio } from "./audio/engine.js";
 
 const hubRoot = document.getElementById("hub-root");
 const canvas = document.getElementById("game");
+
+// Browsers refuse to start an AudioContext outside a user gesture, so the
+// engine stays dormant until the player's first click or keypress.
+audio.armUnlock();
+
+// UI clicks are voiced from ONE delegated listener rather than threaded through
+// every hub screen — the hub owns no rules and shouldn't own sound wiring either.
+hubRoot.addEventListener("click", (e) => {
+  const btn = e.target.closest("button, .card, [data-action]");
+  if (!btn || btn.disabled) return;
+  const back = /back|cancel|return/i.test(btn.dataset.action || btn.textContent || "");
+  audio.play(back ? "ui.back" : "ui.click");
+});
 
 const game = createState();
 

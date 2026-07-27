@@ -190,18 +190,22 @@ export class Soldier {
 // already reloading, and the mag isn't already full. Returns true if a reload
 // actually started. Actors without a magsLeft field (e.g. spec enemies) have
 // unlimited spares.
-export function startReload(actor) {
+//
+// `scene` is optional and only used to play the mag-drop / mag-seat cues —
+// callers without a scene (tests, the AI's autoReload) just reload silently.
+export function startReload(actor, scene) {
   const w = actor.weapon;
   if (!w || !w.magazine) return false;
   if (actor.reloading > 0 || actor.ammo >= w.magazine) return false;
   if (actor.magsLeft !== undefined && actor.magsLeft <= 0) return false;
   actor.reloading = w.reloadTime || 1.5;
+  if (scene && scene.sound) scene.sound("weapon.reload.start", { x: actor.x + actor.w / 2, y: actor.y });
   return true;
 }
 
 // Tick an in-progress reload; refills the magazine (consuming a spare) when it
 // completes.
-export function tickReload(actor, dt) {
+export function tickReload(actor, dt, scene) {
   if (actor.reloading > 0) {
     actor.reloading -= dt;
     if (actor.reloading <= 0) {
@@ -209,6 +213,7 @@ export function tickReload(actor, dt) {
       actor.ammo = actor.weapon.magazine;
       if (actor.magsLeft !== undefined && actor.magsLeft !== Infinity)
         actor.magsLeft -= 1;
+      if (scene && scene.sound) scene.sound("weapon.reload.done", { x: actor.x + actor.w / 2, y: actor.y });
     }
   }
 }

@@ -497,6 +497,7 @@ export function applyDamage(root, ent, amount, owner, scene, ctx) {
   ent.hitFlash = 0.12;
   fireEvent(root, ent, "damage", { amount });
   if (ent.health <= 0) killEntity(root, ent, owner, scene, ctx);
+  else if (amount > 0) scene.sound && scene.sound("enemy.hurt", { x: cx(ent), y: cy(ent) });
 }
 
 // Death cascade: own destroy event → link policy for children → parent
@@ -532,6 +533,10 @@ export function killEntity(root, ent, owner, scene, ctx) {
     }
   }
   if (ctx.burst && ent.maxHealth) ctx.burst(cx(ent), cy(ent), ent.color, ent.isRoot ? 18 : 9, 240);
+  // Root deaths are announced by the mission's own root-death polling (which
+  // also owns kill credit + loot); here we only voice destructible PARTS, so a
+  // dying enemy isn't double-reported.
+  if (!ent.isRoot && ent.maxHealth) scene.sound && scene.sound("enemy.part", { x: cx(ent), y: cy(ent) });
 }
 
 function removeSilently(ent) {
@@ -733,6 +738,9 @@ function doFire(root, self, args, scene, ctx) {
   }
   owner.muzzleFlash = 0.055;
   owner.muzzleColor = def.projectile ? def.projectile.color : "#ff8a5a";
+  // One cue per fire ACTION, not per angle — a 9-shot fan is one report.
+  // `def.sound` is the Slice 3 per-emitter override.
+  scene.sound && scene.sound(def.sound || "weapon.fire.enemy", { x: ox, y: oy });
 }
 
 function resolveEmitter(root, self, ref) {

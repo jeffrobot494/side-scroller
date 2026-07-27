@@ -20,7 +20,17 @@ section + the tests are the source of truth for what currently exists):
   Level Generator (seed → schematic preview), Firing Room (bigger platformed
   range: fire any weapon at respawning dummies OR waves of real enemies — an
   Aim slider + auto-fire/manual drive), Controls (rebind keys). Settings tab is
-  schema-driven config.
+  schema-driven config; the **Sound tab** is the mixer + the cue bank.
+- **Sound (Slice 1 of `docs/SOUND.md`):** `src/audio/` — a cue catalog
+  (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
+  (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
+  overrides in localStorage), and the WebAudio engine (`engine.js`: buses, voice
+  pool, pan + distance falloff, gesture unlock). The whole game triggers through
+  ONE hook, `scene.sound(cueId, {x, y})`, installed by the Mission and the Firing
+  Room; unset headlessly, so tests stay silent and unchanged. Cue ids resolve up
+  the dots (`weapon.fire.pellet` → `weapon.fire` → silence), which is how Slices
+  2–3 will add per-weapon / per-EnemySpec sounds without touching call sites.
+  Sounds today are made-up beeps; real clips slot into the same cues (Slice 4).
 - **Weapon effects:** a 9-kind library (damage/burn/slow/knockback/explode/chain
   + pellets/pierce/homing) priced by `weaponcost.js`; a 24-weapon `arsenal.js`;
   combat resolved in the shared `mission/combat.js`. Weapons also carry
@@ -109,6 +119,9 @@ Static site — serve the folder and open a page. No bundler, no transpile.
 - `src/game/weaponcost.js` + `arsenal.js` — the effect cost model (value effects
   damage/burn/slow/knockback/explode/chain; delivery modifiers pellets/pierce/
   homing) and the 24-weapon arsenal authored against it.
+- `src/audio/` — the sound layer (`cues.js` catalog, `synth.js` pure renderer,
+  `bank.js` registry, `engine.js` WebAudio). `engine.js` is guarded like
+  localStorage is: no `AudioContext` (node) → every export is a silent no-op.
 - `src/hub/` — every DOM screen (rooms, deploy, results, win/lose) + CSS. Owns no
   rules; calls state actions.
 - `src/player2/` — Player2 API client (`client.js`, `queue.js`). LLM + image

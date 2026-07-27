@@ -5,6 +5,7 @@ import { createWeaponDesigner } from "../src/editor/tools/weapon-designer.js";
 import { createEnemyDesigner } from "../src/editor/tools/enemy-designer.js";
 import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
 import { createFiringRoom } from "../src/editor/tools/firing-room.js";
+import { createSoundPage } from "../src/editor/sound-page.js";
 import { Soldier } from "../src/mission/entities.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
@@ -34,6 +35,9 @@ export default async function run(t) {
   mountable(t, "enemy-designer", createEnemyDesigner);
   mountable(t, "level-generator", createLevelGenerator);
   mountable(t, "firing-room", createFiringRoom);
+  // The Sound page is not a Tools-tab panel but follows the same
+  // createX(container) → { dispose() } contract, so it gets the same bar.
+  mountable(t, "sound-page", createSoundPage);
 
   // With a saved EnemySpec in the library, both tools still mount (the Firing
   // Room renders the "Designed" optgroup; the Designer lists the library row).

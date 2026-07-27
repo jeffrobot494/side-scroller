@@ -2,7 +2,7 @@
 // EDITOR APP — a dev-only entry (editor.html) for tweaking settings and running
 // GUI tools. The Settings tab is auto-generated from the config SCHEMA; the
 // Tools tab hosts bespoke GUI editors (the Weapon Designer today; enemy and
-// level editors to come).
+// level editors to come); the Sound tab owns the mixer + the cue bank.
 // ---------------------------------------------------------------------------
 
 import {
@@ -20,11 +20,20 @@ import { createEnemyDesigner } from "./tools/enemy-designer.js";
 import { createLevelGenerator } from "./tools/level-generator.js";
 import { createFiringRoom } from "./tools/firing-room.js";
 import { createControlsMapper } from "./tools/controls-mapper.js";
+import { createSoundPage } from "./sound-page.js";
+import { audio } from "../audio/engine.js";
 
 const root = document.getElementById("editor");
 let tab = "settings";
 let toolId = null; // which Tools-tab tool is open (null = the tool grid)
 let activeTool = null; // the mounted tool instance ({ dispose })
+
+// Auditioning a cue needs a live AudioContext, which browsers only grant inside
+// a user gesture — same arming as the game page.
+audio.armUnlock();
+
+// The Sound tab owns these knobs, so the Settings tab doesn't show them twice.
+const SETTINGS_SCHEMA = SCHEMA.filter((g) => g.title !== "Sound");
 
 const TOOLS = [
   { id: "weapon", label: "Weapon Designer", desc: "Compose weapons from primitives, watch them fire, and check them against the cost budget." },
@@ -48,6 +57,7 @@ function render() {
   const MOUNTABLE = ["weapon", "enemy", "levelgen", "firing", "controls"];
   let body;
   if (tab === "settings") body = settingsView();
+  else if (tab === "sound") body = `<div id="tool-host" class="tool-host"></div>`;
   else if (MOUNTABLE.includes(toolId)) body = `<div id="tool-host" class="tool-host"></div>`;
   else body = toolsView();
 
@@ -56,6 +66,7 @@ function render() {
       <div class="ed-brand">⚙ XCOM&nbsp;TASK&nbsp;FORCE <span>· EDITOR</span></div>
       <nav class="ed-tabs">
         <button data-tab="settings" class="${tab === "settings" ? "active" : ""}">Settings &amp; Tuning</button>
+        <button data-tab="sound" class="${tab === "sound" ? "active" : ""}">Sound</button>
         <button data-tab="tools" class="${tab === "tools" ? "active" : ""}">Tools</button>
       </nav>
       <a class="ed-play" href="./index.html">▸ Play</a>
@@ -63,6 +74,9 @@ function render() {
     <main class="ed-body">${body}</main>`;
 
   if (tab === "settings") bindControls(document.getElementById("cfg"), (key, val) => setConfig(key, val));
+  // The Sound page follows the same createX(container) → { dispose() } contract
+  // the Tools-tab panels use, so the shell tears it down the same way.
+  if (tab === "sound") activeTool = createSoundPage(document.getElementById("tool-host"));
   if (tab === "tools" && MOUNTABLE.includes(toolId)) {
     const host = document.getElementById("tool-host");
     const back = () => { toolId = null; render(); };
@@ -77,9 +91,9 @@ function settingsView() {
       Changes save to this browser instantly. <strong>Live</strong> values (friendly fire, squad damage,
       run/jump speed) take effect immediately, even mid-mission. Load-time values (gravity) apply on your
       next deploy — reload the game after big changes. To make a tweak permanent, Export and paste the
-      values into <code>src/game/config.js</code> defaults.
+      values into <code>src/game/config.js</code> defaults. Volumes live on the <strong>Sound</strong> tab.
     </p>
-    <div id="cfg" class="cfg">${controlsHTML(SCHEMA, config, isDefault)}</div>
+    <div id="cfg" class="cfg">${controlsHTML(SETTINGS_SCHEMA, config, isDefault)}</div>
     <section class="ed-io">
       <div class="ed-io-btns">
         <button class="btn" data-action="reset">Reset all to defaults</button>

@@ -12,6 +12,11 @@
 //   ctx.kill(t,o)      kill `t` crediting `o` (used by burn ticks)
 //   ctx.spark(x,y,color,n,spd) / ctx.burst(x,y,color,n,spd)   cosmetics (optional)
 //
+// Sound is the one presentation hook that hangs off the SCENE rather than ctx
+// (`scene.sound(cueId, { x, y })`), because ai.js `fire()` — the most important
+// sound in the game — takes a scene and no ctx. The scene's owner installs it;
+// headless tests leave it unset, so every call here is guarded and silent.
+//
 // Effect kinds (see weaponcost.js): damage, burn, slow, knockback, explode,
 // chain are resolved here on hit; pellets is a fire-time modifier (ai.js fire),
 // pierce + homing are read off the projectile here.
@@ -59,7 +64,12 @@ export function updateProjectiles(scene, dt, ctx) {
     for (const plat of scene.platforms) {
       if (overlaps(p, plat)) { hitWall = true; break; }
     }
-    if (hitWall) { p.dead = true; ctx.spark && ctx.spark(p.x, p.y, p.color, 4, 90); continue; }
+    if (hitWall) {
+      p.dead = true;
+      ctx.spark && ctx.spark(p.x, p.y, p.color, 4, 90);
+      scene.sound && scene.sound("impact.wall", { x: p.x, y: p.y });
+      continue;
+    }
 
     // Target set (squad-only friendly fire; a shot never hits its own owner).
     const targets =
@@ -72,6 +82,9 @@ export function updateProjectiles(scene, dt, ctx) {
       if (p._hit && p._hit.has(t)) continue; // already pierced this one
       resolveHit(scene, p, t, ctx);
       ctx.spark && ctx.spark(p.x, p.y, p.color, 7, 150);
+      // A shotgun lands 6 pellets in the same millisecond; the cue's cooldown
+      // (bank.js) collapses those into one impact rather than six stacked ones.
+      scene.sound && scene.sound("impact.hit", { x: p.x, y: p.y });
 
       const pierce = (p.effects || []).find((e) => e.kind === "pierce");
       if (pierce) {
@@ -148,6 +161,7 @@ export function applyEffects(scene, target, effects, owner, ctx, at = {}) {
         break;
       case "explode": {
         ctx.burst && ctx.burst(cx, cy, "#ff9b4a", 14, 220);
+        scene.sound && scene.sound("impact.explode", { x: cx, y: cy });
         for (const o of opponents(scene, team)) {
           if (!o.alive) continue;
           const oc = centerOf(o);
@@ -169,6 +183,7 @@ export function applyEffects(scene, target, effects, owner, ctx, at = {}) {
           if (!best) break;
           ctx.damage(best, (fx.amount || 0) * mult, owner);
           ctx.spark && ctx.spark(best.x + best.w / 2, best.y + best.h / 2, "#8fd0ff", 6, 120);
+          scene.sound && scene.sound("impact.chain", { x: best.x + best.w / 2, y: best.y + best.h / 2 });
           hit.add(best);
           from = best;
         }

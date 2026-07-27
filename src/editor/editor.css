@@ -302,3 +302,55 @@
 .es-errors li::before { content: "✗ "; }
 .es-errors li.ok { color: var(--good); }
 .es-errors li.ok::before { content: ""; }
+
+/* ---- Sound page (mixer + cue bank) ---- */
+.snd-bank { margin-top: 28px; }
+.snd-h {
+  font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted);
+  border-bottom: 1px solid var(--line); padding-bottom: 8px; margin: 0 0 18px;
+}
+.snd-cues { display: flex; flex-direction: column; gap: 8px; }
+.snd-cue {
+  border: 1px solid var(--line); border-radius: 6px; background: rgba(20,25,32,0.5);
+  padding: 10px 12px; transition: border-color 0.14s;
+}
+.snd-cue.open { border-color: var(--accent); }
+.snd-cue.changed .cfg-dot { opacity: 1; }
+.snd-cue-top { display: flex; align-items: center; gap: 12px; }
+.snd-cue-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.snd-cue-meta .cfg-help { line-height: 1.4; }
+.snd-play {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer;
+  background: var(--track); color: var(--accent); border: 1px solid var(--line);
+  font-size: 11px; line-height: 1; transition: background 0.14s, border-color 0.14s;
+}
+.snd-play:hover { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+.snd-id {
+  color: var(--muted); font-size: 11px; font-family: ui-monospace, Menlo, monospace;
+  white-space: nowrap;
+}
+.snd-edit { flex: none; }
+
+.snd-params { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.snd-wave { display: flex; align-items: flex-end; gap: 14px; margin-bottom: 12px; }
+.snd-wave .wd-mini { flex: none; min-width: 150px; }
+.snd-wave select {
+  background: var(--track); color: var(--text); border: 1px solid var(--line);
+  border-radius: 5px; padding: 5px 8px; font-family: inherit; font-size: 13px;
+}
+.snd-wave .btn { margin-left: auto; }
+.snd-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px 18px;
+}
+.snd-grid-entry {
+  margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line);
+}
+.snd-mini-head { display: flex; align-items: center; gap: 8px; }
+.snd-mini-head output {
+  margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; font-size: 12px;
+}
+.wd-mini.snd-off { opacity: 0.5; }
+.wd-mini.snd-off input[type="range"] { cursor: not-allowed; }
+.toggle.sm { width: 30px; height: 17px; border-radius: 9px; }
+.toggle.sm .knob { width: 13px; height: 13px; top: 1px; left: 1px; }
+.toggle.sm.on .knob { left: 15px; }

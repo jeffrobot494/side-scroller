@@ -36,7 +36,11 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   if (shooter.fireCooldown > 0) return false;
   // Empty magazine or mid-reload → nothing happens (you must reload).
   if (shooter.reloading > 0) return false;
-  if (shooter.ammo !== undefined && shooter.ammo <= 0) return false;
+  if (shooter.ammo !== undefined && shooter.ammo <= 0) {
+    // The dry click only belongs to the squad — an enemy running dry is silent.
+    if (team === "player") scene.sound && scene.sound("weapon.empty", { x: shooter.x + shooter.w / 2, y: shooter.y });
+    return false;
+  }
 
   const w = shooter.weapon;
   shooter.fireCooldown = 1 / w.fireRate;
@@ -80,6 +84,11 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   shooter.muzzleFlash = 0.055;
   shooter.muzzleDir = { x: dx, y: dy };
   shooter.muzzleColor = spec.color;
+  // ONE shot sound per trigger pull — outside the pellet loop, so a shotgun
+  // shell is a single boom. `w.sounds.fire` is the Slice 2 per-weapon override;
+  // the dotted fallback walks up to the generic cue until then.
+  const cue = (w.sounds && w.sounds.fire) || (team === "player" ? "weapon.fire" : "weapon.fire.enemy");
+  scene.sound && scene.sound(cue, { x: shooter.x + shooter.w / 2, y: shooter.y });
   return true;
 }
 
