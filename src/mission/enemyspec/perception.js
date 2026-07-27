@@ -26,7 +26,7 @@ export function updateSense(root, scene, dt) {
   if (m.senseTimer > 0) return;
   m.senseTimer = SENSE_INTERVAL;
 
-  const t = firstLiving(scene.soldiers);
+  const t = nearestHostile(root, scene);
   const s = root.sense;
   if (!t) {
     s.los = false;
@@ -65,9 +65,31 @@ export function updateSense(root, scene, dt) {
   s.lastSeenY = m.lastSeenY;
 }
 
-function firstLiving(list) {
-  for (const s of list) if (s.alive) return s;
-  return null;
+// Who this agent fights. An enemy (the default team) hunts the squad; a
+// player-team agent (a companion) hunts the enemy roots. The scene exposes both
+// lists; hosts without a specRoots view (a bare test scene) fall back to enemies.
+export function hostilesFor(root, scene) {
+  if (root && root.team === "player") return scene.specRoots || scene.enemies || [];
+  return scene.soldiers || [];
+}
+
+// The nearest LIVING hostile to the agent's center — the primary target for
+// perception, movement, and aim. Replaces the old "first living soldier", which
+// made an entire wave of enemies fixate on soldiers[0] regardless of who was
+// actually closest. Degrades to the first entry (possibly dead) when nothing is
+// alive, matching the old null-tolerant callers.
+export function nearestHostile(root, scene) {
+  const list = hostilesFor(root, scene);
+  const ex = root.x + root.w / 2;
+  const ey = root.y + root.h / 2;
+  let best = null;
+  let bestD = Infinity;
+  for (const e of list) {
+    if (!e || !e.alive) continue;
+    const d = Math.hypot(e.x + e.w / 2 - ex, e.y + e.h / 2 - ey);
+    if (d < bestD) { bestD = d; best = e; }
+  }
+  return best || list[0] || null;
 }
 
 // Is there floor under a probe point just past my leading edge?

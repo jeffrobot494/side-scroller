@@ -21,7 +21,7 @@
 
 import { stepActor, overlaps, Projectile } from "../entities.js";
 import { tickBrain } from "./brain.js";
-import { updateSense } from "./perception.js";
+import { updateSense, nearestHostile } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
 
 const WALL_EPS = 4;
@@ -29,10 +29,13 @@ const WALL_EPS = 4;
 // ---- instantiation --------------------------------------------------------
 
 // Build a live tree from a NORMALIZED spec (normalize.js output only).
-// (x, y) is the root's top-left, matching how missions place enemies.
-export function instantiate(nspec, x, y) {
+// (x, y) is the root's top-left, matching how missions place enemies. `team`
+// picks who this agent treats as hostile — "enemy" (the default) hunts the
+// squad; "player" makes a companion hunt the enemy roots (see nearestHostile).
+export function instantiate(nspec, x, y, team = "enemy") {
   const root = makeInstance(nspec.root, null, null);
   root.isRoot = true;
+  root.team = team;
   root.specTop = nspec;
   root.kindName = nspec.name;
   root.vars = { ...nspec.vars, ...root.vars };
@@ -196,13 +199,9 @@ function updateTree(root, ent, dt, scene, ctx) {
 
 // ---- movement -------------------------------------------------------------
 
-// The "player" a spec enemy tracks: the first living soldier in the host scene
-// (preview/Firing Room have exactly one; a future mission host can pass a
-// nearest-soldier view instead).
-function player(scene) {
-  for (const s of scene.soldiers) if (s.alive) return s;
-  return scene.soldiers[0] || null;
-}
+// The primary target a spec agent tracks resolves through perception's
+// nearestHostile(root, scene) — team-aware (enemies hunt the squad, companions
+// hunt the enemy roots) and nearest-first. See perception.js.
 
 const cx = (e) => e.x + e.w / 2;
 const cy = (e) => e.y + e.h / 2;
@@ -261,7 +260,7 @@ function moveEntity(root, ent, dt, scene) {
     return;
   }
 
-  const target = player(scene);
+  const target = nearestHostile(root, scene);
   const flying = ent.spec.body.gravity === 0;
 
   // temporary overrides first: dash, then moveTo orders
@@ -619,13 +618,13 @@ export function execStep(root, self, step, scene, ctx) {
     case "moveTo": {
       const at = args.at
         ? { x: args.at[0], y: args.at[1] }
-        : resolveTargetPoint(root, self, args.target, scene, player(scene), args.offset);
+        : resolveTargetPoint(root, self, args.target, scene, nearestHostile(root, scene), args.offset);
       if (!at) return null;
       self.moveOrder = { x: at.x, y: at.y, speed: args.speed || 160, timeout: args.timeout || 3 };
       return { kind: "move" };
     }
     case "dash": {
-      const t = player(scene);
+      const t = nearestHostile(root, scene);
       const flying = self.spec.body.gravity === 0;
       const speed = args.speed || 300;
       let ux, uy;
@@ -801,7 +800,7 @@ function resolveEmitter(root, self, ref) {
 // player's feet line in y).
 function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin) {
   const o = origin || { x: cx(from), y: cy(from) };
-  const t = player(scene);
+  const t = nearestHostile(root, scene);
   let base = from.facing >= 0 ? 0 : Math.PI;
   if (t && pattern !== "single") {
     let tx = cx(t);
@@ -882,7 +881,7 @@ export function spawnFromDef(root, defId, x, y, { vx = 0, vy = 0, depth = 1 } = 
 // whitelisted function set, all scoped to (root, self, scene).
 
 export function exprCtx(root, self, scene) {
-  const t = player(scene);
+  const t = nearestHostile(root, scene);
   return {
     get(path) {
       const [head, ...rest] = path.split(".");

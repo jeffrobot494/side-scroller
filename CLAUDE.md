@@ -89,8 +89,14 @@ section + the tests are the source of truth for what currently exists):
   rebuilt around it (template/form/JSON authoring + LLM generate via Player2
   chat completions + live real-runtime preview + library) and the **Firing
   Room** spawns saved specs as waves. Plan: `docs/enemy_creation_system_plan.md`.
-  NOT yet wired into missions/levelgen — the legacy 3-archetype enemies still
-  drive gameplay; that integration is a deliberate later task.
+  **Wired into missions:** every mission enemy is an EnemySpec instance now —
+  `loadMission` instantiates the built-in roster (`src/game/enemyspecs.js`) and
+  the runtime brain/perception drive them; the legacy flat archetypes were
+  retired. Agents are team-aware (`instantiate(nspec, x, y, team="enemy")`;
+  perception's `nearestHostile` targets the nearest hostile), which is what will
+  let companions run the same brain — see `docs/BEHAVIOR-LAB.md` for the plan to
+  develop/test agent intelligence (navigation, coordination, habit-reading).
+  Companions still use the simple `updateCompanion` in `src/mission/ai.js`.
   **Known issue:** `on.spawn` handlers run from `instantiate()`, which has no
   scene, so `fire`/`spawn`/`sound` there are silently skipped (they used to
   crash). Fix = defer the spawn event to the first update; see "Known issues" in
