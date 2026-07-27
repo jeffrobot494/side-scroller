@@ -31,6 +31,20 @@ section + the tests are the source of truth for what currently exists):
   the dots (`weapon.fire.pellet` → `weapon.fire` → silence), which is how Slices
   2–3 will add per-weapon / per-EnemySpec sounds without touching call sites.
   Sounds today are made-up beeps; real clips slot into the same cues (Slice 4).
+  **Slice 2 (per-weapon):** `weaponSound(weapon, kind, team) → { cue, gain }` in
+  `audio/cues.js` is the ONE place that picks a weapon's cue and level
+  (`weaponCue` is a thin wrapper for the id alone). An explicit
+  `weapon.sounds[kind]` beats a timbre derived from `projectile.shape` beats the
+  generic cue. A slot is either a cue-id string or `{ cue?, gain? }` — the
+  gain-only form turns a weapon down while KEEPING its derived timbre, so two
+  weapons sharing a cue can differ in level; gain multiplies the cue's own level
+  (clamped 0–2) and costs no budget. Six per-shape fire timbres spread the
+  24-weapon arsenal with no authoring; two entries carry an explicit override
+  where shape ≠ how it fires. The Weapon Designer's Sound section (shared
+  `editor/sound-picker.js`) has a cue picker + `×` level slider per slot, and
+  writes sparsely — gain 1 stays a plain string, no assignment writes no key.
+  Caveat: the Designer cannot load a built-in weapon, so rebalancing the arsenal
+  means Copy JSON → paste into `arsenal.js`.
 - **Weapon effects:** a 9-kind library (damage/burn/slow/knockback/explode/chain
   + pellets/pierce/homing) priced by `weaponcost.js`; a 24-weapon `arsenal.js`;
   combat resolved in the shared `mission/combat.js`. Weapons also carry

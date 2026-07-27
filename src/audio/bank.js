@@ -25,26 +25,59 @@ const STORAGE_KEY = "sidescroller.sound.v1";
 
 // Hand-tuned placeholder beeps. Deliberately dry and short — they read as
 // feedback, not as music, and they get out of the way of the next one.
+//
+// NOTE when tuning: a `wave: "noise"` cue has no tone term (synth.js zeroes it),
+// so its `freq`/`freqEnd` are inert — **`filterHz` is the pitch control** for
+// pellet/missile/wave/reload/empty. Lowering `freq` on those does nothing.
 export const DEFAULT_BANK = {
   // ---- weapons ------------------------------------------------------------
   "weapon.fire": {
-    synth: { wave: "square", freq: 340, freqEnd: 90, dur: 0.085, attack: 0.001, decay: 0.85, gain: 0.5, noiseMix: 0.5, filterHz: 3200, drive: 0.45 },
+    synth: { wave: "square", freq: 200, freqEnd: 58, dur: 0.085, attack: 0.001, decay: 0.85, gain: 0.5, noiseMix: 0.5, filterHz: 1900, drive: 0.45 },
     pitchJitter: 0.07, cooldown: 0.02, maxVoices: 6,
   },
   "weapon.fire.enemy": {
-    synth: { wave: "saw", freq: 240, freqEnd: 72, dur: 0.1, attack: 0.002, decay: 0.8, gain: 0.42, noiseMix: 0.25, filterHz: 2400, drive: 0.35 },
+    synth: { wave: "saw", freq: 150, freqEnd: 46, dur: 0.1, attack: 0.002, decay: 0.8, gain: 0.42, noiseMix: 0.25, filterHz: 1500, drive: 0.35 },
     pitchJitter: 0.09, cooldown: 0.03, maxVoices: 5,
   },
+  // Per-shape timbres. These are what stop the arsenal sounding uniform: a
+  // weapon picks one up from `projectile.shape` with nothing authored on it.
+  "weapon.fire.bullet": {
+    synth: { wave: "square", freq: 220, freqEnd: 62, dur: 0.08, attack: 0.001, decay: 0.85, gain: 0.5, noiseMix: 0.45, filterHz: 2000, drive: 0.5 },
+    pitchJitter: 0.07, cooldown: 0.02, maxVoices: 6,
+  },
+  "weapon.fire.pellet": {
+    // Heavier, longer, and mostly noise — one shell, not five pellets.
+    synth: { wave: "noise", freq: 220, freqEnd: 70, dur: 0.17, attack: 0.001, decay: 0.55, gain: 0.75, noiseMix: 1, filterHz: 800, drive: 0.55 },
+    pitchJitter: 0.06, cooldown: 0.05, maxVoices: 3,
+  },
+  "weapon.fire.bolt": {
+    synth: { wave: "square", freq: 560, freqEnd: 150, dur: 0.1, attack: 0.001, decay: 0.8, gain: 0.42, noiseMix: 0.12, filterHz: 3200, drive: 0.3 },
+    pitchJitter: 0.1, cooldown: 0.02, maxVoices: 5,
+  },
+  "weapon.fire.missile": {
+    synth: { wave: "noise", freq: 180, dur: 0.36, attack: 0.006, decay: 0.35, gain: 0.7, filterHz: 700, drive: 0.35 },
+    pitchJitter: 0.08, cooldown: 0.08, maxVoices: 3,
+  },
+  "weapon.fire.wave": {
+    // A stream weapon fires many times a second, so this stays quiet and short.
+    synth: { wave: "noise", freq: 400, dur: 0.11, attack: 0.004, decay: 0.7, gain: 0.72, filterHz: 1800 },
+    pitchJitter: 0.18, cooldown: 0.03, maxVoices: 4,
+  },
+  "weapon.fire.orb": {
+    synth: { wave: "sine", freq: 320, freqEnd: 100, dur: 0.13, attack: 0.003, decay: 0.65, gain: 0.45, noiseMix: 0.2, filterHz: 1400, drive: 0.2 },
+    pitchJitter: 0.1, cooldown: 0.03, maxVoices: 4,
+  },
+
   "weapon.reload.start": {
-    synth: { wave: "noise", freq: 200, dur: 0.075, attack: 0.001, decay: 0.7, gain: 0.4, filterHz: 1700 },
+    synth: { wave: "noise", freq: 200, dur: 0.075, attack: 0.001, decay: 0.7, gain: 1, filterHz: 1150 },
     pitchJitter: 0.04, cooldown: 0.05, maxVoices: 2,
   },
   "weapon.reload.done": {
-    synth: { wave: "square", freq: 170, freqEnd: 330, dur: 0.08, attack: 0.001, decay: 0.75, gain: 0.4, noiseMix: 0.35, filterHz: 2600, drive: 0.3 },
+    synth: { wave: "square", freq: 110, freqEnd: 215, dur: 0.08, attack: 0.001, decay: 0.75, gain: 0.4, noiseMix: 0.35, filterHz: 1700, drive: 0.3 },
     pitchJitter: 0.04, cooldown: 0.05, maxVoices: 2,
   },
   "weapon.empty": {
-    synth: { wave: "noise", freq: 400, dur: 0.045, attack: 0.001, decay: 0.9, gain: 0.3, filterHz: 5200 },
+    synth: { wave: "noise", freq: 400, dur: 0.045, attack: 0.001, decay: 0.9, gain: 0.53, filterHz: 3000 },
     pitchJitter: 0.05, cooldown: 0.12, maxVoices: 1,
   },
 
@@ -53,8 +86,20 @@ export const DEFAULT_BANK = {
     synth: { wave: "square", freq: 520, freqEnd: 170, dur: 0.07, attack: 0.001, decay: 0.85, gain: 0.4, noiseMix: 0.45, filterHz: 3600, drive: 0.3 },
     pitchJitter: 0.12, cooldown: 0.045, maxVoices: 4,
   },
+  "impact.hit.bolt": {
+    synth: { wave: "square", freq: 1150, freqEnd: 380, dur: 0.06, attack: 0.001, decay: 0.88, gain: 0.32, noiseMix: 0.2, filterHz: 5400 },
+    pitchJitter: 0.14, cooldown: 0.045, maxVoices: 4,
+  },
+  "impact.hit.pellet": {
+    synth: { wave: "noise", freq: 240, dur: 0.075, attack: 0.001, decay: 0.7, gain: 0.5, filterHz: 1400, drive: 0.3 },
+    pitchJitter: 0.1, cooldown: 0.06, maxVoices: 3,
+  },
+  "impact.hit.wave": {
+    synth: { wave: "noise", freq: 600, dur: 0.1, attack: 0.003, decay: 0.6, gain: 0.46, filterHz: 3800 },
+    pitchJitter: 0.16, cooldown: 0.05, maxVoices: 3,
+  },
   "impact.wall": {
-    synth: { wave: "noise", freq: 300, dur: 0.05, attack: 0.001, decay: 0.9, gain: 0.26, filterHz: 2600 },
+    synth: { wave: "noise", freq: 300, dur: 0.05, attack: 0.001, decay: 0.9, gain: 0.5, filterHz: 2600 },
     pitchJitter: 0.14, cooldown: 0.06, maxVoices: 3,
   },
   "impact.explode": {
@@ -72,7 +117,7 @@ export const DEFAULT_BANK = {
     pitchJitter: 0.06, cooldown: 0.08, maxVoices: 2,
   },
   "soldier.land": {
-    synth: { wave: "noise", freq: 150, dur: 0.09, attack: 0.001, decay: 0.75, gain: 0.32, filterHz: 1100 },
+    synth: { wave: "noise", freq: 150, dur: 0.09, attack: 0.001, decay: 0.75, gain: 0.62, filterHz: 1100 },
     pitchJitter: 0.08, cooldown: 0.1, maxVoices: 2,
   },
   "soldier.hurt": {
@@ -80,7 +125,7 @@ export const DEFAULT_BANK = {
     pitchJitter: 0.06, cooldown: 0.18, maxVoices: 2,
   },
   "soldier.death": {
-    synth: { wave: "saw", freq: 300, freqEnd: 62, dur: 0.5, attack: 0.004, decay: 0.35, gain: 0.7, noiseMix: 0.25, filterHz: 1900, drive: 0.4 },
+    synth: { wave: "saw", freq: 300, freqEnd: 62, dur: 0.5, attack: 0.004, decay: 0.35, gain: 0.6, noiseMix: 0.25, filterHz: 1900, drive: 0.4 },
     pitchJitter: 0.05, cooldown: 0.2, maxVoices: 2,
   },
 
@@ -90,7 +135,7 @@ export const DEFAULT_BANK = {
     pitchJitter: 0.16, cooldown: 0.07, maxVoices: 3,
   },
   "enemy.death": {
-    synth: { wave: "saw", freq: 420, freqEnd: 70, dur: 0.42, attack: 0.003, decay: 0.4, gain: 0.7, noiseMix: 0.35, filterHz: 2000, drive: 0.5 },
+    synth: { wave: "saw", freq: 420, freqEnd: 70, dur: 0.42, attack: 0.003, decay: 0.4, gain: 0.6, noiseMix: 0.35, filterHz: 2000, drive: 0.5 },
     pitchJitter: 0.14, cooldown: 0.05, maxVoices: 4,
   },
   "enemy.part": {

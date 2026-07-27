@@ -125,9 +125,15 @@ export function renderSynth(params, sampleRate = 44100) {
   const noiseAmt = isNoise ? 1 : p.noiseMix;
   const toneAmt = isNoise ? 0 : 1 - p.noiseMix * 0.5;
 
-  // One-pole lowpass coefficient (RC smoothing), computed once.
+  // Lowpass: TWO cascaded one-pole stages (12 dB/octave). A single pole rolls
+  // off at 6 dB/oct, which is far too gentle to darken white noise — a "800 Hz"
+  // cutoff still measured ~3.6 kHz of brightness, so every noise-based cue read
+  // as hiss no matter what the cutoff said. Two stages make filterHz mean what
+  // it claims, which matters because for a `noise` wave it is the ONLY pitch
+  // control there is.
   const lp = p.filterHz == null ? 0 : Math.exp((-2 * Math.PI * p.filterHz) / sampleRate);
-  let lpState = 0;
+  let lpA = 0;
+  let lpB = 0;
 
   const attackN = Math.max(1, Math.floor(p.attack * sampleRate));
   let phase = 0;
@@ -145,8 +151,11 @@ export function renderSynth(params, sampleRate = 44100) {
     if (noiseAmt > 0) s += (rnd() * 2 - 1) * noiseAmt;
 
     if (lp) {
-      lpState = s * (1 - lp) + lpState * lp;
-      s = lpState;
+      lpA = s * (1 - lp) + lpA * lp;
+      lpB = lpA * (1 - lp) + lpB * lp;
+      // Two poles cost ~6 dB of level at the cutoff; give it back so lowering a
+      // cutoff darkens a cue without also quietening it.
+      s = lpB * 2;
     }
 
     // Envelope: linear attack, then an exponential-ish decay whose curve is set

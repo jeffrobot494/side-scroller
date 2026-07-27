@@ -10,6 +10,7 @@
 
 import { Projectile, startReload } from "./entities.js";
 import { config } from "../game/config.js";
+import { weaponSound } from "../audio/cues.js";
 
 // Map a 1..10 Aim stat to a 0..1 accuracy (10 = perfectly tight, 1 = loosest).
 // Feeds the spread penalty in fire() so higher-Aim shooters group tighter.
@@ -38,7 +39,10 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   if (shooter.reloading > 0) return false;
   if (shooter.ammo !== undefined && shooter.ammo <= 0) {
     // The dry click only belongs to the squad — an enemy running dry is silent.
-    if (team === "player") scene.sound && scene.sound("weapon.empty", { x: shooter.x + shooter.w / 2, y: shooter.y });
+    if (team === "player" && scene.sound) {
+      const dry = weaponSound(shooter.weapon, "empty", team);
+      scene.sound(dry.cue, { x: shooter.x + shooter.w / 2, y: shooter.y, gain: dry.gain });
+    }
     return false;
   }
 
@@ -63,6 +67,10 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
   // by config.aimSpread) plus the pellet arc.
   const spread = (w.spread || 0) + (1 - accuracy) * config.aimSpread + arc;
   const spec = w.projectile;
+  // Each projectile carries the cue AND level for its OWN impact, so combat.js
+  // can voice a hit without knowing which weapon fired it (a shot outlives its
+  // shooter, so neither can be looked up at the moment it lands).
+  const impact = weaponSound(w, "impact", team);
 
   for (let i = 0; i < count; i++) {
     let ax = dx;
@@ -76,19 +84,22 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
     }
     const ox = shooter.x + shooter.w / 2 + ax * (shooter.w / 2 + 6);
     const oy = shooter.y + shooter.h * 0.42 + ay * (shooter.h / 2 + 6);
-    scene.projectiles.push(
-      new Projectile(ox, oy, ax * spec.speed, ay * spec.speed, spec, team, w.effects, shooter)
-    );
+    const proj = new Projectile(ox, oy, ax * spec.speed, ay * spec.speed, spec, team, w.effects, shooter);
+    proj.sound = impact.cue;
+    proj.soundGain = impact.gain;
+    scene.projectiles.push(proj);
   }
   // cosmetic: a brief muzzle flash the renderer draws at the barrel tip
   shooter.muzzleFlash = 0.055;
   shooter.muzzleDir = { x: dx, y: dy };
   shooter.muzzleColor = spec.color;
   // ONE shot sound per trigger pull — outside the pellet loop, so a shotgun
-  // shell is a single boom. `w.sounds.fire` is the Slice 2 per-weapon override;
-  // the dotted fallback walks up to the generic cue until then.
-  const cue = (w.sounds && w.sounds.fire) || (team === "player" ? "weapon.fire" : "weapon.fire.enemy");
-  scene.sound && scene.sound(cue, { x: shooter.x + shooter.w / 2, y: shooter.y });
+  // shell is a single boom. weaponSound picks the weapon's own cue and level,
+  // else a timbre derived from the projectile shape, else the generic report.
+  if (scene.sound) {
+    const shot = weaponSound(w, "fire", team);
+    scene.sound(shot.cue, { x: shooter.x + shooter.w / 2, y: shooter.y, gain: shot.gain });
+  }
   return true;
 }
 

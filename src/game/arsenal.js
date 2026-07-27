@@ -64,11 +64,19 @@ const RAW = [
   { id: "arc_tazer", name: "Arc Tazer", tier: 2, fireRate: 6, auto: true, spread: 0.03, magazine: 24, reloadTime: 1.8,
     projectile: { speed: 940, w: 9, h: 4, color: "#8fd0ff", life: 0.8, shape: "bolt" },
     effects: [{ kind: "damage", amount: 9 }, { kind: "chain", amount: 8, jumps: 2, range: 240 }] },
+  // `sounds.fire` overrides the shape-derived timbre. Only two weapons need it:
+  // both picked a shape for how the projectile LOOKS, and the matching sound is
+  // wrong for how the weapon FIRES.
   { id: "concussion_gun", name: "Concussion Gun", tier: 2, fireRate: 2.5, auto: false, spread: 0.02, magazine: 6, reloadTime: 2.2,
     projectile: { speed: 820, w: 18, h: 8, color: "#ffd0a0", life: 0.9, gravity: 0.2, shape: "wave" },
+    // "wave" is a light stream hiss; a 380-knockback slug needs to thump.
+    sounds: { fire: "weapon.fire.pellet" },
     effects: [{ kind: "damage", amount: 30 }, { kind: "knockback", force: 380 }] },
   { id: "hornet_smg", name: "Hornet SMG", tier: 2, fireRate: 9, auto: true, spread: 0.05, magazine: 28, reloadTime: 1.9,
     projectile: { speed: 760, w: 9, h: 5, color: "#d0ff8a", life: 1.4, shape: "missile" },
+    // Shaped "missile" because it homes, but it empties 9 rounds a second — the
+    // 0.36s launcher whoosh would overlap itself into mush.
+    sounds: { fire: "weapon.fire.bolt" },
     effects: [{ kind: "damage", amount: 11 }, { kind: "homing", turn: 4 }] },
 
   // ---- Tier III · Prototype (≤280) --------------------------------------

@@ -1,6 +1,6 @@
 # Sound — system design & slice plan
 
-Status: Slice 1 built. Slices 2–4 designed, unbuilt. Build in slices; each is
+Status: Slices 1–2 built. Slices 3–4 designed, unbuilt. Build in slices; each is
 independently usable and leaves the game shippable. Refine as we go.
 
 Today the game is silent. The target is a small, data-driven audio layer that
@@ -42,6 +42,16 @@ Two properties make this fit the house style.
 the editor auto-generates controls for it and a laser pew can be dialled in
 without touching a source file. That is the audio analogue of the procedural
 shape that permanently backstops missing art.
+
+**`filterHz` is the pitch control for noise.** A `wave: "noise"` cue has no tone
+term at all, so its `freq`/`freqEnd` are inert and only the lowpass shapes it.
+The filter is a **two-pole cascade (12 dB/oct)**: a single pole rolls off at
+6 dB/oct, which is far too gentle to darken white noise — an "800 Hz" cutoff
+still measured ~3.6 kHz of brightness, so every noise cue read as hiss no matter
+what its cutoff claimed. The Sound page greys out Pitch/Sweep on noise cues for
+the same reason: live sliders that silently do nothing waste a tuning session.
+Note that a steeper filter also removes level, so changing a cutoff on a noise
+cue usually means revisiting its `gain`.
 
 **Sample rendering is a pure function.** `renderSynth(params, sampleRate)`
 returns a `Float32Array` and touches no browser API, so the interesting half of
@@ -102,9 +112,60 @@ destroyed); and because `vocabularyDoc()` is generated *from* the schema, the LL
 can assign sounds when it generates an enemy, picking from the cue catalog with
 no prompt drift.
 
-Weapons take a flat `sounds: { fire, reload, empty, impact }` on the weapon
+Weapons take a flat `sounds: { fire, impact, reload, empty }` on the weapon
 object, defaulted from `projectile.shape` so all 24 entries in `arsenal.js` sound
-reasonable before anyone hand-assigns anything.
+reasonable before anyone hand-assigns anything. `weaponSound()` in `cues.js` is
+the single place that decides (with `weaponCue()` a thin wrapper for callers that
+only want the id), so the game, the designer and the tests cannot drift:
+
+    explicit weapon.sounds[kind]  ->  weapon.fire.<shape>  ->  weapon.fire
+
+Each slot is **either** a bare cue id or `{ cue?, gain? }`:
+
+```js
+sounds: {
+  fire:   "weapon.fire.bolt",                    // that cue, at its own level
+  impact: { cue: "impact.hit.pellet", gain: 1.1 },
+  reload: { gain: 0.6 },                         // cue STILL derives from shape
+}
+```
+
+The gain-only form is the one that earns the object shape: it turns a weapon
+down without giving up its shape-derived timbre, so two weapons sharing a cue can
+sit at different levels. Gain is a multiplier the engine folds into the cue's own
+level (`entry.gain * opts.gain` in `play()`), clamped 0–2 to match the bank's own
+trim — a slot adjusts a cue, it does not get its own scale. The string form stays
+valid and is what the Designer writes whenever the gain is 1, so an untouched
+weapon still exports no `sounds` block and a cue-only choice stays a plain string.
+
+Only `fire` and `impact` take the shape suffix — shape is meaningless for a
+reload or a dry click. Enemy fire branches to `weapon.fire.enemy.<shape>`, which
+falls back through `weapon.fire.enemy` to the generic report.
+
+The impact cue **and its gain** are stamped onto each `Projectile` at fire time
+(`p.sound` / `p.soundGain`) rather than looked up on hit: a shot outlives its
+shooter, so by the time it lands there may be no weapon left to ask.
+
+Reload is the one slot that voices two cues — the mag drop and the mag seat. Both
+take the `reload` slot's gain, so a weapon turned down is quiet for the whole
+reload rather than half of it.
+
+**Where you author a level.** The Weapon Designer's Sound rows, each with a `×`
+slider beside the cue picker. Note the Designer can only author *new* weapons —
+it cannot load one of the 24 built-ins, so rebalancing the existing arsenal means
+**Copy JSON** and pasting the `sounds` block into `arsenal.js` (the repo's usual
+"make it permanent" path). A *Load from arsenal* dropdown would close that gap and
+is the obvious follow-up. To judge a level, save the weapon and open the **Firing
+Room** — it lists custom weapons and runs the real `fire()`, so you hear the
+weapon at its true cadence, which a single ▶ audition cannot tell you.
+
+**Where the shape heuristic fails.** It reads how a projectile *looks*, which is
+not always how the weapon *fires*. Two arsenal entries needed an explicit
+override: the Concussion Gun (shaped `wave` for the visual, but a 380-knockback
+slug should thump, not hiss) and the Hornet SMG (shaped `missile` because it
+homes, but at 9 rounds/s the 0.36s launcher whoosh overlaps itself into mush).
+That pair is the argument for keeping per-weapon assignment at all — a purely
+derived system gets both wrong and gives you no way to say so.
 
 ## Three hazards worth designing around up front
 
@@ -148,9 +209,15 @@ is the plan until clips are sourced by hand.
 editor's Sound tab = mixer + cue table + audition + per-cue synth controls +
 export/import.
 
-**Slice 2 — weapons.** `weapon.sounds` on the weapon object, shape-derived
-defaults for the arsenal, a Sound row in the Weapon Designer, per-shape impact
-cues.
+**Slice 2 — weapons.** *(built)*
+`weaponCue()` + `weapon.sounds`; six per-shape fire timbres and three per-shape
+impacts in the bank; the impact cue stamped onto each projectile at fire time; a
+**Sound** section in the Weapon Designer built on `editor/sound-picker.js` (a
+grouped cue `<select>` + ▶ audition, with the resolved cue shown when the row is
+left on Auto). The picker is deliberately its own module because Slice 3 needs
+the identical control and the identical vocabulary. Assignments are stored
+sparsely — an untouched weapon exports no `sounds` block at all — and cost no
+budget, like `magazine` and `shape`.
 
 **Slice 3 — enemies.** A `sound` action in the EnemySpec `ACTIONS` table plus
 `emitters[].sound`; validator and normalizer support; a picker in the Enemy

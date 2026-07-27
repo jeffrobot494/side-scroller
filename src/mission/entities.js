@@ -11,6 +11,7 @@ import { config } from "../game/config.js";
 import { soldierMaxHp } from "../game/soldiers.js";
 import { missionSpecById, specIsFlying } from "../game/enemyspecs.js";
 import { instantiate as instantiateSpec, collidables } from "./enemyspec/runtime.js";
+import { weaponSound } from "../audio/cues.js";
 
 const MAX_FALL = 1200;
 
@@ -199,7 +200,10 @@ export function startReload(actor, scene) {
   if (actor.reloading > 0 || actor.ammo >= w.magazine) return false;
   if (actor.magsLeft !== undefined && actor.magsLeft <= 0) return false;
   actor.reloading = w.reloadTime || 1.5;
-  if (scene && scene.sound) scene.sound("weapon.reload.start", { x: actor.x + actor.w / 2, y: actor.y });
+  if (scene && scene.sound) {
+    const s = weaponSound(w, "reload");
+    scene.sound(s.cue, { x: actor.x + actor.w / 2, y: actor.y, gain: s.gain });
+  }
   return true;
 }
 
@@ -213,7 +217,14 @@ export function tickReload(actor, dt, scene) {
       actor.ammo = actor.weapon.magazine;
       if (actor.magsLeft !== undefined && actor.magsLeft !== Infinity)
         actor.magsLeft -= 1;
-      if (scene && scene.sound) scene.sound("weapon.reload.done", { x: actor.x + actor.w / 2, y: actor.y });
+      // The mag-seat cue is global, but it takes the weapon's `reload` slot
+      // gain so a weapon turned down stays quiet through the WHOLE reload
+      // rather than only the half of it that has a per-weapon cue.
+      if (scene && scene.sound)
+        scene.sound("weapon.reload.done", {
+          x: actor.x + actor.w / 2, y: actor.y,
+          gain: weaponSound(actor.weapon, "reload").gain,
+        });
     }
   }
 }

@@ -13,6 +13,16 @@
 import { effectCost, dps, validate, finalizeWeapon, TIERS } from "../../game/weaponcost.js";
 import { listCustomWeapons, saveCustomWeapon, deleteCustomWeapon } from "../../game/customcontent.js";
 import { drawProjectile, PROJECTILE_SHAPES } from "../../mission/render.js";
+import { cuePickerRowHTML, auditionCue, fmtGain } from "../sound-picker.js";
+import { weaponSound, weaponCue, WEAPON_SOUND_KINDS } from "../../audio/cues.js";
+
+// The four assignable slots, in the order they happen when you use the weapon.
+const SOUND_ROWS = [
+  { kind: "fire", label: "Shot", help: "Once per trigger pull — a shotgun shell is one boom, not six." },
+  { kind: "impact", label: "Impact", help: "When one of its projectiles connects with an actor." },
+  { kind: "reload", label: "Reload", help: "The magazine dropping when a reload starts." },
+  { kind: "empty", label: "Dry click", help: "Trigger pulled on an empty magazine." },
+];
 
 // Numeric fields rendered as sliders (path into the weapon object). The first
 // FIRE_COUNT live in the "Fire" section; the rest in "Projectile".
@@ -71,6 +81,15 @@ export function createWeaponDesigner(container, onBack) {
             <div class="cfg-control"><select data-wd="shape">${PROJECTILE_SHAPES.map((s) => `<option value="${s}"${s === weapon.projectile.shape ? " selected" : ""}>${s}</option>`).join("")}</select></div>
           </div>
           ${FIELDS.slice(FIRE_COUNT).map((f) => fieldRow(f, get(weapon, f.path))).join("")}
+
+          <h3 class="wd-h">Sound</h3>
+          <p class="wd-saved-note">
+            Left on <strong>Auto</strong>, a weapon takes its timbre from the projectile shape above —
+            change the shape and the sound follows. Assign a cue to override that. The <strong>×</strong>
+            slider sets this weapon's level for that cue, so two weapons sharing a timbre can sit at
+            different volumes. Sounds cost no budget.
+          </p>
+          <div id="wd-sounds"></div>
 
           <h3 class="wd-h">Effects</h3>
           <div class="wd-effects" id="wd-effects"></div>
@@ -158,6 +177,52 @@ export function createWeaponDesigner(container, onBack) {
       : `<p class="wd-empty">No saved weapons yet.</p>`;
   }
 
+  // ---- sound assignment ---------------------------------------------------
+  // Rebuilt whenever the shape changes, because an "Auto" row's resolved cue is
+  // derived from the shape and would otherwise show a stale hint.
+  function renderSounds() {
+    $("#wd-sounds").innerHTML = SOUND_ROWS.map((r) =>
+      cuePickerRowHTML({
+        ...r,
+        value: slotCue(r.kind),
+        gain: weaponSound(weapon, r.kind).gain,
+        resolved: weaponCue({ ...weapon, sounds: null }, r.kind),
+      })
+    ).join("");
+  }
+
+  // The explicitly ASSIGNED cue (not the derived one) — "" means Auto, which is
+  // what the row's select shows.
+  function slotCue(kind) {
+    const slot = weapon.sounds && weapon.sounds[kind];
+    if (typeof slot === "string") return slot;
+    return (slot && slot.cue) || "";
+  }
+
+  // Assignments are stored sparsely, so an untouched weapon exports no `sounds`
+  // block at all and a cue-only choice stays a plain string:
+  //   Auto + gain 1  -> key deleted        gain 1 + cue -> "cue"
+  //   gain != 1      -> { cue?, gain }
+  function writeSlot(kind, cue, gain) {
+    if (!WEAPON_SOUND_KINDS.includes(kind)) return;
+    const sounds = weapon.sounds || (weapon.sounds = {});
+    if (gain === 1) {
+      if (cue) sounds[kind] = cue;
+      else delete sounds[kind];
+    } else {
+      sounds[kind] = cue ? { cue, gain } : { gain };
+    }
+    if (!Object.keys(sounds).length) delete weapon.sounds;
+  }
+
+  function setSoundCue(kind, cue) {
+    writeSlot(kind, cue, weaponSound(weapon, kind).gain);
+  }
+
+  function setSoundGain(kind, gain) {
+    writeSlot(kind, slotCue(kind), gain);
+  }
+
   // ---- refresh derived readouts (no input rebuild, keeps slider focus) ----
   function refresh() {
     weapon.id = slug(weapon.name);
@@ -190,6 +255,15 @@ export function createWeaponDesigner(container, onBack) {
       refresh();
       return;
     }
+    if (t.dataset.cueGain !== undefined) {
+      const kind = t.dataset.cueGain;
+      const g = Number(t.value);
+      setSoundGain(kind, g);
+      const out = container.querySelector(`[data-cue-gain-out="${kind}"]`);
+      if (out) out.textContent = fmtGain(g);
+      refresh(); // the exported JSON readout tracks the drag
+      return;
+    }
     if (t.dataset.fxField) {
       weapon.effects[+t.dataset.idx][t.dataset.fxField] = Number(t.value);
       const out = container.querySelector(`[data-val-for="fx-${t.dataset.idx}-${t.dataset.fxField}"]`);
@@ -201,7 +275,8 @@ export function createWeaponDesigner(container, onBack) {
   container.addEventListener("change", (e) => {
     const t = e.target;
     if (t.dataset.wd === "tier") { tierId = t.value; refresh(); }
-    else if (t.dataset.wd === "shape") { weapon.projectile.shape = t.value; refresh(); }
+    else if (t.dataset.wd === "shape") { weapon.projectile.shape = t.value; renderSounds(); refresh(); }
+    else if (t.dataset.cue !== undefined) { setSoundCue(t.dataset.cue, t.value); renderSounds(); refresh(); }
     else if (t.dataset.wd === "fx-kind") {
       const i = +t.dataset.idx;
       weapon.effects[i] = t.value === "burn" ? { kind: "burn", dps: 6, duration: 3 } : { kind: "damage", amount: 10 };
@@ -211,6 +286,15 @@ export function createWeaponDesigner(container, onBack) {
   });
 
   container.addEventListener("click", (e) => {
+    const pick = e.target.closest("[data-cue-play]");
+    if (pick) {
+      // Audition what this slot ACTUALLY plays — the assignment if there is one,
+      // otherwise the shape-derived cue the game would pick.
+      const kind = pick.dataset.cuePlay;
+      const slot = weaponSound(weapon, kind);
+      auditionCue(slot.cue, slot.gain);
+      return;
+    }
     const el = e.target.closest("[data-wd]");
     if (!el) return;
     switch (el.dataset.wd) {
@@ -342,6 +426,7 @@ export function createWeaponDesigner(container, onBack) {
   }
 
   renderEffects();
+  renderSounds();
   renderSaved();
   refresh();
   draw(); // one synchronous frame (also makes headless mount verifiable)

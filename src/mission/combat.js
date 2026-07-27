@@ -84,7 +84,12 @@ export function updateProjectiles(scene, dt, ctx) {
       ctx.spark && ctx.spark(p.x, p.y, p.color, 7, 150);
       // A shotgun lands 6 pellets in the same millisecond; the cue's cooldown
       // (bank.js) collapses those into one impact rather than six stacked ones.
-      scene.sound && scene.sound("impact.hit", { x: p.x, y: p.y });
+      // `p.sound`/`p.soundGain` are the firing weapon's impact cue and level,
+      // stamped on at fire time (ai.js). EnemySpec emitter projectiles carry
+      // neither, so they fall back to their shape's timbre at unit gain.
+      scene.sound &&
+        scene.sound(p.sound || (p.shape ? `impact.hit.${p.shape}` : "impact.hit"),
+          { x: p.x, y: p.y, gain: p.soundGain ?? 1 });
 
       const pierce = (p.effects || []).find((e) => e.kind === "pierce");
       if (pierce) {

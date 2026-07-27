@@ -119,7 +119,7 @@ export function createSoundPage(container) {
     return `
       <div class="snd-params">
         <div class="snd-wave">
-          <label class="wd-mini">Waveform
+          <label class="wd-mini">Waveform${s.wave === "noise" ? ` <span class="cfg-help">— pitch comes from Lowpass</span>` : ""}
             <select data-snd="wave">
               ${WAVES.map((w) => `<option value="${w}"${w === s.wave ? " selected" : ""}>${w}</option>`).join("")}
             </select>
@@ -135,8 +135,22 @@ export function createSoundPage(container) {
       </div>`;
   }
 
+  // A pure-noise cue has no tone term at all (see synth.js), so its Pitch and
+  // Sweep sliders do nothing — for those, `filterHz` IS the pitch control.
+  // Showing live sliders that silently no-op is how you waste a tuning session.
+  function isInert(sl, s) {
+    return s.wave === "noise" && (sl.key === "freq" || sl.key === "freqEnd");
+  }
+
   function synthSliderHTML(id, sl, s) {
     const [min, max] = SYNTH_RANGES[sl.key];
+    if (isInert(sl, s)) {
+      return `
+        <label class="wd-mini snd-off" title="Noise has no tone to pitch — use Lowpass instead.">
+          <span class="snd-mini-head">${sl.label}<output>n/a</output></span>
+          <span class="wd-mini-ctl"><input type="range" min="0" max="1" value="0" disabled></span>
+        </label>`;
+    }
     const off = sl.nullable && s[sl.key] == null;
     // A nullable param (sweep, lowpass) shows a switch: off means "not applied",
     // which is a different thing from the slider sitting at its minimum.
