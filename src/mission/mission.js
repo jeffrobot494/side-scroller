@@ -9,7 +9,7 @@
 
 import { MissionInput } from "./input.js";
 import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload } from "./entities.js";
-import { fire, updateCompanion, aimAccuracy } from "./ai.js";
+import { fire, updateCompanion, updateCompanionSpec, aimAccuracy } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
 import { drawProjectile } from "./render.js";
 import {
@@ -186,7 +186,10 @@ export class Mission {
         if (wantFire && fire(scene, s, s.fireDir(), "player", dt, acc)) this.shake = Math.min(0.5, this.shake + 0.12);
       } else {
         s.setCrouch(false); // companions never kneel; a swapped-away soldier stands back up
-        updateCompanion(s, dt, scene, leader);
+        // "spec" (default) runs the shared agent brain over the soldier
+        // locomotor; "legacy" is the original hand-written updateCompanion.
+        if (config.companionBrain === "legacy") updateCompanion(s, dt, scene, leader);
+        else updateCompanionSpec(s, dt, scene, leader, this._ctx);
       }
       const fallVy = s.vy;
       stepActor(s, dt, scene.world, scene.platforms);

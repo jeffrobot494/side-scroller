@@ -11,6 +11,8 @@
 import { Projectile, startReload } from "./entities.js";
 import { config } from "../game/config.js";
 import { weaponSound } from "../audio/cues.js";
+import { instantiate, updateSpecEnemy } from "./enemyspec/runtime.js";
+import { DEFAULT_COMPANION_SPEC } from "../game/companionspecs.js";
 
 // Map a 1..10 Aim stat to a 0..1 accuracy (10 = perfectly tight, 1 = loosest).
 // Feeds the spread penalty in fire() so higher-Aim shooters group tighter.
@@ -154,4 +156,39 @@ export function updateCompanion(soldier, dt, scene, leader) {
   }
 
   soldier.applyMovement(dt, move, jump);
+}
+
+// ---- Companion AI on the shared brain (Slice L3) --------------------------
+// The spec-driven path: a companion Soldier is steered by a spec agent's
+// perception + brain through the `soldier` locomotor — the same intelligence
+// enemies run. Gated by config.companionBrain; updateCompanion above is the
+// legacy fallback until this is validated in the Behavior Lab.
+
+// Lazily attach a shared-brain agent to a companion Soldier. The agent is a spec
+// instance used ONLY for perception + decision; its soldier locomotor drives THIS
+// Soldier body. It is never drawn, collidable, or in scene.specRoots.
+function companionAgent(soldier) {
+  if (soldier.agent) return soldier.agent;
+  const a = instantiate(DEFAULT_COMPANION_SPEC, soldier.x, soldier.y, "player");
+  a.soldier = soldier;
+  // brain `fire` → the Soldier's EQUIPPED weapon along its facing (updateCompanion
+  // parity), through the shared fire() path — not the emitter pipeline.
+  a.fireWeapon = (_args, scene) => {
+    fire(scene, soldier, { x: soldier.facing, y: 0 }, "player", 0, aimAccuracy(soldier.data.stats.aim));
+  };
+  soldier.agent = a;
+  return a;
+}
+
+export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
+  if (!soldier.alive) return;
+  autoReload(soldier); // companions reload themselves when they run dry
+  const a = companionAgent(soldier);
+  // sync the real body → agent so perception/aim reason about where we ACTUALLY
+  // are (the locomotor drives the Soldier; the agent's own x/y is just a mirror).
+  a.x = soldier.x; a.y = soldier.y; a.w = soldier.w; a.h = soldier.h;
+  a.vx = soldier.vx; a.vy = soldier.vy; a.onGround = soldier.onGround; a.facing = soldier.facing;
+  a.anchor = leader ? { x: leader.x + leader.w / 2, y: leader.y + leader.h / 2 } : null;
+  // perception + brain + soldier locomotor (→ soldier.applyMovement / fire())
+  updateSpecEnemy(a, dt, scene, ctx);
 }

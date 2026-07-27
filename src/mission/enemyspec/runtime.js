@@ -19,7 +19,8 @@
 // (doc §10.4: the engine enforces limits regardless).
 // ---------------------------------------------------------------------------
 
-import { stepActor, overlaps, Projectile } from "../entities.js";
+import { overlaps, Projectile } from "../entities.js";
+import { locomotorFor } from "../locomotion.js";
 import { tickBrain } from "./brain.js";
 import { updateSense, nearestHostile } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
@@ -250,6 +251,12 @@ function resolveFlyerTerrain(root, ent, scene, ctx) {
   }
 }
 
+// Movement is two layers now (docs/LOCOMOTOR-REFACTOR.md): this file (the brain
+// layer) decides the ONE MotionRequest an entity wants this frame — resolving
+// targets and reproducing the dash > moveOrder > controller arbitration — and
+// hands it to the body's locomotor (locomotion.js), which actuates it, integrates
+// physics, and sets facing. Target resolution stays HERE so a request's points
+// are always concrete world coordinates.
 function moveEntity(root, ent, dt, scene) {
   // followers ride their parent; no independent physics
   if (isFollower(ent)) {
@@ -259,72 +266,55 @@ function moveEntity(root, ent, dt, scene) {
     ent.facing = p.facing;
     return;
   }
+  const req = motionRequest(root, ent, dt, scene);
+  locomotorFor(ent).apply(ent, req, dt, scene);
+}
 
+// Per-frame arbitration: an active dash wins, else an active moveOrder (→ steer
+// to its point, with the arrival/timeout stop), else the standing controller.
+// dash/moveOrder/patrolDir/timeout state lives on the entity; the locomotor is
+// stateless. Every request carries `target` for the locomotor's facing.
+function motionRequest(root, ent, dt, scene) {
   const target = nearestHostile(root, scene);
-  const flying = ent.spec.body.gravity === 0;
+  let req;
 
-  // temporary overrides first: dash, then moveTo orders
   if (ent.dash) {
-    ent.vx = ent.dash.vx;
-    if (flying) ent.vy = ent.dash.vy;
     ent.dash.t -= dt;
-    if (ent.dash.t <= 0) { ent.dash = null; ent.vx *= 0.4; }
+    const expire = ent.dash.t <= 0;
+    // a committed burst: the locomotor picks its axes (legged = horizontal only)
+    req = { kind: "burst", ux: ent.dash.ux, uy: ent.dash.uy, speed: ent.dash.speed, expire };
+    if (expire) ent.dash = null;
   } else if (ent.moveOrder) {
     const o = ent.moveOrder;
-    steerToward(ent, o.x, o.y, o.speed, flying);
+    req = { kind: "steer", point: { x: o.x, y: o.y }, speed: o.speed };
     o.timeout -= dt;
     if (o.timeout <= 0 || Math.hypot(o.x - cx(ent), o.y - cy(ent)) < 12) {
       ent.moveOrder = null;
-      ent.vx = 0;
-      if (flying) ent.vy = 0;
+      req = { kind: "stop" };
     }
   } else if (ent.motion) {
-    applyMotion(root, ent, ent.motion, dt, scene, target, flying);
-  }
-
-  // physics: grounded actors use the shared platform integrator; flyers
-  // integrate directly and clamp to the world box.
-  if (ent.spec.body.gravity > 0) {
-    const world = ent.spec.body.gravity === 1
-      ? scene.world
-      : { ...scene.world, gravity: scene.world.gravity * ent.spec.body.gravity };
-    stepActor(ent, dt, world, scene.platforms);
+    req = controllerRequest(root, ent, ent.motion, dt, scene, target);
   } else {
-    const slowMult = ent.slow && ent.slow.time > 0 ? ent.slow.factor : 1;
-    ent.x += ent.vx * slowMult * dt;
-    ent.y += ent.vy * slowMult * dt;
-    ent.x = Math.max(0, Math.min(scene.world.width - ent.w, ent.x));
-    ent.y = Math.max(-80, Math.min(scene.world.height - ent.h, ent.y));
+    req = { kind: "coast" };
   }
-
-  // face the player unless velocity clearly says otherwise
-  if (Math.abs(ent.vx) > 8) ent.facing = ent.vx > 0 ? 1 : -1;
-  else if (target) ent.facing = cx(target) >= cx(ent) ? 1 : -1;
+  req.target = target;
+  return req;
 }
 
-function steerToward(ent, tx, ty, speed, flying) {
-  const dx = tx - cx(ent);
-  const dy = ty - cy(ent);
-  const len = Math.hypot(dx, dy) || 1;
-  ent.vx = (dx / len) * speed;
-  if (flying) ent.vy = (dy / len) * speed;
-}
-
-function applyMotion(root, ent, m, dt, scene, target, flying) {
+// Translate one of the 10 standing controllers into a MotionRequest. Steering
+// controllers resolve a concrete point here; kinematic styles (flyer-only)
+// pass their pre-resolved params for the locomotor to apply verbatim.
+function controllerRequest(root, ent, m, dt, scene, target) {
   switch (m.type) {
     case "static":
-      ent.vx = 0;
-      if (flying) ent.vy = 0;
-      break;
+      return { kind: "stop" };
     case "velocity":
-      break; // set at start; physics carries it
+      return { kind: "coast" }; // launched at instantiate; physics carries it
     case "gravity":
-      ent.vx *= 0.8;
-      break;
+      return { kind: "brakeX", factor: 0.8 };
     case "moveTo": {
       const at = resolveTargetPoint(root, ent, m.target, scene, target, m.offset);
-      if (at) steerToward(ent, at.x, at.y, m.speed, flying);
-      break;
+      return at ? { kind: "steer", point: at, speed: m.speed } : { kind: "coast" };
     }
     case "patrol": {
       const half = (m.range || 160) / 2;
@@ -332,41 +322,23 @@ function applyMotion(root, ent, m, dt, scene, target, flying) {
       if (cx(ent) > ent.anchorX + ent.w / 2 + half) ent.patrolDir = -1;
       else if (cx(ent) < ent.anchorX + ent.w / 2 - half) ent.patrolDir = 1;
       else if (ent.vx === 0 && ent.onGround) ent.patrolDir *= -1; // bumped a wall
-      ent.vx = ent.patrolDir * m.speed;
-      break;
+      return { kind: "driveX", v: ent.patrolDir * m.speed };
     }
-    case "chase":
-      if (!target) { ent.vx = 0; break; }
-      if (flying) steerToward(ent, cx(target), cy(target), m.speed, true);
-      else {
-        ent.vx = (cx(target) >= cx(ent) ? 1 : -1) * m.speed;
-        // hop obstacles / gaps like the legacy charger
-        if (ent.onGround && (cy(target) < cy(ent) - 40 || Math.abs(ent.vx) < 5)) ent.vy = -560;
-      }
-      break;
+    case "chase": {
+      if (!target) return { kind: "stopX" };
+      const point = { x: cx(target), y: cy(target) };
+      // a flyer steers in both axes; a legged body drives horizontally and lets
+      // its locomotor decide when to hop (target above) to traverse.
+      if (ent.spec.body.gravity === 0) return { kind: "steer", point, speed: m.speed };
+      return { kind: "driveX", v: (point.x >= cx(ent) ? 1 : -1) * m.speed, hopToward: point };
+    }
     case "keepDistance": {
-      if (!target) { ent.vx *= 0.7; break; }
-      const d = Math.hypot(cx(target) - cx(ent), cy(target) - cy(ent));
-      const dir = cx(target) >= cx(ent) ? 1 : -1;
-      if (d > m.max) ent.vx = dir * m.speed;
-      else if (d < m.min) ent.vx = -dir * m.speed;
-      else ent.vx *= 0.7;
-      if (flying) ent.vy = 0;
-      break;
+      if (!target) return { kind: "brakeX", factor: 0.7 };
+      return { kind: "holdRange", point: { x: cx(target), y: cy(target) }, min: m.min, max: m.max, speed: m.speed };
     }
     case "home": {
-      if (!target) break;
-      const want = Math.atan2(cy(target) - cy(ent), cx(target) - cx(ent));
-      const cur = Math.atan2(ent.vy, ent.vx);
-      const speed = m.speed;
-      let d = want - cur;
-      while (d > Math.PI) d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      const maxTurn = (m.turnRate || 3) * dt;
-      const ang = Math.hypot(ent.vx, ent.vy) < 1 ? want : cur + Math.max(-maxTurn, Math.min(maxTurn, d));
-      ent.vx = Math.cos(ang) * speed;
-      ent.vy = Math.sin(ang) * speed;
-      break;
+      if (!target) return { kind: "coast" };
+      return { kind: "kinematic", style: "home", point: { x: cx(target), y: cy(target) }, speed: m.speed, turnRate: m.turnRate || 3 };
     }
     case "orbit": {
       const center = m.around === "player" && target
@@ -374,38 +346,18 @@ function applyMotion(root, ent, m, dt, scene, target, flying) {
         : ent.parent
           ? { x: cx(ent.parent), y: cy(ent.parent) }
           : { x: ent.anchorX + ent.w / 2, y: ent.anchorY + ent.h / 2 };
-      ent.orbitAngle += (m.degPerSec || 90) * dt;
-      const rad = (ent.orbitAngle * Math.PI) / 180;
-      const nx = center.x + Math.cos(rad) * m.radius - ent.w / 2;
-      const ny = center.y + Math.sin(rad) * m.radius - ent.h / 2;
-      ent.vx = (nx - ent.x) / Math.max(dt, 1e-6);
-      ent.vy = (ny - ent.y) / Math.max(dt, 1e-6);
-      ent.x = nx;
-      ent.y = ny;
-      ent.vx = 0; ent.vy = 0; // position is authoritative; don't double-integrate
-      break;
+      return { kind: "kinematic", style: "orbit", center, radius: m.radius, degPerSec: m.degPerSec || 90 };
     }
-    case "hover": {
-      ent.hoverPhase += (m.rate || 2.4) * dt;
-      // altitude-hold: ease the bob anchor toward `altitude` px between the
-      // underside and the ground below — climbs over perches, descends past
-      // them. altitude: null keeps the legacy spawn-anchored bob.
-      if (typeof m.altitude === "number") {
-        const groundTop = groundTopBelow(ent, scene);
-        const desired = groundTop - m.altitude - ent.h;
-        const climb = (m.climbSpeed ?? 90) * dt;
-        const dy = desired - ent.anchorY;
-        ent.anchorY += Math.max(-climb, Math.min(climb, dy));
-      }
-      ent.y = ent.anchorY + Math.sin(ent.hoverPhase) * (m.amplitude || 14);
-      if (target) {
-        const dx = cx(target) - cx(ent);
-        ent.vx = Math.abs(dx) > 30 ? Math.sign(dx) * (m.driftSpeed || 40) : 0;
-      }
-      ent.vy = 0;
-      break;
-    }
+    case "hover":
+      return {
+        kind: "kinematic", style: "hover",
+        amplitude: m.amplitude || 14, rate: m.rate || 2.4, driftSpeed: m.driftSpeed || 40,
+        altitude: m.altitude, climbSpeed: m.climbSpeed ?? 90,
+        groundTop: typeof m.altitude === "number" ? groundTopBelow(ent, scene) : null,
+        driftTargetX: target ? cx(target) : null,
+      };
   }
+  return { kind: "coast" };
 }
 
 // Resolve a moveTo/dash target to a world point. `offset: [along, up]` shifts
@@ -419,6 +371,7 @@ function resolveTargetPoint(root, ent, target, scene, playerEnt, offset) {
   else if (target === "player" && playerEnt) base = { x: cx(playerEnt), y: cy(playerEnt) };
   else if (target === "parent" && ent.parent) base = { x: cx(ent.parent), y: cy(ent.parent) };
   else if (target === "spawn") base = { x: ent.anchorX + ent.w / 2, y: ent.anchorY + ent.h / 2 };
+  else if (target === "anchor" && root.anchor) base = { x: root.anchor.x, y: root.anchor.y };
   else if (target === "lastSeen" && root.memory && root.memory.seenOnce) {
     base = { x: root.memory.lastSeenX, y: root.memory.lastSeenY };
   }
@@ -624,11 +577,14 @@ export function execStep(root, self, step, scene, ctx) {
       return { kind: "move" };
     }
     case "dash": {
+      // A body-agnostic committed burst: resolve a UNIT direction (both axes)
+      // and speed here; the locomotor decides which axes its body uses (a legged
+      // body takes the horizontal only, a flyer takes both). No body knowledge
+      // leaks into the brain (docs/LOCOMOTOR-REFACTOR.md, Slice L2).
       const t = nearestHostile(root, scene);
-      const flying = self.spec.body.gravity === 0;
       const speed = args.speed || 300;
       let ux, uy;
-      // aimed dash: at a resolved point (offset past the player = a strafing pass)
+      // aimed dash: toward a resolved point (offset past the target = a strafing pass)
       if (args.target || args.at || args.offset) {
         const at = args.at
           ? { x: args.at[0], y: args.at[1] }
@@ -638,7 +594,7 @@ export function execStep(root, self, step, scene, ctx) {
           const dy = at.y - cy(self);
           const len = Math.hypot(dx, dy) || 1;
           ux = dx / len;
-          uy = flying ? dy / len : 0;
+          uy = dy / len;
         }
       }
       if (ux === undefined) {
@@ -648,16 +604,22 @@ export function execStep(root, self, step, scene, ctx) {
         else if (t) dir = Math.sign(cx(t) - cx(self)) || self.facing;
         else dir = self.facing;
         ux = dir;
-        uy = t && flying ? Math.sign(cy(t) - cy(self)) * 0.4 : 0;
+        uy = t ? Math.sign(cy(t) - cy(self)) * 0.4 : 0;
       }
-      self.dash = { vx: ux * speed, vy: uy * speed, t: args.duration };
+      self.dash = { ux, uy, speed, t: args.duration };
       return { kind: "time", t: args.duration };
     }
     case "jump":
-      if (self.onGround) self.vy = -((args && args.vy) || 520);
+      // Body-agnostic: the brain says "hop", the locomotor owns the impulse
+      // (legacy jump.vy is accepted but inert — the body decides now).
+      locomotorFor(self).jump(self);
       return null;
     case "fire":
-      doFire(root, self, args, scene, ctx);
+      // A soldier-bodied agent (a companion) fires its EQUIPPED weapon through
+      // the shared fire() path, not the emitter pipeline — the host installs
+      // self.fireWeapon (see companion bridge). Everyone else uses emitters.
+      if (self.fireWeapon) self.fireWeapon(args, scene);
+      else doFire(root, self, args, scene, ctx);
       return null;
     case "sound": {
       const id = typeof args === "string" ? args : args && args.id;
@@ -766,8 +728,10 @@ function doFire(root, self, args, scene, ctx) {
     } else {
       const p = def.projectile;
       const speed = args.speed || p.speed;
+      // team follows the agent's allegiance (root.team): an enemy spec's rounds
+      // hit the squad; a player-team spec's rounds hit the enemy roster.
       scene.projectiles.push(
-        new Projectile(ox, oy, Math.cos(a) * speed, Math.sin(a) * speed, p, "enemy", p.effects, root)
+        new Projectile(ox, oy, Math.cos(a) * speed, Math.sin(a) * speed, p, root.team, p.effects, root)
       );
     }
   }

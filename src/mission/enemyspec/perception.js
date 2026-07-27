@@ -26,8 +26,20 @@ export function updateSense(root, scene, dt) {
   if (m.senseTimer > 0) return;
   m.senseTimer = SENSE_INTERVAL;
 
-  const t = nearestHostile(root, scene);
+  const ex = root.x + root.w / 2;
+  const ey = root.y + root.h / 2;
+
+  // anchor sense: distance to a companion's LEADER (root.anchor, set live by the
+  // companion bridge) or, lacking one, the spawn point — lets a brain express
+  // "stay near the leader / hold near home" without knowing the body.
   const s = root.sense;
+  const ax = root.anchor ? root.anchor.x : root.anchorX + root.w / 2;
+  const ay = root.anchor ? root.anchor.y : root.anchorY + root.h / 2;
+  s.anchorX = ax;
+  s.anchorY = ay;
+  s.anchorDist = Math.hypot(ax - ex, ay - ey);
+
+  const t = nearestHostile(root, scene);
   if (!t) {
     s.los = false;
     s.dist = 99999;
@@ -40,8 +52,6 @@ export function updateSense(root, scene, dt) {
     return;
   }
 
-  const ex = root.x + root.w / 2;
-  const ey = root.y + root.h / 2;
   const px = t.x + t.w / 2;
   const py = t.y + t.h / 2;
 

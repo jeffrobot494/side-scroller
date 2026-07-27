@@ -58,7 +58,9 @@ export const MOTIONS = {
   hover:        { params: { amplitude: 14, rate: 2.4, driftSpeed: 40, altitude: 150, climbSpeed: 90 } },
 };
 export const FLYING_MOTIONS = ["velocity", "moveTo", "home", "orbit", "hover"];
-export const MOTION_TARGETS = ["player", "parent", "spawn"];
+// "anchor" = a companion's leader (or, lacking one, the spawn point) — see the
+// soldier locomotor / companion brain (docs/LOCOMOTOR-REFACTOR.md, Slice L3).
+export const MOTION_TARGETS = ["player", "parent", "spawn", "anchor"];
 
 // Discrete step/actions. Blocking actions occupy their track for a duration;
 // instant ones complete in the same tick. `if.then/else` may contain only
@@ -67,8 +69,8 @@ export const ACTIONS = {
   wait:      { blocking: true },  // { wait: 1.5 } or { wait: { range: [a, b] } }
   telegraph: { blocking: true },  // { telegraph: { part?, time, color? } }
   moveTo:    { blocking: true },  // { moveTo: { target|at:[x,y], speed, timeout? } }
-  dash:      { blocking: true },  // { dash: { target?, speed, duration, away? } }
-  jump:      { blocking: false }, // { jump: { vy? } } — hop if on the ground
+  dash:      { blocking: true },  // { dash: { target?, speed, duration, away? } } — a committed burst; each body actuates its own axes
+  jump:      { blocking: false }, // { jump: {} } — hop if on the ground; the body owns the impulse
   fire:      { blocking: false }, // { fire: { emitter, count?, pattern?, spreadDeg?, aim?, speed? } }
   spawn:     { blocking: false }, // { spawn: { ref, count?, pattern?, speed?, at? } }
   setMotion: { blocking: false }, // { setMotion: { target?, type, ...params } }
@@ -168,10 +170,10 @@ export function vocabularyDoc() {
     `  sound: { id: "<cueId>", gain?: 0-2, pitch?: >0 } (or just { sound: "<cueId>" }) — plays a cue at the entity. Use it for moments the defaults do not cover: a telegraph, a phase change, a signal handler. Do NOT use it for plain hurt/death; those already sound via the top-level slots and would double up.`,
     `Sound cue ids (the closed set — never invent one): ${CUE_IDS.join(", ")}.`,
     `  Blocking (occupy the track for a duration): wait, telegraph, moveTo, dash. Every looping track needs at least one.`,
-    `  moveTo/dash targets: "player", "parent", "spawn", "lastSeen" (where the player was last visible), or at:[x,y]. Optional offset:[along,up] — along is on the line toward the target (positive = a point PAST it → fly-through strafing passes; negative = standoff short of it), up is vertical (negative = above). e.g. { moveTo: { target:"player", offset:[-260,-140], speed:260 } } = a firing perch above and short of the player; { moveTo: { target:"player", offset:[240,0], speed:420 } } = a strafing pass through them.`,
+    `  moveTo/dash targets: "player", "parent", "spawn", "lastSeen" (where the player was last visible), "anchor" (a companion's leader), or at:[x,y]. Optional offset:[along,up] — along is on the line toward the target (positive = a point PAST it → fly-through strafing passes; negative = standoff short of it), up is vertical (negative = above). e.g. { moveTo: { target:"player", offset:[-260,-140], speed:260 } } = a firing perch above and short of the player; { moveTo: { target:"player", offset:[240,0], speed:420 } } = a strafing pass through them.`,
     `  fire: { emitter: "<name>" or "<childId>.<name>", count, pattern: ${PATTERNS.join("|")}, spreadDeg, aim: ${AIM_STYLES.join("|")} }`,
     `  spawn: { ref: "<defId>", count, pattern, speed }`,
-    `Expressions (strings): arithmetic/comparison/boolean over self.hpPct, self.x/y, self.vars.*, root.vars.*, player.x/y/vx/vy/isGrounded, arena.time/width, sense.los/dist/playerAbove/playerBelow/playerApproaching/cornered/timeSinceSeen, and functions ${EXPR_FUNCTIONS.join(", ")}. No scripting.`,
+    `Expressions (strings): arithmetic/comparison/boolean over self.hpPct, self.x/y, self.vars.*, root.vars.*, player.x/y/vx/vy/isGrounded, arena.time/width, sense.los/dist/playerAbove/playerBelow/playerApproaching/cornered/timeSinceSeen/anchorDist (anchorX/anchorY = a companion's leader, or the spawn point), and functions ${EXPR_FUNCTIONS.join(", ")}. No scripting.`,
     `limits: { maxAlive<=${LIMIT_CAPS.maxAlive}, maxSpawnsPerSecond<=${LIMIT_CAPS.maxSpawnsPerSecond}, maxSpawnDepth<=${LIMIT_CAPS.maxSpawnDepth} } — engine-enforced.`,
     `intelligence rubric — HOW SMART the behavior reads, NOT how hard it hits (damage/hp/attack rate belong in threat):`,
     `  1: scripted tracks, aim "current", no sense.* usage — pure pattern.`,

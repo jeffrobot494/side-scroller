@@ -131,6 +131,12 @@ guarded by the characterization test L1 adds, plus the existing
 `enemyspec-runtime` / `mission-enemyspec` suites.
 
 **Slice L1 — Extract the Locomotor seam (behavior-preserving, enemies only).**
+*Built.* `src/mission/locomotion.js` holds the `legged`/`flying` locomotors and
+the MotionRequest vocabulary; `enemyspec/runtime.js` `moveEntity` now picks the
+ONE request (`motionRequest` + `controllerRequest`) and delegates actuation +
+physics + facing + jump/hop to the locomotor. Jump/hop impulses are config knobs
+(`enemyJumpImpulse` 520, `enemyHopImpulse` 560). Guarded by
+`test/locomotion-characterization.test.mjs` (golden: `test/locomotion.golden.json`).
 - **Step 0 — lock current behavior in a characterization test.** Add
   `test/locomotion-characterization.test.mjs`: instantiate the built-in roster
   (`enemyspecs.js`) + the motion templates (charger / shooter / flier / boss),
@@ -152,6 +158,11 @@ guarded by the characterization test L1 adds, plus the existing
   (`cowardly_duelist`, `sky_duelist`, `iron_moth`) fights identically.
 
 **Slice L2 — Body-agnostic brain intents (purge the body leaks).**
+*Built.* The `dash` action stores a UNIT direction (`{ux, uy, speed}`) — no flying
+branch — and the `burst` request lets each locomotor pick its axes (legged takes
+the horizontal only). `jump` no longer carries `vy` (the body owns the impulse;
+legacy `jump:{vy}` loads but is inert). `schema.js` docs/comments updated. The L1
+golden still matches (both refactors are velocity-identical).
 - Audit first: `grep` the built-in specs/templates for the leaked forms
   (`jump: { vy`, `dash` with explicit speeds) to size the migration.
 - Remove hardcoded body knowledge from the brain: `jump.vy` → `vertical:"gain"`;
@@ -164,6 +175,15 @@ guarded by the characterization test L1 adds, plus the existing
 - Bar: a brain spec makes no assumption about how the body moves; suite green.
 
 **Slice L3 — The `soldier` locomotor (companions join the brain).**
+*Built.* `doFire` now fires `root.team` (not hardcoded `"enemy"`). locomotion.js
+gains a `SOLDIER` locomotor (steering intent → `move`/`jump` → `Soldier.
+applyMovement`; brain `fire` → `self.fireWeapon`, the equipped-weapon `fire()`),
+picked via `body.locomotor:"soldier"`. Perception adds `sense.anchorDist/anchorX/
+anchorY` (leader) + an `"anchor"` move target. `src/game/companionspecs.js` holds
+a default companion spec reproducing `updateCompanion`; `updateCompanionSpec`
+(ai.js) bridges a Soldier to a `"player"`-team agent. Gated by
+`config.companionBrain` (default `"spec"`; `"legacy"` restores `updateCompanion`
+as a fallback). Guard: `test/locomotion-intents.test.mjs`.
 - **Prerequisite fix:** `doFire` in `runtime.js` hardcodes projectile team
   `"enemy"` — change it to `root.team` so a spec-driven shooter respects
   allegiance (a latent bug now that Slice 0 added `team`; can land on its own).
