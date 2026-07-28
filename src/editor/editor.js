@@ -19,6 +19,7 @@ import { createWeaponDesigner } from "./tools/weapon-designer.js";
 import { createEnemyDesigner } from "./tools/enemy-designer.js";
 import { createLevelGenerator } from "./tools/level-generator.js";
 import { createFiringRoom } from "./tools/firing-room.js";
+import { createBehaviorLab } from "./tools/behavior-lab.js";
 import { createControlsMapper } from "./tools/controls-mapper.js";
 import { createSoundPage } from "./sound-page.js";
 import { applyWeaponOverrides } from "../game/weaponoverrides.js";
@@ -47,6 +48,7 @@ const TOOLS = [
   { id: "enemy", label: "Enemy Designer", desc: "Compose EnemySpec enemies — prompt the LLM or build by hand (parts, brains, emitters) — validate, preview, and save to the library." },
   { id: "levelgen", label: "Level Generator", desc: "Generate procedural missions from a seed; preview the layout and check the threat budget." },
   { id: "firing", label: "Firing Room", desc: "Fire any weapon at respawning dummies or waves of real enemies on a platformed range." },
+  { id: "behaviorlab", label: "Behavior Lab", desc: "Watch agents think: two teams on a generated level, frame/decision stepping, and the utility scoreboard behind every choice." },
   { id: "controls", label: "Controls", desc: "Rebind keyboard controls (move, jump, fire, reload, …); gamepad uses built-in defaults." },
   { label: "Level Editor", desc: "Place platforms, spawns, loot, and the exit on a canvas." },
 ];
@@ -61,7 +63,7 @@ function disposeTool() {
 function render() {
   disposeTool();
 
-  const MOUNTABLE = ["weapon", "enemy", "levelgen", "firing", "controls"];
+  const MOUNTABLE = ["weapon", "enemy", "levelgen", "firing", "behaviorlab", "controls"];
   let body;
   if (tab === "settings") body = settingsView();
   else if (tab === "sound") body = `<div id="tool-host" class="tool-host"></div>`;
@@ -87,7 +89,7 @@ function render() {
   if (tab === "tools" && MOUNTABLE.includes(toolId)) {
     const host = document.getElementById("tool-host");
     const back = () => { toolId = null; render(); };
-    const factory = { weapon: createWeaponDesigner, enemy: createEnemyDesigner, levelgen: createLevelGenerator, firing: createFiringRoom, controls: createControlsMapper }[toolId];
+    const factory = { weapon: createWeaponDesigner, enemy: createEnemyDesigner, levelgen: createLevelGenerator, firing: createFiringRoom, behaviorlab: createBehaviorLab, controls: createControlsMapper }[toolId];
     activeTool = factory(host, back);
   }
 }

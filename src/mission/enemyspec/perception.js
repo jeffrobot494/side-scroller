@@ -16,6 +16,8 @@
 //   sense.lastSeenX/Y       last position I actually saw the player at
 // ---------------------------------------------------------------------------
 
+import { config } from "../../game/config.js";
+
 const SENSE_INTERVAL = 0.2;
 const EDGE = 90;
 
@@ -24,7 +26,9 @@ export function updateSense(root, scene, dt) {
   m.timeSinceSeen += dt;
   m.senseTimer -= dt;
   if (m.senseTimer > 0) return;
-  m.senseTimer = SENSE_INTERVAL;
+  // config.labPerceptionScale is 1 in a normal mission; the Behavior Lab turns
+  // it up to watch stale sense data drive a bad decision (docs/BEHAVIOR-LAB.md).
+  m.senseTimer = SENSE_INTERVAL * config.labPerceptionScale;
 
   const ex = root.x + root.w / 2;
   const ey = root.y + root.h / 2;
@@ -56,7 +60,9 @@ export function updateSense(root, scene, dt) {
   const py = t.y + t.h / 2;
 
   s.dist = Math.hypot(px - ex, py - ey);
-  s.los = !blocked(ex, ey, px, py, scene.platforms);
+  // God eye (Lab lever, off by default): skip occlusion so a navigation fault
+  // can be told apart from "it simply never saw you".
+  s.los = config.labGodEye || !blocked(ex, ey, px, py, scene.platforms);
   s.playerAbove = py < ey - 40;
   s.playerBelow = py > ey + 40;
   s.playerApproaching = Math.abs(t.vx || 0) > 60 && Math.sign(t.vx) === Math.sign(ex - px);

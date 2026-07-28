@@ -21,8 +21,20 @@ section + the tests are the source of truth for what currently exists):
 - **Editor tools** (`editor.html` → Tools): Weapon Designer, Enemy Designer,
   Level Generator (seed → schematic preview), Firing Room (bigger platformed
   range: fire any weapon at respawning dummies OR waves of real enemies — an
-  Aim slider + auto-fire/manual drive), Controls (rebind keys). Settings tab is
-  schema-driven config; the **Sound tab** is the mixer + the cue bank.
+  Aim slider + auto-fire/manual drive), **Behavior Lab**, Controls (rebind keys).
+  Settings tab is schema-driven config; the **Sound tab** is the mixer + the cue
+  bank.
+- **Behavior Lab (Slice 1 of `docs/BEHAVIOR-LAB.md` — built):** the agent
+  observatory. Both teams as spec agents on a *generated* level (real
+  `generateLevel` + `loadMission` + `updateSpecEnemy`/`updateCompanionSpec`),
+  pause/step-frame/**step-decision**/slow-mo, and the overlays that make a
+  decision visible: LOS, `sense.*`, preferred-range rings, move order, last-seen,
+  and the **utility scoreboard** (every action's score, its `when` gate or
+  cooldown, the winner). The one runtime hook it needed: `tickUtility` records
+  its scoring pass on `root.brainState.lastDecision`. Four no-op-by-default
+  levers live in the config `SCHEMA` group "Agent brain" (`labDecisionScale`,
+  `labPerceptionScale`, `labAimErrorScale`, `labGodEye`) and are read by every
+  spec agent. Deferred by plan: metrics, ghost player, replay/AB, presets.
 - **Sound (Slices 1–3 of `docs/SOUND.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
@@ -96,7 +108,9 @@ section + the tests are the source of truth for what currently exists):
   perception's `nearestHostile` targets the nearest hostile), which is what will
   let companions run the same brain — see `docs/BEHAVIOR-LAB.md` for the plan to
   develop/test agent intelligence (navigation, coordination, habit-reading).
-  Companions still use the simple `updateCompanion` in `src/mission/ai.js`.
+  Companions already run it: `config.companionBrain` defaults to `"spec"`
+  (`updateCompanionSpec` + `src/game/companionspecs.js`), with the old
+  `updateCompanion` kept as the `"legacy"` fallback.
   **Known issue:** `on.spawn` handlers run from `instantiate()`, which has no
   scene, so `fire`/`spawn`/`sound` there are silently skipped (they used to
   crash). Fix = defer the spawn event to the first update; see "Known issues" in

@@ -387,6 +387,53 @@ export const SCHEMA = [
       },
     ],
   },
+  {
+    // Agent-brain levers. Every default here is a no-op (×1 / off), so a normal
+    // mission behaves exactly as it did — they exist to isolate a bug in the
+    // Behavior Lab (docs/BEHAVIOR-LAB.md): slow decisions down to watch them,
+    // or blind/deafen one layer to prove the fault is in another. Live, and read
+    // by every spec agent (enemies AND companions).
+    title: "Agent brain",
+    items: [
+      {
+        key: "labDecisionScale",
+        label: "Decision interval ×",
+        type: "range",
+        default: 1,
+        min: 0.25,
+        max: 3,
+        step: 0.05,
+        help: "Scales every utility brain's decisionInterval. >1 = thinks less often (more committed), <1 = twitchier. Live.",
+      },
+      {
+        key: "labPerceptionScale",
+        label: "Perception interval ×",
+        type: "range",
+        default: 1,
+        min: 0.25,
+        max: 3,
+        step: 0.05,
+        help: "Scales the 0.2s sensor cadence. >1 = slower reactions and staler sense.* / last-seen memory. Live.",
+      },
+      {
+        key: "labAimErrorScale",
+        label: "Aim error ×",
+        type: "range",
+        default: 1,
+        min: 0,
+        max: 3,
+        step: 0.05,
+        help: "Scales the random spread on aimed/burst spec fire. 0 = pinpoint (isolate a navigation bug from a whiffing one). Live.",
+      },
+      {
+        key: "labGodEye",
+        label: "God eye (no LOS occlusion)",
+        type: "bool",
+        default: false,
+        help: "Agents see through platforms — sense.los is always true when a hostile exists. Tells a perception bug apart from a pathing one. Live.",
+      },
+    ],
+  },
 ];
 
 const STORAGE_KEY = "sidescroller.config.v1";

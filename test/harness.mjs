@@ -115,12 +115,18 @@ function mkClassList() {
   };
 }
 
-// A 2D-context mock: gradients answer addColorStop; every other method is a
-// noop, so a tool's synchronous draw() at mount runs without throwing.
+// A 2D-context mock: gradients answer addColorStop, measureText answers a
+// zero-width metric (a tool sizing a label reads .width); every other method is
+// a noop, so a tool's synchronous draw() at mount runs without throwing.
 export function ctx2d() {
   const grad = { addColorStop() {} };
   return new Proxy(
-    { createLinearGradient: () => grad, createRadialGradient: () => grad, canvas: { width: 800, height: 300 } },
+    {
+      createLinearGradient: () => grad,
+      createRadialGradient: () => grad,
+      measureText: () => ({ width: 0 }),
+      canvas: { width: 800, height: 300 },
+    },
     { get: (t, p) => (p in t ? t[p] : () => {}) }
   );
 }

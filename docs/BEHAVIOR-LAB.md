@@ -159,9 +159,46 @@ attacks the three real gaps.
 - Net: the whole agent brain (targeting + movement + companions) is now
   allegiance-agnostic. Slice 1 can drop *either* team onto a level as agents.
 
-**Slice 1 — Build the Behavior Lab** (observability + time control + levers +
-metrics). Everything after this is iterated *inside* the Lab; without it the work
-is blind.
+**Slice 1 — Build the Behavior Lab. — DONE (MVP).**
+`src/editor/tools/behavior-lab.js` (`createBehaviorLab`), registered in the
+Tools tab. What shipped, and the shape it actually took:
+
+- **Real everything.** `generateLevel()` builds the level, `loadMission()` builds
+  the scene, `updateSpecEnemy` drives red and `updateCompanionSpec` drives blue —
+  no lab-only simulation. Setup bar: seed (+ reroll), length, difficulty, blue
+  count/weapon, and a red team that is either the generated mix or *all one spec*
+  (mission roster or the Designer's library, re-seated for its own body height).
+- **Time control.** Pause / Run / step one frame / **step one decision** (runs
+  until the selected agent's next scoring pass — a frame is not the unit of
+  thought), 0.25× / 1× / 3×, on a fixed 1/60 step so slow-mo and stepping are
+  exact. Follow (1:1, default) vs Fit camera — fit shrinks a 6500px level past
+  readability, which is why follow is the default.
+- **Overlays** for the selected agent (click it in the arena or the roster):
+  LOS line (dashed when broken), preferred-range rings from `keepDistance`,
+  move-order line + dot, dash vector, last-seen ✕, the `sense.groundAhead` probe
+  (green/red), a selection halo, and a floating `state → action · phase` tag. A
+  toggle draws every agent's LOS at once.
+- **Inspector rail:** the full live `sense.*` grid, the **utility scoreboard**
+  (each action's score bar, the `when` that gated it or the cooldown that parked
+  it, and the winner flagged), and the commitment strip (windup/steps/recovery +
+  telegraph). `tickUtility` now records that breakdown on
+  `root.brainState.lastDecision` once per decision — the only runtime change the
+  panel needed. A tracks-mode brain has no scoring pass, so the panel shows its
+  track progress instead, and the Lab opens on a utility agent when one exists
+  (most of the built-in roster is deliberately scripted fodder).
+- **Levers** are four config `SCHEMA` knobs in a new "Agent brain" group, all
+  no-ops by default, rendered in the Lab by the shared schema→controls renderer
+  (so they also appear on the Settings tab): `labDecisionScale`,
+  `labPerceptionScale`, `labAimErrorScale`, `labGodEye`.
+- **Not built, as planned:** metrics panel, scripted ghost player, record/replay
+  + A/B, scenario presets. Also missing and worth knowing: blue has no path to
+  the fight — the default companion spec escorts its own spawn point, so a
+  "cross the level to reach the enemy" study waits on Slice 2 navigation.
+- Covered by `test/behavior-lab.test.mjs` (headless mount; scoreboard records
+  scored/gated/cooldown rows and the winner; each lever reaches the runtime).
+  Visuals are an eyeball check. Mockup: `docs/mockups/behavior-lab.html`.
+
+The original plan for this slice follows.
 
 - **Where it goes / the recipe.** A new editor tool, `src/editor/tools/
   behavior-lab.js`, exporting `createBehaviorLab(container, onBack) → { dispose()

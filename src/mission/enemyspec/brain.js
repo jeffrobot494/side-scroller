@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { execStep, execStepsInstant, makeTrackStates, truthyEval, numberEval } from "./runtime.js";
+import { config } from "../../game/config.js";
 
 const STEP_GUARD = 24; // max instant steps executed per track per frame
 
@@ -114,16 +115,29 @@ function tickUtility(root, state, dt, scene, ctx) {
 
   bs.decisionTimer -= dt;
   if (bs.decisionTimer > 0) return;
-  bs.decisionTimer = state.decisionInterval;
+  bs.decisionTimer = state.decisionInterval * config.labDecisionScale;
 
+  // The scoreboard the Behavior Lab draws (docs/BEHAVIOR-LAB.md Slice 1): why
+  // each action lost, not just which one won. Built here because this is the
+  // only place the numbers exist — recorded once per decision (not per frame),
+  // so the cost is one small array every decisionInterval per agent.
+  const breakdown = [];
   let best = null;
   let bestScore = 0;
   for (const a of state.actions) {
-    if ((bs.cooldowns[a.id] || 0) > root.age) continue;
-    if (a.when !== undefined && !truthyEval(root, root, scene, a.when)) continue;
+    if ((bs.cooldowns[a.id] || 0) > root.age) {
+      breakdown.push({ id: a.id, score: 0, status: "cooldown", detail: (bs.cooldowns[a.id] - root.age).toFixed(2) + "s left" });
+      continue;
+    }
+    if (a.when !== undefined && !truthyEval(root, root, scene, a.when)) {
+      breakdown.push({ id: a.id, score: 0, status: "gated", detail: a.when });
+      continue;
+    }
     const score = numberEval(root, root, scene, a.score) + (root.rng() - 0.5) * 0.2;
+    breakdown.push({ id: a.id, score, status: "scored", detail: a.when === undefined ? "" : a.when });
     if (score > bestScore) { bestScore = score; best = a; }
   }
+  bs.lastDecision = { at: root.age, state: bs.current, chosen: best ? best.id : null, actions: breakdown };
   if (!best) return;
 
   bs.cooldowns[best.id] = root.age + best.cooldown;
