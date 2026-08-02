@@ -18,6 +18,7 @@ import {
 } from "./enemyspec/runtime.js";
 import { drawSpecEnemy } from "./enemyspec/render.js";
 import { solveCamera, parseCanvasSize, DESIGN_W, DESIGN_H } from "./camera.js";
+import { createFpsSampler } from "../game/fps.js";
 import { config } from "../game/config.js";
 import { audio } from "../audio/engine.js";
 import { specSound } from "../audio/cues.js";
@@ -31,6 +32,7 @@ export class Mission {
     this.onComplete = onComplete;
     this.input = new MissionInput();
     this.running = false;
+    this.fps = createFpsSampler(); // outlives a single mission; reset in start()
     this._frame = this._frame.bind(this);
   }
 
@@ -81,6 +83,7 @@ export class Mission {
     this.input.enable(this.canvas); // pass canvas for mouse aim + click-to-fire
     this.running = true;
     this.accumulator = 0;
+    this.fps.reset(); // don't carry a rate in from the previous deploy
     this.lastTime = performance.now();
     requestAnimationFrame(this._frame);
   }
@@ -95,6 +98,9 @@ export class Mission {
 
   _frame(now) {
     if (!this.running) return;
+    // Sampled from the raw timestamp, before the clamp below — the meter should
+    // report an honest spike even though the sim refuses to step one.
+    this.fps.sample(now);
     let ft = (now - this.lastTime) / 1000;
     this.lastTime = now;
     if (ft > 0.25) ft = 0.25;
@@ -892,15 +898,27 @@ export class Mission {
       y += cardH + 8;
     }
 
-    // objective + loot (top-right)
+    // objective + loot (top-right). The FPS meter takes the corner when it's
+    // on and the gameplay stack slides down; with it off `top` is 26 and the
+    // layout is exactly what it always was.
     const lootCount = (this.scene.collected || []).length;
     ctx.textAlign = "right";
+
+    const top = config.showFps ? 44 : 26;
+    if (config.showFps) {
+      const fps = this.fps.fps();
+      const n = fps > 0 ? Math.round(fps) : null;
+      ctx.fillStyle = n === null || n >= 50 ? "#8894a6" : n >= 30 ? "#ffb15a" : "#ff6a6a";
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.fillText(n === null ? "-- FPS" : `${n} FPS`, W - 16, 26);
+    }
+
     ctx.fillStyle = "#8affc1";
     ctx.font = "bold 13px system-ui, sans-serif";
-    ctx.fillText("▶  REACH EXTRACTION", W - 16, 26);
+    ctx.fillText("▶  REACH EXTRACTION", W - 16, top);
     ctx.fillStyle = "#f2c14e";
     ctx.font = "12px system-ui, sans-serif";
-    ctx.fillText(`◈  Loot recovered: ${lootCount}`, W - 16, 46);
+    ctx.fillText(`◈  Loot recovered: ${lootCount}`, W - 16, top + 20);
 
     // ammo / reload readout for the controlled soldier (only for magazine guns)
     const cur = this.currentSoldier();
@@ -908,7 +926,7 @@ export class Mission {
       ctx.font = "bold 14px system-ui, sans-serif";
       if (cur.reloading > 0) {
         ctx.fillStyle = "#ffb15a";
-        ctx.fillText("RELOADING…", W - 16, 70);
+        ctx.fillText("RELOADING…", W - 16, top + 44);
       } else {
         const dry = cur.ammo <= 0 && cur.magsLeft <= 0;
         ctx.fillStyle = cur.ammo <= 0 ? "#ff6a6a" : "#e6ecf5";
@@ -916,7 +934,7 @@ export class Mission {
           dry
             ? `⦿  OUT OF AMMO`
             : `⦿  ${cur.ammo} / ${cur.weapon.magazine}  ▮×${cur.magsLeft}`,
-          W - 16, 70
+          W - 16, top + 44
         );
       }
     }

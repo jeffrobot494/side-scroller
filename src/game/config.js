@@ -182,10 +182,11 @@ export const SCHEMA = [
     ],
   },
   {
-    // The mission's window onto the world. The visible width is
-    // canvas.width / zoom, so a bigger canvas and a smaller zoom buy the same
-    // field of view — the canvas renders it at full resolution, zoom trades
-    // sharpness for reach. Mission only; the editor tools own their canvases.
+    // The mission's window onto the world, plus the on-screen readouts drawn
+    // over it. The visible width is canvas.width / zoom, so a bigger canvas and
+    // a smaller zoom buy the same field of view — the canvas renders it at full
+    // resolution, zoom trades sharpness for reach. The camera keys are mission
+    // only (the editor tools own their canvases); showFps also covers the base.
     title: "Viewport",
     items: [
       {
@@ -205,6 +206,13 @@ export const SCHEMA = [
         max: 1.5,
         step: 0.05,
         help: "World scale. 1 = the classic framing; 0.5 shows twice as much level each way. The world is only 540px tall, so vertical gain is empty sky — below ~0.6 the action shrinks into a band at the bottom. Live.",
+      },
+      {
+        key: "showFps",
+        label: "Show FPS",
+        type: "bool",
+        default: true,
+        help: "Frame-rate meter in the top-right of the base and the mission. Live.",
       },
     ],
   },
