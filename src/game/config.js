@@ -182,6 +182,33 @@ export const SCHEMA = [
     ],
   },
   {
+    // The mission's window onto the world. The visible width is
+    // canvas.width / zoom, so a bigger canvas and a smaller zoom buy the same
+    // field of view — the canvas renders it at full resolution, zoom trades
+    // sharpness for reach. Mission only; the editor tools own their canvases.
+    title: "Viewport",
+    items: [
+      {
+        key: "missionCanvas",
+        label: "Mission canvas",
+        type: "enum",
+        options: ["960x540", "1280x720", "1600x900"],
+        default: "960x540",
+        help: "Backing-store size of the mission canvas (all 16:9; CSS shrinks it to fit a small window). Bigger = more world on screen at the same zoom. Applies on next deploy.",
+      },
+      {
+        key: "missionZoom",
+        label: "Camera zoom",
+        type: "range",
+        default: 1,
+        min: 0.5,
+        max: 1.5,
+        step: 0.05,
+        help: "World scale. 1 = the classic framing; 0.5 shows twice as much level each way. The world is only 540px tall, so vertical gain is empty sky — below ~0.6 the action shrinks into a band at the bottom. Live.",
+      },
+    ],
+  },
+  {
     title: "Sound",
     items: [
       {

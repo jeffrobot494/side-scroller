@@ -17,6 +17,7 @@ import {
   applyDamage as specDamage, killEntity as specKill,
 } from "./enemyspec/runtime.js";
 import { drawSpecEnemy } from "./enemyspec/render.js";
+import { solveCamera, parseCanvasSize, DESIGN_W, DESIGN_H } from "./camera.js";
 import { config } from "../game/config.js";
 import { audio } from "../audio/engine.js";
 import { specSound } from "../audio/cues.js";
@@ -62,11 +63,19 @@ export class Mission {
     this.scene.sound = (cue, opts) => audio.play(cue, opts);
     audio.play("mission.start");
 
+    // Size the backing store BEFORE anything reads it: the motes below are
+    // seeded in screen space, and assigning width/height clears the surface.
+    this._applyCanvasSize();
+
     // cosmetic-only state (never read by game logic)
     this.time = 0;
     this.shake = 0;
     this.particles = [];
-    this.motes = this._makeMotes(46); // drifting ambient spores
+    // 46 spores at the classic size, scaled by area so a bigger canvas doesn't
+    // look emptier.
+    this.motes = this._makeMotes(
+      Math.round(46 * ((this.canvas.width * this.canvas.height) / (DESIGN_W * DESIGN_H)))
+    );
     this.damageFlash = 0; // red vignette pulse when the controlled soldier is hit
 
     this.input.enable(this.canvas); // pass canvas for mouse aim + click-to-fire
@@ -216,10 +225,12 @@ export class Mission {
     if (src.type === "stick") {
       dx = src.x; dy = src.y;
     } else {
-      // mouse: canvas point → world (add camera) → direction from the muzzle
+      // mouse: canvas px → world (÷ zoom, + camera) → direction from the muzzle.
+      // input.js already divided out any CSS scaling of the element.
+      const z = this._zoom();
       const mx = s.x + s.w / 2, my = s.y + s.h * 0.42;
-      dx = src.x + this.camera.x - mx;
-      dy = src.y + this.camera.y - my;
+      dx = src.x / z + this.camera.x - mx;
+      dy = src.y / z + this.camera.y - my;
     }
     const len = Math.hypot(dx, dy);
     if (len < 0.001) { s.aimVec = null; return; }
@@ -385,13 +396,40 @@ export class Mission {
     this.onComplete(this.result);
   }
 
+  // ---- viewport ------------------------------------------------------------
+
+  // Backing store from the config preset. Done at start() (not in the ctor) so
+  // a changed preset lands on the next deploy — assigning width/height clears
+  // the surface and resets ctx state, which is safe here because render() sets
+  // the transform and every style fresh each frame. The !== guard matters:
+  // `canvas.width = canvas.width` still clears.
+  _applyCanvasSize() {
+    const { w, h } = parseCanvasSize(config.missionCanvas);
+    if (this.canvas.width !== w) this.canvas.width = w;
+    if (this.canvas.height !== h) this.canvas.height = h;
+  }
+
+  // Live world scale. One accessor so update() and render() can't disagree.
+  _zoom() {
+    const z = Number(config.missionZoom);
+    return Number.isFinite(z) && z > 0 ? z : 1;
+  }
+
+  // Every preset is 16:9, so ONE factor maps the 960x540 space the HUD was
+  // authored in onto the live canvas. 1 at the classic size.
+  _uiScale() {
+    return this.canvas.height / DESIGN_H;
+  }
+
   _updateCamera() {
-    const s = this.currentSoldier();
-    const targetX = s.x + s.w / 2 - this.canvas.width * 0.4;
-    this.camera.x = clamp(targetX, 0, this.scene.world.width - this.canvas.width);
-    this.camera.y = 0;
-    // Pan + distance falloff are measured from the middle of the viewport.
-    audio.setListener(this.camera.x + this.canvas.width / 2);
+    const z = this._zoom();
+    const viewW = this.canvas.width / z;
+    const c = solveCamera(this.currentSoldier(), viewW, this.canvas.height / z, this.scene.world);
+    this.camera.x = c.x;
+    this.camera.y = c.y;
+    // Pan + distance falloff are measured from the middle of the viewport, and
+    // the audible range widens with it so a zoomed-out edge isn't silent.
+    audio.setListener(this.camera.x + viewW / 2, viewW / DESIGN_W);
   }
 
   // ---- particles (cosmetic) ----------------------------------------------
@@ -438,8 +476,9 @@ export class Mission {
     const scene = this.scene;
     const W = this.canvas.width;
     const H = this.canvas.height;
+    const z = this._zoom();
 
-    this._drawBackground(ctx, W, H);
+    this._drawBackground(ctx, W, H, z);
 
     ctx.save();
     let sx = 0, sy = 0;
@@ -448,14 +487,21 @@ export class Mission {
       sx = (Math.random() * 2 - 1) * m;
       sy = (Math.random() * 2 - 1) * m;
     }
-    ctx.translate(-Math.round(this.camera.x) + sx, -Math.round(this.camera.y) + sy);
+    // world → screen: (world - camera) * zoom, then screen-space shake.
+    // Rounding the SCREEN offset (not camera.x) keeps the scroll snapped to one
+    // device pixel at any zoom — rounding world units judders at z < 1.
+    ctx.setTransform(
+      z, 0, 0, z,
+      -Math.round(this.camera.x * z) + sx,
+      -Math.round(this.camera.y * z) + sy
+    );
 
-    this._drawPlatforms(ctx, scene);
-    this._drawExit(ctx, scene.exit);
+    this._drawPlatforms(ctx, scene, z);
+    this._drawExit(ctx, scene.exit, z);
     for (const l of scene.loot) this._drawLoot(ctx, l);
-    for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time);
-    for (const p of scene.projectiles) this._drawProjectile(p);
-    for (const s of scene.soldiers) this._drawSoldier(s, s === this.currentSoldier());
+    for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z);
+    for (const p of scene.projectiles) this._drawProjectile(p, z);
+    for (const s of scene.soldiers) this._drawSoldier(s, s === this.currentSoldier(), z);
     this._drawParticles(ctx);
 
     ctx.restore();
@@ -466,8 +512,14 @@ export class Mission {
     if (this.endBanner) this._drawEndBanner();
   }
 
-  _drawBackground(ctx, W, H) {
+  // Screen space, but camera-aware. The horizon is measured from where the
+  // world's bottom edge lands ON SCREEN rather than from the canvas bottom, so
+  // the skyline stays welded to the ground slab instead of floating above it
+  // once the viewport is taller than the 540px world. At the classic size with
+  // no zoom `hy === H`, i.e. the original numbers.
+  _drawBackground(ctx, W, H, z = 1) {
     const t = this.time;
+    const hy = (this.scene.world.height - this.camera.y) * z;
     const sky = ctx.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, "#060915");
     sky.addColorStop(0.55, "#0c1424");
@@ -477,12 +529,12 @@ export class Mission {
     ctx.fillRect(0, 0, W, H);
 
     // ominous hive glow low on the horizon
-    const gx = W * 0.72 - ((this.camera.x * 0.05) % (W * 2));
-    this._glow(ctx, gx, H * 0.84, 340, "rgba(110,240,170,0.16)");
+    const gx = W * 0.72 - ((this.camera.x * z * 0.05) % (W * 2));
+    this._glow(ctx, gx, hy * 0.84, 340 * z, "rgba(110,240,170,0.16)");
 
     // two parallax layers of ruined skyline
-    this._skyline(ctx, W, H, 0.18, H * 0.66, 130, "#0a1420", 46);
-    this._skyline(ctx, W, H, 0.36, H * 0.76, 90, "#0c1a24", 78);
+    this._skyline(ctx, W, H, 0.18, hy * 0.66, 130, "#0a1420", 46, z);
+    this._skyline(ctx, W, H, 0.36, hy * 0.76, 90, "#0c1a24", 78, z);
 
     // drifting spores
     for (const m of this.motes) {
@@ -495,20 +547,28 @@ export class Mission {
     }
   }
 
-  _skyline(ctx, W, H, par, baseY, peak, color, step) {
-    const off = this.camera.x * par;
+  // Buildings are sized in screen px, so they scale with the zoom along with
+  // everything else on the horizon. The skyline is seeded from the building
+  // index, so it stays deterministic — a different zoom just picks a different
+  // (equally arbitrary) stretch of ruins.
+  _skyline(ctx, W, H, par, baseY, peak, color, step, z = 1) {
+    const sstep = step * z;
+    const off = this.camera.x * z * par;
     ctx.fillStyle = color;
-    const start = Math.floor(off / step) - 1;
-    for (let i = start; i * step - off < W + step; i++) {
+    const start = Math.floor(off / sstep) - 1;
+    for (let i = start; i * sstep - off < W + sstep; i++) {
       const seed = Math.sin(i * 12.9898) * 43758.5453;
       const r = seed - Math.floor(seed);
-      const bh = peak * (0.4 + 0.6 * r);
-      const x = i * step - off;
-      ctx.fillRect(x, baseY - bh, step - 6, bh + H);
+      const bh = peak * z * (0.4 + 0.6 * r);
+      const x = i * sstep - off;
+      ctx.fillRect(x, baseY - bh, sstep - 6 * z, bh + H);
     }
   }
 
-  _drawPlatforms(ctx, scene) {
+  _drawPlatforms(ctx, scene, z = 1) {
+    // "you can stand here" — hold the lit edge at its authored 2 device px when
+    // zoomed out, but let it scale up with everything else when zoomed in.
+    const edge = Math.max(2, 2 / z);
     for (const p of scene.platforms) {
       const g = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
       g.addColorStop(0, "#27425f");
@@ -517,9 +577,9 @@ export class Mission {
       ctx.fillRect(p.x, p.y, p.w, p.h);
       // lit top edge
       ctx.fillStyle = "#6fd3ff";
-      ctx.fillRect(p.x, p.y, p.w, 2);
+      ctx.fillRect(p.x, p.y, p.w, edge);
       ctx.fillStyle = "rgba(255,255,255,0.05)";
-      ctx.fillRect(p.x, p.y + 2, p.w, 2);
+      ctx.fillRect(p.x, p.y + edge, p.w, 2); // sits just under the lit edge
       // rivets
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       for (let rx = p.x + 10; rx < p.x + p.w - 6; rx += 28) {
@@ -532,7 +592,7 @@ export class Mission {
     }
   }
 
-  _drawExit(ctx, ex) {
+  _drawExit(ctx, ex, z = 1) {
     const t = this.time;
     const pulse = 0.5 + 0.5 * Math.sin(t * 4);
     const beam = ctx.createLinearGradient(0, ex.y, 0, ex.y + ex.h);
@@ -555,10 +615,12 @@ export class Mission {
       ctx.closePath();
       ctx.fill();
     }
+    // The label is signage, not scenery: keep it screen-sized so it stays
+    // readable when zoomed out.
     ctx.fillStyle = "#8affc1";
-    ctx.font = "bold 12px monospace";
+    ctx.font = `bold ${12 / z}px monospace`;
     ctx.textAlign = "center";
-    ctx.fillText("▲ EXTRACT", ex.x + ex.w / 2, ex.y - 10);
+    ctx.fillText("▲ EXTRACT", ex.x + ex.w / 2, ex.y - 10 / z);
     ctx.textAlign = "left";
   }
 
@@ -580,26 +642,31 @@ export class Mission {
     ctx.restore();
   }
 
-  _drawSoldier(s, controlled) {
+  _drawSoldier(s, controlled, z = 1) {
     const ctx = this.ctx;
     if (!s.alive) return;
-    const x = Math.round(s.x), y = Math.round(s.y), w = s.w, h = s.h, cx = x + w / 2, dir = s.facing;
+    // Snap to a DEVICE pixel, not a world one — rounding world coords at z < 1
+    // makes the walk stutter in multi-pixel steps.
+    const snap = (v) => Math.round(v * z) / z;
+    const x = snap(s.x), y = snap(s.y), w = s.w, h = s.h, cx = x + w / 2, dir = s.facing;
 
     this._shadow(ctx, cx, y + h, w * 0.85);
 
     if (controlled) {
+      // "which one am I" — the ring and caret stay screen-sized, since finding
+      // your soldier is exactly the job they exist for when zoomed out.
       const p = 0.5 + 0.5 * Math.sin(this.time * 5);
       ctx.strokeStyle = `rgba(255,211,106,${0.35 + p * 0.4})`;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 / z;
       ctx.beginPath();
-      ctx.ellipse(cx, y + h - 1, w * 0.7, 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, y + h - 1, w * 0.7, 6 / z, 0, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fillStyle = "#ffd36a";
-      const cyv = y - 20 - p * 3;
+      const cyv = y - (20 + p * 3) / z;
       ctx.beginPath();
-      ctx.moveTo(cx, cyv + 9);
-      ctx.lineTo(cx - 6, cyv);
-      ctx.lineTo(cx + 6, cyv);
+      ctx.moveTo(cx, cyv + 9 / z);
+      ctx.lineTo(cx - 6 / z, cyv);
+      ctx.lineTo(cx + 6 / z, cyv);
       ctx.closePath();
       ctx.fill();
     }
@@ -705,8 +772,8 @@ export class Mission {
     ctx.stroke();
   }
 
-  _drawProjectile(p) {
-    drawProjectile(this.ctx, p);
+  _drawProjectile(p, z = 1) {
+    drawProjectile(this.ctx, p, z);
   }
 
   _drawParticles(ctx) {
@@ -765,9 +832,15 @@ export class Mission {
     }
   }
 
+  // The HUD is authored in 960x540 space and scaled onto whatever preset is
+  // live, so its cards and text keep the same apparent size on a big canvas
+  // instead of shrinking into a corner. W/H below are DESIGN units.
   _drawHUD() {
     const ctx = this.ctx;
-    const W = this.canvas.width, H = this.canvas.height;
+    const k = this._uiScale();
+    ctx.save();
+    ctx.scale(k, k);
+    const W = this.canvas.width / k, H = DESIGN_H;
 
     // squad cards (top-left)
     let y = 12;
@@ -862,13 +935,16 @@ export class Mission {
       H - 7
     );
     ctx.textAlign = "left";
+    ctx.restore();
   }
 
   _drawIntro() {
     const ctx = this.ctx;
-    const W = this.canvas.width, H = this.canvas.height;
+    const k = this._uiScale();
     const a = clamp(this.introTimer / 2.2, 0, 1);
     ctx.save();
+    ctx.scale(k, k); // design space — see _drawHUD
+    const W = this.canvas.width / k, H = DESIGN_H;
     ctx.globalAlpha = a;
     const g = ctx.createLinearGradient(0, H / 2 - 60, 0, H / 2 + 60);
     g.addColorStop(0, "rgba(0,0,0,0)");
@@ -895,7 +971,10 @@ export class Mission {
 
   _drawEndBanner() {
     const ctx = this.ctx;
-    const W = this.canvas.width, H = this.canvas.height;
+    const k = this._uiScale();
+    ctx.save();
+    ctx.scale(k, k); // design space — see _drawHUD
+    const W = this.canvas.width / k, H = DESIGN_H;
     const win = this.endBanner.success;
     ctx.fillStyle = "rgba(4,6,12,0.72)";
     ctx.fillRect(0, 0, W, H);
@@ -913,6 +992,7 @@ export class Mission {
     ctx.font = "14px system-ui, sans-serif";
     ctx.fillText(win ? "Returning to base…" : "No survivors. Returning to base…", W / 2, H / 2 + 34);
     ctx.textAlign = "left";
+    ctx.restore();
   }
 
   // ---- small drawing helpers ---------------------------------------------

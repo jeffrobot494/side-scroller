@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "projectId": "design-1785290774311",
+  "title": "design",
+  "gameVision": {
+    "premise": "",
+    "pillars": "",
+    "constraints": "",
+    "approved": false,
+    "revision": 0,
+    "updatedAt": "2026-07-29T02:06:14.311Z"
+  },
+  "pages": {
+    "new-design-1785701899369": {
+      "id": "new-design-1785701899369",
+      "kind": "undetermined",
+      "name": "New Design",
+      "blurb": "",
+      "status": "new",
+      "parentId": null,
+      "identityLocked": false,
+      "conversationId": "conv-new-design-1785701899369",
+      "revision": 0,
+      "sections": {
+        "acceptanceCriteria": "",
+        "alternativesConsidered": "",
+        "assetRequirements": "",
+        "contentRequirements": "",
+        "dependenciesAndInteractions": "",
+        "edgeCases": "",
+        "inputsAndOutputs": "",
+        "intendedExperience": "",
+        "outOfScope": "",
+        "placeInGameLoop": "",
+        "playerValue": "",
+        "playtestQuestions": "",
+        "presentation": "",
+        "rulesAndBehavior": "",
+        "stillToDecide": "",
+        "suggestedBreakdown": "",
+        "summary": ""
+      },
+      "relationships": [],
+      "emptyPageOrigins": [],
+      "createdAt": "2026-08-02T20:18:19.369Z",
+      "updatedAt": "2026-08-02T20:18:19.369Z"
+    }
+  },
+  "conversations": {},
+  "designerInstructions": "",
+  "activePageId": "new-design-1785701899369",
+  "activeConversationId": "conv-new-design-1785701899369",
+  "recentPageIds": [
+    "new-design-1785701899369"
+  ],
+  "createdAt": "2026-07-29T02:06:14.311Z",
+  "updatedAt": "2026-08-02T20:18:19.369Z"
+}

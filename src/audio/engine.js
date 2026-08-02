@@ -36,6 +36,7 @@ let ctx = null;
 let master = null;
 const busGain = {}; // name -> GainNode
 let listenerX = 0; // world x the camera is centred on (for pan + falloff)
+let listenerScale = 1; // how wide the viewport is vs the classic one; widens falloff
 let blurred = false;
 let armed = false;
 
@@ -111,9 +112,15 @@ function applyVolumes() {
   if (busGain.music) busGain.music.gain.value = clamp(config.musicVolume ?? 0.6, 0, 1);
 }
 
-/** Where the camera is looking, in world px. Sounds pan/fade relative to this. */
-export function setListener(x) {
+/**
+ * Where the camera is looking, in world px. Sounds pan/fade relative to this.
+ * `rangeScale` stretches the audible range with the viewport (1 = the classic
+ * 960px-wide view), so zooming out doesn't leave the screen edges silent.
+ */
+export function setListener(x, rangeScale = 1) {
   listenerX = Number(x) || 0;
+  const s = Number(rangeScale);
+  listenerScale = Number.isFinite(s) && s > 0 ? s : 1;
 }
 
 export function stopAll() {
@@ -190,7 +197,7 @@ export function play(id, opts = {}) {
   let pan = 0;
   if (opts.x !== undefined && opts.x !== null) {
     const dx = opts.x - listenerX;
-    const range = Math.max(1, config.audioFalloff ?? 900);
+    const range = Math.max(1, (config.audioFalloff ?? 900) * listenerScale);
     vol *= clamp(1 - Math.abs(dx) / range, 0, 1);
     if (vol <= 0.001) return false; // too far off screen to bother with a voice
     pan = clamp(dx / range, -1, 1) * clamp(config.audioPan ?? 0.7, 0, 1);

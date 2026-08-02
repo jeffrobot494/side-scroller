@@ -8,28 +8,33 @@
 // bespoke art; the readable silhouette comes from shape/size/color composition.
 // ---------------------------------------------------------------------------
 
-export function drawSpecEnemy(ctx, root, time = 0) {
-  drawTree(ctx, root, time);
-  for (const sp of root.spawned) drawTree(ctx, sp, time);
+// `scale` is the host's world→screen factor (1 for the 1:1 hosts). Only the
+// telegraph outline uses it: that outline is the player's "this part is about
+// to attack" tell, so it stays screen-sized rather than thinning to a hairline
+// when the mission is zoomed out.
+export function drawSpecEnemy(ctx, root, time = 0, scale = 1) {
+  drawTree(ctx, root, time, scale);
+  for (const sp of root.spawned) drawTree(ctx, sp, time, scale);
 }
 
-function drawTree(ctx, e, time) {
+function drawTree(ctx, e, time, scale) {
   if (!e.alive) return;
-  if (!e.disabled) drawEntity(ctx, e, time);
-  for (const c of e.children) drawTree(ctx, c, time);
+  if (!e.disabled) drawEntity(ctx, e, time, scale);
+  for (const c of e.children) drawTree(ctx, c, time, scale);
 }
 
-function drawEntity(ctx, e, time) {
+function drawEntity(ctx, e, time, scale = 1) {
   const cx = e.x + e.w / 2;
   const cy = e.y + e.h / 2;
 
   // telegraph: a pulsing warning glow around the part about to act
   if (e.telegraph > 0) {
     const p = 0.5 + 0.5 * Math.sin(time * 26);
+    const pad = 3 / scale;
     glow(ctx, cx, cy, Math.max(e.w, e.h) * 0.8 + p * 8, `rgba(255,90,90,${0.28 + p * 0.2})`);
     ctx.strokeStyle = `rgba(255,110,90,${0.5 + p * 0.4})`;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(e.x - 3, e.y - 3, e.w + 6, e.h + 6);
+    ctx.lineWidth = 2 / scale;
+    ctx.strokeRect(e.x - pad, e.y - pad, e.w + pad * 2, e.h + pad * 2);
   }
 
   const flash = e.hitFlash > 0;

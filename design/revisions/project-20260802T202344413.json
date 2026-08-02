@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "projectId": "design-1785290774311",
+  "title": "design",
+  "gameVision": {
+    "premise": "A 2D side-scrolling action game that combines immediate real-time combat and tactical decision-making with a persistent strategic campaign. Irreversible losses alter the campaign’s course and generate a dynamic narrative shaped by play.",
+    "pillars": "- **Immediate action, consequential decisions:** Responsive side-scrolling combat where tactical choices have lasting campaign effects.\n- **One continuous war:** Real-time missions feed into a strategic campaign rather than functioning as isolated levels.\n- **Loss creates history:** Ironman rules and permadeath make failure persistent, allowing setbacks and survival to shape the narrative.\n- **Player-authored campaign story:** The narrative adapts to decisions, outcomes, and losses instead of following a wholly fixed sequence.",
+    "constraints": "- Gameplay is presented as a 2D side-scrolling action game.\n- Tactical play occurs in real time.\n- The game includes a persistent strategic campaign layer.\n- Ironman-style persistence prevents freely undoing adverse outcomes.\n- Some form of permanent loss is central, but its exact target and campaign-failure conditions remain undefined.\n- Narrative progression must respond to campaign state and player outcomes.",
+    "approved": false,
+    "revision": 1,
+    "updatedAt": "2026-08-02T20:22:16.994Z"
+  },
+  "pages": {
+    "new-design-1785701899369": {
+      "id": "new-design-1785701899369",
+      "kind": "undetermined",
+      "name": "New Design",
+      "blurb": "",
+      "status": "new",
+      "parentId": null,
+      "identityLocked": false,
+      "conversationId": "conv-new-design-1785701899369",
+      "revision": 0,
+      "sections": {
+        "acceptanceCriteria": "",
+        "alternativesConsidered": "",
+        "assetRequirements": "",
+        "contentRequirements": "",
+        "dependenciesAndInteractions": "",
+        "edgeCases": "",
+        "inputsAndOutputs": "",
+        "intendedExperience": "",
+        "outOfScope": "",
+        "placeInGameLoop": "",
+        "playerValue": "",
+        "playtestQuestions": "",
+        "presentation": "",
+        "rulesAndBehavior": "",
+        "stillToDecide": "",
+        "suggestedBreakdown": "",
+        "summary": ""
+      },
+      "relationships": [],
+      "emptyPageOrigins": [],
+      "createdAt": "2026-08-02T20:18:19.369Z",
+      "updatedAt": "2026-08-02T20:18:19.369Z"
+    }
+  },
+  "conversations": {},
+  "designerInstructions": "",
+  "activePageId": "new-design-1785701899369",
+  "activeConversationId": "conv-new-design-1785701899369",
+  "recentPageIds": [
+    "new-design-1785701899369"
+  ],
+  "createdAt": "2026-07-29T02:06:14.311Z",
+  "updatedAt": "2026-08-02T20:22:16.994Z"
+}

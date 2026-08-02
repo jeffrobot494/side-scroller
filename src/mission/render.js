@@ -9,6 +9,11 @@
 // Coordinates: `p.x`/`p.y` are the projectile's TOP-LEFT in the coordinate space
 // already set on `ctx` (the mission translates by its camera before calling;
 // the Firing Room draws 1:1). Direction comes from `p.vx`/`p.vy`.
+//
+// `scale` is the host's world→screen factor, and exists for ONE reason: canvas
+// shadows are measured in device pixels and ignore the transform, so a zoomed-
+// out mission would shrink the shot but not its glow, turning every tracer into
+// a smear. Defaults to 1, which is what the 1:1 hosts pass.
 // ---------------------------------------------------------------------------
 
 export const PROJECTILE_SHAPES = ["bullet", "orb", "bolt", "missile", "pellet", "wave"];
@@ -21,14 +26,14 @@ export function defaultShape(p) {
   return "bullet";
 }
 
-export function drawProjectile(ctx, p) {
+export function drawProjectile(ctx, p, scale = 1) {
   const shape = p.shape || defaultShape(p);
   const cx = p.x + p.w / 2;
   const cy = p.y + p.h / 2;
   const ang = Math.atan2(p.vy || 0, p.vx || (p.vy ? 0 : 1));
 
   ctx.save();
-  ctx.shadowBlur = 12;
+  ctx.shadowBlur = 12 * scale;
   ctx.shadowColor = p.color;
   ctx.fillStyle = p.color;
 
