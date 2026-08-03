@@ -85,6 +85,29 @@ this is only for links that don't occur naturally in the text.
 - **Repo-root files stay uppercase** — `README.md`, `CLAUDE.md`, `ROADMAP.md`,
   `DOC-SCHEMA.md`. These are metafiles that tools and humans expect to shout.
 
+## What a tech spec must answer
+
+Seven things. A design doc entering a sprint means its tech spec is about to
+become instructions, so the linter requires all seven from that moment — six as
+named sections, one as frontmatter.
+
+| # | Section | Answers |
+|---|---|---|
+| 1 | `needs:` (frontmatter) | What must exist first. `needs: []` if nothing |
+| 2 | `## Reuses` | What already exists that this builds on — the biggest source of accidental rewrites |
+| 3 | `## Where the code goes` | Module paths, and the repo conventions they must follow |
+| 4 | `## The seam` | What this owns, and what it must not touch |
+| 5 | `## Slices` | Ordered, independently landable, each saying whether it changes runtime behaviour |
+| 6 | `## Must not regress` | Which existing tests are the guard |
+| 7 | `## Approximations` | Where the implementation is deliberately not exact, and what catches the failure |
+
+Heading text is matched exactly, so the linter can check it.
+
+**What a tech spec should not contain:** file-by-file structure, function
+signatures, pseudocode. They read as authority and go stale the moment the
+implementation deviates. Name the seam and the reuse; let the builder pick the
+shape.
+
 ## House style
 
 Structure first. The reader should never scroll past prose to reach the
@@ -107,3 +130,6 @@ This applies to every doc type, and to summaries written in chat.
 - Prose links float to the current version of a doc. Sprint log entries pin to
   what was current when they were written.
 - A doc with no `category` is a lint error, not a permanent state.
+- The viewer's **Gaps** tab splits findings in two: *blocking* — anything that
+  stops something in the current sprint being built correctly — and *minor*,
+  which is tidiness. The nav badge counts blockers only.

@@ -16,6 +16,17 @@ qualified and inventing it wastes Bo's time. Decline and hand back a prompt
 instead; full rule in `WORKING-NOTES.md`. Claude may move design that already
 exists, attack design Bo wrote, and do all the engineering.
 
+**A tech spec needs all seven parts before anything is built from it** —
+`needs`, Reuses, Where the code goes, The seam, Slices, Must not regress,
+Approximations. The design map's Gaps tab and `test/docs.test.mjs` both enforce
+it once the matching design doc enters a sprint. Table in `DOC-SCHEMA.md`.
+
+**Tech specs are written by the `/spec` procedure, never freehand.** Read the
+code, write the seven parts citing real paths, run the bar, get a fresh-context
+subagent to attack it, then hand Bo only the four questions he can answer. Full
+steps in `.claude/commands/spec.md`. Bo does not review architecture and his
+approval is not a check on it — the repo and the review agent are.
+
 **Docs lead with structure, not prose** — one sentence of orientation, then
 tables and bullets. See "House style" in `DOC-SCHEMA.md`. This applies to
 answers in chat too.

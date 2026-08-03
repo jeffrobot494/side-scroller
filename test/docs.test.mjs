@@ -1,0 +1,70 @@
+// docs — the documentation is checked by the same bar as the code.
+//
+// Two rules, both aimed at the way a tech spec goes wrong:
+//
+//   1. A spec that cites code which does not exist. Either it was written from
+//      memory instead of from the repo, or the module moved and the spec rotted.
+//      Both are silent failures that a builder then follows off a cliff.
+//   2. A design doc entering a sprint whose tech spec is missing one of the
+//      seven required parts. The viewer's Gaps tab already shows this; the
+//      regression bar is where it actually stops someone.
+//
+// Rule 1 runs over tech/ only. Design docs are not supposed to name modules at
+// all (see the standing rule in CLAUDE.md), so a citation there is its own bug.
+
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { parse, index, lint } from "../src/docmap/app.js";
+
+const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
+const DOC_DIRS = ["design", "tech", "idea", "sprints", "archive"];
+
+const mdIn = (dir) => {
+  const d = join(ROOT, dir);
+  return existsSync(d) ? readdirSync(d).filter((f) => f.endsWith(".md")).map((f) => `${dir}/${f}`) : [];
+};
+
+// A backticked token that looks like a repo path. Trailing "/" means a folder.
+const CITATION = /`((?:src|test)\/[A-Za-z0-9_./-]*)`/g;
+
+export default async function run(t) {
+  // ---- 1. every code path a tech spec cites must exist --------------------
+  const bad = [];
+  for (const rel of mdIn("tech")) {
+    const text = readFileSync(join(ROOT, rel), "utf8");
+    for (const m of text.matchAll(CITATION)) {
+      const cited = m[1];
+      if (!existsSync(join(ROOT, cited))) bad.push(`${rel} cites \`${cited}\`, which does not exist`);
+    }
+  }
+  t.ok(`tech specs cite only real paths${bad.length ? ` — ${bad.join("; ")}` : ""}`, bad.length === 0);
+
+  // ---- 2. nothing in the current sprint may be missing a spec part --------
+  const docs = [];
+  for (const dir of DOC_DIRS) for (const rel of mdIn(dir)) docs.push(parse(rel, readFileSync(join(ROOT, rel), "utf8")));
+  for (const f of ["ROADMAP.md", "DOC-SCHEMA.md", "CLAUDE.md", "WORKING-NOTES.md"]) {
+    if (existsSync(join(ROOT, f))) docs.push(parse(f, readFileSync(join(ROOT, f), "utf8")));
+  }
+  index(docs);
+
+  // A spec about to be followed that names no module at all was written from
+  // memory. Only applied to sprint work — older docs are archaeology, and a
+  // permanently red suite is a suite people stop reading.
+  const inSprint = docs.filter((d) => d.type === "design" && d.sprint);
+  for (const d of inSprint) {
+    const rel = `tech/${d.name}.md`;
+    if (!existsSync(join(ROOT, rel))) continue; // the lint below is the louder complaint
+    const text = readFileSync(join(ROOT, rel), "utf8");
+    t.ok(`${rel} names the code it builds on`, [...text.matchAll(CITATION)].length > 0);
+  }
+
+  const blocking = lint().filter(([, , b]) => b).map(([d, why]) => `${d.path}: ${why}`);
+  // One assertion, not one per gap — a wall of red is a wall people stop reading.
+  t.ok(
+    blocking.length
+      ? `sprint work is not ready to build — ${blocking.length} blocking gap(s):\n      ${blocking.join("\n      ")}`
+      : "every sprint doc has a complete tech spec",
+    blocking.length === 0,
+  );
+}

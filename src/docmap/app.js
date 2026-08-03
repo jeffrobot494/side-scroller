@@ -3,7 +3,7 @@
 // Reads every .md under the type folders (see DOC-SCHEMA.md), parses the
 // frontmatter, and renders three views: the current sprint, a map of every
 // system grouped by category, and a doc reader. Plus a lint pass, because the
-// browser is also the drift detector — a doc with no category or a link to a
+// browser is also the gap detector — a doc with no category or a link to a
 // file that does not exist should be visible, not silent.
 //
 // No build step, no dependencies, native ESM — same as the game and editor.
@@ -35,6 +35,19 @@ const CAT_LABEL = {
   vision: "Vision",
 };
 const STATUSES = ["unbuilt", "designed", "building", "built", "superseded", "reference"];
+
+// The seven a tech spec must answer before anyone builds from it. Six are named
+// sections; the seventh is the `needs` field. Enforced only once the matching
+// design doc is in a sprint — that is the moment the spec stops being notes and
+// starts being instructions.
+const TECH_SECTIONS = [
+  "Reuses",
+  "Where the code goes",
+  "The seam",
+  "Slices",
+  "Must not regress",
+  "Approximations",
+];
 
 // A doc's id is its full path minus ".md" — unique across folders.
 const idOf = (path) => path.replace(/\.md$/i, "").toLowerCase();
@@ -108,6 +121,7 @@ export function parse(path, text) {
     status: fm.status || "",
     resolution: fm.resolution || "",
     sprint: fm.sprint || "",
+    needs: fm.needs || "",
     body,
     links: [...links],
   };
@@ -168,16 +182,16 @@ export function lint() {
     // links. ROADMAP is the doc most likely to rot and was the least watched.
     const root = d.folder === "" && !d.type;
     if (!root) {
-      if (!d.category && d.type !== "sprint") out.push([d, "no category"]);
-      if (d.type === "idea" && d.folder !== "idea/") out.push([d, "type is idea but it does not live in idea/"]);
-      if (d.folder === "idea/" && d.type !== "idea") out.push([d, "lives in idea/ but type is not idea"]);
-      if (!d.type) out.push([d, "no type"]);
-      if (d.category && !CAT_LABEL[d.category]) out.push([d, `unknown category "${d.category}"`]);
-      if (d.status && !STATUSES.includes(d.status)) out.push([d, `unknown status "${d.status}"`]);
-      if (d.status === "built" && d.resolution === "vague") out.push([d, "built but never designed — resolution is vague"]);
-      if (d.type === "design" && d.folder.startsWith("tech/")) out.push([d, "type is design but it lives in tech/"]);
-      if (d.type === "tech" && d.folder.startsWith("design/")) out.push([d, "type is tech but it lives in design/"]);
-        if (/[A-Z_]/.test(d.path.split("/").pop()) && d.folder) out.push([d, "filename should be lowercase-with-hyphens"]);
+      if (!d.category && d.type !== "sprint") out.push([d, "no category", false]);
+      if (d.type === "idea" && d.folder !== "idea/") out.push([d, "type is idea but it does not live in idea/", false]);
+      if (d.folder === "idea/" && d.type !== "idea") out.push([d, "lives in idea/ but type is not idea", false]);
+      if (!d.type) out.push([d, "no type", false]);
+      if (d.category && !CAT_LABEL[d.category]) out.push([d, `unknown category "${d.category}"`, false]);
+      if (d.status && !STATUSES.includes(d.status)) out.push([d, `unknown status "${d.status}"`, false]);
+      if (d.status === "built" && d.resolution === "vague") out.push([d, "built but never designed — resolution is vague", false]);
+      if (d.type === "design" && d.folder.startsWith("tech/")) out.push([d, "type is design but it lives in tech/", false]);
+      if (d.type === "tech" && d.folder.startsWith("design/")) out.push([d, "type is tech but it lives in design/", false]);
+        if (/[A-Z_]/.test(d.path.split("/").pop()) && d.folder) out.push([d, "filename should be lowercase-with-hyphens", false]);
     }
     for (const ref of d.links) {
       // Only a reference carrying a folder is a link worth checking. A bare
@@ -186,13 +200,27 @@ export function lint() {
       if (!ref.includes("/")) continue;
       if (resolve(ref)) continue;
       const amb = (byName.get(nameOf(ref)) || []).length > 1;
-      out.push([d, amb ? `links to "${ref}", which is ambiguous — use the full path` : `links to "${ref}", which does not exist`]);
+      out.push([d, amb ? `links to "${ref}", which is ambiguous — use the full path` : `links to "${ref}", which does not exist`, false]);
     }
   }
+  // A design doc in a sprint is about to be built, so its tech spec must be
+  // complete. No tech doc at all is the loudest version of the same problem.
+  for (const d of docs) {
+    if (d.type !== "design" || !d.sprint) continue;
+    const spec = byId.get(`tech/${d.name}`);
+    if (!spec) { out.push([d, `in sprint ${d.sprint} with no tech spec — expected tech/${d.name}.md`, true]); continue; }
+    for (const s of TECH_SECTIONS) {
+      if (!new RegExp(`^##\\s+${s}\\s*$`, "mi").test(spec.body)) {
+        out.push([spec, `tech spec is missing "## ${s}"`, true]);
+      }
+    }
+    if (!spec.needs) out.push([spec, "tech spec has no `needs` — list prerequisites, or `needs: []`", true]);
+  }
+
   for (const m of mockups) {
     const doc = m.replace(/\.mockup\.html$/i, ".md");
     if (!byId.has(idOf(doc))) {
-      out.push([{ id: idOf(m), title: m.split("/").pop(), path: m }, "mockup has no matching doc"]);
+      out.push([{ id: idOf(m), title: m.split("/").pop(), path: m }, "mockup has no matching doc", false]);
     }
   }
   return out;
@@ -285,29 +313,37 @@ function viewDoc(id) {
       ${back ? `<div class="backlinks"><div class="lbl">Referenced by</div>${back}</div>` : ""}</div>`;
 }
 
-function viewLint() {
+function viewGaps() {
   const rows = lint();
-  return `<h2 class="page">Drift</h2>
-    <p class="lede">Checks the docs against themselves and the schema. Empty is the goal.</p>
-    ${rows.length
-      ? `<div class="lint">${rows.map(([d, why]) =>
-          `<div class="item"><a class="who" href="#/d/${d.id}">${esc(d.title)}</a><span class="why">${esc(why)}</span></div>`).join("")}</div>`
-      : `<p class="ok">No drift. Every doc has a type and category, and every link resolves.</p>`}`;
+  const blocking = rows.filter(([, , b]) => b);
+  const minor = rows.filter(([, , b]) => !b);
+  const list = (rs) => `<div class="lint">${rs.map(([d, why]) =>
+    `<div class="item"><a class="who" href="#/d/${d.id}">${esc(d.title)}</a><span class="why">${esc(why)}</span></div>`).join("")}</div>`;
+
+  if (!rows.length) {
+    return `<h2 class="page">Gaps</h2>
+      <p class="lede">Nothing between you and building.</p>
+      <p class="ok">Every sprint doc has a complete tech spec, and every link resolves.</p>`;
+  }
+  return `<h2 class="page">Gaps</h2>
+    <p class="lede">${blocking.length} blocking, ${minor.length} minor.</p>
+    ${blocking.length ? `<h3 class="gaph">Blocking — nothing in this sprint can be built until these are fixed</h3>${list(blocking)}` : ""}
+    ${minor.length ? `<h3 class="gaph minor">Minor — tidiness, not blockers</h3>${list(minor)}` : ""}`;
 }
 
 // ---- shell -----------------------------------------------------------------
 
 function topnav(route) {
   const on = (h) => (route === h || (h === "/map" && route === "/") ? " class=on" : "");
-  const n = lint().length;
+  const n = lint().filter(([, , blocking]) => blocking).length;
   return `<div class="top">
     <span class="brand">Design map</span>
     <a href="#/map"${on("/map")}>System Map</a>
     <a href="#/sprint"${on("/sprint")}>Sprint</a>
     <a href="#/tech"${on("/tech")}>Tech</a>
     <span class="spacer"></span>
-    <a class="drift" href="#/lint">Drift${n ? ` <b>${n}</b>` : ""}</a>
-    <a class="drift" href="#" id="reload">Reload</a>
+    <a class="mini" href="#/gaps">Gaps${n ? ` <b>${n}</b>` : ""}</a>
+    <a class="mini" href="#" id="reload">Reload</a>
   </div>`;
 }
 
@@ -316,7 +352,7 @@ function draw() {
   const main =
     route === "/sprint" ? viewSprint()
     : route === "/tech" ? viewTech()
-    : route === "/lint" ? viewLint()
+    : route === "/gaps" ? viewGaps()
     : route.startsWith("/d/") ? viewDoc(route.slice(3))
     : viewMap();
   document.querySelector("#app").innerHTML = topnav(route) + `<div class="main">${main}</div>`;

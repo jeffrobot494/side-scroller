@@ -90,4 +90,41 @@ export default async function run(t) {
   const rows = lint();
   t.ok("root doc broken link is caught", rows.some(([d, w]) => d.id === "roadmap" && w.includes("gone.md")));
   t.ok("root doc is exempt from schema rules", !rows.some(([d, w]) => d.id === "roadmap" && w.includes("no type")));
+
+  // ---- a tech spec entering a sprint must be complete --------------------
+  const SECTIONS = ["Reuses","Where the code goes","The seam","Slices","Must not regress","Approximations"];
+  const full = "---\ntype: tech\ncategory: scenes\nneeds: [nav]\n---\n# T\n"
+    + SECTIONS.map((s) => `## ${s}\n\nx\n`).join("\n");
+
+  index([
+    parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n"),
+    parse("tech/thing.md", full),
+  ]);
+  t.eq("a complete tech spec passes", lint().length, 0);
+
+  index([
+    parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n"),
+    parse("tech/thing.md", "---\ntype: tech\ncategory: scenes\n---\n# T\n\n## Slices\n\nx\n"),
+  ]);
+  const gaps = lint().map(([, w]) => w);
+  t.eq("five missing sections are named", gaps.filter((w) => w.includes("is missing")).length, 5);
+  t.ok("a present section is not flagged", !gaps.some((w) => w.includes('"## Slices"')));
+  t.ok("missing needs is flagged", gaps.some((w) => w.includes("needs")));
+
+  index([parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n")]);
+  t.ok("no tech spec at all is flagged", lint().some(([, w]) => w.includes("no tech spec")));
+
+  // and none of it fires for a design doc outside a sprint
+  index([parse("design/thing.md", "---\ntype: design\ncategory: scenes\n---\n# Thing\n")]);
+  t.eq("outside a sprint, nothing is required", lint().length, 0);
+
+  // ---- gaps are split into blocking and minor ----------------------------
+  index([
+    parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n"),
+    parse("tech/nocat.md", "---\ntype: tech\n---\n# No category\n"),
+  ]);
+  const split = lint();
+  t.ok("a missing tech spec blocks", split.some(([, w, b]) => b && w.includes("no tech spec")));
+  t.ok("a missing category does not block", split.some(([, w, b]) => !b && w === "no category"));
+  t.ok("every row carries a blocking flag", split.every(([, , b]) => typeof b === "boolean"));
 }
