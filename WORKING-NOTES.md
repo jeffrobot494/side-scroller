@@ -95,6 +95,9 @@ sprint system instead of running a sprint.
 
 - **Disagree readily.** Pushback is received well and usually improves the
   outcome. Deference produces worse work here.
+- **Lead with tables and bullets, never a paragraph.** Bo reads for
+  information and resents scrolling past prose to reach it. One orienting
+  sentence, then structure. Full rule in `DOC-SCHEMA.md`.
 - **The complaint is structure, never length.** Bo has said "hard to follow"
   twice and "too long" zero times. Fix by leading with the conclusion and
   separating concerns — not by truncating substance.

@@ -193,36 +193,52 @@ function badges(d) {
   return b.join(" ");
 }
 
-function card(d) {
-  return `<a class="card${d.sprint ? " sprint" : ""}" href="#/d/${d.id}">
-    <span class="t">${esc(d.title)}</span><span class="row">${badges(d)}</span></a>`;
+function row(d, extra = "") {
+  // A state page shares its system's title, so mark it or the list reads double.
+  const title = esc(d.title) + (d.type === "state" ? ' <span class="path">· state</span>' : "");
+  return `<a class="row${d.sprint ? " sprint" : ""}" href="#/d/${d.id}">
+    <span class="t">${title}</span>${extra}<span class="meta">${badges(d)}</span></a>`;
 }
 
+// The map: one panel, one collapsible section per category. A list beats a card
+// grid here — the point is scanning everything at once, not admiring the cards.
 function viewMap() {
-  const live = docs.filter((d) =>
-    (d.type === "design" || d.type === "tech") && d.status !== "superseded");
-  const cols = CATS.map((c) => {
+  // Design docs only. This is a design tool; tech has its own tab.
+  const live = docs.filter((d) => d.type === "design" && d.status !== "superseded");
+  const sections = CATS.map((c) => {
     const items = live.filter((d) => d.category === c);
-    return `<div class="group"><h3>${CAT_LABEL[c]}</h3>${
-      items.length ? items.map(card).join("") : '<p class="empty">nothing yet</p>'
-    }</div>`;
+    return `<details open><summary><span class="chev"></span>${CAT_LABEL[c]}
+      <span class="spacer"></span><span class="n">${items.length}</span></summary>
+      ${items.length ? items.map((d) => row(d)).join("") : '<div class="empty">nothing yet</div>'}
+    </details>`;
   }).join("");
-
   const loose = live.filter((d) => !CATS.includes(d.category));
-  return `<div class="crumb">${live.length} live docs</div>
-    <h2 class="page">System map</h2>
-    <p class="lede">Everything designed or built, by category. Amber cards are in scope for the current sprint.</p>
-    <div class="groups">${cols}</div>
-    ${loose.length ? `<div class="group" style="margin-top:26px"><h3>Other</h3>${loose.map(card).join("")}</div>` : ""}`;
+  const other = loose.length
+    ? `<details open><summary><span class="chev"></span>Other<span class="spacer"></span><span class="n">${loose.length}</span></summary>${loose.map((d) => row(d)).join("")}</details>`
+    : "";
+  return `<h2 class="page">System map</h2>
+    <p class="lede">${live.length} design docs. Amber rows are in scope for the current sprint.</p>
+    <div class="tree">${sections}${other}</div>`;
+}
+
+function viewTech() {
+  const items = docs
+    .filter((d) => d.folder === "tech/")
+    .sort((a, b) => a.title.localeCompare(b.title));
+  return `<h2 class="page">Tech</h2>
+    <p class="lede">Everything in <code>tech/</code>, alphabetical. Organise later.</p>
+    <div class="tree"><details open><summary><span class="chev"></span>All
+      <span class="spacer"></span><span class="n">${items.length}</span></summary>
+      ${items.map((d) => row(d, `<span class="path">${esc(d.path)}</span>`)).join("")}
+    </details></div>`;
 }
 
 function viewSprint() {
   const sprints = docs.filter((d) => d.type === "sprint").sort((a, b) => b.id.localeCompare(a.id));
   const s = sprints[0];
   if (!s) return `<h2 class="page">No sprint</h2><p class="lede">Nothing in <code>sprints/</code> yet.</p>`;
-  // One card per system, not per document: a system in scope usually has both a
-  // design doc and a state page, and showing both is just two links to the same
-  // thing wearing different titles. The state page wins when it exists.
+  // One row per system, not per document: a system in scope usually has both a
+  // design doc and a state page, and showing both is two links to the same thing.
   const bySystem = new Map();
   for (const d of docs) {
     if (d.sprint !== s.sprint || d.type === "sprint") continue;
@@ -231,19 +247,19 @@ function viewSprint() {
     if (!cur || (d.type === "state" && cur.type !== "state")) bySystem.set(key, d);
   }
   const inScope = [...bySystem.values()];
-  return `<div class="crumb">${esc(s.path)}</div>
-    <h2 class="page">${esc(s.title)}</h2>
-    ${inScope.length ? `<p class="lede">In scope this sprint:</p><div class="groups" style="grid-template-columns:repeat(2,1fr)">${
-      inScope.map((d) => `<div>${card(d)}</div>`).join("")}</div>` : ""}
-    <div class="doc" style="margin-top:22px">${renderMd(s.body, linkFor)}</div>`;
+  return `<h2 class="page">${esc(s.title)}</h2>
+    ${inScope.length ? `<div class="tree" style="margin-bottom:22px"><details open>
+      <summary><span class="chev"></span>In scope<span class="spacer"></span><span class="n">${inScope.length}</span></summary>
+      ${inScope.map((d) => row(d)).join("")}</details></div>` : ""}
+    <div class="doc">${renderMd(s.body, linkFor)}</div>`;
 }
 
 function viewDoc(id) {
   const d = byId.get(id);
-  if (!d) return `<h2 class="page">Not found</h2><p class="lede">No doc with slug <code>${esc(id)}</code>.</p>`;
+  if (!d) return `<h2 class="page">Not found</h2><p class="lede">No doc with id <code>${esc(id)}</code>.</p>`;
   const back = (backlinks.get(id) || []).map((s) => `<a href="#/d/${s}">${esc(byId.get(s).title)}</a>`).join("");
   return `<div class="crumb">${esc(d.path)}</div>
-    <div class="meta">${badges(d)}${d.category ? `<span class="badge b-designed">${CAT_LABEL[d.category] || d.category}</span>` : ""}</div>
+    <div class="meta-row">${badges(d)}${d.category ? `<span class="badge b-designed">${CAT_LABEL[d.category] || d.category}</span>` : ""}</div>
     <div class="doc">${renderMd(d.body, linkFor)}
       ${back ? `<div class="backlinks"><div class="lbl">Referenced by</div>${back}</div>` : ""}</div>`;
 }
@@ -260,38 +276,28 @@ function viewLint() {
 
 // ---- shell -----------------------------------------------------------------
 
-function sidebar(route) {
-  const on = (h) => (route === h ? " class=on" : "");
+function topnav(route) {
+  const on = (h) => (route === h || (h === "/map" && route === "/") ? " class=on" : "");
   const n = lint().length;
-  const group = (label, list) => list.length
-    ? `<div class="navgroup"><div class="lbl">${label}</div>${list.map((d) =>
-        `<a href="#/d/${d.id}"${route === `/d/${d.id}` ? ' class="on"' : ""}>${esc(d.title)}</a>`).join("")}</div>`
-    : "";
-  const of = (t) => docs.filter((d) => d.type === t && d.status !== "superseded");
-  return `<div class="side">
-    <h1>Design map</h1>
-    <p class="sub">${docs.length} docs</p>
-    <div class="navgroup">
-      <a href="#/"${on("/")}>Current sprint</a>
-      <a href="#/map"${on("/map")}>System map</a>
-      <a href="#/lint"${on("/lint")}>Drift <span class="n">${n || ""}</span></a>
-    </div>
-    ${group("Design", of("design"))}
-    ${group("Tech", of("tech"))}
-    ${group("State", of("state"))}
-    ${group("Archive", docs.filter((d) => d.status === "superseded" || d.folder === "archive/"))}
+  return `<div class="top">
+    <span class="brand">Design map</span>
+    <a href="#/map"${on("/map")}>System Map</a>
+    <a href="#/sprint"${on("/sprint")}>Sprint</a>
+    <a href="#/tech"${on("/tech")}>Tech</a>
+    <span class="spacer"></span>
+    <a class="drift" href="#/lint">Drift${n ? ` <b>${n}</b>` : ""}</a>
   </div>`;
 }
 
 function draw() {
-  const route = location.hash.replace(/^#/, "") || "/";
+  const route = location.hash.replace(/^#/, "") || "/map";
   const main =
-    route === "/" ? viewSprint()
-    : route === "/map" ? viewMap()
+    route === "/sprint" ? viewSprint()
+    : route === "/tech" ? viewTech()
     : route === "/lint" ? viewLint()
     : route.startsWith("/d/") ? viewDoc(route.slice(3))
-    : viewSprint();
-  document.querySelector("#app").innerHTML = sidebar(route) + `<div class="main">${main}</div>`;
+    : viewMap();
+  document.querySelector("#app").innerHTML = topnav(route) + `<div class="main">${main}</div>`;
   window.scrollTo(0, 0);
 }
 

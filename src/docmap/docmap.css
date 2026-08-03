@@ -24,36 +24,30 @@ body {
   font: 15px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-#app { display: grid; grid-template-columns: 268px 1fr; min-height: 100vh; }
+/* ---- top nav ---- */
+.top {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 26px; height: 52px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.top .brand {
+  font-size: 13.5px; font-weight: 600; margin-right: 20px; letter-spacing: -.01em;
+}
+.top a {
+  padding: 6px 13px; border-radius: var(--radius);
+  color: var(--ink-2); text-decoration: none; font-size: 13.5px;
+}
+.top a:hover { background: #f1efe9; color: var(--ink); }
+.top a.on { background: #eef1f6; color: var(--accent); font-weight: 600; }
+.top .spacer { flex: 1; }
+.top a.drift { font-size: 12.5px; color: var(--ink-3); }
+.top a.drift b { color: var(--warn); font-weight: 600; }
 
-/* ---- sidebar ---- */
-.side {
-  border-right: 1px solid var(--line);
-  background: var(--panel);
-  padding: 18px 0 40px;
-  position: sticky; top: 0; height: 100vh; overflow-y: auto;
-}
-.side h1 { font-size: 15px; margin: 0 18px 2px; letter-spacing: -.01em; }
-.side .sub { margin: 0 18px 18px; color: var(--ink-3); font-size: 12px; }
-.navgroup { margin: 0 0 16px; }
-.navgroup > .lbl {
-  font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
-  color: var(--ink-3); padding: 0 18px; margin-bottom: 5px;
-}
-.side a {
-  display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
-  padding: 4px 18px; color: var(--ink-2); text-decoration: none; font-size: 13.5px;
-  border-left: 2px solid transparent;
-}
-.side a:hover { background: #f1efe9; color: var(--ink); }
-.side a.on { border-left-color: var(--accent); color: var(--ink); background: #eef1f6; }
-.side a .n { color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
-
-/* ---- main ---- */
-.main { padding: 34px 44px 90px; max-width: 940px; }
+.main { padding: 30px 26px 90px; max-width: 900px; }
 .crumb { color: var(--ink-3); font-size: 12px; margin-bottom: 6px; }
-h2.page { font-size: 25px; margin: 0 0 4px; letter-spacing: -.02em; font-weight: 600; }
-.lede { color: var(--ink-2); margin: 0 0 26px; }
+h2.page { font-size: 24px; margin: 0 0 4px; letter-spacing: -.02em; font-weight: 600; }
+.lede { color: var(--ink-2); margin: 0 0 22px; }
 
 /* ---- badges ---- */
 .badge {
@@ -63,30 +57,41 @@ h2.page { font-size: 25px; margin: 0 0 4px; letter-spacing: -.02em; font-weight:
 .b-idea { color: var(--idea); } .b-designed { color: var(--designed); }
 .b-building { color: var(--building); } .b-built { color: var(--built); }
 .b-superseded, .b-reference { color: var(--ink-3); }
-.badge.solid { color: #fff; border-color: transparent; }
 .badge.vague { border-style: dashed; }
 .badge.warn { color: var(--warn); border-color: var(--warn); }
 
-/* ---- map ---- */
-.groups { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px 20px; }
-@media (max-width: 1100px) { .groups { grid-template-columns: repeat(2, 1fr); } }
-.group > h3 {
-  font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
-  color: var(--ink-3); margin: 0 0 9px; padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
+/* ---- tree (system map + tech) ---- */
+.tree {
+  border: 1px solid var(--line); background: var(--panel);
+  border-radius: 10px; overflow: hidden;
 }
-.cat { margin-bottom: 18px; }
-.cat > h4 { font-size: 12.5px; margin: 0 0 7px; color: var(--ink-2); font-weight: 600; }
-.card {
-  display: block; background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 9px 11px; margin-bottom: 7px;
-  text-decoration: none; color: var(--ink);
+.tree details { border-bottom: 1px solid var(--line); }
+.tree details:last-child { border-bottom: 0; }
+.tree summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; cursor: pointer; list-style: none;
+  font-size: 13px; font-weight: 600; color: var(--ink);
+  background: #faf8f3;
 }
-.card:hover { border-color: var(--line-2); }
-.card.sprint { border-color: var(--building); background: #fdf8f0; }
-.card .t { font-size: 13.5px; font-weight: 600; display: block; margin-bottom: 4px; }
-.card .row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
-.empty { color: var(--ink-3); font-size: 13px; font-style: italic; }
+.tree summary::-webkit-details-marker { display: none; }
+.tree summary:hover { background: #f4f1ea; }
+.tree summary .chev { color: var(--ink-3); font-size: 10px; width: 10px; transition: none; }
+.tree details[open] > summary .chev::before { content: "▾"; }
+.tree details:not([open]) > summary .chev::before { content: "▸"; }
+.tree summary .n { color: var(--ink-3); font-weight: 400; font-size: 11.5px; }
+.tree summary .spacer { flex: 1; }
+
+.row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px 8px 32px; border-top: 1px solid var(--line);
+  text-decoration: none; color: var(--ink); font-size: 13.5px;
+}
+.row:hover { background: #f4f1ea; }
+.row.sprint { background: #fdf8f0; }
+.row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .meta { display: flex; gap: 5px; flex-wrap: nowrap; }
+.row .path { color: var(--ink-3); font-size: 11.5px; }
+.empty { color: var(--ink-3); font-size: 12.5px; font-style: italic; padding: 8px 14px 8px 32px; border-top: 1px solid var(--line); }
 
 /* ---- doc ---- */
 .doc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 30px 36px; }
@@ -108,7 +113,7 @@ h2.page { font-size: 25px; margin: 0 0 4px; letter-spacing: -.02em; font-weight:
 .doc a { color: var(--accent); }
 .doc a.missing { color: var(--warn); text-decoration: line-through; }
 
-.meta { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 22px; }
+.meta-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 20px; }
 .backlinks { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13px; }
 .backlinks .lbl { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
 .backlinks a { color: var(--accent); margin-right: 12px; }

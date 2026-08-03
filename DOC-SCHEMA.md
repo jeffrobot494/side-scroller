@@ -72,6 +72,21 @@ this is only for links that don't occur naturally in the text.
 - **Repo-root files stay uppercase** — `README.md`, `CLAUDE.md`, `ROADMAP.md`,
   `DOC-SCHEMA.md`. These are metafiles that tools and humans expect to shout.
 
+## House style
+
+Structure first. The reader should never scroll past prose to reach the
+information.
+
+| Rule | |
+|---|---|
+| Opening | One sentence saying what the page is. Then straight into structure. |
+| Default form | Tables and bullets. Prose only where a point genuinely needs a paragraph. |
+| Banned | Preamble, throat-clearing, "the shape of the problem", restating the title |
+| Test | If a section could be a table, it should be a table |
+| Paragraphs | At most two or three per page, and never at the top |
+
+This applies to every doc type, and to summaries written in chat.
+
 ## Rules
 
 - Status lives in `ROADMAP.md` and in `state` docs. Design and tech docs never

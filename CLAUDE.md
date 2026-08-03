@@ -10,6 +10,10 @@ generated.
 lives in `ROADMAP.md` and in the `*.state.md` pages, never in a design or
 tech doc. Browse it all at `design.html`.
 
+**Docs lead with structure, not prose** — one sentence of orientation, then
+tables and bullets. See "House style" in `DOC-SCHEMA.md`. This applies to
+answers in chat too.
+
 ## Current status
 
 Playable end to end, and built well beyond the original "vertical slice" (the

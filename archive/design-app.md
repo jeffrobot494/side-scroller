@@ -1,7 +1,7 @@
 ---
 type: tech
 category: development-tools
-status: built
+status: superseded
 resolution: sharp
 tags: [tools, design]
 ---
