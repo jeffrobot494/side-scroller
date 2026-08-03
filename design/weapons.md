@@ -7,54 +7,43 @@ resolution: vague
 
 # Weapons
 
-What the arsenal should feel like to use. How it is built:
-`tech/weapon-designer.md`.
+What the arsenal should feel like to use. Built in `tech/weapon-designer.md`.
 
-## Weapons create spatial decisions
+## Principles
 
-The pillar. A weapon is interesting when it changes *where you want to stand*,
-not when it does more damage than the last one. A shotgun pulls you in, a rail
-gun pushes you out, a grenade launcher makes you think about arcs and cover. Two
-guns with different numbers and identical positioning are one gun.
+| | |
+|---|---|
+| Weapons create spatial decisions | A weapon is interesting when it changes where you want to stand, not when it does more damage |
+| Nine ideas, not twenty-four guns | One shared effect vocabulary, so any new weapon reads as a combination of things already understood |
+| Cost is advisory | Every effect is priced against a tier budget, but the budget is a readout, not a block |
+| Friction is felt, not read | Reloading, arcs, and spread are positioning decisions, not stat lines |
 
-## Nine ideas, not twenty-four guns
+## The effect vocabulary
 
-Every weapon is a combination drawn from one shared vocabulary:
+| What it does | How it arrives |
+|---|---|
+| damage · burn · slow · knockback · explode · chain | pellets · pierce · homing |
 
-**What it does** — damage, burn, slow, knockback, explode, chain
-**How it arrives** — pellets, pierce, homing
+A shotgun pulls you in, a rail gun pushes you out, a grenade launcher makes you
+think about arcs and cover. Two guns with different numbers and identical
+positioning are one gun.
 
-So the player learns nine concepts, then reads any new weapon as a combination of
-things they already understand. This is what keeps a growing arsenal
-comprehensible instead of becoming a wall of stats — and it is why a new effect
-kind is a real design event, while a new weapon is not.
-
-## Cost is a design tool, not a rule
-
-Every effect is priced, and each tech tier has a budget. But the budget is
-**advisory** — a visible readout, not a block. Blowing it is the author's call.
-Explode and chain make it easy to overspend, and sometimes an over-budget weapon
-is exactly the reward a mission should hand out.
+Adding an effect kind is a real design event. Adding a weapon is not.
 
 ## Friction the player can feel
 
-- **Magazines and reloading.** You move at 20% speed while reloading, so
-  reloading is a positioning decision, not a pause.
-- **Arcing projectiles.** Rockets and grenades lob, which makes elevation matter
-  and gives the player a reason to read the terrain.
-- **Projectile shape reads at a glance.** Six visual forms, so an incoming threat
-  is identifiable before it lands.
-- **Aim is a stat, and it applies to everyone.** Higher aim means tighter spread
-  for the player's soldiers and for enemies alike. A rookie's gun genuinely
-  sprays.
+| Mechanic | What it costs the player |
+|---|---|
+| Magazines and reloading | 20% move speed while reloading — a positioning decision, not a pause |
+| Arcing projectiles | Rockets and grenades lob, so elevation matters and terrain must be read |
+| Six projectile shapes | An incoming threat is identifiable before it lands |
+| Aim as a stat, for everyone | Higher aim tightens spread for soldiers and enemies alike; a rookie's gun genuinely sprays |
 
 ## Open questions
 
-- Should any weapon be strictly better than another at the same tier, or should
-  every choice be a trade?
-- How does the player learn what a weapon does before spending on it — numbers,
-  a range, or only by using it?
-- Do enemy weapons draw from the same vocabulary the player's do? Shared rules
-  are readable; separate rules allow set pieces.
-- What makes a weapon feel *good* rather than merely effective — that question is
-  entirely unaddressed and is probably the one that matters most.
+| Question | Why it matters |
+|---|---|
+| Should any weapon be strictly better at the same tier? | Or is every choice a trade? |
+| How does the player learn what a weapon does before buying it? | Numbers, a range, or only by using it |
+| Do enemy weapons draw from the same vocabulary? | Shared rules are readable; separate rules allow set pieces |
+| What makes a weapon feel *good* rather than merely effective? | Entirely unaddressed, and probably the one that matters most |

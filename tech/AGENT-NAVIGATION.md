@@ -9,289 +9,200 @@ tags: [ai, enemies, companions, movement, navigation]
 
 # Agent navigation
 
-Agents in this game have no spatial reasoning. Every behavior is expressed
-relative to whatever they are fighting — close the distance, hold a range, go
-where I last saw you — so the level itself is nearly invisible to them. Out of
-all the terrain, an agent perceives three things: whether a wall blocks its view
-of the target, whether there is floor under an 8px probe past its front foot, and
-whether the target is more than 40px above or below it.
+How agents get somewhere. Player-facing intent: `design/enemies.md`.
 
-That is why a grounded enemy chasing a target on a ledge walks to the spot
-underneath and stays there. It is not stuck; it is doing exactly what it was
-told, which was "reduce the horizontal distance."
+## What agents perceive today
 
-This document is the design for giving agents somewhere to *be* and a way to get
-there. It replaces an earlier draft that led with an implementation audit.
+| Fact | Source |
+|---|---|
+| Is a wall between me and my target | Line-of-sight segment test |
+| Is there floor under my front foot | A single 8px probe |
+| Is my target >40px above or below | Vertical band check |
 
-## The shape of the design
+That is the whole picture. Every behaviour is expressed relative to the target —
+close the distance, hold a range, go where I last saw you — so a grounded enemy
+chasing someone on a ledge walks to the spot underneath and stays there. Not
+stuck: doing exactly what it was told.
 
-Five pieces. The first two are new concepts, the third is new machinery, and the
-last two are about what stays untouched.
+## The five pieces
 
-### 1. Objective and task
-
-**Objective** is an authored field set when an agent spawns. It answers "what am
-I here for" and changes rarely, through explicit transitions — a guard whose post
-is overrun, an agent dropping below a health threshold.
-
-    hunt      find and kill hostiles
-    advance   get somewhere; fight what is in the way
-    guard     hold a region, engage intruders, return when done
-
-**Task** is the runtime unit of work. It answers "what am I doing right now."
-Tasks *complete*, which is the property that makes them useful — travel finishes
-on arrival, engage finishes when the target is dead or lost, return finishes when
-you are back at your post.
-
-    travel    get to a destination
-    engage    fight a specific target
-    search    look for a target I lost
-    hold      stand here
-
-Encountering an enemy does **not** change the objective. It suspends the current
-task and starts an `engage` task. When that completes, the suspended task
-resumes. The objective is what tells you what to do after every interruption, so
-it cannot be the thing an interruption overwrites.
-
-The two fields earn their keep at exactly one point — the transition out of
-combat reads *both*:
-
-| Objective | Task ends | Next |
+| # | Piece | What it adds |
 |---|---|---|
-| `guard` | `engage` completes | return to post |
-| `advance` | `engage` completes | resume the route |
-| `hunt` | `engage` completes | search for the next target |
+| 1 | Objective and task | A stable purpose plus a completable unit of work |
+| 2 | Nav graph | Facts about where a body can stand and how it moves between |
+| 3 | Destination scoring | Opinions about where to be, over the graph's nodes |
+| 4 | Line of shot | Split from line of sight |
+| 5 | — | The combat brain, deliberately untouched |
 
-Collapsing them to one field means encoding the objective into the task name
-(`guard_engaging`, `advance_engaging`, …), which multiplies states instead of
-adding them. At three objectives and four tasks that is still hand-authorable, so
-this is a small structural bet rather than an urgent one — but the requirement it
-protects is not optional: **when a fight ends, the agent must still know what it
-was doing before the fight started.**
+## 1. Objective and task
+
+| Field | Changes | Values |
+|---|---|---|
+| `objective` | Authored at spawn, rarely after | `hunt` · `advance` · `guard` |
+| `task` | At runtime, and *completes* | `travel` · `engage` · `search` · `hold` |
+
+Meeting an enemy does **not** change the objective. It suspends the current task,
+starts an `engage` task, and resumes when that completes.
+
+The two fields earn their keep at exactly one point — the exit from combat reads
+both:
+
+| Objective | `engage` completes → |
+|---|---|
+| `guard` | Return to post |
+| `advance` | Resume the route |
+| `hunt` | Search for the next target |
+
+Collapsing to one field means encoding the objective into the task name
+(`guard_engaging`, …), multiplying states instead of adding them. At 3 × 4 that
+is still hand-authorable, so this is a small structural bet — but the requirement
+it protects is not optional: **when a fight ends, the agent must still know what
+it was doing before it started.**
 
 Objective is also what distinguishes a companion from an enemy running the
-identical brain. It is a per-instance spawn parameter, not a state.
+identical brain. It is a spawn parameter, not a state.
 
-### 2. The node graph — facts about the level
+## 2. The nav graph — facts about the level
 
-A level is continuous space, but the places you can *stand* are a small discrete
-set. Collapsing to those turns navigation from a search over pixels into a search
-over roughly 15–60 options.
+| | |
+|---|---|
+| Nodes | Standable surfaces, not platforms. A crate splits a ground slab into two |
+| Edges | Directed moves: jump up, jump across, walk off and fall |
+| Cost | Seconds, so route cost compares against everything else an agent weighs |
+| Per body | Nodes come from geometry; edges come from who is asking |
+| Built | Once at level load. Nothing in the terrain moves |
+| Flyers | No graph. They already move in two dimensions |
 
-**Nodes are standable surfaces, not platforms.** A crate sitting on the ground
-slab splits it into two nodes, because you cannot walk through the crate. A node
-is a maximal stretch of surface where a given body can stand and walk
-uninterrupted, which makes node extraction partly body-dependent (headroom).
+Direction matters: dropping off a high ledge is always available, climbing back
+may not be. Encoding that lets an agent know it would strand itself *before* it
+commits.
 
-**Edges are directed moves.** Platforms here are solid from every side, so there
-are three kinds: jump up, jump across a gap, walk off and fall. Direction
-matters — dropping off a high ledge is always available, climbing back may not
-be. Encoding that lets an agent know it would strand itself *before* it commits.
+### Three uses
 
-**Edge cost is measured in seconds**, not pixels, so route cost is directly
-comparable to everything else an agent weighs ("better position, but four seconds
-away").
+| Use | |
+|---|---|
+| Routing | Next move from here to there. Precomputed, so queries are free |
+| Candidate destinations | The node list is a list of *places* — "where should I stand" becomes a scoring problem |
+| True distance | Straight-line distance lies constantly in a platformer |
 
-**Edges are per-body.** Nodes come from geometry; edges come from who is asking.
-A heavy body with a weak jump has fewer arrows on identical terrain, so "the
-small ones can follow you up there, the big one has to go around" is a
-consequence rather than an authored behavior. Flying bodies get no graph — for
-them everything already connects to everything, which is why they do not feel
-dumb today.
+The graph holds facts. It knows nothing about other agents, projectiles, or
+danger. Keeping that boundary sharp is what stops it becoming a knot.
 
-Built once at level load and never modified; nothing in the terrain moves.
-Node counts are small enough to precompute every route at build time and make
-each query a table lookup.
+## 3. Destination scoring — opinions about where to be
 
-Three uses:
+A second scoring pass, over nodes, independent of the action brain.
 
-1. **Routing** — next move from here to there.
-2. **Supplying candidate destinations** — the node list is a list of *places*, so
-   "where should I stand" becomes a scoring problem. Today an agent has no
-   vocabulary for "somewhere"; it can only name positions relative to its target,
-   which is why every behavior reduces to closing distance.
-3. **True distance** — most dumb platformer AI comes from trusting straight-line
-   distance. Something 100px above you may be two seconds away, twelve seconds
-   away, or unreachable, and the straight line cannot tell those apart.
+**They do not compete.** Movement arbitration is already dash > move order >
+standing controller. Dashes and move orders are issued *by actions*; the standing
+controller is the fallback. Destination scoring replaces that fallback slot.
 
-The graph holds facts. It knows nothing about other agents, projectiles, danger,
-or what anyone is doing. Keeping that boundary sharp is what stops it becoming a
-knot.
+Merging them into one list would be the regression: an action is short and
+committed, a destination is a multi-second pursuit. Score them together and the
+agent either commits to a four-second walk it cannot shoot during, or you invent
+non-blocking movement actions and lose the commitment that makes fights readable.
 
-### 3. Destination scoring — opinions about where to be
-
-The existing utility brain scores *actions*. This adds a second, independent pass
-that scores *places*, over the node list, using the same style of weighted
-expression.
-
-The two do not compete, because they occupy different slots that already exist.
-Movement arbitration today is: an active dash wins, else an active move order,
-else the standing motion controller. Dashes and move orders are issued *by
-actions*; the standing controller is the fallback that runs when no action is
-driving. Destination scoring replaces that fallback slot. The action layer keeps
-overriding it exactly as it does now.
-
-Merging them into one list would be the real regression. An action is short and
-committed (windup → execute → recovery, no cancelling); a destination is a
-multi-second background pursuit. Score them together and either the agent commits
-to a four-second walk it cannot shoot during, or you invent non-blocking movement
-actions and lose the commitment that makes fights readable.
-
-The task supplies the weight profile:
+### Weights by task
 
 | Term | `travel` | `engage` |
 |---|---|---|
-| progress toward objective point | high | low |
-| has shot line to target | — | high |
-| within my preferred range | — | high |
-| elevation over target | — | moderate |
-| time to arrive | penalty | penalty |
-| ally already there | small penalty | penalty |
-| dead end (no exit edges) | penalty | penalty |
+| Progress toward objective point | high | low |
+| Has shot line to target | — | high |
+| Within preferred range | — | high |
+| Elevation over target | — | moderate |
+| Time to arrive | penalty | penalty |
+| Ally already there | small penalty | penalty |
+| Dead end (no exit edges) | penalty | penalty |
 
-Same engine, same node list, different weights — so tasks are authorable data.
+### Three rules that matter more than the weights
 
-Three rules that matter more than the weights:
+| Rule | Why |
+|---|---|
+| Score, do not filter | Filtering for "has a shot" piles every enemy onto the same ledge |
+| "Nearby" means time, not radius | Across a chasm, nothing better is reachable soon enough — so shoot from here |
+| Commit to the destination | Re-scoring every 0.25s makes an agent oscillate between two ledges forever |
 
-- **Score, do not filter.** Filtering for "nodes with a shot" piles every enemy
-  onto the same obvious ledge. Scoring spreads them.
-- **"Nearby" means time, not radius.** Candidates are nodes reachable within N
-  seconds. This gives the correct behavior across a chasm for free: nothing
-  better is reachable soon enough, so the agent shoots from where it stands
-  instead of embarking on a hopeless journey.
-- **Commit to the destination.** Re-scoring every quarter-second makes an agent
-  oscillate between two similar ledges and never arrive — the classic failure of
-  scored movement, and it reads far worse than standing still. Give the current
-  destination a stickiness margin a rival must beat, and re-evaluate on arrival
-  or material change (target moved far, shot line lost, took damage, ally
-  crowded in), not on a fast timer. Destinations change on the order of seconds;
-  actions on the order of a quarter-second.
+Destinations change on the order of seconds; actions on the order of a quarter
+second. Shot line is evaluated *from each candidate node*, runs last, and only on
+candidates that survived the cheap filters.
 
-Shot line is evaluated *from each candidate node*, not from where the agent
-stands. It is the one expensive term, so it runs last, only on candidates that
-survived the cheap filters.
+## 4. Line of shot ≠ line of sight
 
-### 4. Line of shot is not line of sight
+| | |
+|---|---|
+| Sight | A clear line from my eyes to yours |
+| Shot | From a muzzle at an offset, possibly arcing, with no ally in the corridor |
 
-Worth splitting from the start because it is cheap and the failure is ugly.
-Sight is a clear line from my eyes to yours. A shot leaves a muzzle at an offset,
-some projectiles arc under gravity, and an ally may be standing in the corridor —
-and friendly fire is a supported config. Line of shot is line of sight from the
-muzzle, plus nobody friendly in the way.
+Cheap to split, and friendly fire is a supported config — conflate them and
+enemies shoot their own front rank in the back.
 
-### 5. What does not change
+## 5. What does not change
 
-**The combat brain is the good part.** Scored actions with gates, cooldowns,
-windup, execute, recovery, and no mid-commitment cancelling is what makes a
-duelist readable and punishable. None of it is touched. This work replaces the
-movement layer only.
+The combat brain is the good part: scored actions with gates, cooldowns, windup,
+execute, recovery, no mid-commitment cancelling. None of it is touched.
 
-A useful consequence: because the action layer runs independently of the movement
-layer, an agent already fires while travelling with no special case. A task switch
-governs only where the agent wants to *stand*. So meeting an enemy mid-route does
-not necessarily change the destination at all — it changes it only when standing
-somewhere better outscores continuing, and the scoring answers that on its own.
-"Advance while firing" and "break off to climb a ledge" are the same system with
-different weights.
+A useful consequence — the action layer already runs independently of movement,
+so an agent fires while travelling with no special case. A task switch governs
+only where it wants to *stand*. Meeting an enemy mid-route changes the
+destination only when standing somewhere better outscores continuing.
 
 ## The layer stack
 
 | Layer | Changes | Example |
 |---|---|---|
-| Objective | authored, ~never | `advance` |
-| Task | on events, completes | `travel` → `engage` → `travel` |
-| Destination | on arrival or material change | that ledge with a shot line |
-| Route | when the destination changes | walk, jump, walk |
-| Step | per frame | drive left, jump now |
+| Objective | Authored, ~never | `advance` |
+| Task | On events, completes | `travel` → `engage` → `travel` |
+| Destination | On arrival or material change | That ledge with a shot line |
+| Route | When the destination changes | Walk, jump, walk |
+| Step | Per frame | Drive left, jump now |
 
-Each layer changes roughly ten times less often than the one below it, which is
-what makes the whole thing cheap to run and easy to inspect — any single layer can
-be frozen in the Lab while the others keep moving.
+Each layer changes roughly ten times less often than the one below — which is
+what makes it cheap to run and easy to inspect.
 
 ## Worked example
 
-An `advance` trooper is travelling toward the far end of the level. A soldier
-appears on a ledge above and ahead.
+An `advance` trooper travelling toward the far end. A soldier appears on a ledge
+above and ahead.
 
-1. Perception sees a hostile on the next sense tick (0.2s cadence, so there is a
-   natural reaction delay).
-2. The `travel` task is suspended; an `engage` task starts. The objective is
-   still `advance`.
-3. Destination scoring switches to the `engage` weights. Candidate nodes are
-   those reachable in under a few seconds. The ledge the soldier is on scores
-   poorly (inside preferred range, no elevation advantage); a crate top with a
-   shot line at mid-range scores well.
-4. The route to the crate top is two edges: walk, then jump. The agent follows
-   it, firing whenever the action brain says to — travelling does not suppress
-   combat.
-5. The soldier dies. The `engage` task completes; `travel` resumes with its old
-   destination intact.
-6. Had the objective been `guard`, step 5 would instead route back to the post.
+| Step | |
+|---|---|
+| 1 | Perception sees a hostile on the next sense tick (0.2s — natural reaction delay) |
+| 2 | `travel` suspends, `engage` starts. Objective is still `advance` |
+| 3 | Destination weights switch to `engage`. Candidates = nodes reachable in a few seconds |
+| 4 | The ledge scores poorly (too close, no elevation); a crate top with a shot line scores well |
+| 5 | Route is walk, then jump. It fires en route — travelling does not suppress combat |
+| 6 | Soldier dies. `engage` completes, `travel` resumes with its old destination |
+| — | Had the objective been `guard`, step 6 routes back to the post instead |
 
 ## Slices
 
-Each lands independently and keeps the test suite green.
+| # | Slice | |
+|---|---|---|
+| N1 | The graph | Nodes, four edge kinds, per-body envelopes, precomputed routes, golden fixture. Then refactor `levelgen`'s `auditGeometry` onto it — one flood-fill, not two. *No runtime change* |
+| — | Lab v2 | Slots in here. N3 cannot be evaluated without watching one agent reach one point. See `sprints/2026-08.md` |
+| N2 | Senses | New spatial facts on the existing perception cadence. Read-only, safe to land alone |
+| N3 | Travel | `objective`/`task`, destination selection, route following, explicit "jump now". *No combat change* |
+| N4 | Engage | Combat weights, stickiness margin, shot line from candidate nodes |
+| N5 | Content | Roster objectives, nav-aware behaviour, updated authoring vocabulary |
 
-**N1 — the graph.** Node extraction, the four edge kinds, per-body envelopes,
-precomputed routes, a golden fixture for a fixed platform set, degenerate cases.
-The level generator already builds and flood-fills this graph privately at build
-time to validate its own geometry; that should become the same code, so the
-generator's guarantee and the AI's beliefs cannot disagree. *No runtime change.*
-
-**Lab v2 — see `ROADMAP.md`.** Slots in here, not later: N3 cannot be
-evaluated without a way to watch one agent try to reach one point. The current
-Behavior Lab is being rebuilt from scratch at a much smaller scope.
-
-**N2 — senses.** New spatial facts on the existing perception cadence: my node,
-the target's node, same-surface, hops and seconds to reach, the kind of the next
-move, gap width ahead, unreachable. Read-only — specs can gate on them while
-still moving the old way, which makes this safe to land alone.
-
-**N3 — travel.** `objective` and `task` fields, destination selection for
-`travel`, route following, and the one locomotor change this needs: an explicit
-"jump now" instruction. Both grounded bodies currently *guess* when a steering
-intent implies a jump (two different thresholds, and one of them ignores the case
-entirely), because nothing can tell them. With a graph the brain knows the takeoff
-point, so the guess is replaced by an instruction. *No combat change.*
-
-**N4 — engage.** Destination scoring under combat weights, the stickiness margin,
-shot-line evaluation from candidate nodes, line of shot split from line of sight.
-
-**N5 — content.** Give the built-in roster objectives and nav-aware behavior;
-update the authoring vocabulary and the intelligence rubric.
-
-Ordering rationale: N1 is pure and testable with no risk; the Lab is how N3 gets
-evaluated at all; N2 is read-only and immediately improves the Lab; N3 is the
-first slice that can regress anything, and by then the graph is trusted. N5 is
-last because authoring against a vocabulary nobody has watched in the Lab
+Ordering: N1 is pure and testable; the Lab is how N3 is evaluated at all; N2 is
+read-only; N3 is the first slice that can regress anything, and by then the graph
+is trusted. N5 is last because authoring against a vocabulary nobody has watched
 produces specs that look smart in JSON and dumb on screen.
 
 ## Deliberate non-goals
 
-- **Cover, hiding, and dodging.** Not blocked by any of this; add later as
-  destination-scoring terms and actions.
-- **Explored-territory memory.** Agents assume hostiles always exist and wander
-  when idle. The cheap fix for the ping-ponging that causes is momentum — keep
-  going the way you are going until something stops you — not territory memory.
-  When memory is wanted, the graph makes it a data addition (mark nodes visited,
-  decay) rather than a rewrite.
-- **Flyers.** They already move in two dimensions. Their real problem is
-  different: terrain resolution pushes them out of a platform while steering
-  pushes them back in, so they can grind against geometry. Separate fix.
-- **Dynamic geometry.** Nothing moves or breaks. The graph is a pure function of
-  the platform list, so the hook is "rebuild on change" — do not build
-  invalidation machinery for a case that does not exist.
-- **Group coordination.** Lane reservation and turn-taking need shared team
-  state; that is its own piece of work and this one should not anticipate it
-  beyond the "ally already there" scoring term.
+| Item | Why |
+|---|---|
+| Cover, hiding, dodging | Not blocked by this; later as scoring terms and actions |
+| Explored-territory memory | The fix for idle ping-ponging is momentum, not memory |
+| Flyers | Different problem: terrain resolution pushes out while steering pushes in |
+| Dynamic geometry | Nothing moves or breaks. The hook is "rebuild on change" |
+| Group coordination | Needs shared team state; own piece of work |
 
 ## Open questions
 
-- Does `withdraw` want to be an objective, a task, or just a set of scoring
-  weights? Leaning on weights, since retreating is a question of where to stand.
-- Crouch-height nodes: a soldier can crouch to 22px, so some spans are
-  crouch-only. Real, but needs a second envelope per body and a crouch-while-
-  moving intent. Deferred.
-- How does an `advance` objective pick its destination point? "Far end of the
-  level" is the obvious default and is usually right, but it should probably be
-  an authored point so a mission can direct a wave.
+| Question | Leaning |
+|---|---|
+| Is `withdraw` an objective, a task, or just weights? | Weights — retreating is a question of where to stand |
+| Crouch-height nodes (soldiers crouch to 22px) | Real, but needs a second envelope per body. Deferred |
+| How does `advance` pick its destination point? | "Far end" is the default; should probably be authorable so a mission can direct a wave |

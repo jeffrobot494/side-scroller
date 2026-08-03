@@ -7,69 +7,73 @@ resolution: vague
 
 # Missions
 
-How the player chooses and experiences a mission. How it is built:
+How the player chooses and experiences a mission. Built in
 `tech/level-generation.md`.
 
-## You choose from leads, not from a list
+## Principles
 
-An Ops officer — Lt. Sable, callsign "Watchtower" — surfaces **leads**: cheap
-stubs describing a possible mission. A codename, a location, a hook, an
-advertised threat level, a reward hint, and a deadline. You pick one. Only then
-does the actual level exist.
+| | |
+|---|---|
+| You choose leads, not levels | The level does not exist until you commit to a lead |
+| Leads can lie | Advertised threat may not match reality — bounded by a telegraphed intel stat |
+| Intel investment is the endgame | The final lead is only found by an Ops track you had to pay for |
+| A campaign, not a shuffle | Persistent story state feeds each new batch of leads |
+| Geometry is always beatable | A mission can kill you; it can never be unplayable |
 
-That ordering is the point. Choosing feels like commanding an operation rather
-than picking a level from a menu.
+## The lead
 
-## Leads can lie
+Lt. Sable, callsign "Watchtower", surfaces cheap stubs describing a possible
+mission. You pick one, then the level generates.
 
-The advertised threat may not match what you find. Ambushes are real, and a
-mission can be worse than it looked.
+| Field | Example |
+|---|---|
+| Codename | "Broken Antenna" |
+| Location | Comms array, eastern ridge |
+| Hook | "A defector is transmitting before they silence her." |
+| Advertised threat | Moderate — may be a lie |
+| Reward hint | Intel cache |
+| Expires in | 4 days |
 
-What keeps that fair is **intel accuracy** — a telegraphed stat bounding how far
-the lie can stretch. The player always knows how much they can trust what they
-are being told. Investment in Ops shrinks the gap.
+Choosing from leads feels like commanding an operation. Choosing from a list
+feels like picking a level.
 
-Without the bound this is just the game cheating. With it, the uncertainty
-becomes the drama: do you take the promising lead you can't verify?
+## Why lying is fair
 
-## Investment in intelligence is the endgame
+| | |
+|---|---|
+| The lie | Advertised threat can diverge from reality. Ambushes are real |
+| The bound | A telegraphed **intel accuracy** stat caps how far it can stretch |
+| The lever | Ops investment shrinks the gap |
+| The result | Uncertainty becomes drama instead of the game cheating |
 
-The Ops upgrade track is how the final lead gets found. Under-invest and the doom
-clock runs out before you locate anything worth attacking. So "should I spend on
-better intel or better guns" is a real strategic question with a real failure
-state attached.
+Without the bound this is unfairness. With it, the question becomes: do you take
+the promising lead you cannot verify?
 
-## A campaign, not a shuffle
+## Safety nets — where they go
 
-A persistent story state — act and beat, sector map, enemy agenda, named cast,
-your own casualties and famous soldiers and tech built — feeds each new batch of
-leads. Mission results fold back into it. The intent is that the sequence of
-missions reads as a war with a direction, not a randomiser.
+| Has no safety net | Has an absolute safety net |
+|---|---|
+| Combat | Traversability |
+| Permadeath | Spawn-to-exit route |
+| Threat accuracy (within the intel bound) | Enemy placement legality |
 
-## The engine guarantees you can finish
-
-Geometry is never generated freely. The engine builds a platform skeleton that is
-provably traversable, and generation only *themes* it — names the site, writes the
-brief, sets the biome, decides enemy composition, places enemies onto anchors the
-engine offers.
-
-The rule: no safety nets in combat and permadeath, absolute safety nets in
-geometry. A mission can kill you; it can never be unplayable.
+The engine builds a provably traversable skeleton. Generation only themes it —
+names the site, writes the brief, sets the biome, picks enemy composition, places
+enemies onto engine-offered anchors. It never emits raw coordinates.
 
 ## Set pieces
 
-- **Base defense.** At least one mission where the aliens attack you. Trigger
-  undecided, possibly avoidable.
-- **Endgame assault.** Do well enough to find the alien base, then attack it to
-  end the invasion.
-- **Recovery missions.** The best gear needs parts that only exist in the field,
-  so some missions are the only route to a piece of technology.
+| Type | |
+|---|---|
+| Base defense | The aliens attack you. Trigger undecided, possibly avoidable |
+| Endgame assault | Find the alien base, attack it, end the invasion |
+| Recovery | Some technology exists only in the field — these missions are the only route to it |
 
 ## Open questions
 
-- How much of a lead should be visible before committing, and what does
-  investment actually reveal?
-- What does a mission feel like *ending* — is extraction a moment, or does the
-  level simply stop?
-- Do leads expiring create useful pressure, or just anxiety about missing out?
-- How does the player read a biome as a threat signal rather than only as scenery?
+| Question | Why it matters |
+|---|---|
+| How much of a lead is visible before committing? | And what does investment actually reveal? |
+| What does a mission feel like *ending*? | Is extraction a moment, or does the level just stop? |
+| Do expiring leads create pressure or just anxiety? | Fear of missing out is not the same as tension |
+| How does a biome read as a threat signal? | Currently scenery only |
