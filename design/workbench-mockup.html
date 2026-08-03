@@ -1,0 +1,1294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Game Design Workbench — Slice 1 Mockup</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#06101a;--panel:#0b1a29;--panel2:#102236;--panel3:#142a40;
+  --border:#253d53;--soft:#193045;--text:#f4f7fb;--muted:#93a7b9;
+  --faint:#60758a;--accent:#8b6cf2;--accent2:#b8a5ff;
+  --green:#43d58c;--yellow:#efc253;--red:#ef6d75;--blue:#61a9ff;
+  --shadow:0 20px 65px rgba(0,0,0,.30)
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  color:var(--text);
+  background:
+    radial-gradient(circle at 58% -18%,rgba(139,108,242,.15),transparent 34%),
+    linear-gradient(180deg,#07121e,#050d16)
+}
+button,textarea,input,select{font:inherit}
+button{color:inherit;cursor:pointer}
+button:focus-visible,textarea:focus-visible,input:focus-visible,select:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px
+}
+.app{
+  min-height:100vh;
+  display:grid;
+  grid-template-columns:235px minmax(430px,1fr) minmax(350px,430px)
+}
+.sidebar,.doc-panel{background:rgba(8,21,34,.975)}
+.sidebar{
+  border-right:1px solid var(--soft);
+  padding:16px 13px;
+  display:flex;flex-direction:column;
+  min-width:0
+}
+.doc-panel{
+  border-left:1px solid var(--soft);
+  display:flex;flex-direction:column;
+  min-width:0;
+  max-height:100vh;
+  position:sticky;top:0
+}
+.brand{display:flex;gap:10px;align-items:center;padding:3px 6px 15px}
+.mark{
+  width:36px;height:36px;border-radius:11px;border:1px solid var(--accent);
+  display:grid;place-items:center;color:var(--accent2);font-size:20px;
+  background:rgba(139,108,242,.13)
+}
+.brand h1{font-size:13px;margin:0}.brand p{font-size:9px;color:var(--muted);margin:3px 0 0}
+.project-card{
+  border:1px solid var(--border);background:var(--panel);border-radius:10px;
+  padding:11px;margin-bottom:10px
+}
+.project-card small{display:block;color:var(--muted);font-size:8px}
+.project-card strong{display:block;margin-top:3px;font-size:11px}
+.codex-line{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:8px;color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(67,213,140,.08)}
+.new-design{
+  width:100%;display:flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid #7457d3;background:linear-gradient(180deg,#7759d7,#563bad);
+  padding:10px 12px;border-radius:9px;font-size:10px;font-weight:650;
+  margin-bottom:12px
+}
+.nav-label{
+  color:var(--faint);text-transform:uppercase;letter-spacing:.08em;
+  font-size:8px;padding:6px 8px
+}
+.nav,.design-list{display:grid;gap:3px}
+.nav button,.design-button{
+  width:100%;border:0;background:transparent;text-align:left;border-radius:8px
+}
+.nav button{padding:9px 10px;color:#b6c4d0;font-size:10px}
+.nav button:hover,.design-button:hover{background:rgba(255,255,255,.035)}
+.nav button.active,.design-button.active{background:rgba(139,108,242,.14);color:#fff}
+.icon{display:inline-block;width:20px;color:var(--accent2)}
+.design-button{padding:9px 10px}
+.design-button strong{display:block;font-size:10px}
+.design-button small{display:block;margin-top:4px;color:var(--muted);font-size:8px}
+.kind-chip{
+  display:inline-flex;align-items:center;border-radius:999px;
+  padding:3px 6px;font-size:7px;margin-top:6px;
+  background:rgba(255,255,255,.05);color:var(--muted)
+}
+.sidebar-footer{
+  margin-top:auto;border-top:1px solid var(--soft);padding:13px 6px 2px;
+  display:flex;align-items:center;gap:9px
+}
+.avatar{
+  width:31px;height:31px;border-radius:50%;display:grid;place-items:center;
+  background:linear-gradient(135deg,#efbf49,#477bd7);border:2px solid #dda936
+}
+.sidebar-footer strong{display:block;font-size:10px}
+.sidebar-footer small{display:block;margin-top:2px;color:var(--muted);font-size:8px}
+
+.main{min-width:0;display:flex;flex-direction:column;min-height:100vh}
+.main-header,.doc-header{
+  background:rgba(10,24,38,.90);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--soft)
+}
+.main-header{
+  padding:13px 18px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  position:sticky;top:0;z-index:5
+}
+.title-row{display:flex;align-items:center;gap:10px;min-width:0}
+.eyebrow{display:block;color:var(--muted);font-size:8px}
+.main-header h2,.doc-header h2{font-size:14px;margin:3px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.badge{
+  display:inline-flex;align-items:center;gap:5px;border-radius:999px;
+  padding:4px 8px;font-size:8px;color:var(--muted);background:rgba(255,255,255,.055);
+  white-space:nowrap
+}
+.badge.purple{background:rgba(139,108,242,.14);color:var(--accent2)}
+.badge.green{background:rgba(67,213,140,.11);color:#79dfaa}
+.badge.yellow{background:rgba(239,194,83,.11);color:#f3cf72}
+.badge.blue{background:rgba(97,169,255,.11);color:#8bc1ff}
+.gear{
+  width:30px;height:30px;border-radius:8px;border:1px solid var(--border);
+  background:#0d1e2f;display:grid;place-items:center;font-size:13px
+}
+.chat{
+  flex:1;overflow:auto;padding:24px 25px
+}
+.messages{
+  max-width:850px;margin:0 auto;display:grid;gap:15px
+}
+.empty-chat{
+  align-self:center;justify-self:center;text-align:center;max-width:510px;
+  margin-top:80px;color:var(--muted)
+}
+.empty-chat .empty-icon{
+  width:52px;height:52px;border-radius:15px;border:1px solid var(--border);
+  background:var(--panel);display:grid;place-items:center;margin:0 auto 14px;
+  color:var(--accent2);font-size:23px
+}
+.empty-chat h3{margin:0 0 8px;font-size:16px;color:var(--text)}
+.empty-chat p{margin:0;font-size:10px;line-height:1.55}
+.message{
+  max-width:84%;border-radius:15px;padding:13px 15px;font-size:11px;line-height:1.55
+}
+.message.user{justify-self:end;background:linear-gradient(#8061e4,#6246bd);border-bottom-right-radius:5px}
+.message.agent{justify-self:start;background:var(--panel);border:1px solid var(--border);border-bottom-left-radius:5px}
+.message p{margin:0}.message ol,.message ul{margin:10px 0 0;padding-left:19px;color:#bac7d1}
+.message li+li{margin-top:5px}.meta{margin-top:8px;color:rgba(255,255,255,.50);font-size:8px}.agent .meta{color:var(--faint)}
+.system-event{
+  justify-self:center;border:1px solid var(--soft);border-radius:999px;
+  padding:6px 10px;color:var(--muted);font-size:8px;background:rgba(255,255,255,.02)
+}
+.run-status{
+  max-width:850px;margin:0 auto 10px;display:none;color:var(--muted);font-size:9px
+}
+.run-status.show{display:flex;align-items:center;gap:7px}
+.spinner{
+  width:11px;height:11px;border:2px solid rgba(255,255,255,.15);
+  border-top-color:var(--accent2);border-radius:50%;animation:spin .8s linear infinite
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.composer{
+  border-top:1px solid var(--soft);padding:13px 18px 16px;background:rgba(7,18,30,.97)
+}
+.compose-row{max-width:900px;margin:0 auto;display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end}
+.compose-row label{display:block;color:var(--muted);font-size:9px;margin-bottom:6px}
+textarea{
+  width:100%;min-height:82px;max-height:190px;resize:vertical;
+  border:1px solid var(--border);background:#071522;color:#fff;border-radius:10px;
+  padding:10px 11px;font-size:11px
+}
+.primary,.secondary,.danger,.success{
+  border-radius:8px;padding:9px 12px;font-size:10px;border:1px solid transparent
+}
+.primary{background:linear-gradient(#8062e3,#5e43b9);border-color:#8c6bea}
+.secondary{background:#0c1e30;border-color:var(--border)}
+.danger{background:rgba(133,44,51,.32);border-color:#a64b54;color:#ff9da4}
+.success{background:#176143;border-color:#38aa74}
+button:disabled{opacity:.5;cursor:not-allowed}
+
+.doc-header{padding:13px 16px 0}
+.doc-title{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.tabs{display:flex;gap:18px;margin-top:14px;overflow:auto}
+.tab{
+  border:0;background:transparent;color:var(--muted);padding:0 0 10px;
+  font-size:9px;position:relative;white-space:nowrap
+}
+.tab.active{color:#fff}.tab.active:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
+.doc-body{flex:1;min-height:0;overflow:auto;padding:17px}
+.doc-empty{
+  border:1px dashed var(--border);border-radius:12px;padding:20px;text-align:center;
+  color:var(--muted);font-size:10px;line-height:1.55;margin-top:10px
+}
+.section+.section{margin-top:21px}.section h3{font-size:11px;margin:0 0 8px}
+.section p,.section li{font-size:10px;color:#b6c4cf;line-height:1.55}.section p{margin:0}
+.section ul{margin:0;padding-left:18px}.section li+li{margin-top:5px}
+.section-empty{color:#5f7488!important;font-style:italic}
+.callout{
+  border:1px solid rgba(139,108,242,.36);background:rgba(139,108,242,.12);
+  border-radius:10px;padding:11px;margin-bottom:12px
+}
+.callout strong{font-size:10px}.callout p{font-size:9px;color:#c3b5ff;margin:4px 0 0}
+.diff{border:1px solid var(--border);background:var(--panel);border-radius:10px;padding:13px}
+.diff small{font-size:8px;color:var(--muted)}
+.old{font-size:10px;color:#8699aa;text-decoration:line-through;margin:10px 0 0}
+.new{font-size:10px;color:#dce5ed;line-height:1.55;margin:8px 0 0}
+.reason{font-size:9px;color:var(--muted);line-height:1.45;margin-top:12px}
+.edit-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}
+.doc-footer{border-top:1px solid var(--soft);padding:12px 14px;background:#091725}
+.foot-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.foot-status{min-height:15px;color:var(--muted);font-size:8px;margin-top:8px}
+
+.page{padding:28px;max-width:950px;width:100%;margin:0 auto}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;margin-bottom:18px}
+.page h2{font-size:20px;margin:0 0 7px}.page-head p{font-size:11px;color:var(--muted);margin:0}
+.card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.card{
+  border:1px solid var(--border);background:var(--panel);border-radius:13px;padding:16px
+}
+.card h3{font-size:12px;margin:0 0 7px}.card p,.card li{font-size:10px;color:#b8c5d0;line-height:1.6}
+.card .meta-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.vision-section+.vision-section{margin-top:10px}
+.backlog-item{
+  display:grid;grid-template-columns:1fr auto;gap:12px;padding:11px 0;border-bottom:1px solid var(--soft)
+}
+.backlog-item:last-child{border-bottom:0}.backlog-item strong{font-size:10px}.backlog-item small{display:block;color:var(--muted);font-size:8px;margin-top:4px}
+.handoff-file{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:9px;color:#b9c6d0;margin:6px 0}
+.settings-grid{display:grid;gap:14px}
+.field label{display:block;font-size:9px;color:var(--muted);margin-bottom:6px}
+.field input,.field select,.field textarea{
+  width:100%;border:1px solid var(--border);background:#071522;color:#fff;
+  border-radius:9px;padding:9px 10px;font-size:10px
+}
+.field textarea{min-height:95px}
+.modal-bg{
+  position:fixed;inset:0;z-index:100;background:rgba(2,7,12,.80);
+  display:grid;place-items:center;padding:20px;backdrop-filter:blur(6px)
+}
+.modal{
+  width:min(680px,100%);max-height:calc(100vh - 40px);overflow:auto;
+  background:#0f2133;border:1px solid #38516a;border-radius:13px;box-shadow:var(--shadow)
+}
+.modal header,.modal footer{
+  padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px
+}
+.modal header{border-bottom:1px solid var(--soft)}.modal footer{border-top:1px solid var(--soft);justify-content:flex-end}
+.modal h2{font-size:14px;margin:0}.modal .body{padding:16px}.modal p,.modal li{font-size:10px;color:#bdcad4;line-height:1.6}
+.close{border:0;background:transparent;font-size:20px;color:var(--muted)}
+.toast{
+  position:fixed;right:18px;bottom:18px;z-index:200;width:min(350px,calc(100vw - 36px));
+  border:1px solid #3c566e;border-radius:10px;background:#10263a;padding:12px 14px;box-shadow:var(--shadow)
+}
+.toast strong{font-size:10px}.toast p{font-size:9px;color:var(--muted);margin:4px 0 0}
+.mobile{display:none}
+@media(max-width:1120px){
+  .app{grid-template-columns:215px minmax(390px,1fr)}
+  .doc-panel{grid-column:1/-1;position:static;max-height:none;border-left:0;border-top:1px solid var(--soft)}
+  .doc-body{max-height:650px}
+}
+@media(max-width:760px){
+  .app{display:block}
+  .sidebar{
+    position:fixed;inset:0 auto 0 0;width:255px;z-index:50;transform:translateX(-105%);
+    transition:.2s;box-shadow:20px 0 60px rgba(0,0,0,.5)
+  }
+  .sidebar.open{transform:translateX(0)}
+  .mobile{display:flex;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--soft);background:#091725}
+  .mobile button{border:0;background:transparent;font-size:18px}.mobile strong{font-size:11px}
+  .main-header{top:43px}.chat{padding:18px 13px}.message{max-width:92%}
+  .compose-row{grid-template-columns:1fr}.compose-row .primary{justify-self:end}
+  .card-grid{grid-template-columns:1fr}
+}
+
+/* Slice 1.1 — unified System Map and wiki pages */
+.filter-row{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 18px}
+.filter-button{
+  border:1px solid var(--border);background:#0b1b2b;color:var(--muted);
+  border-radius:999px;padding:7px 10px;font-size:9px
+}
+.filter-button.active{background:rgba(139,108,242,.16);border-color:#6f56c9;color:#fff}
+.map-summary{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.map-tree{
+  border:1px solid var(--border);background:var(--panel);border-radius:13px;
+  overflow:hidden
+}
+.tree-row{
+  display:grid;grid-template-columns:22px 1fr auto;gap:7px;align-items:center;
+  min-height:43px;padding:6px 11px;border-bottom:1px solid rgba(37,61,83,.65)
+}
+.tree-row:last-child{border-bottom:0}
+.tree-row:hover{background:rgba(255,255,255,.025)}
+.tree-row.empty{background:rgba(239,194,83,.025)}
+.tree-toggle{
+  width:22px;height:25px;border:0;background:transparent;color:var(--muted);
+  display:grid;place-items:center;padding:0
+}
+.tree-toggle.spacer{cursor:default}
+.tree-main{
+  min-width:0;border:0;background:transparent;text-align:left;padding:3px 0
+}
+.tree-title{display:flex;align-items:center;gap:7px;min-width:0}
+.tree-title strong{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree-symbol{
+  width:14px;text-align:center;color:var(--accent2);font-size:11px;flex:none
+}
+.tree-symbol.empty{color:var(--yellow)}
+.tree-main small{
+  display:block;color:var(--muted);font-size:8px;margin:4px 0 0 21px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.tree-meta{display:flex;gap:5px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.empty-count{color:#f3cf72}
+.wiki-link{
+  display:inline;border:0;background:transparent;padding:0;color:#9cc6ff;
+  text-decoration:underline;text-decoration-color:rgba(156,198,255,.38);
+  text-underline-offset:2px;font-size:inherit
+}
+.wiki-link:hover{color:#c5deff}
+.wiki-link.missing{color:#efc86b;text-decoration-style:dashed}
+.relationship-list{display:grid;gap:7px}
+.relationship-item{
+  border:1px solid var(--soft);border-radius:9px;padding:9px 10px;background:rgba(255,255,255,.018)
+}
+.relationship-item small{display:block;color:var(--muted);font-size:8px;margin-top:3px}
+.empty-page-callout{
+  border:1px dashed rgba(239,194,83,.55);background:rgba(239,194,83,.055);
+  border-radius:11px;padding:14px;margin-bottom:15px
+}
+.empty-page-callout strong{font-size:11px;color:#f2cc71}
+.empty-page-callout p{font-size:9px;color:#c4b58b;line-height:1.55;margin:6px 0 0}
+.context-links{display:grid;gap:7px;margin-top:11px}
+.context-link{
+  border-left:2px solid rgba(239,194,83,.45);padding-left:9px;
+  color:#b8c5d0;font-size:9px;line-height:1.5
+}
+.parent-line{font-size:8px;color:var(--muted);margin-top:5px}
+.map-legend{font-size:9px;color:var(--muted);line-height:1.55;margin-top:12px}
+
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal-root"></div>
+<div id="toast-root" aria-live="polite"></div>
+
+<script>
+const state={
+  view:"workspace",
+  tab:"document",
+  running:false,
+  editStatus:"pending",
+  documentStatus:"Ready for review",
+  activeId:"mobile",
+  globalInstructions:"Challenge weak ideas rather than agreeing automatically. Prefer solutions realistic for a solo developer. Identify scope creep. Keep responses concise unless I ask for more detail.",
+  projectInstructions:"This is a fast 2D arena-shooter prototype. Prioritize readable enemy behavior and systems that can be implemented in small, independent slices.",
+  detail:"Balanced",
+  posture:"Critical",
+  proposalMode:"Automatic",
+  conversations:{
+    mobile:[
+      {role:"user",text:"I want a basic enemy that slowly walks toward the player and damages them on contact."},
+      {role:"assistant",text:"That is a good first enemy because it tests movement, targeting, health, and death without requiring complex attacks. I see three unresolved rules:",list:["When does it begin pursuing the player?","Does it stop moving while dealing contact damage?","Can several enemies damage the player simultaneously?"]},
+      {role:"user",text:"It detects the player from about six units away, stops when close enough, and each enemy can damage the player once per second."},
+      {role:"assistant",text:"I prepared a proposed update to the feature specification. I also recommend explicitly stating that each enemy owns its own damage cooldown rather than sharing one across all enemies."}
+    ],
+    ricochet:[
+      {role:"user",text:"I want a weapon that can bounce shots off walls."},
+      {role:"assistant",text:"The core appeal is using arena geometry to reach targets indirectly. The next important decisions are the bounce limit, damage behavior after bouncing, and how predictable the reflection should be."}
+    ],
+    victory:[
+      {role:"user",text:"We need the arena to end after all the enemies are dead."},
+      {role:"assistant",text:"That defines the victory trigger, but the player-facing transition still needs definition: whether combat freezes, how victory is communicated, and what action advances to the next screen."}
+    ],
+    new:[]
+  },
+  designs:{
+    mobile:{
+      id:"mobile",kind:"Enemy",name:"Mobile Enemy — Slow",
+      blurb:"A readable close-range enemy that pursues the player and deals periodic contact damage.",
+      status:"Ready for review",
+      summary:"A basic melee enemy that slowly approaches the player and deals contact damage.",
+      playerValue:"Introduces a readable close-range threat that pressures the player to move and shoot simultaneously.",
+      experience:"The player should immediately understand that the enemy is slow but dangerous if ignored.",
+      behavior:["Spawns through the encounter system.","Moves toward the player.","Stops within contact range.","Deals 10 damage on contact.","Can take damage and die."],
+      deps:["Health & Damage","Enemy Spawning","Player Position"],
+      still:["Whether enemies can overlap while pursuing the player.","Whether detection needs a visual or audio cue."],
+      out:"Special attacks, loot drops, advanced pathfinding, group coordination, and final art."
+    },
+    ricochet:{
+      id:"ricochet",kind:"Weapon",name:"Ricochet Weapon",
+      blurb:"A projectile weapon that rewards using arena surfaces to strike targets indirectly.",
+      status:"Drafting",
+      summary:"A projectile weapon that rebounds from arena surfaces.",
+      playerValue:"Adds spatial aiming decisions and makes arena geometry tactically meaningful.",
+      experience:"The player should feel clever when a planned rebound hits an otherwise protected target.",
+      behavior:["Fires toward the aim direction.","Rebounds from at least one arena surface.","Bounce count is still undecided.","Damage before and after bouncing is undecided."],
+      deps:["Projectile Weapon","Arena Collision"],
+      still:["Maximum bounce count.","Whether damage changes after a bounce.","Whether a projected trajectory is shown."],
+      out:"Final visual effects, targeting assistance, and multi-projectile variants."
+    },
+    victory:{
+      id:"victory",kind:"Feature",name:"Arena Victory Loop",
+      blurb:"Recognizes encounter completion and moves the player cleanly out of combat.",
+      status:"Drafting",
+      summary:"Ends an encounter after all required enemies are defeated and allows the player to continue.",
+      playerValue:"Creates a clear sense of completion and connects combat encounters into a playable loop.",
+      experience:"The player should immediately understand that the encounter is complete and what happens next.",
+      behavior:["Tracks encounter objectives.","Recognizes when the victory condition is satisfied.","Changes combat state after victory.","The next-step flow is unresolved."],
+      deps:["Enemy Spawning","Encounter State"],
+      still:["Whether the arena freezes immediately.","What screen or action follows victory."],
+      out:"Campaign progression, elaborate rewards, score grading, and final presentation."
+    },
+    new:{
+      id:"new",kind:"Undetermined",name:"New Design",blurb:"",
+      status:"New",summary:"",playerValue:"",experience:"",behavior:[],deps:[],still:[],out:""
+    }
+  }
+};
+
+const esc=s=>String(s??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+const badge=(t,c="")=>`<span class="badge ${c}">${esc(t)}</span>`;
+const active=()=>state.designs[state.activeId];
+
+function render(){
+  document.querySelector("#app").innerHTML=`<div class="app">${sidebar()}<main class="main"><div class="mobile"><button data-action="menu">☰</button><strong>AI Game Design Workbench</strong></div>${mainContent()}</main>${documentPanel()}</div>`;
+  bind();
+}
+
+function sidebar(){
+  const items=Object.values(state.designs).filter(d=>d.id!=="new" || state.activeId==="new");
+  return `<aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="mark">✦</div><div><h1>Game Design Workbench</h1><p>BYOA design documentation assistant</p></div></div>
+    <div class="project-card">
+      <small>Project</small><strong>Arena Lab</strong>
+      <div class="codex-line"><span class="dot"></span>Codex CLI connected · ChatGPT</div>
+    </div>
+    <button class="new-design" data-action="new-design"><span>＋</span> New Design</button>
+    <div class="nav-label">Project</div>
+    <nav class="nav">
+      ${nav("workspace","✦","Design Workspace")}
+      ${nav("vision","◉","Game Vision")}
+      ${nav("systems","⌘","System Map")}
+      ${nav("backlog","▦","Feature Backlog")}
+      ${nav("handoffs","⇩","Handoff Packets")}
+    </nav>
+    <div class="nav-label" style="margin-top:14px">Recent Designs</div>
+    <div class="design-list">
+      ${items.map(d=>`<button class="design-button ${state.activeId===d.id?"active":""}" data-design="${d.id}">
+        <strong>${esc(d.name)}</strong><small>${esc(d.blurb||"Start talking to define this design.")}</small>
+        <span class="kind-chip">${esc(d.kind)} · ${esc(d.status)}</span>
+      </button>`).join("")}
+    </div>
+    <div class="sidebar-footer"><div class="avatar">🤖</div><div><strong>Bo</strong><small>Project owner</small></div></div>
+  </aside>`;
+}
+
+function nav(id,ic,label){
+  return `<button class="${state.view===id?"active":""}" data-view="${id}"><span class="icon">${ic}</span>${label}</button>`;
+}
+
+function mainContent(){
+  if(state.view!=="workspace") return pageView();
+  const d=active();
+  return `<header class="main-header">
+    <div class="title-row"><div><span class="eyebrow">Current focus</span><h2>${esc(d.name)}</h2></div>${badge(d.kind,d.kind==="Undetermined"?"":"blue")}</div>
+    <div class="header-actions">
+      ${badge("Game Designer","purple")}
+      ${badge("No Code Access")}
+      ${badge("Codex Connected","green")}
+      <button class="gear" data-action="settings" title="Designer Settings">⚙</button>
+    </div>
+  </header>
+  <section class="chat">
+    <div class="messages" id="messages">${renderMessages()}</div>
+  </section>
+  <footer class="composer">
+    <div class="run-status ${state.running?"show":""}" id="run-status"><span class="spinner"></span>Thinking about the design…</div>
+    <div class="compose-row">
+      <div><label for="composer">Message the Game Designer</label><textarea id="composer" placeholder="${state.activeId==="new"?"Start describing the system, feature, enemy, weapon, or idea…":"Continue the design conversation…"}"></textarea></div>
+      <button class="primary" data-action="${state.running?"stop":"send"}">${state.running?"Stop":"Send"}</button>
+    </div>
+  </footer>`;
+}
+
+function renderMessages(){
+  const list=state.conversations[state.activeId]||[];
+  if(!list.length){
+    return `<div class="empty-chat"><div class="empty-icon">＋</div><h3>Start with the idea, not a form</h3><p>Describe whatever you want to design. The Game Designer will infer a useful name, blurb, and category from the conversation.</p></div>`;
+  }
+  return list.map(m=>{
+    if(m.role==="event") return `<div class="system-event">${esc(m.text)}</div>`;
+    const listHtml=m.list?`<ol>${m.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ol>`:"";
+    return `<article class="message ${m.role==="user"?"user":"agent"}"><p>${esc(m.text)}</p>${listHtml}<div class="meta">${m.role==="user"?"Bo":"Game Designer"}</div></article>`;
+  }).join("");
+}
+
+function documentPanel(){
+  const d=active();
+  const editCount=state.activeId==="mobile" && state.editStatus==="pending" ? 1 : 0;
+  return `<aside class="doc-panel">
+    <header class="doc-header">
+      <div class="doc-title"><div><span class="eyebrow">Working document</span><h2>${d.kind==="System"?"System Specification":d.kind==="Undetermined"?"Design Document":"Feature Specification"}</h2></div>${badge(d.status,d.status==="Ready for review"?"purple":"")}</div>
+      <div class="tabs">
+        <button class="tab ${state.tab==="document"?"active":""}" data-tab="document">Document</button>
+        <button class="tab ${state.tab==="edits"?"active":""}" data-tab="edits">Proposed Edits ${editCount}</button>
+      </div>
+    </header>
+    <div class="doc-body">${state.tab==="document"?docTab(d):editsTab()}</div>
+    <footer class="doc-footer">
+      <div class="foot-actions">
+        <button class="secondary" data-action="mark-ready" ${d.kind==="Undetermined"?"disabled":""}>Mark Ready</button>
+        <button class="primary" data-action="handoff" ${d.kind==="Undetermined"?"disabled":""}>Prepare Handoff</button>
+      </div>
+      <div class="foot-status" id="foot-status"></div>
+    </footer>
+  </aside>`;
+}
+
+function docTab(d){
+  if(d.kind==="Undetermined"){
+    return `<div class="doc-empty"><strong>No document yet.</strong><br>The Game Designer will create one after it understands what you are designing.</div>`;
+  }
+  return `
+    ${docSection("Blurb",d.blurb)}
+    ${docSection("Summary",d.summary)}
+    ${docSection("Player value",d.playerValue)}
+    ${docSection("Intended experience",d.experience)}
+    ${listSection("Rules and behavior",d.behavior)}
+    ${listSection("Dependencies",d.deps)}
+    ${listSection("Still to decide",d.still)}
+    ${docSection("Out of scope",d.out)}
+    <section class="section"><h3>Handoff</h3><p>${d.status==="Approved"?"No handoff exported yet. Use Prepare Handoff below to generate one from this approved revision.":"Handoff export becomes available from this page once the design is ready. Draft export is still possible with a warning."}</p></section>
+  `;
+}
+
+function docSection(title,text){
+  return `<section class="section"><h3>${title}</h3><p class="${text?"":"section-empty"}">${esc(text||"Not defined yet.")}</p></section>`;
+}
+function listSection(title,items){
+  return `<section class="section"><h3>${title}</h3>${items&&items.length?`<ul>${items.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:`<p class="section-empty">Not defined yet.</p>`}</section>`;
+}
+
+function editsTab(){
+  if(state.activeId!=="mobile"){
+    return `<div class="doc-empty">No proposed edits are waiting for review.</div>`;
+  }
+  if(state.editStatus==="accepted") return `<div class="callout"><strong>Edit accepted</strong><p>The clarified detection and contact-damage behavior is now authoritative.</p></div>`;
+  if(state.editStatus==="rejected") return `<div class="callout"><strong>Edit rejected</strong><p>The document was left unchanged.</p></div>`;
+  return `<div class="callout"><strong>Proposed change</strong><p>Clarify detection and contact-damage behavior.</p></div>
+  <div class="diff">
+    <small>Rules and behavior</small>
+    <p class="old">Moves toward the player.</p>
+    <p class="new">Detects the player within 6 world units and moves toward them at 1.2 units per second.</p>
+    <p class="old">Deals 10 damage on contact.</p>
+    <p class="new">Stops within contact range and deals 10 damage immediately, then once per second while contact continues. Each enemy tracks its own cooldown.</p>
+    <div class="reason">Reason: removes ambiguity for implementation and multi-enemy encounters.</div>
+  </div>
+  <div class="edit-actions"><button class="danger" data-action="reject-edit">Reject</button><button class="success" data-action="accept-edit">Accept Edit</button></div>`;
+}
+
+function pageView(){
+  if(state.view==="vision") return `<section class="page">
+    <div class="page-head"><div><h2>Game Vision</h2><p>The project-level context supplied to the Game Designer on every relevant turn.</p></div><button class="secondary">Edit Vision</button></div>
+    <div class="card vision-section"><h3>Premise</h3><p>A fast, readable 2D arena shooter built around movement, weapon experimentation, and distinct enemy behaviors.</p></div>
+    <div class="card vision-section"><h3>Design pillars</h3><ul><li>Threats communicate behavior clearly.</li><li>Weapons create different spatial decisions.</li><li>Features remain small enough to test independently.</li></ul></div>
+    <div class="card vision-section"><h3>Constraints</h3><p>Solo-developer scope, placeholder art allowed, avoid systems requiring large quantities of bespoke animation.</p></div>
+  </section>`;
+  if(state.view==="systems"){
+    const systems=Object.values(state.designs).filter(d=>d.kind==="System");
+    return `<section class="page"><div class="page-head"><div><h2>System Map</h2><p>Major game systems inferred and documented through design conversations.</p></div><button class="primary" data-action="new-design">＋ New Design</button></div>
+      <div class="card-grid">${systems.length?systems.map(cardDesign).join(""):`<div class="card"><h3>No systems yet</h3><p>Click New Design and start describing one.</p></div>`}</div>
+    </section>`;
+  }
+  if(state.view==="backlog"){
+    const items=Object.values(state.designs).filter(d=>!["System","Undetermined"].includes(d.kind));
+    return `<section class="page"><div class="page-head"><div><h2>Feature Backlog</h2><p>Design items other than major systems. This is not a production board.</p></div><button class="primary" data-action="new-design">＋ New Design</button></div>
+      <div class="card">${items.map(d=>`<div class="backlog-item"><div><strong>${esc(d.name)}</strong><small>${esc(d.blurb)}</small></div><div>${badge(d.kind,"blue")} ${badge(d.status)}</div></div>`).join("")}</div>
+    </section>`;
+  }
+}
+
+function cardDesign(d){
+  return `<article class="card"><h3>${esc(d.name)}</h3><p>${esc(d.blurb)}</p><div class="meta-row">${badge(d.kind,"blue")}${badge(d.status)}</div><button class="secondary" style="margin-top:12px" data-design="${d.id}">Open Design</button></article>`;
+}
+
+function bind(){
+  document.querySelectorAll("[data-view]").forEach(e=>e.onclick=()=>{state.view=e.dataset.view;closeSidebar();render()});
+  document.querySelectorAll("[data-design]").forEach(e=>e.onclick=()=>{state.activeId=e.dataset.design;state.view="workspace";state.tab="document";closeSidebar();render()});
+  document.querySelectorAll("[data-tab]").forEach(e=>e.onclick=()=>{state.tab=e.dataset.tab;render()});
+  document.querySelectorAll("[data-action]").forEach(e=>e.onclick=()=>action(e.dataset.action));
+  const composer=document.querySelector("#composer");
+  if(composer) composer.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter"){e.preventDefault();action("send")}});
+}
+
+function action(a){
+  if(a==="menu"){document.querySelector("#sidebar").classList.toggle("open");return}
+  if(a==="new-design"){startNewDesign();return}
+  if(a==="settings"){settingsModal();return}
+  if(a==="send"){sendMessage();return}
+  if(a==="stop"){state.running=false;render();toast("Run stopped","The unfinished assistant response was discarded.");return}
+  if(a==="accept-edit"){acceptEdit();return}
+  if(a==="reject-edit"){state.editStatus="rejected";render();toast("Edit rejected","The document remains unchanged.");return}
+  if(a==="mark-ready"){active().status="Ready for review";render();setTimeout(()=>{const x=document.querySelector("#foot-status");if(x)x.textContent="Marked ready for final review."},0);return}
+  if(a==="handoff"){handoffModal();return}
+}
+
+function startNewDesign(){
+  state.activeId="new";state.view="workspace";state.tab="document";
+  state.designs.new={id:"new",kind:"Undetermined",name:"New Design",blurb:"",status:"New",summary:"",playerValue:"",experience:"",behavior:[],deps:[],still:[],out:""};
+  state.conversations.new=[];
+  closeSidebar();render();
+  setTimeout(()=>document.querySelector("#composer")?.focus(),0);
+}
+
+function sendMessage(){
+  const input=document.querySelector("#composer");
+  const text=input?.value.trim();
+  if(!text||state.running)return;
+  state.conversations[state.activeId].push({role:"user",text});
+  state.running=true;render();
+  setTimeout(()=>{
+    if(state.activeId==="new") inferNewDesign(text);
+    else standardResponse(text);
+    state.running=false;render();
+    setTimeout(()=>document.querySelector("#messages")?.lastElementChild?.scrollIntoView({behavior:"smooth",block:"end"}),0);
+  },900);
+}
+
+function inferNewDesign(text){
+  const lower=text.toLowerCase();
+  let d=state.designs.new;
+  if(lower.includes("upgrade")){
+    d.kind="System";d.name="Weapon Upgrade System";
+    d.blurb="After each arena, the player chooses upgrades that meaningfully alter weapon behavior rather than simply increasing damage.";
+    d.status="Drafting";
+    d.summary="A post-arena selection system that offers several weapon-behavior upgrades and applies the chosen upgrade according to the run’s progression rules.";
+    d.playerValue="Creates recurring build decisions and allows the player’s weapon to develop differently during a run.";
+    d.experience="The player should compare distinct playstyle changes rather than selecting an obviously superior numerical increase.";
+    d.behavior=["After an arena, present three upgrade choices.","Each choice changes weapon behavior rather than only increasing damage.","Apply the chosen upgrade to the player’s current build."];
+    d.deps=["Arena Victory Loop","Weapon System"];
+    d.still=["Whether upgrades last for one run or persist permanently.","Whether choices are generic or weapon-specific.","How duplicate or incompatible upgrades are handled."];
+    d.out="Final upgrade pool, progression economy, elaborate presentation, and permanent account progression.";
+    state.conversations.new.push({role:"assistant",text:"This sounds like a major system rather than a single feature. I have named it Weapon Upgrade System and created a short blurb and initial specification. The most important unresolved choice is whether upgrades are run-based, permanent, or split between both."});
+  }else if(lower.includes("enemy")){
+    d.kind="Enemy";d.name="New Enemy Design";
+    d.blurb="A new enemy concept being defined through conversation.";
+    d.status="Drafting";
+    d.summary=text;
+    d.playerValue="Adds a distinct combat threat.";
+    d.experience="The player should be able to read the enemy’s purpose and respond deliberately.";
+    d.still=["Core behavior and counterplay.","Presentation and encounter role."];
+    state.conversations.new.push({role:"assistant",text:"I have identified this as an enemy design and created an initial document. I will keep refining the name and blurb as its role becomes clearer."});
+  }else if(lower.includes("weapon")){
+    d.kind="Weapon";d.name="New Weapon Design";
+    d.blurb="A weapon concept being defined through conversation.";
+    d.status="Drafting";d.summary=text;d.playerValue="Creates a distinct combat option.";d.still=["Core firing behavior.","Tradeoffs and ideal use cases."];
+    state.conversations.new.push({role:"assistant",text:"I have identified this as a weapon design and created an initial document. The next useful step is defining the decision it creates for the player."});
+  }else{
+    d.kind="Feature";d.name="New Gameplay Feature";
+    d.blurb="A gameplay feature inferred from the current design conversation.";
+    d.status="Drafting";d.summary=text;d.still=["The exact player value and boundaries of the feature."];
+    state.conversations.new.push({role:"assistant",text:"I have treated this as a gameplay feature for now and created an initial document. I can reclassify it later if the conversation reveals that it is really a larger system or a specific content item."});
+  }
+  state.conversations.new.push({role:"event",text:`Created ${d.kind}: ${d.name}`});
+}
+
+function standardResponse(text){
+  state.conversations[state.activeId].push({role:"assistant",text:"I would compare that with the current specification, identify any contradiction or missing rule, and return a proposed document edit rather than silently changing the authoritative document."});
+}
+
+function acceptEdit(){
+  state.designs.mobile.behavior=[
+    "Spawns through the encounter system.",
+    "Detects the player within 6 world units.",
+    "Moves toward the player at 1.2 units per second.",
+    "Stops within contact range.",
+    "Deals 10 damage immediately, then once per second while contact continues.",
+    "Each enemy tracks its own damage cooldown.",
+    "Can take damage and die."
+  ];
+  state.editStatus="accepted";state.documentStatus="Updated";state.tab="document";
+  render();toast("Edit accepted","The clarified behavior is now part of the authoritative document.");
+}
+
+function settingsModal(){
+  document.querySelector("#modal-root").innerHTML=`<div class="modal-bg" id="modal-bg"><section class="modal">
+    <header><div><span class="eyebrow">Agent tuning</span><h2>Designer Settings</h2></div><button class="close" data-close>×</button></header>
+    <div class="body"><div class="settings-grid">
+      <div class="field"><label for="global-inst">Global Designer Instructions</label><textarea id="global-inst">${esc(state.globalInstructions)}</textarea></div>
+      <div class="field"><label for="project-inst">Project Instructions</label><textarea id="project-inst">${esc(state.projectInstructions)}</textarea></div>
+      <div class="field"><label for="detail">Response detail</label><select id="detail"><option ${state.detail==="Concise"?"selected":""}>Concise</option><option ${state.detail==="Balanced"?"selected":""}>Balanced</option><option ${state.detail==="Detailed"?"selected":""}>Detailed</option></select></div>
+      <div class="field"><label for="posture">Design posture</label><select id="posture"><option ${state.posture==="Supportive"?"selected":""}>Supportive</option><option ${state.posture==="Critical"?"selected":""}>Critical</option><option ${state.posture==="Highly Critical"?"selected":""}>Highly Critical</option></select></div>
+      <div class="field"><label for="proposal">Document proposals</label><select id="proposal"><option ${state.proposalMode==="Automatic"?"selected":""}>Automatic</option><option ${state.proposalMode==="Only When Asked"?"selected":""}>Only When Asked</option></select></div>
+      <div class="callout"><strong>Built-in boundaries</strong><p>The agent cannot write code, access a game repository, approve its own document changes, or create hidden project records.</p></div>
+    </div></div>
+    <footer><button class="secondary" data-close>Cancel</button><button class="primary" id="save-settings">Save Settings</button></footer>
+  </section></div>`;
+  document.querySelectorAll("[data-close]").forEach(e=>e.onclick=closeModal);
+  document.querySelector("#modal-bg").onclick=e=>{if(e.target.id==="modal-bg")closeModal()};
+  document.querySelector("#save-settings").onclick=()=>{
+    state.globalInstructions=document.querySelector("#global-inst").value;
+    state.projectInstructions=document.querySelector("#project-inst").value;
+    state.detail=document.querySelector("#detail").value;
+    state.posture=document.querySelector("#posture").value;
+    state.proposalMode=document.querySelector("#proposal").value;
+    closeModal();toast("Designer settings saved","The next Codex turn will use the updated instructions.");
+  };
+}
+
+function handoffModal(){
+  const d=active();
+  document.querySelector("#modal-root").innerHTML=`<div class="modal-bg" id="modal-bg"><section class="modal">
+    <header><div><span class="eyebrow">Documentation export</span><h2>Handoff Packet — ${esc(d.name)}</h2></div><button class="close" data-close>×</button></header>
+    <div class="body">
+      <p>${d.status!=="Approved"?"This design is not approved yet. The exported packet would be clearly marked as a draft.":"This packet is ready to export."}</p>
+      <div class="card">
+        <div class="handoff-file">README.md</div>
+        <div class="handoff-file">design-specification.md</div>
+        <div class="handoff-file">dependencies-and-interactions.md</div>
+        <div class="handoff-file">asset-and-content-requirements.md</div>
+        <div class="handoff-file">acceptance-criteria.md</div>
+        <div class="handoff-file">playtest-plan.md</div>
+        <div class="handoff-file">implementation-considerations.md</div>
+      </div>
+      <p>The packet contains design documentation only. It does not contain source-code changes or verified technical architecture.</p>
+    </div>
+    <footer><button class="secondary" data-close>Close</button><button class="primary" data-action-export>Export Draft Markdown</button></footer>
+  </section></div>`;
+  document.querySelectorAll("[data-close]").forEach(e=>e.onclick=closeModal);
+  document.querySelector("#modal-bg").onclick=e=>{if(e.target.id==="modal-bg")closeModal()};
+  document.querySelector("[data-action-export]").onclick=()=>{closeModal();toast("Export simulated","A real desktop build would write the Markdown packet to the project’s handoffs folder.")};
+}
+
+function closeModal(){document.querySelector("#modal-root").innerHTML=""}
+function closeSidebar(){document.querySelector("#sidebar")?.classList.remove("open")}
+function toast(title,body){
+  const r=document.querySelector("#toast-root");
+  r.innerHTML=`<div class="toast"><strong>${esc(title)}</strong><p>${esc(body)}</p></div>`;
+  clearTimeout(toast.timer);toast.timer=setTimeout(()=>r.innerHTML="",3000)
+}
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal()});
+
+/* ---------- Unified System Map + wiki behavior ---------- */
+
+state.systemFilter="all";
+state.expanded={
+  combat:true,
+  playerWeapons:true,
+  enemyCombat:true,
+  encounter:true,
+  progression:true,
+  unassigned:true
+};
+
+/* Add hierarchy and wiki metadata to the existing mock state. */
+Object.assign(state.conversations,{
+  combat:[{role:"assistant",text:"This page defines the top-level combat structure and links the major combat subsystems."}],
+  playerWeapons:[],
+  enemyCombat:[],
+  encounter:[],
+  progression:[],
+  healthDamage:[],
+  projectileSystem:[],
+  arenaCollision:[],
+  enemySpawning:[],
+  contactDamage:[],
+  projectileLifetime:[],
+  weaponUpgrade:[]
+});
+
+Object.assign(state.designs,{
+  combat:{
+    id:"combat",kind:"System",name:"Combat System",
+    blurb:"The top-level rules and subsystems governing real-time combat.",
+    status:"Drafting",parentId:null,
+    summary:"Defines how the player, weapons, enemies, damage, and arena geometry combine during combat.",
+    playerValue:"Creates the game’s primary moment-to-moment challenge.",
+    experience:"Combat should be fast, readable, and driven by spatial decisions.",
+    behavior:["Coordinates player attacks, enemy threats, damage resolution, and combat state."],
+    deps:[],still:["Final boundaries between combat and encounter management."],
+    out:"Campaign progression and content production.",
+    refs:[{targetId:"healthDamage",relationship:"contains"},{targetId:"playerWeapons",relationship:"contains"},{targetId:"enemyCombat",relationship:"contains"}]
+  },
+  playerWeapons:{
+    id:"playerWeapons",kind:"Subsystem",name:"Player Weapons",
+    blurb:"Organizes player weapon behavior and weapon-specific features.",
+    status:"Drafting",parentId:"combat",
+    summary:"Defines the shared expectations for player-operated weapons.",
+    playerValue:"Provides distinct ways to attack and make positioning decisions.",
+    experience:"Each weapon should be understandable quickly but support mastery.",
+    behavior:["Weapons produce attacks according to shared aiming, firing, and damage rules."],
+    deps:["Health & Damage"],still:["Shared ammunition and cooldown conventions."],
+    out:"Final weapon roster.",
+    refs:[{targetId:"healthDamage",relationship:"depends_on"},{targetId:"projectileSystem",relationship:"uses"}]
+  },
+  enemyCombat:{
+    id:"enemyCombat",kind:"Subsystem",name:"Enemy Combat",
+    blurb:"Organizes enemy threats, damage behavior, and combat readability.",
+    status:"Drafting",parentId:"combat",
+    summary:"Defines shared rules for enemies during combat.",
+    playerValue:"Creates varied, readable threats.",
+    experience:"Players should understand each enemy’s threat and counterplay.",
+    behavior:["Enemies detect, pursue, attack, take damage, and die according to their own pages and shared rules."],
+    deps:["Health & Damage"],still:["Shared enemy collision and overlap rules."],
+    out:"Final enemy roster.",
+    refs:[{targetId:"healthDamage",relationship:"depends_on"},{targetId:"contactDamage",relationship:"uses"}]
+  },
+  encounter:{
+    id:"encounter",kind:"System",name:"Encounter System",
+    blurb:"Controls arena setup, enemy spawning, objectives, and encounter completion.",
+    status:"Drafting",parentId:null,
+    summary:"Defines the lifecycle of a playable arena encounter.",
+    playerValue:"Turns combat into clear, complete playable challenges.",
+    experience:"The player should always understand whether an encounter is active, complete, or transitioning.",
+    behavior:["Begins encounters, creates required enemies, tracks completion, and ends the arena."],
+    deps:["Combat System"],still:["Restart behavior and post-victory transition."],
+    out:"Campaign map and long-term progression.",
+    refs:[{targetId:"combat",relationship:"uses"},{targetId:"enemySpawning",relationship:"contains"},{targetId:"victory",relationship:"contains"}]
+  },
+  progression:{
+    id:"progression",kind:"System",name:"Progression System",
+    blurb:"Organizes how player capabilities change during and between runs.",
+    status:"Drafting",parentId:null,
+    summary:"Defines run-based and potentially permanent growth.",
+    playerValue:"Creates meaningful long-term and within-run decisions.",
+    experience:"Progress should change playstyle rather than only increase numbers.",
+    behavior:["Presents progression choices and applies the selected benefits."],
+    deps:["Arena Victory Loop"],still:["Boundary between run-based and permanent progression."],
+    out:"Final economy and complete upgrade pool.",
+    refs:[{targetId:"victory",relationship:"triggered_by"},{targetId:"weaponUpgrade",relationship:"contains"}]
+  },
+  healthDamage:{
+    id:"healthDamage",kind:"Rule",name:"Health & Damage",
+    blurb:"Shared rules for receiving damage, losing health, and dying.",
+    status:"Drafting",parentId:"combat",
+    summary:"Defines common health and damage behavior used by players and enemies.",
+    playerValue:"Makes combat outcomes predictable and readable.",
+    experience:"Damage should have clear cause, feedback, and consequence.",
+    behavior:["Damage reduces health.","Entities die or enter a defeated state at zero health."],
+    deps:[],still:["Invulnerability windows and damage stacking."],out:"Final effects and balance.",
+    refs:[]
+  },
+  projectileSystem:{
+    id:"projectileSystem",kind:"Subsystem",name:"Projectile System",
+    blurb:"Shared behavior for spawned projectiles and projectile movement.",
+    status:"Drafting",parentId:"playerWeapons",
+    summary:"Defines how projectiles are created, travel, collide, and expire.",
+    playerValue:"Makes ranged attacks predictable.",
+    experience:"Projectile motion and collisions should match visible expectations.",
+    behavior:["Projectiles move through the arena and resolve collisions."],
+    deps:["Arena Collision"],still:["Default lifetime and collision precedence."],out:"Special projectile variants.",
+    refs:[{targetId:"arenaCollision",relationship:"depends_on"},{targetId:"projectileLifetime",relationship:"depends_on"}]
+  },
+  arenaCollision:{
+    id:"arenaCollision",kind:"Rule",name:"Arena Collision",
+    blurb:"",status:"Empty",parentId:"combat",
+    summary:"",playerValue:"",experience:"",behavior:[],deps:[],still:[],out:"",
+    refs:[],
+    emptyOrigin:[
+      {sourceId:"ricochet",quote:"Projectiles rebound from arena surfaces."},
+      {sourceId:"projectileSystem",quote:"Projectiles resolve collisions against arena geometry."}
+    ]
+  },
+  enemySpawning:{
+    id:"enemySpawning",kind:"Feature",name:"Enemy Spawning",
+    blurb:"",status:"Empty",parentId:"encounter",
+    summary:"",playerValue:"",experience:"",behavior:[],deps:[],still:[],out:"",
+    refs:[],
+    emptyOrigin:[
+      {sourceId:"mobile",quote:"The enemy spawns through the encounter system."},
+      {sourceId:"encounter",quote:"The encounter creates all required enemies."}
+    ]
+  },
+  contactDamage:{
+    id:"contactDamage",kind:"Rule",name:"Contact Damage Rules",
+    blurb:"",status:"Empty",parentId:"enemyCombat",
+    summary:"",playerValue:"",experience:"",behavior:[],deps:[],still:[],out:"",
+    refs:[],
+    emptyOrigin:[
+      {sourceId:"mobile",quote:"The enemy deals periodic damage while in contact with the player."}
+    ]
+  },
+  projectileLifetime:{
+    id:"projectileLifetime",kind:"Rule",name:"Projectile Lifetime",
+    blurb:"",status:"Empty",parentId:"projectileSystem",
+    summary:"",playerValue:"",experience:"",behavior:[],deps:[],still:[],out:"",
+    refs:[],
+    emptyOrigin:[
+      {sourceId:"projectileSystem",quote:"Every projectile needs a rule for when it expires."}
+    ]
+  },
+  weaponUpgrade:{
+    id:"weaponUpgrade",kind:"System",name:"Weapon Upgrade System",
+    blurb:"After each arena, the player chooses upgrades that alter weapon behavior.",
+    status:"Drafting",parentId:"progression",
+    summary:"A post-arena selection system offering weapon-behavior upgrades.",
+    playerValue:"Creates recurring build decisions.",
+    experience:"Choices should represent different playstyles rather than obvious numerical upgrades.",
+    behavior:["After an arena, present three upgrade choices.","Apply the selected upgrade to the current build."],
+    deps:["Arena Victory Loop","Player Weapons"],still:["Run-based versus permanent upgrades.","Weapon-specific versus shared choices."],
+    out:"Final upgrade pool and progression economy.",
+    refs:[{targetId:"victory",relationship:"triggered_by"},{targetId:"playerWeapons",relationship:"modifies"}]
+  }
+});
+
+/* Place the existing designs inside the hierarchy. */
+Object.assign(state.designs.mobile,{
+  parentId:"enemyCombat",
+  refs:[
+    {targetId:"enemySpawning",relationship:"created_by"},
+    {targetId:"healthDamage",relationship:"uses"},
+    {targetId:"contactDamage",relationship:"depends_on"}
+  ]
+});
+Object.assign(state.designs.ricochet,{
+  parentId:"playerWeapons",
+  refs:[
+    {targetId:"projectileSystem",relationship:"uses"},
+    {targetId:"arenaCollision",relationship:"depends_on"},
+    {targetId:"weaponUpgrade",relationship:"modified_by"}
+  ]
+});
+Object.assign(state.designs.victory,{
+  parentId:"encounter",
+  refs:[
+    {targetId:"enemySpawning",relationship:"observes"},
+    {targetId:"progression",relationship:"unlocks"}
+  ]
+});
+Object.assign(state.designs.new,{parentId:null,refs:[]});
+
+function statusColor(status){
+  if(status==="Empty")return "yellow";
+  if(status==="Approved")return "green";
+  if(status==="Ready for review")return "purple";
+  return "";
+}
+
+function childrenOf(parentId){
+  return Object.values(state.designs)
+    .filter(d=>d.id!=="new" && d.parentId===parentId)
+    .sort((a,b)=>{
+      const ae=a.status==="Empty"?1:0, be=b.status==="Empty"?1:0;
+      if(ae!==be)return ae-be;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+function descendants(id){
+  const direct=childrenOf(id);
+  return direct.flatMap(d=>[d,...descendants(d.id)]);
+}
+
+function emptyCount(id){
+  return descendants(id).filter(d=>d.status==="Empty").length;
+}
+
+function backlinksFor(id){
+  return Object.values(state.designs).flatMap(source=>
+    (source.refs||[])
+      .filter(r=>r.targetId===id)
+      .map(r=>({source,relationship:r.relationship}))
+  );
+}
+
+function relatedLabel(rel){
+  return ({
+    depends_on:"Depends on",
+    uses:"Uses",
+    contains:"Contains",
+    created_by:"Created by",
+    modified_by:"Modified by",
+    observes:"Observes",
+    unlocks:"Unlocks",
+    triggered_by:"Triggered by",
+    modifies:"Modifies"
+  })[rel]||"Related to";
+}
+
+function wikiLink(id,label,relationship){
+  const target=state.designs[id];
+  const missing=!target || target.status==="Empty";
+  return `<button class="wiki-link ${missing?"missing":""}" data-wiki="${esc(id)}" title="${missing?"Empty page — click to begin designing":"Open design page"}">${esc(label||target?.name||id)}</button>${relationship?` <span class="badge">${esc(relatedLabel(relationship))}</span>`:""}`;
+}
+
+function richText(text){
+  const safe=esc(text||"");
+  return safe.replace(/\[\[([^\]]+)\]\]/g,(match,name)=>{
+    const target=Object.values(state.designs).find(d=>d.name.toLowerCase()===name.toLowerCase());
+    return target?wikiLink(target.id,target.name):`<button class="wiki-link missing" data-create-page="${esc(name)}">${esc(name)}</button>`;
+  });
+}
+
+sidebar=function(){
+  const recentIds=[state.activeId,"mobile","ricochet","victory","weaponUpgrade"]
+    .filter((id,i,a)=>id && state.designs[id] && a.indexOf(id)===i)
+    .slice(0,4);
+  return `<aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="mark">✦</div><div><h1>Game Design Workbench</h1><p>BYOA design documentation assistant</p></div></div>
+    <div class="project-card">
+      <small>Project</small><strong>Arena Lab</strong>
+      <div class="codex-line"><span class="dot"></span>Codex CLI connected · ChatGPT</div>
+    </div>
+    <button class="new-design" data-action="new-design"><span>＋</span> New Design</button>
+    <div class="nav-label">Project</div>
+    <nav class="nav">
+      ${nav("workspace","✦","Design Workspace")}
+      ${nav("vision","◉","Game Vision")}
+      ${nav("systems","⌘","System Map")}
+    </nav>
+    <div class="nav-label" style="margin-top:14px">Recent Designs</div>
+    <div class="design-list">
+      ${recentIds.map(id=>{
+        const d=state.designs[id];
+        return `<button class="design-button ${state.activeId===d.id?"active":""}" data-design="${d.id}">
+          <strong>${esc(d.name)}</strong><small>${esc(d.blurb||"Empty page — design work needed.")}</small>
+          <span class="kind-chip">${esc(d.kind)} · ${esc(d.status)}</span>
+        </button>`;
+      }).join("")}
+    </div>
+    <div class="sidebar-footer"><div class="avatar">🤖</div><div><strong>Bo</strong><small>Project owner</small></div></div>
+  </aside>`;
+};
+
+renderMessages=function(){
+  const d=active();
+  const list=state.conversations[state.activeId]||[];
+  if(!list.length && d.status==="Empty"){
+    const origins=(d.emptyOrigin||[]).map(x=>{
+      const src=state.designs[x.sourceId];
+      return `<div class="context-link"><strong>${esc(src?.name||"Another page")}</strong><br>${esc(x.quote)}</div>`;
+    }).join("");
+    return `<div class="empty-chat" style="margin-top:45px">
+      <div class="empty-icon" style="color:var(--yellow)">○</div>
+      <h3>${esc(d.name)} is an empty page</h3>
+      <p>It was created because another design referenced it. Start talking to define it; the Game Designer already has the backlink context.</p>
+      <div class="context-links" style="text-align:left">${origins}</div>
+    </div>`;
+  }
+  if(!list.length){
+    return `<div class="empty-chat"><div class="empty-icon">＋</div><h3>Start with the idea, not a form</h3><p>Describe whatever you want to design. The Game Designer will infer a useful name, blurb, category, and likely parent from the conversation.</p></div>`;
+  }
+  return list.map(m=>{
+    if(m.role==="event") return `<div class="system-event">${esc(m.text)}</div>`;
+    const listHtml=m.list?`<ol>${m.list.map(x=>`<li>${esc(x)}</li>`).join("")}</ol>`:"";
+    return `<article class="message ${m.role==="user"?"user":"agent"}"><p>${richText(m.text)}</p>${listHtml}<div class="meta">${m.role==="user"?"Bo":"Game Designer"}</div></article>`;
+  }).join("");
+};
+
+docTab=function(d){
+  if(d.status==="Empty"){
+    const origins=(d.emptyOrigin||[]).map(x=>{
+      const src=state.designs[x.sourceId];
+      return `<div class="relationship-item">${wikiLink(x.sourceId,src?.name)}<small>${esc(x.quote)}</small></div>`;
+    }).join("");
+    return `<div class="empty-page-callout"><strong>Empty page — design work needed</strong><p>This page exists because another design explicitly linked to it. Start a conversation to turn it into a real specification.</p></div>
+      <section class="section"><h3>Tentative identity</h3><p><strong>${esc(d.name)}</strong> · ${esc(d.kind)}</p><div class="parent-line">Parent: ${d.parentId?wikiLink(d.parentId,state.designs[d.parentId]?.name):"Unassigned"}</div></section>
+      <section class="section"><h3>Referenced by</h3><div class="relationship-list">${origins||'<p class="section-empty">No backlinks recorded.</p>'}</div></section>`;
+  }
+  if(d.kind==="Undetermined"){
+    return `<div class="doc-empty"><strong>No document yet.</strong><br>The Game Designer will create one after it understands what you are designing.</div>`;
+  }
+  const refs=(d.refs||[]).map(r=>{
+    const target=state.designs[r.targetId];
+    return `<div class="relationship-item"><span class="badge">${esc(relatedLabel(r.relationship))}</span> ${wikiLink(r.targetId,target?.name)}<small>${target?.blurb||"Empty page — design work is still needed."}</small></div>`;
+  }).join("");
+  const backlinks=backlinksFor(d.id).map(b=>
+    `<div class="relationship-item">${wikiLink(b.source.id,b.source.name)}<small>${esc(relatedLabel(b.relationship))} this page.</small></div>`
+  ).join("");
+  return `
+    ${docSection("Blurb",d.blurb)}
+    ${docSection("Summary",d.summary)}
+    ${docSection("Player value",d.playerValue)}
+    ${docSection("Intended experience",d.experience)}
+    ${listSection("Rules and behavior",d.behavior)}
+    <section class="section"><h3>Linked designs</h3><div class="relationship-list">${refs||'<p class="section-empty">No outgoing links.</p>'}</div></section>
+    <section class="section"><h3>Referenced by</h3><div class="relationship-list">${backlinks||'<p class="section-empty">No backlinks.</p>'}</div></section>
+    ${listSection("Still to decide",d.still)}
+    ${docSection("Out of scope",d.out)}
+    <section class="section"><h3>Handoff</h3><p>${d.status==="Approved"?"No handoff exported yet. Use Prepare Handoff below to generate one from this approved revision.":"Handoff export becomes available from this page once the design is ready. Draft export is still possible with a warning."}</p></section>
+  `;
+};
+
+function treeMatches(d){
+  const f=state.systemFilter;
+  if(f==="all")return true;
+  if(f==="empty")return d.status==="Empty" || descendants(d.id).some(x=>x.status==="Empty");
+  if(f==="drafting")return d.status==="Drafting" || descendants(d.id).some(x=>x.status==="Drafting");
+  if(f==="review")return d.status==="Ready for review" || descendants(d.id).some(x=>x.status==="Ready for review");
+  if(f==="approved")return d.status==="Approved" || descendants(d.id).some(x=>x.status==="Approved");
+  return true;
+}
+
+function renderTreeNode(d,depth=0){
+  if(!treeMatches(d))return "";
+  const kids=childrenOf(d.id).filter(treeMatches);
+  const hasKids=kids.length>0;
+  const expanded=state.expanded[d.id]!==false;
+  const empties=emptyCount(d.id);
+  return `<div>
+    <div class="tree-row ${d.status==="Empty"?"empty":""}" style="padding-left:${11+depth*18}px">
+      ${hasKids?`<button class="tree-toggle" data-toggle-node="${d.id}" aria-label="${expanded?"Collapse":"Expand"} ${esc(d.name)}">${expanded?"▾":"▸"}</button>`:`<span class="tree-toggle spacer"></span>`}
+      <button class="tree-main" data-design="${d.id}">
+        <span class="tree-title"><span class="tree-symbol ${d.status==="Empty"?"empty":""}">${d.status==="Empty"?"○":hasKids?"◆":"•"}</span><strong>${esc(d.name)}</strong></span>
+        <small>${esc(d.blurb||"Empty page — design work needed.")}</small>
+      </button>
+      <div class="tree-meta">${empties?`<span class="badge yellow">${empties} empty</span>`:""}${badge(d.kind,"blue")}${badge(d.status,statusColor(d.status))}</div>
+    </div>
+    ${hasKids&&expanded?kids.map(k=>renderTreeNode(k,depth+1)).join(""):""}
+  </div>`;
+}
+
+function systemMapPage(){
+  const roots=Object.values(state.designs)
+    .filter(d=>d.id!=="new" && !d.parentId && d.kind==="System")
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  const unassigned=Object.values(state.designs)
+    .filter(d=>d.id!=="new" && !d.parentId && d.kind!=="System");
+  const emptyTotal=Object.values(state.designs).filter(d=>d.status==="Empty").length;
+  const draftingTotal=Object.values(state.designs).filter(d=>d.status==="Drafting").length;
+  return `<section class="page">
+    <div class="page-head"><div><h2>System Map</h2><p>A collapsible hierarchy of every system, feature, enemy, weapon, rule, and design page in the game.</p></div><button class="primary" data-action="new-design">＋ New Design</button></div>
+    <div class="map-summary">${badge(`${Object.keys(state.designs).length-1} pages`,"blue")}${badge(`${emptyTotal} empty pages`,"yellow")}${badge(`${draftingTotal} drafting`)}</div>
+    <div class="filter-row">
+      ${[
+        ["all","All"],
+        ["empty",`Empty Pages (${emptyTotal})`],
+        ["drafting","Drafting"],
+        ["review","Ready for Review"],
+        ["approved","Approved"]
+      ].map(([id,label])=>`<button class="filter-button ${state.systemFilter===id?"active":""}" data-map-filter="${id}">${label}</button>`).join("")}
+    </div>
+    <div class="map-tree">
+      ${roots.filter(treeMatches).map(r=>renderTreeNode(r)).join("")||'<div class="doc-empty">No pages match this filter.</div>'}
+      ${unassigned.length?`<div class="tree-row"><button class="tree-toggle" data-toggle-node="unassigned">${state.expanded.unassigned!==false?"▾":"▸"}</button><button class="tree-main"><span class="tree-title"><span class="tree-symbol">◇</span><strong>Unassigned Designs</strong></span><small>Pages whose parent has not been determined.</small></button><div class="tree-meta">${badge(`${unassigned.length} pages`)}</div></div>${state.expanded.unassigned!==false?unassigned.filter(treeMatches).map(d=>renderTreeNode(d,1)).join(""):""}`:""}
+    </div>
+    <p class="map-legend">○ Empty pages were created by approved wiki links and are a direct checklist of missing design work. Each page has one primary parent; cross-system relationships appear as wiki links and backlinks.</p>
+  </section>`;
+}
+
+pageView=function(){
+  if(state.view==="vision") return `<section class="page">
+    <div class="page-head"><div><h2>Game Vision</h2><p>The project-level context supplied to the Game Designer on every relevant turn.</p></div><button class="secondary">Edit Vision</button></div>
+    <div class="card vision-section"><h3>Premise</h3><p>A fast, readable 2D arena shooter built around movement, weapon experimentation, and distinct enemy behaviors.</p></div>
+    <div class="card vision-section"><h3>Design pillars</h3><ul><li>Threats communicate behavior clearly.</li><li>Weapons create different spatial decisions.</li><li>Features remain small enough to test independently.</li></ul></div>
+    <div class="card vision-section"><h3>Constraints</h3><p>Solo-developer scope, placeholder art allowed, avoid systems requiring large quantities of bespoke animation.</p></div>
+  </section>`;
+  if(state.view==="systems") return systemMapPage();
+  return systemMapPage();
+};
+
+documentPanel=function(){
+  const d=active();
+  const editCount=state.activeId==="mobile" && state.editStatus==="pending" ? 1 : 0;
+  return `<aside class="doc-panel">
+    <header class="doc-header">
+      <div class="doc-title"><div><span class="eyebrow">Working document</span><h2>${d.status==="Empty"?"Empty Design Page":d.kind==="System"?"System Specification":d.kind==="Undetermined"?"Design Document":"Design Specification"}</h2></div>${badge(d.status,statusColor(d.status))}</div>
+      <div class="tabs">
+        <button class="tab ${state.tab==="document"?"active":""}" data-tab="document">Document</button>
+        <button class="tab ${state.tab==="edits"?"active":""}" data-tab="edits">Proposed Edits ${editCount}</button>
+      </div>
+    </header>
+    <div class="doc-body">${state.tab==="document"?docTab(d):editsTab()}</div>
+    <footer class="doc-footer">
+      <div class="foot-actions">
+        <button class="secondary" data-action="mark-ready" ${["Undetermined","Empty"].includes(d.kind)||d.status==="Empty"?"disabled":""}>Mark Ready</button>
+        <button class="primary" data-action="handoff" ${d.kind==="Undetermined"||d.status==="Empty"?"disabled":""}>Prepare Handoff</button>
+      </div>
+      <div class="foot-status" id="foot-status"></div>
+    </footer>
+  </aside>`;
+};
+
+mainContent=function(){
+  if(state.view!=="workspace") return pageView();
+  const d=active();
+  const parent=d.parentId?state.designs[d.parentId]:null;
+  return `<header class="main-header">
+    <div class="title-row"><div><span class="eyebrow">Current focus${parent?` · ${esc(parent.name)}`:""}</span><h2>${esc(d.name)}</h2></div>${badge(d.kind,d.kind==="Undetermined"?"":"blue")}</div>
+    <div class="header-actions">
+      ${d.status==="Empty"?badge("Empty Page","yellow"):""}
+      ${badge("Game Designer","purple")}
+      ${badge("No Code Access")}
+      ${badge("Codex Connected","green")}
+      <button class="gear" data-action="settings" title="Designer Settings">⚙</button>
+    </div>
+  </header>
+  <section class="chat">
+    <div class="messages" id="messages">${renderMessages()}</div>
+  </section>
+  <footer class="composer">
+    <div class="run-status ${state.running?"show":""}" id="run-status"><span class="spinner"></span>Thinking about the design…</div>
+    <div class="compose-row">
+      <div><label for="composer">Message the Game Designer</label><textarea id="composer" placeholder="${d.status==="Empty"?`Start defining ${esc(d.name)}…`:state.activeId==="new"?"Start describing the system, feature, enemy, weapon, or idea…":"Continue the design conversation…"}"></textarea></div>
+      <button class="primary" data-action="${state.running?"stop":"send"}">${state.running?"Stop":"Send"}</button>
+    </div>
+  </footer>`;
+};
+
+const originalBind=bind;
+bind=function(){
+  originalBind();
+  document.querySelectorAll("[data-wiki]").forEach(e=>e.onclick=()=>openWikiPage(e.dataset.wiki));
+  document.querySelectorAll("[data-create-page]").forEach(e=>e.onclick=()=>createMissingPage(e.dataset.createPage));
+  document.querySelectorAll("[data-toggle-node]").forEach(e=>e.onclick=()=>{
+    const id=e.dataset.toggleNode;
+    state.expanded[id]=state.expanded[id]===false;
+    render();
+  });
+  document.querySelectorAll("[data-map-filter]").forEach(e=>e.onclick=()=>{
+    state.systemFilter=e.dataset.mapFilter;
+    render();
+  });
+  document.querySelectorAll("[data-open-empty]").forEach(e=>e.onclick=()=>{
+    state.view="systems";state.systemFilter="empty";render();
+  });
+};
+
+function openWikiPage(id){
+  if(!state.designs[id])return;
+  state.activeId=id;
+  state.view="workspace";
+  state.tab="document";
+  closeSidebar();
+  render();
+  setTimeout(()=>document.querySelector("#composer")?.focus(),0);
+}
+
+function slugId(name){
+  return name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")||"untitled";
+}
+
+function createMissingPage(name,sourceId=state.activeId){
+  const id="missing-"+slugId(name);
+  if(!state.designs[id]){
+    state.designs[id]={
+      id,kind:"Undetermined",name,blurb:"",status:"Empty",
+      parentId:state.designs[sourceId]?.parentId||null,
+      summary:"",playerValue:"",experience:"",behavior:[],deps:[],still:[],out:"",
+      refs:[],emptyOrigin:[{sourceId,quote:`Referenced as [[${name}]].`}]
+    };
+    state.conversations[id]=[];
+    state.designs[sourceId].refs=state.designs[sourceId].refs||[];
+    state.designs[sourceId].refs.push({targetId:id,relationship:"related_to"});
+  }
+  openWikiPage(id);
+  toast("Empty page created",`${name} was added to the System Map as outstanding design work.`);
+}
+
+const originalStartNewDesign=startNewDesign;
+startNewDesign=function(){
+  originalStartNewDesign();
+  state.designs.new.parentId=null;
+  state.designs.new.refs=[];
+};
+
+const originalInferNewDesign=inferNewDesign;
+inferNewDesign=function(text){
+  const previousName=state.designs.new.name;
+  originalInferNewDesign(text);
+  const d=state.designs.new;
+  if(d.kind==="System" && text.toLowerCase().includes("upgrade")) d.parentId="progression";
+  else if(d.kind==="Enemy") d.parentId="enemyCombat";
+  else if(d.kind==="Weapon") d.parentId="playerWeapons";
+  else d.parentId=null;
+  if(d.name!==previousName){
+    state.conversations.new.push({role:"event",text:d.parentId?`Placed under ${state.designs[d.parentId].name} in the System Map`:"Parent not yet determined — shown under Unassigned Designs"});
+  }
+};
+
+const originalStandardResponse=standardResponse;
+standardResponse=function(text){
+  const d=active();
+  if(d.status==="Empty"){
+    d.status="Drafting";
+    d.blurb=`A design page for ${d.name.toLowerCase()}, created from existing project references.`;
+    d.summary=text;
+    d.still=["Broader rules and boundaries still need to be defined."];
+    state.conversations[state.activeId].push({
+      role:"assistant",
+      text:`I have converted ${d.name} from an empty page into a drafting page. I am using its backlinks as the starting requirements and will propose structured rules as the conversation develops.`
+    });
+    state.conversations[state.activeId].push({role:"event",text:`Status changed: Empty → Drafting`});
+    return;
+  }
+  originalStandardResponse(text);
+};
+
+render();
+</script>
+</body>
+</html>

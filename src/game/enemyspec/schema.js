@@ -6,7 +6,7 @@
 // validator, the normalizer, the Designer's form UI, and the LLM prompt all
 // read THIS module, so the vocabulary can grow in exactly one place. Anything
 // not named here does not exist — the LLM composes these primitives freely but
-// can never invent new engine behavior (docs/llm_adaptive_enemy_system_plan_v2.md §1).
+// can never invent new engine behavior (tech/enemyspec-llm.md §1).
 //
 // Shape summary (sparse-authored; normalize.js fills defaults):
 //   EnemySpec: { v, id, name, threat, role, tier, limits, vars, defs, root, brain }
@@ -59,7 +59,7 @@ export const MOTIONS = {
 };
 export const FLYING_MOTIONS = ["velocity", "moveTo", "home", "orbit", "hover"];
 // "anchor" = a companion's leader (or, lacking one, the spawn point) — see the
-// soldier locomotor / companion brain (docs/LOCOMOTOR-REFACTOR.md, Slice L3).
+// soldier locomotor / companion brain (tech/locomotion.md, Slice L3).
 export const MOTION_TARGETS = ["player", "parent", "spawn", "anchor"];
 
 // Discrete step/actions. Blocking actions occupy their track for a duration;

@@ -27,7 +27,7 @@ export function updateSense(root, scene, dt) {
   m.senseTimer -= dt;
   if (m.senseTimer > 0) return;
   // config.labPerceptionScale is 1 in a normal mission; the Behavior Lab turns
-  // it up to watch stale sense data drive a bad decision (docs/BEHAVIOR-LAB.md).
+  // it up to watch stale sense data drive a bad decision (tech/behavior-lab.md).
   m.senseTimer = SENSE_INTERVAL * config.labPerceptionScale;
 
   const ex = root.x + root.w / 2;

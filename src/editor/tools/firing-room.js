@@ -140,7 +140,7 @@ export function createFiringRoom(container, onBack) {
       enemies: [],
       projectiles: [],
       // The range is the natural place to audition a weapon, so it installs the
-      // same sound hook the live mission does (see docs/SOUND.md).
+      // same sound hook the live mission does (see tech/sound.md).
       sound: (cue, opts) => audio.play(cue, opts),
     };
     spawnTargets();

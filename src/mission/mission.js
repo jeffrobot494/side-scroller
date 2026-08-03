@@ -60,7 +60,7 @@ export class Mission {
     };
 
     // The one sound hook. Installed on the SCENE (not _ctx) because ai.js
-    // fire() takes a scene and no ctx — see docs/SOUND.md. Headless callers of
+    // fire() takes a scene and no ctx — see tech/sound.md. Headless callers of
     // loadMission never set it, so every `scene.sound && …` site stays silent.
     this.scene.sound = (cue, opts) => audio.play(cue, opts);
     audio.play("mission.start");

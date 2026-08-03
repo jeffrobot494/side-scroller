@@ -425,7 +425,7 @@ export const SCHEMA = [
   {
     // Agent-brain levers. Every default here is a no-op (×1 / off), so a normal
     // mission behaves exactly as it did — they exist to isolate a bug in the
-    // Behavior Lab (docs/BEHAVIOR-LAB.md): slow decisions down to watch them,
+    // Behavior Lab (tech/behavior-lab.md): slow decisions down to watch them,
     // or blind/deafen one layer to prove the fault is in another. Live, and read
     // by every spec agent (enemies AND companions).
     title: "Agent brain",

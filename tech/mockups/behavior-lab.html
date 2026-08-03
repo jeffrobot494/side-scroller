@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Behavior Lab — mockup</title>
+  <!-- MOCKUP ONLY. Static markup + a canned canvas frame; no game modules are
+       imported and nothing here simulates. It reuses the real editor CSS so the
+       layout can be judged against the tools that already ship.
+       Serve the repo root and open /docs/mockups/behavior-lab.html -->
+  <link rel="stylesheet" href="../../src/hub/hub.css" />
+  <link rel="stylesheet" href="../../src/editor/editor.css" />
+  <style>
+    /* ---- proposed bl-* styles (would move into editor.css) ---------------- */
+    .bl-body { max-width: 1320px; margin: 0 auto; padding: 22px 26px 60px; }
+
+    .bl-mock {
+      font-size: 12px; color: var(--muted); line-height: 1.6;
+      border-left: 3px solid var(--credits); padding: 8px 14px; margin: 0 0 18px;
+      background: rgba(20,25,32,0.5); border-radius: 0 4px 4px 0;
+    }
+    .bl-mock b { color: var(--credits); }
+
+    /* main split: arena on the left, inspector rail on the right */
+    .bl-grid { display: grid; grid-template-columns: minmax(0,1fr) 340px; gap: 18px; align-items: start; }
+    .bl-canvas { width: 100%; height: auto; display: block; border: 1px solid var(--line);
+      border-radius: 6px; background: #0c1424; box-shadow: inset 0 0 30px rgba(0,0,0,0.5); cursor: crosshair; }
+
+    /* transport bar under the arena */
+    .bl-transport {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      border: 1px solid var(--line); border-radius: 6px; background: rgba(20,25,32,0.5);
+      padding: 8px 10px; margin-top: 10px;
+    }
+    .bl-t-btn {
+      border: 1px solid var(--line); border-radius: 4px; background: var(--track); color: var(--text);
+      padding: 5px 11px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+    }
+    .bl-t-btn:hover { border-color: #4a5a70; }
+    .bl-t-btn.on { color: #0d1117; background: var(--light); border-color: var(--light); }
+    .bl-t-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+    .bl-clock { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
+    .bl-clock b { color: var(--credits); font-variant-numeric: tabular-nums; }
+
+    /* panels */
+    .bl-panel { border: 1px solid var(--line); border-radius: 6px; background: rgba(20,25,32,0.5); padding: 12px; }
+    .bl-panel + .bl-panel { margin-top: 12px; }
+    .bl-h {
+      font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
+      margin: 0 0 10px; opacity: 0.85; display: flex; align-items: center; gap: 8px;
+    }
+    .bl-h .bl-tag { margin-left: auto; }
+    .bl-tag {
+      font-size: 9px; letter-spacing: 1px; text-transform: uppercase; font-weight: 700;
+      color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+    }
+    .bl-tag.mvp { color: var(--good); border-color: rgba(76,175,114,0.5); }
+    .bl-tag.later { color: var(--credits); border-color: rgba(242,193,78,0.45); }
+    /* deferred surfaces read as sketches, not shipped UI */
+    .bl-later { border-style: dashed; opacity: 0.65; }
+
+    /* rosters */
+    .bl-roster { display: flex; flex-direction: column; gap: 6px; }
+    .bl-agent {
+      display: flex; align-items: center; gap: 9px; text-align: left; width: 100%;
+      border: 1px solid var(--line); border-left-width: 3px; border-radius: 5px;
+      background: rgba(12,16,22,0.6); padding: 7px 9px; cursor: pointer; font-family: inherit;
+      transition: border-color 0.12s, background 0.12s;
+    }
+    .bl-agent:hover { background: rgba(30,38,48,0.7); }
+    .bl-agent.blue { border-left-color: #4c9ce8; }
+    .bl-agent.red  { border-left-color: #e05a5a; }
+    .bl-agent.sel { border-color: var(--light); background: rgba(255,202,122,0.08); }
+    .bl-agent-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .bl-agent-sub { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+    .bl-agent-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+    .bl-hp { width: 46px; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; flex: none; }
+    .bl-hp span { display: block; height: 100%; background: var(--good); }
+    .bl-roster-head {
+      display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 1.5px;
+      text-transform: uppercase; color: var(--muted); margin: 14px 0 7px;
+    }
+    .bl-roster-head:first-of-type { margin-top: 0; }
+    .bl-swatch { width: 9px; height: 9px; border-radius: 2px; }
+    .bl-roster-head .btn { margin-left: auto; padding: 3px 9px; font-size: 11px; }
+
+    /* sense readout */
+    .bl-sense { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px 12px; }
+    .bl-s {
+      display: flex; align-items: baseline; gap: 6px; font-size: 11px;
+      font-family: ui-monospace, Menlo, monospace; border-bottom: 1px solid rgba(51,61,74,0.3); padding-bottom: 3px;
+    }
+    .bl-s i { color: var(--muted); font-style: normal; }
+    .bl-s b { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
+    .bl-s b.t { color: var(--good); }
+    .bl-s b.f { color: #7a848f; }
+
+    /* utility scoreboard — the centerpiece */
+    .bl-score { display: flex; flex-direction: column; gap: 5px; }
+    .bl-act {
+      position: relative; border: 1px solid var(--line); border-radius: 4px;
+      background: rgba(12,16,22,0.6); padding: 6px 9px; overflow: hidden;
+    }
+    .bl-act-bar { position: absolute; inset: 0 auto 0 0; background: rgba(76,156,232,0.16); }
+    .bl-act-top { position: relative; display: flex; align-items: baseline; gap: 8px; }
+    .bl-act-name { font-size: 12px; font-weight: 600; color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+    .bl-act-score { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--text);
+      font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
+    .bl-act-gate { position: relative; font-size: 10px; color: var(--muted);
+      font-family: ui-monospace, Menlo, monospace; margin-top: 3px; }
+    .bl-act.win { border-color: var(--light); box-shadow: 0 0 0 1px rgba(255,202,122,0.25); }
+    .bl-act.win .bl-act-bar { background: rgba(255,202,122,0.20); }
+    .bl-act.win .bl-act-score { color: var(--light); }
+    .bl-act.gated { opacity: 0.5; }
+    .bl-act.gated .bl-act-bar { background: rgba(120,130,145,0.10); }
+    .bl-act.gated .bl-act-score { color: #7a848f; }
+    .bl-act.cool .bl-act-gate { color: #c98b8b; }
+    .bl-win-flag { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--light); font-weight: 700; }
+
+    /* commitment strip */
+    .bl-commit-name { font-size: 13px; font-weight: 700; color: var(--light);
+      font-family: ui-monospace, Menlo, monospace; margin-bottom: 8px; }
+    .bl-phases { display: flex; gap: 4px; }
+    .bl-phase { flex: 1; text-align: center; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+      color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 4px 2px; background: var(--track); }
+    .bl-phase.on { color: #0d1117; background: var(--light); border-color: var(--light); font-weight: 700; }
+    .bl-phase.done { color: var(--good); border-color: rgba(76,175,114,0.4); }
+    .bl-commit-note { font-size: 11px; color: var(--muted); margin-top: 7px; line-height: 1.5; }
+
+    /* levers */
+    .bl-lever { display: grid; grid-template-columns: 1fr 116px 42px; align-items: center; gap: 9px; padding: 5px 0; }
+    .bl-lever label { font-size: 12px; color: var(--text); }
+    .bl-lever small { display: block; font-size: 10px; color: var(--muted); }
+    .bl-lever input[type=range] { width: 100%; accent-color: var(--accent); }
+    .bl-lever output { font-size: 12px; color: var(--credits); font-weight: 700; text-align: right;
+      font-variant-numeric: tabular-nums; }
+    .bl-lever .toggle { justify-self: end; grid-column: 2 / span 2; }
+
+    /* legend + metrics */
+    .bl-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+    .bl-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .bl-key { width: 16px; height: 0; border-top-width: 2px; }
+    .bl-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px,1fr)); gap: 8px; }
+    .bl-metrics .lg-tile { padding: 8px; }
+    .bl-metrics .lg-tile b { font-size: 14px; }
+
+    .bl-foot { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 16px;
+      font-size: 12px; color: var(--muted); line-height: 1.7; }
+    .bl-foot h3 { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: #9aa6b4; margin: 0 0 8px; }
+    .bl-foot code { color: var(--credits); }
+    .bl-foot ul { margin: 0; padding-left: 18px; }
+
+    @media (max-width: 1080px) { .bl-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div id="editor">
+
+  <div class="ed-top">
+    <div class="ed-brand">XCOM TASK FORCE <span>EDITOR</span></div>
+    <div class="ed-tabs">
+      <button>Settings</button><button>Sound</button><button class="active">Tools</button>
+    </div>
+    <a class="ed-play" href="#">▶ Play</a>
+  </div>
+
+  <div class="bl-body">
+
+    <p class="bl-mock"><b>MOCKUP</b> — static layout study for <code>docs/behavior-lab.md</code> Slice 1.
+      Nothing simulates; the arena is one hand-painted frame. Panels tagged
+      <span class="bl-tag mvp">MVP</span> are the Slice&nbsp;1 deliverable, ones tagged
+      <span class="bl-tag later">later</span> are the accrete-afterwards items (metrics, ghost player, replay, presets).</p>
+
+    <div class="wd-head">
+      <button class="btn btn-ghost">← Tools</button>
+      <span class="wd-name" style="min-width:auto">Behavior Lab</span>
+      <span class="wd-id">seed 40318 · 5 agents · 2 teams</span>
+    </div>
+
+    <!-- ---- scenario / setup bar ---------------------------------------- -->
+    <div class="fr-params">
+      <label class="lg-field">Level seed
+        <span class="lg-seedrow">
+          <input type="number" value="40318" />
+          <button class="btn btn-alt" style="padding:5px 10px">🎲</button>
+        </span>
+      </label>
+      <label class="lg-field">Size
+        <select><option>Medium (multi-tier)</option><option>Small</option><option>Large</option><option>Flat range</option></select>
+      </label>
+      <label class="lg-field">Scenario <span class="bl-tag later">later</span>
+        <select style="min-width:200px">
+          <option>Free setup</option>
+          <option>1v1 duel</option>
+          <option>2 escort vs 3</option>
+          <option>Cross 3 gaps to reach the fight</option>
+          <option>Elevation standoff</option>
+        </select>
+      </label>
+      <label class="lg-field lg-boss">God eye <small style="color:var(--muted)">(no LOS occlusion)</small>
+        <button type="button" role="switch" class="toggle"><span class="knob"></span></button>
+      </label>
+      <button class="btn">Deploy</button>
+      <button class="btn btn-alt">Reset</button>
+    </div>
+
+    <!-- ---- main split --------------------------------------------------- -->
+    <div class="bl-grid">
+
+      <!-- LEFT: arena + transport + rosters + levers -->
+      <div>
+        <canvas class="bl-canvas" id="bl-canvas" width="1000" height="500"></canvas>
+
+        <div class="bl-transport">
+          <button class="bl-t-btn on">❚❚ Paused</button>
+          <button class="bl-t-btn">▶ Run</button>
+          <button class="bl-t-btn">⏭ Step frame</button>
+          <button class="bl-t-btn">⏭⏭ Step decision</button>
+          <div class="bl-t-sep"></div>
+          <button class="bl-t-btn">0.25×</button>
+          <button class="bl-t-btn on">1×</button>
+          <button class="bl-t-btn">3×</button>
+          <div class="bl-t-sep"></div>
+          <button class="bl-t-btn">Overlays ▾</button>
+          <span class="bl-clock">t <b>12.40</b>s · frame <b>744</b> · next decision <b>0.08</b>s</span>
+        </div>
+
+        <div class="bl-legend">
+          <span><i class="bl-key" style="border-top:2px solid #7ad7ff"></i> line of sight</span>
+          <span><i class="bl-key" style="border-top:2px dashed #ffca7a"></i> move order</span>
+          <span><i class="bl-key" style="border-top:2px dotted #e05a5a"></i> preferred range</span>
+          <span><i class="bl-key" style="border-top:2px solid #8f7ad7"></i> last seen</span>
+          <span><i class="bl-key" style="border-top:2px solid #4caf72"></i> ground probe / gap</span>
+        </div>
+
+        <div class="bl-panel" style="margin-top:12px">
+          <div class="bl-h">Rosters <span class="bl-tag mvp">MVP</span></div>
+
+          <div class="bl-roster-head"><i class="bl-swatch" style="background:#4c9ce8"></i> Blue — team "player"
+            <button class="btn btn-alt">Freeze</button><button class="btn">+ Add</button></div>
+          <div class="bl-roster" id="bl-blue"></div>
+
+          <div class="bl-roster-head"><i class="bl-swatch" style="background:#e05a5a"></i> Red — team "enemy"
+            <button class="btn btn-alt">Freeze</button><button class="btn">+ Add</button></div>
+          <div class="bl-roster" id="bl-red"></div>
+
+          <div class="bl-roster-head" style="opacity:0.65"><i class="bl-swatch" style="background:#8f7ad7"></i>
+            Ghost player <span class="bl-tag later">later</span></div>
+          <div class="bl-roster">
+            <button class="bl-agent bl-later" style="border-left-color:#8f7ad7">
+              <div class="bl-agent-meta">
+                <span class="bl-agent-name">Scripted stand-in</span>
+                <span class="bl-agent-sub">pattern: jumps-when-fired-on</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <div class="bl-panel">
+          <div class="bl-h">Global levers <span class="bl-tag mvp">MVP</span>
+            <span class="bl-tag">config SCHEMA</span></div>
+          <div class="bl-lever">
+            <label>Decision interval <small>labDecisionScale</small></label>
+            <input type="range" min="0.25" max="3" step="0.05" value="1" /><output>1.00×</output>
+          </div>
+          <div class="bl-lever">
+            <label>Perception interval <small>labPerceptionScale</small></label>
+            <input type="range" min="0.25" max="3" step="0.05" value="1" /><output>1.00×</output>
+          </div>
+          <div class="bl-lever">
+            <label>Reaction delay <small>labReactionScale</small></label>
+            <input type="range" min="0" max="3" step="0.05" value="1" /><output>1.00×</output>
+          </div>
+          <div class="bl-lever">
+            <label>Aim error <small>labAimErrorScale</small></label>
+            <input type="range" min="0" max="3" step="0.05" value="0.6" /><output>0.60×</output>
+          </div>
+          <div class="bl-lever">
+            <label>Draw every agent's overlays <small>otherwise selection only</small></label>
+            <button type="button" role="switch" class="toggle"><span class="knob"></span></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: inspector rail -->
+      <div>
+        <div class="bl-panel">
+          <div class="bl-h">Selected agent <span class="bl-tag mvp">MVP</span></div>
+          <div class="wd-head" style="margin:0 0 10px; gap:10px">
+            <span class="wd-name" style="min-width:auto; font-size:15px; padding:6px 10px" id="bl-sel-name">Sky Duelist</span>
+            <span class="wd-badge on" id="bl-sel-team">RED</span>
+          </div>
+          <div class="bl-agent-sub" id="bl-sel-spec">spec sky_duelist · int 4 · hp 27/40 · targeting B1 "Vasquez"</div>
+        </div>
+
+        <div class="bl-panel">
+          <div class="bl-h">sense.* <span class="bl-tag mvp">MVP</span></div>
+          <div class="bl-sense" id="bl-sense"></div>
+        </div>
+
+        <div class="bl-panel">
+          <div class="bl-h">Utility scoreboard <span class="bl-tag mvp">MVP</span></div>
+          <div class="bl-score" id="bl-score"></div>
+          <div class="bl-commit-note">Scores are <code>tickUtility</code>'s own numbers + noise, as of the last
+            decision tick. Gated actions show the <code>when</code> that failed.</div>
+        </div>
+
+        <div class="bl-panel">
+          <div class="bl-h">Commitment <span class="bl-tag mvp">MVP</span></div>
+          <div class="bl-commit-name" id="bl-commit">lead_shot</div>
+          <div class="bl-phases">
+            <div class="bl-phase done">windup</div>
+            <div class="bl-phase on">steps 2/3</div>
+            <div class="bl-phase">recovery</div>
+          </div>
+          <div class="bl-commit-note">0.18 / 0.30s into windup · telegraph <code>flash</code> ·
+            no mid-commit cancel.</div>
+        </div>
+
+        <div class="bl-panel bl-later">
+          <div class="bl-h">Run metrics <span class="bl-tag later">later</span></div>
+          <div class="bl-metrics">
+            <div class="lg-tile"><span>Time to engage</span><b>2.9s</b></div>
+            <div class="lg-tile"><span>Hit %</span><b>34</b></div>
+            <div class="lg-tile"><span>Deaths</span><b>1 / 0</b></div>
+            <div class="lg-tile"><span>Dist travelled</span><b>1420</b></div>
+            <div class="lg-tile"><span>% at pref range</span><b>61</b></div>
+            <div class="lg-tile"><span>Decisions/s</span><b>3.1</b></div>
+            <div class="lg-tile"><span>Stuck events</span><b>2</b></div>
+            <div class="lg-tile"><span>Gaps crossed</span><b>1 / 3</b></div>
+          </div>
+        </div>
+
+        <div class="bl-panel bl-later">
+          <div class="bl-h">Record / A-B <span class="bl-tag later">later</span></div>
+          <div class="es-createbtns">
+            <button class="btn btn-alt">● Record</button>
+            <button class="btn btn-alt">Replay</button>
+            <button class="btn">Run A/B</button>
+          </div>
+          <div class="bl-commit-note">Same seed + same scenario, brain A vs brain B, diff the metrics.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bl-foot">
+      <h3>How this maps to the plan</h3>
+      <ul>
+        <li><b>Slice 1 MVP</b> = the arena on a generated multi-elevation level, the transport bar, the rosters,
+          and the three overlays: LOS line, <code>sense.*</code> readout, utility scoreboard (+ commitment).</li>
+        <li>The scoreboard is the only piece needing runtime work — <code>tickUtility</code> in
+          <code>src/mission/enemyspec/brain.js</code> already computes every score; stash the last breakdown on
+          <code>root.brainState</code> and read it here.</li>
+        <li>Both rosters are spec agents differing by <code>team</code> (<code>"player"</code> / <code>"enemy"</code>);
+          blue runs through <code>updateCompanionSpec</code>, red through <code>updateSpecEnemy</code>.</li>
+        <li>Numeric levers land in the config <code>SCHEMA</code> so the Settings tab generates them too.</li>
+        <li>Dashed panels are deliberately <i>not</i> Slice 1: metrics + replay arrive with Slice 5,
+          the ghost player with Slice 4, presets whenever they earn their keep.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Mockup only: canned data for two selectable agents + one painted frame.
+// ---------------------------------------------------------------------------
+const GROUND = 430;
+// a generated-looking multi-tier level: ground with one pit, five platforms
+const GROUND_SEGS = [[0, 470], [560, 1000]];
+const PLATFORMS = [
+  { x: 120, y: 340, w: 175 },
+  { x: 355, y: 272, w: 150 },
+  { x: 600, y: 330, w: 185 },
+  { x: 770, y: 218, w: 150 },
+  { x: 250, y: 176, w: 135 },
+];
+
+const AGENTS = {
+  B1: {
+    id: "B1", name: "Vasquez", team: "blue", spec: "companion_rifle", x: 205, y: GROUND, hp: 0.78,
+    sub: "escort · int 3", label: "B1",
+  },
+  B2: {
+    id: "B2", name: "Okonkwo", team: "blue", spec: "companion_rifle", x: 92, y: GROUND, hp: 1,
+    sub: "escort · int 3", label: "B2",
+  },
+  R1: {
+    id: "R1", name: "Sky Duelist", team: "red", spec: "sky_duelist", x: 838, y: 218, hp: 0.68,
+    sub: "perch · int 4", label: "R1",
+  },
+  R2: {
+    id: "R2", name: "Duelist", team: "red", spec: "cowardly_duelist", x: 655, y: 330, hp: 0.92,
+    sub: "standoff · int 4", label: "R2",
+  },
+  R3: {
+    id: "R3", name: "Fodder", team: "red", spec: "grunt_rusher", x: 720, y: GROUND, hp: 1,
+    sub: "track · int 1", label: "R3",
+  },
+};
+
+// Per-agent canned inspector payloads.
+const VIEW = {
+  R1: {
+    header: { name: "Sky Duelist", team: "RED", spec: 'spec sky_duelist · int 4 · hp 27/40 · targeting B1 "Vasquez"' },
+    target: "B1", lastSeen: { x: 300, y: 340 }, ring: 260, moveTo: { x: 790, y: 218 },
+    sense: [
+      ["dist", "214", "n"], ["los", "true", "t"], ["above", "-122", "n"], ["approaching", "true", "t"],
+      ["cornered", "false", "f"], ["timeSinceSeen", "0.00", "n"], ["hpFrac", "0.68", "n"],
+      ["groundAhead", "false", "f"], ["alliesEngaging", "2", "n"], ["ammo", "4/6", "n"],
+    ],
+    commit: "lead_shot",
+    actions: [
+      { name: "lead_shot", score: 0.72, gate: "when: sense.los && sense.dist < 340 ✓", state: "win" },
+      { name: "reposition_perch", score: 0.41, gate: "when: — (always eligible)" },
+      { name: "back_hop", score: 0.28, gate: "when: sense.dist < 140 ✗", state: "gated" },
+      { name: "climb_away", score: 0.19, gate: "when: sense.hpFrac < 0.5 ✗", state: "gated" },
+      { name: "suppress_burst", score: 0.55, gate: "cooldown 1.4s remaining", state: "cool gated" },
+      { name: "hunt_last_seen", score: 0.12, gate: "when: sense.timeSinceSeen > 1.2 ✗", state: "gated" },
+      { name: "idle", score: 0.05, gate: "when: — (fallback)" },
+    ],
+  },
+  B1: {
+    header: { name: "Vasquez", team: "BLUE", spec: 'spec companion_rifle · int 3 · hp 31/40 · targeting R2 "Duelist"' },
+    target: "R2", lastSeen: { x: 690, y: 330 }, ring: 200, moveTo: { x: 300, y: 340 },
+    sense: [
+      ["dist", "455", "n"], ["los", "false", "f"], ["above", "10", "n"], ["approaching", "false", "f"],
+      ["anchorDist", "88", "n"], ["timeSinceSeen", "1.90", "n"], ["hpFrac", "0.78", "n"],
+      ["groundAhead", "true", "t"], ["cornered", "false", "f"], ["ammo", "12/20", "n"],
+    ],
+    commit: "hold_standoff",
+    actions: [
+      { name: "hold_standoff", score: 0.61, gate: "when: sense.anchorDist < 220 ✓", state: "win" },
+      { name: "engage", score: 0.44, gate: "when: sense.los ✗", state: "gated" },
+      { name: "regroup_leader", score: 0.33, gate: "when: sense.anchorDist > 260 ✗", state: "gated" },
+      { name: "advance_lastseen", score: 0.29, gate: "when: sense.timeSinceSeen > 1.5 ✓" },
+      { name: "take_cover", score: 0.21, gate: "when: sense.hpFrac < 0.4 ✗", state: "gated" },
+      { name: "idle", score: 0.05, gate: "when: — (fallback)" },
+    ],
+  },
+};
+
+let selected = "R1";
+
+// ---- rosters ---------------------------------------------------------------
+function rosterRow(a) {
+  const sel = a.id === selected ? " sel" : "";
+  const col = a.hp > 0.6 ? "var(--good)" : a.hp > 0.3 ? "var(--credits)" : "var(--bad)";
+  return `<button class="bl-agent ${a.team}${sel}" data-agent="${a.id}">
+    <div class="bl-agent-meta">
+      <span class="bl-agent-name">${a.label} · ${a.name}</span>
+      <span class="bl-agent-sub">${a.spec} — ${a.sub}</span>
+    </div>
+    <span class="bl-hp"><span style="width:${Math.round(a.hp * 100)}%;background:${col}"></span></span>
+  </button>`;
+}
+function drawRosters() {
+  const all = Object.values(AGENTS);
+  document.getElementById("bl-blue").innerHTML = all.filter(a => a.team === "blue").map(rosterRow).join("");
+  document.getElementById("bl-red").innerHTML = all.filter(a => a.team === "red").map(rosterRow).join("");
+}
+
+// ---- inspector -------------------------------------------------------------
+function drawInspector() {
+  const v = VIEW[selected];
+  document.getElementById("bl-sel-name").textContent = v.header.name;
+  const team = document.getElementById("bl-sel-team");
+  team.textContent = v.header.team;
+  team.style.color = v.header.team === "RED" ? "#e05a5a" : "#4c9ce8";
+  team.style.borderColor = v.header.team === "RED" ? "#e05a5a" : "#4c9ce8";
+  document.getElementById("bl-sel-spec").textContent = v.header.spec;
+
+  document.getElementById("bl-sense").innerHTML = v.sense
+    .map(([k, val, kind]) => `<div class="bl-s"><i>${k}</i><b class="${kind === "n" ? "" : kind}">${val}</b></div>`).join("");
+
+  const max = Math.max(...v.actions.map(a => a.score));
+  document.getElementById("bl-score").innerHTML = v.actions.map(a => `
+    <div class="bl-act ${a.state || ""}">
+      <div class="bl-act-bar" style="width:${Math.round((a.score / max) * 100)}%"></div>
+      <div class="bl-act-top">
+        <span class="bl-act-name">${a.name}</span>
+        ${(a.state || "").includes("win") ? '<span class="bl-win-flag">chosen</span>' : ""}
+        <span class="bl-act-score">${a.score.toFixed(2)}</span>
+      </div>
+      <div class="bl-act-gate">${a.gate}</div>
+    </div>`).join("");
+
+  document.getElementById("bl-commit").textContent = v.commit;
+}
+
+// ---- arena -----------------------------------------------------------------
+const cv = document.getElementById("bl-canvas");
+const g = cv.getContext("2d");
+const AW = 18, AH = 34; // agent box
+
+function agentTop(a) { return a.y - AH; }
+function cx(a) { return a.x; }
+function cy(a) { return a.y - AH / 2; }
+
+function drawArena() {
+  const W = cv.width, H = cv.height;
+  g.clearRect(0, 0, W, H);
+
+  // sky wash
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#101c2e"); sky.addColorStop(1, "#0a0f18");
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+
+  // faint grid so elevation reads
+  g.strokeStyle = "rgba(120,150,190,0.05)"; g.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (let y = 0; y < H; y += 40) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+
+  // ground segments + the pit between them
+  g.fillStyle = "#1b2430";
+  for (const [x0, x1] of GROUND_SEGS) {
+    g.fillRect(x0, GROUND, x1 - x0, H - GROUND);
+    g.fillStyle = "#2a3644"; g.fillRect(x0, GROUND, x1 - x0, 3); g.fillStyle = "#1b2430";
+  }
+  // pit hazard hatch
+  g.save(); g.strokeStyle = "rgba(224,90,90,0.35)"; g.lineWidth = 2;
+  for (let x = 470; x < 560; x += 12) { g.beginPath(); g.moveTo(x, GROUND + 8); g.lineTo(x - 10, H); g.stroke(); }
+  g.restore();
+
+  // platforms
+  for (const p of PLATFORMS) {
+    g.fillStyle = "#1b2430"; g.fillRect(p.x, p.y, p.w, 14);
+    g.fillStyle = "#2a3644"; g.fillRect(p.x, p.y, p.w, 3);
+  }
+
+  const v = VIEW[selected];
+  const me = AGENTS[selected];
+  const tgt = AGENTS[v.target];
+
+  // ---- overlays for the selected agent ----
+  // preferred-range ring
+  g.save(); g.setLineDash([2, 5]); g.strokeStyle = "rgba(224,90,90,0.5)"; g.lineWidth = 1.5;
+  g.beginPath(); g.arc(cx(me), cy(me), v.ring, 0, Math.PI * 2); g.stroke(); g.restore();
+
+  // move order
+  g.save(); g.setLineDash([7, 5]); g.strokeStyle = "#ffca7a"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx(me), cy(me)); g.lineTo(v.moveTo.x, v.moveTo.y - 6); g.stroke();
+  g.restore();
+  g.fillStyle = "#ffca7a";
+  g.beginPath(); g.arc(v.moveTo.x, v.moveTo.y - 6, 4, 0, Math.PI * 2); g.fill();
+  label(v.moveTo.x + 8, v.moveTo.y - 12, "moveTo", "#ffca7a");
+
+  // line of sight (solid when clear, dashed+dim when broken)
+  const clear = v.sense.find(s => s[0] === "los")[1] === "true";
+  g.save();
+  g.strokeStyle = clear ? "#7ad7ff" : "rgba(122,215,255,0.35)";
+  g.lineWidth = 2; if (!clear) g.setLineDash([4, 6]);
+  g.beginPath(); g.moveTo(cx(me), cy(me)); g.lineTo(cx(tgt), cy(tgt)); g.stroke(); g.restore();
+  const mx = (cx(me) + cx(tgt)) / 2, my = (cy(me) + cy(tgt)) / 2;
+  label(mx - 30, my - 8, clear ? "los ✓ 214px" : "los ✗ blocked", clear ? "#7ad7ff" : "#7a848f");
+
+  // last-seen marker
+  g.save(); g.strokeStyle = "#8f7ad7"; g.lineWidth = 2;
+  const ls = v.lastSeen;
+  g.beginPath(); g.moveTo(ls.x - 7, ls.y - 27); g.lineTo(ls.x + 7, ls.y - 13);
+  g.moveTo(ls.x + 7, ls.y - 27); g.lineTo(ls.x - 7, ls.y - 13); g.stroke(); g.restore();
+  label(ls.x - 12, ls.y - 34, "lastSeen", "#8f7ad7");
+
+  // ground probe under the selected agent (the single front sense.groundAhead ray)
+  const dir = cx(tgt) > cx(me) ? 1 : -1;
+  g.save(); g.strokeStyle = "#4caf72"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(cx(me) + dir * 26, agentTop(me) + AH); g.lineTo(cx(me) + dir * 26, agentTop(me) + AH + 26);
+  g.stroke(); g.restore();
+
+  // ---- agents ----
+  for (const a of Object.values(AGENTS)) drawAgent(a, a.id === selected);
+
+  // floating sense card next to the selected agent
+  senseCard(cx(me) + 34, agentTop(me) - 96, v);
+
+  // ghost player stand-in (deferred → drawn faint)
+  g.save(); g.setLineDash([3, 4]); g.strokeStyle = "rgba(143,122,215,0.55)"; g.lineWidth = 1.5;
+  g.strokeRect(40 - AW / 2, GROUND - AH, AW, AH); g.restore();
+  label(18, GROUND - AH - 8, "ghost player", "rgba(143,122,215,0.7)");
+}
+
+function drawAgent(a, sel) {
+  const x = a.x - AW / 2, y = agentTop(a);
+  if (sel) { // selection halo
+    g.save(); g.strokeStyle = "#ffca7a"; g.lineWidth = 2; g.shadowColor = "#ffca7a"; g.shadowBlur = 12;
+    g.strokeRect(x - 4, y - 4, AW + 8, AH + 8); g.restore();
+  }
+  const base = a.team === "blue" ? "#4c9ce8" : "#e05a5a";
+  g.fillStyle = base; g.fillRect(x, y, AW, AH);
+  g.fillStyle = "rgba(255,255,255,0.18)"; g.fillRect(x, y, AW, 6);
+  // hp pip
+  g.fillStyle = "#0a0e13"; g.fillRect(x, y - 7, AW, 4);
+  g.fillStyle = a.hp > 0.6 ? "#4caf72" : a.hp > 0.3 ? "#f2c14e" : "#e05a5a";
+  g.fillRect(x, y - 7, AW * a.hp, 4);
+  // id tag
+  g.font = "600 10px ui-monospace, Menlo, monospace"; g.fillStyle = "#d8dee9";
+  g.fillText(a.label, x, y + AH + 12);
+}
+
+function label(x, y, text, color) {
+  g.font = "600 10px ui-monospace, Menlo, monospace";
+  g.fillStyle = color; g.fillText(text, x, y);
+}
+
+function senseCard(x, y, v) {
+  const rows = v.sense.slice(0, 6);
+  const w = 176, h = 16 + rows.length * 13;
+  g.fillStyle = "rgba(10,14,19,0.9)"; g.strokeStyle = "#333d4a"; g.lineWidth = 1;
+  g.fillRect(x, y, w, h); g.strokeRect(x, y, w, h);
+  g.font = "10px ui-monospace, Menlo, monospace";
+  rows.forEach((r, i) => {
+    const ty = y + 16 + i * 13;
+    g.fillStyle = "#808b99"; g.fillText(r[0], x + 8, ty);
+    g.fillStyle = r[2] === "t" ? "#4caf72" : r[2] === "f" ? "#7a848f" : "#d8dee9";
+    g.textAlign = "right"; g.fillText(r[1], x + w - 8, ty); g.textAlign = "left";
+  });
+}
+
+// ---- wiring ----------------------------------------------------------------
+document.addEventListener("click", (e) => {
+  const row = e.target.closest("[data-agent]");
+  if (row && VIEW[row.dataset.agent]) { selected = row.dataset.agent; render(); }
+  const t = e.target.closest(".toggle");
+  if (t) t.classList.toggle("on");
+});
+// clicking an agent in the arena selects it too
+cv.addEventListener("click", (e) => {
+  const r = cv.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (cv.width / r.width), py = (e.clientY - r.top) * (cv.height / r.height);
+  for (const a of Object.values(AGENTS)) {
+    if (!VIEW[a.id]) continue;
+    if (Math.abs(px - a.x) < 22 && py > agentTop(a) - 10 && py < a.y + 6) { selected = a.id; render(); return; }
+  }
+});
+
+function render() { drawRosters(); drawInspector(); drawArena(); }
+render();
+</script>
+</body>
+</html>

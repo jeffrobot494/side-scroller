@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // BANK — cue id -> how it sounds. The registry, and the analogue of the asset
-// registry in docs/ASSET-GENERATION.md: renderers ask for a key, the bank
+// registry in tech/asset-generation.md: renderers ask for a key, the bank
 // decides what plays, and a missing entry is silence rather than a crash.
 //
 // Entry shape:

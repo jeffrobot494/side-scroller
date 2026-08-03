@@ -6,7 +6,7 @@ squad, deploy into missions, fight JSON-defined enemies with AI companions, lose
 soldiers permanently, sell loot, commission weapons, and beat the doom clock.
 
 This repo currently holds a **playable vertical slice** of the full core loop.
-See `docs/DEVELOPMENT_PLAN.md` and `docs/GDD.md`.
+See `archive/development-plan.md` and `design/gdd.md`.
 
 ## Run it
 

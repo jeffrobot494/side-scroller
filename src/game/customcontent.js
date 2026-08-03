@@ -113,7 +113,7 @@ export function customWeaponMap() {
 // Composed EnemySpec enemies authored in the new Enemy Designer (manual or
 // LLM-generated). Deliberately a SEPARATE store from the legacy flat enemies
 // above: nothing in loadMission/the game pages reads this yet, so the creation
-// system can evolve without touching missions (docs/enemy_creation_system_plan.md).
+// system can evolve without touching missions (tech/enemyspec.md).
 // Specs saved here are validated by the Designer before they land.
 
 const ENEMYSPEC_KEY = "sidescroller.enemyspecs.v1";

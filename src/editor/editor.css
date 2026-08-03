@@ -287,7 +287,7 @@
 }
 
 /* ==========================================================================
-   BEHAVIOR LAB (docs/BEHAVIOR-LAB.md) — arena + transport + inspector rail
+   BEHAVIOR LAB (docs/behavior-lab.md) — arena + transport + inspector rail
    ========================================================================== */
 .bl-grid { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 18px; align-items: start; }
 .bl-canvas { margin-bottom: 0; cursor: crosshair; }

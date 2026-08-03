@@ -14,7 +14,7 @@
 // Weapons can be LOADED — from ARSENAL or from your saved customs — and saved
 // back over what you loaded: a custom weapon upserts in place, a built-in
 // stores an override (weaponoverrides.js) because arsenal.js is source a
-// browser cannot write. See docs/WEAPON-DESIGNER.md.
+// browser cannot write. See tech/weapon-designer.md.
 //
 // createWeaponDesigner(container, onBack) → { dispose(), load(origin, id) }
 // ---------------------------------------------------------------------------

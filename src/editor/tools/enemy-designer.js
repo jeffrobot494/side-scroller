@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // ENEMY DESIGNER — author EnemySpec enemies: prompt an LLM or build by hand.
 //
-// The working object is a sparse EnemySpec (docs/enemy_creation_system_plan.md).
+// The working object is a sparse EnemySpec (tech/enemyspec.md).
 // Three ways in: a starter template, the form (common fields), or the JSON
 // panel (full power — the JSON is authoritative; the form maps only what it
 // understands). Every change re-validates; a valid spec re-instantiates the
@@ -125,7 +125,7 @@ export function createEnemyDesigner(container, onBack) {
     burn: null, slow: null, crouched: false,
   };
   const scene = {
-    // Same hook the mission and Firing Room install (docs/SOUND.md), so the
+    // Same hook the mission and Firing Room install (tech/sound.md), so the
     // preview plays the enemy's authored voice as it moves and fires.
     sound: (cue, opts) => audio.play(cue, opts),
     world: { width: WORLD_W, height: WORLD_H, gravity: 2000 },

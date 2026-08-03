@@ -253,7 +253,7 @@ function resolveFlyerTerrain(root, ent, scene, ctx) {
   }
 }
 
-// Movement is two layers now (docs/LOCOMOTOR-REFACTOR.md): this file (the brain
+// Movement is two layers now (tech/locomotion.md): this file (the brain
 // layer) decides the ONE MotionRequest an entity wants this frame — resolving
 // targets and reproducing the dash > moveOrder > controller arbitration — and
 // hands it to the body's locomotor (locomotion.js), which actuates it, integrates
@@ -582,7 +582,7 @@ export function execStep(root, self, step, scene, ctx) {
       // A body-agnostic committed burst: resolve a UNIT direction (both axes)
       // and speed here; the locomotor decides which axes its body uses (a legged
       // body takes the horizontal only, a flyer takes both). No body knowledge
-      // leaks into the brain (docs/LOCOMOTOR-REFACTOR.md, Slice L2).
+      // leaks into the brain (tech/locomotion.md, Slice L2).
       const t = nearestHostile(root, scene);
       const speed = args.speed || 300;
       let ux, uy;

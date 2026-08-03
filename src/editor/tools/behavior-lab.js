@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// BEHAVIOR LAB — a two-team agent observatory (docs/BEHAVIOR-LAB.md, Slice 1).
+// BEHAVIOR LAB — a two-team agent observatory (tech/behavior-lab.md, Slice 1).
 //
 // The Firing Room's observability-first cousin. Where that tool asks "what does
 // this weapon do?", this one asks "why did that agent do that?" — so it drops
@@ -140,7 +140,7 @@ export function createBehaviorLab(container, onBack) {
       }
     }
     scene.enemies = scene.specRoots.flatMap((r) => collidables(r));
-    // What you watch should sound like what you'd play (docs/SOUND.md).
+    // What you watch should sound like what you'd play (tech/sound.md).
     scene.sound = (cue, opts) => audio.play(cue, opts);
     audio.setListener(level.world.width / 2);
 

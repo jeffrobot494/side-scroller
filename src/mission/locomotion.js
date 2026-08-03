@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// LOCOMOTION — one brain, many bodies (docs/LOCOMOTOR-REFACTOR.md, Slice L1).
+// LOCOMOTION — one brain, many bodies (tech/locomotion.md, Slice L1).
 //
 // The brain layer decides WHAT an agent wants each frame and hands a locomotor
 // exactly ONE MotionRequest; the locomotor — chosen by the body — decides HOW

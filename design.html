@@ -3,15 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Design Workbench — XCOM Task Force</title>
-  <link rel="stylesheet" href="src/design/design.css">
+  <title>Design map — XCOM Task Force</title>
+  <link rel="stylesheet" href="src/docmap/docmap.css">
 </head>
 <body>
-  <div class="dz-shell" id="dz-app">
-    <div class="dz-empty">Loading design docs…</div>
-  </div>
+  <div id="app"></div>
   <script type="module">
-    import { main } from './src/design/app.js';
+    import { main } from './src/docmap/app.js';
     main();
   </script>
 </body>

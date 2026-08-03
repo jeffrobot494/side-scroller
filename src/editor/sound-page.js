@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // SOUND PAGE — the editor's third tab: the mixer + the cue bank.
 //
-// Two halves, matching the split in docs/SOUND.md:
+// Two halves, matching the split in tech/sound.md:
 //   · the MIXER is just the config SCHEMA's "Sound" group, rendered through the
 //     same schema→controls renderer the Settings tab uses (no bespoke wiring);
 //   · the BANK is a cue table — one row per entry in cues.js — where each cue

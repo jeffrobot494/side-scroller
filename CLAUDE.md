@@ -1,30 +1,33 @@
-# CLAUDE.md — working notes for this repo
+# Repo notes
 
 XCOM-like alien-invasion 2D side-scroller: run-and-gun missions on Canvas + a
 strategy hub in DOM, with content authored as plain-data JS and (increasingly)
-generated. Design vision and the big plans live in `docs/` (`GDD.md`,
-`DEVELOPMENT_PLAN.md`, `LEVEL-GENERATION.md`, `ASSET-GENERATION.md`, `SOUND.md`,
-`WEAPON-DESIGNER.md`). Docs marked *built* describe shipped behaviour; the rest
-are plans — `SOUND.md` also carries a **Known issues (open)** section.
+generated.
+
+**Documentation lives in four folders, one per doc type — see `DOC-SCHEMA.md`.**
+`design/` = what the player should experience. `tech/` = how it is built.
+`sprints/` = what we committed to this month. `archive/` = superseded. Status
+lives in `ROADMAP.md` and in the `*.state.md` pages, never in a design or
+tech doc. Browse it all at `design.html`.
 
 ## Current status
 
 Playable end to end, and built well beyond the original "vertical slice" (the
-STATUS blurbs in `DEVELOPMENT_PLAN.md`/`README.md` predate the items below — this
+STATUS blurbs in `development-plan.md`/`README.md` predate the items below — this
 section + the tests are the source of truth for what currently exists):
 
 - **Missions are generated, not a fixed list.** Operations surfaces procedurally
   generated **leads** (`state.leads`); pick one → deploy → its generated `level`
   loads (`loadMission` unchanged). Difficulty/enemy budgets scale with campaign
   pressure; a boss lead (`winsCampaign`) appears after enough wins. This is
-  Slice 1 of `docs/LEVEL-GENERATION.md` (no LLM yet); later slices add the LLM.
+  Slice 1 of `tech/level-generation.md` (no LLM yet); later slices add the LLM.
 - **Editor tools** (`editor.html` → Tools): Weapon Designer, Enemy Designer,
   Level Generator (seed → schematic preview), Firing Room (bigger platformed
   range: fire any weapon at respawning dummies OR waves of real enemies — an
   Aim slider + auto-fire/manual drive), **Behavior Lab**, Controls (rebind keys).
   Settings tab is schema-driven config; the **Sound tab** is the mixer + the cue
   bank.
-- **Behavior Lab (Slice 1 of `docs/BEHAVIOR-LAB.md` — built):** the agent
+- **Behavior Lab (Slice 1 of `tech/behavior-lab.md` — built):** the agent
   observatory. Both teams as spec agents on a *generated* level (real
   `generateLevel` + `loadMission` + `updateSpecEnemy`/`updateCompanionSpec`),
   pause/step-frame/**step-decision**/slow-mo, and the overlays that make a
@@ -35,7 +38,7 @@ section + the tests are the source of truth for what currently exists):
   levers live in the config `SCHEMA` group "Agent brain" (`labDecisionScale`,
   `labPerceptionScale`, `labAimErrorScale`, `labGodEye`) and are read by every
   spec agent. Deferred by plan: metrics, ghost player, replay/AB, presets.
-- **Sound (Slices 1–3 of `docs/SOUND.md`):** `src/audio/` — a cue catalog
+- **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
   overrides in localStorage), and the WebAudio engine (`engine.js`: buses, voice
@@ -73,7 +76,7 @@ section + the tests are the source of truth for what currently exists):
   `projectile.gravity` (arc — rockets/grenades lob), and `projectile.shape`
   (6 looks, drawn by the shared `mission/render.js`). The **Aim** stat now
   drives spread for everyone (tighter with higher Aim; `config.aimSpread`).
-- **Weapon Designer (reworked; `docs/WEAPON-DESIGNER.md` — built):** the effect
+- **Weapon Designer (reworked; `tech/weapon-designer.md` — built):** the effect
   vocabulary is `EFFECT_SCHEMA` in `weaponcost.js` — label + params + ranges +
   defaults per kind, and the source `VALUE_KINDS`/`DELIVERY_KINDS` derive from.
   All 9 kinds are authorable (a tenth is one schema entry, no UI work), delivery
@@ -100,13 +103,13 @@ section + the tests are the source of truth for what currently exists):
   perception/memory, engine-enforced spawn limits. The **Enemy Designer** was
   rebuilt around it (template/form/JSON authoring + LLM generate via Player2
   chat completions + live real-runtime preview + library) and the **Firing
-  Room** spawns saved specs as waves. Plan: `docs/enemy_creation_system_plan.md`.
+  Room** spawns saved specs as waves. Plan: `tech/enemyspec.md`.
   **Wired into missions:** every mission enemy is an EnemySpec instance now —
   `loadMission` instantiates the built-in roster (`src/game/enemyspecs.js`) and
   the runtime brain/perception drive them; the legacy flat archetypes were
   retired. Agents are team-aware (`instantiate(nspec, x, y, team="enemy")`;
   perception's `nearestHostile` targets the nearest hostile), which is what will
-  let companions run the same brain — see `docs/BEHAVIOR-LAB.md` for the plan to
+  let companions run the same brain — see `tech/behavior-lab.md` for the plan to
   develop/test agent intelligence (navigation, coordination, habit-reading).
   Companions already run it: `config.companionBrain` defaults to `"spec"`
   (`updateCompanionSpec` + `src/game/companionspecs.js`), with the old
@@ -114,11 +117,20 @@ section + the tests are the source of truth for what currently exists):
   **Known issue:** `on.spawn` handlers run from `instantiate()`, which has no
   scene, so `fire`/`spawn`/`sound` there are silently skipped (they used to
   crash). Fix = defer the spawn event to the first update; see "Known issues" in
-  `docs/SOUND.md`.
+  `tech/sound.md`.
 - **Player2 is partially wired:** the Enemy Designer's Generate button uses
   `src/player2/client.js` chat completions (needs the app + a client id in the
   config `player2GameClientId`). Image gen and the rest remain unused — still
-  the dependency for level-gen Slice 2 and `docs/ASSET-GENERATION.md`.
+  the dependency for level-gen Slice 2 and `tech/asset-generation.md`.
+
+## Working notes
+
+Read `WORKING-NOTES.md` at session start. Short version: Bo's main failure mode
+is building tooling instead of the thing the tooling would serve, and Claude
+answering tangents enthusiastically is what sustains it. Tells — designing a tool
+that doesn't exist yet, "oh, that's another thing," three exchanges with no file
+written, a taxonomy for fewer than six things. Name it once, offer the parking
+lot, stop elaborating.
 
 ## Running it (no build step)
 

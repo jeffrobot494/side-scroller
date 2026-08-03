@@ -3,7 +3,7 @@
 //
 // The Sound page owns the LIBRARY; this is how a tool assigns from it. Kept in
 // its own module because the Weapon Designer and the Enemy Designer need the
-// identical control and must offer the identical vocabulary (docs/SOUND.md).
+// identical control and must offer the identical vocabulary (tech/sound.md).
 //
 // Emits a settings-style row: a grouped <select> over the cue catalog plus a ▶
 // audition button. The empty value means "leave it automatic" — the caller's own

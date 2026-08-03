@@ -2,7 +2,7 @@
 // ENEMYSPEC BRAIN — drives a spec enemy's root through its states.
 //
 // Two arbitration modes over the same action vocabulary (the reconciliation of
-// the two design docs — see docs/enemy_creation_system_plan.md):
+// the two design docs — see tech/enemyspec.md):
 //
 //   "tracks"  — parallel scripted step sequences per state (choreographed
 //               bosses: each track advances independently; blocking steps
@@ -117,7 +117,7 @@ function tickUtility(root, state, dt, scene, ctx) {
   if (bs.decisionTimer > 0) return;
   bs.decisionTimer = state.decisionInterval * config.labDecisionScale;
 
-  // The scoreboard the Behavior Lab draws (docs/BEHAVIOR-LAB.md Slice 1): why
+  // The scoreboard the Behavior Lab draws (tech/behavior-lab.md Slice 1): why
   // each action lost, not just which one won. Built here because this is the
   // only place the numbers exist — recorded once per decision (not per frame),
   // so the cost is one small array every decisionInterval per agent.
