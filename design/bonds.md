@@ -1,7 +1,7 @@
 ---
 type: design
 category: gameplay-systems
-status: idea
+status: unbuilt
 resolution: vague
 tags: [soldiers, meta]
 ---

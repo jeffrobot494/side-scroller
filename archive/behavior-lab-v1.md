@@ -1,13 +1,12 @@
 ---
 type: tech
 category: development-tools
-status: building
+status: superseded
 resolution: sharp
-sprint: 2026-08
 tags: [ai, enemies, companions, editor]
 ---
 
-# Behavior Lab
+# Behavior Lab v1
 
 *A sandbox for agent intelligence*
 

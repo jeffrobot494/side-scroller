@@ -1,12 +1,11 @@
 ---
-type: tech
+type: idea
 category: content-generation
-status: idea
 resolution: vague
 tags: [assets, animation]
 ---
 
-# Brainstorm: character animation
+# Idea: character animation
 
 The best fully automated system should **not require every character to pass through the same pipeline**. It should route each character through one of two production methods:
 

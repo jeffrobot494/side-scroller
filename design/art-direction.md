@@ -1,7 +1,7 @@
 ---
 type: design
 category: content-generation
-status: idea
+status: unbuilt
 resolution: vague
 ---
 
@@ -46,12 +46,3 @@ because the player has to read them instantly.
 | Never at runtime | Latency, credits, content filtering, non-determinism |
 | Human approves before commit | Once approved, irreproducibility stops mattering |
 | Style bible in every prompt | A set of enemies must look like one world |
-
-## Open questions
-
-| Question | Why it matters |
-|---|---|
-| **Baked sprites or cutout puppets?** | Undecided after 841 lines. Constrains what enemy bodies can exist |
-| How much identity can a generated enemy have? | Before it stops reading as part of the same world |
-| Does the base share the action layer's look? | Or is the strategy layer deliberately a different register |
-| What reads as "dangerous" from silhouette alone? | The cheapest readability tool, currently unused |

@@ -24,8 +24,6 @@ Floor: click a point in the Behavior Lab and one agent walks, climbs, and drops
 its way there. Full delivery: one enemy spec navigates in a real mission, and
 companions escort by navigating.
 
-State pages: `systems/agent-navigation.state.md`, `systems/behavior-lab.state.md`.
-
 Nothing outside the sprint starts until it closes on Aug 31.
 
 ## Next
@@ -34,11 +32,11 @@ Ordered. Designed and ready to build; waiting on capacity, not on thinking.
 
 | # | Item | Design |
 |---|---|---|
-| 1 | Spatial senses — my node, target node, hops/seconds, gap ahead | `agent-navigation.md` §N2 |
-| 2 | Travel — `objective`/`task` fields, destination, route following, explicit jump instruction | `agent-navigation.md` §N3 |
-| 3 | Engage — destination scoring under combat weights, line of shot | `agent-navigation.md` §N4 |
-| 4 | Roster content — objectives + nav-aware behavior on built-in enemies | `agent-navigation.md` §N5 |
-| 5 | Sound Slice 4 — real clips into the existing cue slots | `sound.md` |
+| 1 | Spatial senses — my node, target node, hops/seconds, gap ahead | `tech/agent-navigation.md` §N2 |
+| 2 | Travel — `objective`/`task` fields, destination, route following, explicit jump instruction | `tech/agent-navigation.md` §N3 |
+| 3 | Engage — destination scoring under combat weights, line of shot | `tech/agent-navigation.md` §N4 |
+| 4 | Roster content — objectives + nav-aware behavior on built-in enemies | `tech/agent-navigation.md` §N5 |
+| 5 | Sound Slice 4 — real clips into the existing cue slots | `tech/sound.md` |
 
 ## Needs design
 
@@ -46,11 +44,11 @@ Wanted, but starting would mean thinking first. Sketches exist; none is a design
 
 | Item | Sketch |
 |---|---|
-| Group coordination — team blackboard, attack tokens, roles that mean something | `behavior-lab.md` Slice 3 |
-| Player-habit tracking — counters for jump/camp/dodge patterns, counter-actions | `behavior-lab.md` Slice 4 |
-| LLM tuning in the loop — adjust intelligence weights, never difficulty | `behavior-lab.md` Slice 5 |
-| Level generation Slice 2 — LLM flavor over the procedural baseline | `level-generation.md` |
-| Asset generation — images through Player2 | `asset-generation.md` |
+| Group coordination — team blackboard, attack tokens, roles that mean something | `tech/behavior-lab.md` Slice 3 |
+| Player-habit tracking — counters for jump/camp/dodge patterns, counter-actions | `tech/behavior-lab.md` Slice 4 |
+| LLM tuning in the loop — adjust intelligence weights, never difficulty | `tech/behavior-lab.md` Slice 5 |
+| Level generation Slice 2 — LLM flavor over the procedural baseline | `tech/level-generation.md` |
+| Asset generation — images through Player2 | `tech/asset-generation.md` |
 | Bond system · city traversal · design app · animation factory · parallax biomes | respective docs |
 
 ## Stalled — needs a decision, not more work
@@ -71,27 +69,27 @@ description of what the game does today; this is only the index.
 
 | System | Where |
 |---|---|
-| EnemySpec — format, runtime, designer, wired into all mission enemies | `enemy_creation_system_plan.md` |
-| Locomotor refactor L1–L3 — brain/body split, soldier locomotor, companions on the shared brain | `LOCOMOTOR-REFACTOR.md` |
-| Level generation Slice 1 — seeded procedural levels, leads, difficulty budgets | `level-generation.md` |
-| Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `sound.md` |
-| Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `weapon-designer.md` |
-| Behavior Lab Slice 1 — two teams, overlays, utility scoreboard, time control | `behavior-lab.md` |
+| EnemySpec — format, runtime, designer, wired into all mission enemies | `tech/enemyspec.md` |
+| Locomotor refactor L1–L3 — brain/body split, soldier locomotor, companions on the shared brain | `tech/locomotion.md` |
+| Level generation Slice 1 — seeded procedural levels, leads, difficulty budgets | `tech/level-generation.md` |
+| Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `tech/sound.md` |
+| Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `tech/weapon-designer.md` |
+| Behavior Lab Slice 1 — two teams, overlays, utility scoreboard, time control | `tech/behavior-lab.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 
 ## Known issues
 
 | Issue | Where |
 |---|---|
-| `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `sound.md` "Known issues" |
-| Flyers can grind against terrain — steering pushes in while resolution pushes out | `agent-navigation.md` non-goals |
+| `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
+| Flyers can grind against terrain — steering pushes in while resolution pushes out | `tech/agent-navigation.md` non-goals |
 | Grounded bodies disagree on when a steering intent implies a jump; one ignores it entirely | fixed by Next #2 |
 
 ## Conventions
 
 - A document is exactly one of: **design** (what it should be), **roadmap**
   (this file), **status** (`CLAUDE.md`, what exists now), **decision log** (why
-  we rejected things). Never two at once — that is what made `behavior-lab.md`
+  we rejected things). Never two at once — that is what made `tech/behavior-lab.md`
   unreadable.
 - Design docs hold still. They do not track their own progress and carry no DONE
   annotations.

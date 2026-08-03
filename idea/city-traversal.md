@@ -1,12 +1,11 @@
 ---
-type: design
+type: idea
 category: gameplay-systems
-status: idea
 resolution: vague
 tags: [levels, traversal, city, brainstorm]
 ---
 
-# Brainstorm: environment traversal
+# Idea: environment traversal
 
 Blue-sky dump. Not a spec, not a plan, no commitments. The goal is one place to
 see every way a soldier might move through, break into, climb onto, drop under, or

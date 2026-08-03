@@ -1,7 +1,7 @@
 ---
 type: design
 category: scenes
-status: idea
+status: unbuilt
 resolution: vague
 ---
 
@@ -68,12 +68,3 @@ enemies onto engine-offered anchors. It never emits raw coordinates.
 | Base defense | The aliens attack you. Trigger undecided, possibly avoidable |
 | Endgame assault | Find the alien base, attack it, end the invasion |
 | Recovery | Some technology exists only in the field — these missions are the only route to it |
-
-## Open questions
-
-| Question | Why it matters |
-|---|---|
-| How much of a lead is visible before committing? | And what does investment actually reveal? |
-| What does a mission feel like *ending*? | Is extraction a moment, or does the level just stop? |
-| Do expiring leads create pressure or just anxiety? | Fear of missing out is not the same as tension |
-| How does a biome read as a threat signal? | Currently scenery only |

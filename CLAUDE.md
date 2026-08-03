@@ -6,9 +6,15 @@ generated.
 
 **Documentation lives in four folders, one per doc type — see `DOC-SCHEMA.md`.**
 `design/` = what the player should experience. `tech/` = how it is built.
-`sprints/` = what we committed to this month. `archive/` = superseded. Status
-lives in `ROADMAP.md` and in the `*.state.md` pages, never in a design or
-tech doc. Browse it all at `design.html`.
+`idea/` = what we might do later, not agreed. `sprints/` = what we committed to
+this month. `archive/` = superseded. Status lives in `ROADMAP.md`, never in a
+design or tech doc. Browse it all at `design.html`.
+
+**Claude does not author design.** No design docs, no sprints, no invented
+"open questions", no deciding what matters or what is fun — Claude is not
+qualified and inventing it wastes Bo's time. Decline and hand back a prompt
+instead; full rule in `WORKING-NOTES.md`. Claude may move design that already
+exists, attack design Bo wrote, and do all the engineering.
 
 **Docs lead with structure, not prose** — one sentence of orientation, then
 tables and bullets. See "House style" in `DOC-SCHEMA.md`. This applies to

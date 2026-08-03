@@ -13,7 +13,7 @@ import { render as renderMd, DOC_REF } from "./md.js";
 
 // Discovery walks these using the directory listing python's http.server emits.
 // A folder that is missing or not served simply contributes nothing.
-const DOC_DIRS = ["design/", "tech/", "sprints/", "archive/"];
+const DOC_DIRS = ["design/", "tech/", "idea/", "sprints/", "archive/"];
 const ROOT_DOCS = ["ROADMAP.md", "DOC-SCHEMA.md", "CLAUDE.md", "WORKING-NOTES.md"];
 
 // The six categories, in the order they are shown. Flat — no grouping.
@@ -34,18 +34,16 @@ const CAT_LABEL = {
   "game-data": "Game data",
   vision: "Vision",
 };
-const STATUSES = ["idea", "designed", "building", "built", "superseded", "reference"];
+const STATUSES = ["unbuilt", "designed", "building", "built", "superseded", "reference"];
 
 // A doc's id is its full path minus ".md" — unique across folders.
 const idOf = (path) => path.replace(/\.md$/i, "").toLowerCase();
 // The bare name is still how references resolve, since docs cite each other by
 // filename as often as by path.
 const nameOf = (path) => path.split("/").pop().replace(/\.md$/i, "").toLowerCase();
-// A state page is "<system>.state.md", so both docs about one system share a
-// system name while keeping distinct filenames.
-const systemOf = (d) => d.name.replace(/\.state$/, "");
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+let mockups = new Set(); // paths of "<doc>.mockup.html" found beside a doc
 let docs = [];
 let byId = new Map();
 let byName = new Map(); // bare name -> [id...]; ambiguous names resolve to nothing
@@ -55,14 +53,17 @@ let backlinks = new Map();
 
 async function discover() {
   const found = [];
+  mockups = new Set();
   for (const dir of DOC_DIRS) {
     try {
-      const r = await fetch(dir);
+      const r = await fetch(dir, { cache: "no-store" });
       if (!r.ok) continue;
       const html = await r.text();
-      for (const m of html.matchAll(/href="([^"]+\.md)"/gi)) {
+      for (const m of html.matchAll(/href="([^"]+\.(?:md|html))"/gi)) {
         const name = decodeURIComponent(m[1]).split("/").pop();
-        if (name.toLowerCase().endsWith(".md")) found.push(dir + name);
+        const low = name.toLowerCase();
+        if (low.endsWith(".mockup.html")) mockups.add(dir + name);
+        else if (low.endsWith(".md")) found.push(dir + name);
       }
     } catch { /* not served — skip */ }
   }
@@ -112,10 +113,10 @@ export function parse(path, text) {
   };
 }
 
-async function load() {
+export async function load() {
   const paths = await discover();
   const loaded = await Promise.all(paths.map(async (p) => {
-    try { const r = await fetch(p); return r.ok ? parse(p, await r.text()) : null; }
+    try { const r = await fetch(p, { cache: "no-store" }); return r.ok ? parse(p, await r.text()) : null; }
     catch { return null; }
   }));
   index(loaded.filter(Boolean));
@@ -146,8 +147,8 @@ export function index(list) {
 export const backlinksFor = (id) => backlinks.get(id) || [];
 
 // Resolve a reference to a doc id. An exact path wins; a bare filename resolves
-// only when it is unambiguous, so `agent-navigation.state.md` (two of them) stays a
-// non-link rather than silently picking one.
+// only when it is unambiguous — `agent-navigation.md` exists in both design/ and
+// tech/, so a bare reference to it stays a non-link rather than picking one.
 export function resolve(ref) {
   const id = idOf(ref);
   if (byId.has(id)) return id;
@@ -162,21 +163,36 @@ const linkFor = (ref) => { const id = resolve(ref); return id ? `#/d/${id}` : nu
 export function lint() {
   const out = [];
   for (const d of docs) {
-    if (d.folder === "" && !d.type) continue; // root notes are exempt
-    if (!d.category && d.type !== "sprint") out.push([d, "no category"]);
-    if (!d.type) out.push([d, "no type"]);
-    if (d.category && !CAT_LABEL[d.category]) out.push([d, `unknown category "${d.category}"`]);
-    if (d.status && !STATUSES.includes(d.status)) out.push([d, `unknown status "${d.status}"`]);
-    if (d.status === "built" && d.resolution === "vague") out.push([d, "built but never designed — resolution is vague"]);
-    if (d.type === "design" && d.folder.startsWith("tech/")) out.push([d, "type is design but it lives in tech/"]);
-    if (d.type === "tech" && d.folder.startsWith("design/")) out.push([d, "type is tech but it lives in design/"]);
-    if (d.name.endsWith(".state") && d.type !== "state") out.push([d, "named *.state.md but type is not state"]);
-    if (d.type === "state" && !d.name.endsWith(".state")) out.push([d, "type is state but not named *.state.md"]);
-    if (/[A-Z_]/.test(d.path.split("/").pop()) && d.folder) out.push([d, "filename should be lowercase-with-hyphens"]);
+    // Root notes (ROADMAP, CLAUDE, DOC-SCHEMA, WORKING-NOTES) carry no
+    // frontmatter, so skip the schema rules for them — but still check their
+    // links. ROADMAP is the doc most likely to rot and was the least watched.
+    const root = d.folder === "" && !d.type;
+    if (!root) {
+      if (!d.category && d.type !== "sprint") out.push([d, "no category"]);
+      if (d.type === "idea" && d.folder !== "idea/") out.push([d, "type is idea but it does not live in idea/"]);
+      if (d.folder === "idea/" && d.type !== "idea") out.push([d, "lives in idea/ but type is not idea"]);
+      if (!d.type) out.push([d, "no type"]);
+      if (d.category && !CAT_LABEL[d.category]) out.push([d, `unknown category "${d.category}"`]);
+      if (d.status && !STATUSES.includes(d.status)) out.push([d, `unknown status "${d.status}"`]);
+      if (d.status === "built" && d.resolution === "vague") out.push([d, "built but never designed — resolution is vague"]);
+      if (d.type === "design" && d.folder.startsWith("tech/")) out.push([d, "type is design but it lives in tech/"]);
+      if (d.type === "tech" && d.folder.startsWith("design/")) out.push([d, "type is tech but it lives in design/"]);
+        if (/[A-Z_]/.test(d.path.split("/").pop()) && d.folder) out.push([d, "filename should be lowercase-with-hyphens"]);
+    }
     for (const ref of d.links) {
+      // Only a reference carrying a folder is a link worth checking. A bare
+      // filename is usually prose — a naming example in DOC-SCHEMA, an old
+      // filename quoted in WORKING-NOTES — and flagging those is noise.
+      if (!ref.includes("/")) continue;
       if (resolve(ref)) continue;
       const amb = (byName.get(nameOf(ref)) || []).length > 1;
       out.push([d, amb ? `links to "${ref}", which is ambiguous — use the full path` : `links to "${ref}", which does not exist`]);
+    }
+  }
+  for (const m of mockups) {
+    const doc = m.replace(/\.mockup\.html$/i, ".md");
+    if (!byId.has(idOf(doc))) {
+      out.push([{ id: idOf(m), title: m.split("/").pop(), path: m }, "mockup has no matching doc"]);
     }
   }
   return out;
@@ -194,17 +210,16 @@ function badges(d) {
 }
 
 function row(d, extra = "") {
-  // A state page shares its system's title, so mark it or the list reads double.
-  const title = esc(d.title) + (d.type === "state" ? ' <span class="path">· state</span>' : "");
-  return `<a class="row${d.sprint ? " sprint" : ""}" href="#/d/${d.id}">
+  const title = esc(d.title);
+  return `<a class="row${d.sprint ? " sprint" : ""}${d.type === "idea" ? " idea" : ""}" href="#/d/${d.id}">
     <span class="t">${title}</span>${extra}<span class="meta">${badges(d)}</span></a>`;
 }
 
 // The map: one panel, one collapsible section per category. A list beats a card
 // grid here — the point is scanning everything at once, not admiring the cards.
 function viewMap() {
-  // Design docs only. This is a design tool; tech has its own tab.
-  const live = docs.filter((d) => d.type === "design" && d.status !== "superseded");
+  // Design docs, plus ideas — future design for the same category, shown muted.
+  const live = docs.filter((d) => (d.type === "design" || d.type === "idea") && d.status !== "superseded");
   const sections = CATS.map((c) => {
     const items = live.filter((d) => d.category === c);
     return `<details open><summary><span class="chev"></span>${CAT_LABEL[c]}
@@ -237,14 +252,13 @@ function viewSprint() {
   const sprints = docs.filter((d) => d.type === "sprint").sort((a, b) => b.id.localeCompare(a.id));
   const s = sprints[0];
   if (!s) return `<h2 class="page">No sprint</h2><p class="lede">Nothing in <code>sprints/</code> yet.</p>`;
-  // One row per system, not per document: a system in scope usually has both a
-  // design doc and a state page, and showing both is two links to the same thing.
+  // One row per system, and the row is the DESIGN page — that is what the sprint
+  // is working toward. Tech pages are reachable from it.
   const bySystem = new Map();
   for (const d of docs) {
     if (d.sprint !== s.sprint || d.type === "sprint") continue;
-    const key = systemOf(d);
-    const cur = bySystem.get(key);
-    if (!cur || (d.type === "state" && cur.type !== "state")) bySystem.set(key, d);
+    const cur = bySystem.get(d.name);
+    if (!cur || (d.type === "design" && cur.type !== "design")) bySystem.set(d.name, d);
   }
   const inScope = [...bySystem.values()];
   return `<h2 class="page">${esc(s.title)}</h2>
@@ -258,7 +272,14 @@ function viewDoc(id) {
   const d = byId.get(id);
   if (!d) return `<h2 class="page">Not found</h2><p class="lede">No doc with id <code>${esc(id)}</code>.</p>`;
   const back = (backlinks.get(id) || []).map((s) => `<a href="#/d/${s}">${esc(byId.get(s).title)}</a>`).join("");
-  return `<div class="crumb">${esc(d.path)}</div>
+  // A mockup sits beside its doc as "<doc>.mockup.html" and opens the page —
+  // what it looks like belongs above what it says.
+  const mock = d.path.replace(/\.md$/i, ".mockup.html");
+  const shot = mockups.has(mock)
+    ? `<div class="mockup"><iframe src="${mock}" title="Mockup"></iframe>
+        <a class="pop" href="${mock}" target="_blank">Open standalone</a></div>`
+    : "";
+  return `<div class="crumb">${esc(d.path)}</div>${shot}
     <div class="meta-row">${badges(d)}${d.category ? `<span class="badge b-designed">${CAT_LABEL[d.category] || d.category}</span>` : ""}</div>
     <div class="doc">${renderMd(d.body, linkFor)}
       ${back ? `<div class="backlinks"><div class="lbl">Referenced by</div>${back}</div>` : ""}</div>`;
@@ -286,6 +307,7 @@ function topnav(route) {
     <a href="#/tech"${on("/tech")}>Tech</a>
     <span class="spacer"></span>
     <a class="drift" href="#/lint">Drift${n ? ` <b>${n}</b>` : ""}</a>
+    <a class="drift" href="#" id="reload">Reload</a>
   </div>`;
 }
 
@@ -298,6 +320,12 @@ function draw() {
     : route.startsWith("/d/") ? viewDoc(route.slice(3))
     : viewMap();
   document.querySelector("#app").innerHTML = topnav(route) + `<div class="main">${main}</div>`;
+  document.querySelector("#reload").onclick = async (e) => {
+    e.preventDefault();
+    e.target.textContent = "Reloading…";
+    await load();
+    draw();
+  };
   window.scrollTo(0, 0);
 }
 

@@ -1,7 +1,7 @@
 ---
 type: design
 category: artificial-intelligence
-status: idea
+status: unbuilt
 resolution: vague
 ---
 
@@ -54,12 +54,3 @@ on its own, damage is the easy lever and the wrong one.
 - Produces counters, specialists, descendants, rivalries belonging to that run
 - A generated enemy must read as a role, not a bag of attributes, or its
   descendants will not read as relatives
-
-## Open questions
-
-| Question | Why it matters |
-|---|---|
-| Should an enemy ever visibly fail a jump? | Perfect traversal reads robotic; a missed ledge reads alive |
-| Should the player break pursuit using terrain? | Determines how memory and giving-up work |
-| How much should an enemy telegraph *where it is going*? | Route intent is readable; instant repathing is not |
-| How obviously should adaptation surface? | Invisible is wasted; heavy-handed feels like cheating |

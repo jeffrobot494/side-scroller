@@ -1,7 +1,7 @@
 ---
 type: design
 category: gameplay-systems
-status: idea
+status: unbuilt
 resolution: vague
 ---
 
@@ -43,13 +43,3 @@ channel.
 
 Readability depends on all three being solved before anything is tuned for
 flavour.
-
-## Open questions
-
-| Question | Why it matters |
-|---|---|
-| Should enemies be audible before visible, and how far ahead? | Directly changes how much warning the player gets |
-| Does the player's weapon sit above or below enemy fire? | Determines what gets buried under your own trigger |
-| Is there music, and does it react to combat state? | No decision made |
-| What does the base sound like? | The strategy layer has had no audio design at all |
-| How much do soldiers speak? | Cheapest route to attachment, fastest route to irritation |

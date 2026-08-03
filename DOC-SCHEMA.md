@@ -1,13 +1,13 @@
 # Doc schema
 
 The contract between the documentation files and the viewer. Every `.md` under
-`design/`, `tech/`, `sprints/`, and `archive/` carries this frontmatter.
+`design/`, `tech/`, `idea/`, `sprints/`, and `archive/` carries this frontmatter.
 
 ```yaml
 ---
-type: tech                    # design | tech | sprint | state
+type: tech                    # design | tech | idea | sprint
 category: artificial-intelligence
-status: building              # idea | designed | building | built | superseded
+status: building              # unbuilt | designed | building | built | superseded | reference
 resolution: sharp             # vague | sharp
 sprint: 2026-08               # optional — which sprint it is in scope for
 related: [behavior-lab, locomotion]   # optional — slugs, not paths
@@ -24,7 +24,7 @@ readable: a document is exactly one of these, never two at once.
 | `design` | what should the player experience | `design/` |
 | `tech` | how is it built | `tech/` |
 | `sprint` | what are we committing to this month | `sprints/` |
-| `state` | what does this system do right now | beside its doc, as `<system>.state.md` |
+| `idea` | what we might do later — not agreed, not scheduled | `idea/` |
 
 The test for design vs tech: **would this still be true if the engine were
 rewritten in another language?** "Enemies commit to an attack so the player can
@@ -40,7 +40,13 @@ Plus `vision` for the GDD, which is the root doc and belongs to none of them.
 Primary category only. A doc spanning several (sound spans four) picks the one it
 is most about and names the others in prose.
 
-**`status`** — build state. How much of this exists.
+The test for `idea` vs the rest: **can an implementer treat this as
+instructions?** `design` and `tech`, yes. `idea`, no — it holds options, not
+decisions, and may contradict itself. `idea` docs carry no `status`, because
+nothing in them is being built.
+
+**`status`** — build state. How much of this exists. `unbuilt` · `designed` ·
+`building` · `built` · `superseded` · `reference`.
 
 **`resolution`** — design state. How well settled the thinking is. Deliberately
 separate from `status`, because the interesting cases are the mismatches:
@@ -52,6 +58,10 @@ separate from `status`, because the interesting cases are the mismatches:
 
 **`sprint`** — set when a doc is in scope for the current sprint; cleared at
 review. Drives the viewer's "this month" filter.
+
+**`needs`** — *tech docs only.* Slugs of systems that must exist before this one
+can be built. Design docs never carry it: what the player experiences does not
+depend on build order.
 
 **`related`** — slugs of other docs. Prose links are the real relationship graph;
 this is only for links that don't occur naturally in the text.
@@ -65,10 +75,13 @@ this is only for links that don't occur naturally in the text.
   `sound-system-design-plan.md`. The folder and the `type` field already say what
   kind of document it is, so words like *system*, *plan*, *design*, and *doc* in
   a filename are pure noise.
-- **State pages are `<system>.state.md`**, sitting beside the doc they track —
-  `agent-navigation.md` and `agent-navigation.state.md`. They sort adjacently, the
-  pairing is obvious in any listing, and there are no subfolders to remember.
 - **Sprints are `YYYY-MM.md`.** Sorts chronologically, no other rule needed.
+- **Mockups are `<doc>.mockup.html`**, sitting beside the doc they illustrate.
+  The viewer renders one at the top of its doc page. A mockup with no matching
+  doc is a lint error.
+- **Idea docs are titled `Idea: <subject>`** so they read as unagreed wherever
+  they appear — in the map, in a link, in a search result. The filename stays
+  plain (`parallax-biomes.md`).
 - **Repo-root files stay uppercase** — `README.md`, `CLAUDE.md`, `ROADMAP.md`,
   `DOC-SCHEMA.md`. These are metafiles that tools and humans expect to shout.
 
@@ -89,7 +102,7 @@ This applies to every doc type, and to summaries written in chat.
 
 ## Rules
 
-- Status lives in `ROADMAP.md` and in `state` docs. Design and tech docs never
+- Status lives in `ROADMAP.md`. Design and tech docs never
   carry DONE annotations or progress notes.
 - Prose links float to the current version of a doc. Sprint log entries pin to
   what was current when they were written.

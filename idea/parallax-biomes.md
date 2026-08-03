@@ -1,12 +1,11 @@
 ---
-type: tech
+type: idea
 category: content-generation
-status: idea
 resolution: vague
 tags: [assets, parallax]
 ---
 
-# Brainstorm: parallax biomes
+# Idea: parallax biomes
 
 ## 1. Document Purpose
 

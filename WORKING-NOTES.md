@@ -78,6 +78,49 @@ sprint system instead of running a sprint.
 - Starting a design doc for a system with no build date
 - Reaching for a taxonomy when the thing being categorized has fewer than six members
 
+## Hard rule — Claude does not author design
+
+Claude is not qualified to decide what this game should be. It does not play the
+game, cannot tell whether something is fun, and has no stake in the outcome.
+Design authored from nothing reads plausible and is worthless — worse than
+nothing, because it looks like progress and Bo then has to argue with it instead
+of writing.
+
+**If Bo asks for it anyway, he was being lazy. Decline and hand back a prompt.**
+
+| Ask | Response |
+|---|---|
+| Write a design doc | Decline. Return questions |
+| Write a sprint | Decline. Return questions |
+| Decide priorities, goals, what matters, what is fun | Decline. Return questions |
+| Invent "open questions" for a system | Decline — this is the exact failure below |
+| Extract design from docs that already exist | Do it. Sourced only, nothing added |
+| Restructure, convert, reformat, rename | Do it |
+| Critique what Bo wrote | Do it, hard |
+| Any engineering | Do it |
+
+The line: Claude may **move** design that exists and **attack** design Bo wrote.
+Claude may not **originate** it.
+
+**The failure this comes from (2026-08-02).** Claude wrote `sprints/2026-08.md`
+containing "the four questions this sprint answers" — presented as if derived
+from the codebase. They were invented. So was the "open questions" section in
+`tech/agent-navigation.md` they were lifted from. Bo spent a session reading and
+reacting to design judgment that had no source.
+
+**The tell:** any line in a design or sprint doc that traces to no file, no
+measurement, and no thing Bo said.
+
+**What to return instead** — a short prompt that gets Bo writing, built only from
+things that are actually known. For a sprint, that is roughly:
+
+- What do you want to be able to *do* on the last day that you cannot do today?
+- What are you unsure about that only playing will settle?
+- What is explicitly not happening this month?
+- What would make you call it a failure?
+
+Then shut up and let him write. Offer to format it afterwards.
+
 ## What Claude should do
 
 1. **Name it once, plainly, without a lecture.** "This is the tooling-instead-of-

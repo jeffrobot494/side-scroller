@@ -1,7 +1,7 @@
 ---
 type: design
 category: gameplay-systems
-status: idea
+status: unbuilt
 resolution: vague
 ---
 
@@ -38,12 +38,3 @@ Adding an effect kind is a real design event. Adding a weapon is not.
 | Arcing projectiles | Rockets and grenades lob, so elevation matters and terrain must be read |
 | Six projectile shapes | An incoming threat is identifiable before it lands |
 | Aim as a stat, for everyone | Higher aim tightens spread for soldiers and enemies alike; a rookie's gun genuinely sprays |
-
-## Open questions
-
-| Question | Why it matters |
-|---|---|
-| Should any weapon be strictly better at the same tier? | Or is every choice a trade? |
-| How does the player learn what a weapon does before buying it? | Numbers, a range, or only by using it |
-| Do enemy weapons draw from the same vocabulary? | Shared rules are readable; separate rules allow set pieces |
-| What makes a weapon feel *good* rather than merely effective? | Entirely unaddressed, and probably the one that matters most |

@@ -88,10 +88,25 @@ h2.page { font-size: 24px; margin: 0 0 4px; letter-spacing: -.02em; font-weight:
 }
 .row:hover { background: #f4f1ea; }
 .row.sprint { background: #fdf8f0; }
+.row.idea .t { color: var(--ink-2); }
+.row.idea { background: #fbfaf7; }
 .row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .meta { display: flex; gap: 5px; flex-wrap: nowrap; }
 .row .path { color: var(--ink-3); font-size: 11.5px; }
 .empty { color: var(--ink-3); font-size: 12.5px; font-style: italic; padding: 8px 14px 8px 32px; border-top: 1px solid var(--line); }
+
+/* ---- mockup ---- */
+.mockup { position: relative; margin: 0 0 20px; }
+.mockup iframe {
+  width: 100%; height: 520px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel); display: block;
+}
+.mockup .pop {
+  position: absolute; right: 10px; bottom: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 3px 9px; font-size: 11.5px; color: var(--ink-2); text-decoration: none;
+}
+.mockup .pop:hover { border-color: var(--line-2); color: var(--ink); }
 
 /* ---- doc ---- */
 .doc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 30px 36px; }

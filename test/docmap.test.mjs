@@ -65,20 +65,29 @@ export default async function run(t) {
   t.eq("root folder", parse("ROADMAP.md", "# R").folder, "");
 
   // ---- id collisions -----------------------------------------------------
-  // A system's state page is named after the system, so filename-only ids made
-  // tech/AGENT-NAVIGATION.md and tech/systems/agent-navigation.md the same doc.
+  // A system has both a design doc and a tech doc under the same filename, so
+  // filename-only ids would collapse them into one.
   index([
-    parse("tech/AGENT-NAVIGATION.md", "---\ntype: tech\n---\n# Agent navigation and goals\n"),
-    parse("tech/systems/agent-navigation.md", "---\ntype: state\n---\n# Agent navigation\n"),
-    parse("tech/SOUND.md", "---\ntype: tech\n---\n# Sound\n\nSee `tech/AGENT-NAVIGATION.md` and `tech/systems/agent-navigation.md`.\n"),
+    parse("design/agent-navigation.md", "---\ntype: design\ncategory: artificial-intelligence\n---\n# Agent navigation\n"),
+    parse("tech/agent-navigation.md", "---\ntype: tech\ncategory: artificial-intelligence\n---\n# Agent navigation\n"),
+    parse("tech/sound.md", "---\ntype: tech\ncategory: content-generation\n---\n# Sound\n\nSee `design/agent-navigation.md` and `tech/agent-navigation.md`.\n"),
   ]);
 
-  t.eq("same-named docs keep distinct ids", resolve("tech/AGENT-NAVIGATION.md"), "tech/agent-navigation");
-  t.eq("state page resolves separately", resolve("tech/systems/agent-navigation.md"), "tech/systems/agent-navigation");
+  t.eq("same-named docs keep distinct ids", resolve("design/agent-navigation.md"), "design/agent-navigation");
+  t.eq("the tech twin resolves separately", resolve("tech/agent-navigation.md"), "tech/agent-navigation");
   t.eq("ambiguous bare name resolves to nothing", resolve("agent-navigation.md"), null);
-  t.eq("unambiguous bare name still resolves", resolve("SOUND.md"), "tech/sound");
-  t.eq("unknown resolves to nothing", resolve("tech/NOPE.md"), null);
-  t.eq("backlinks land on the design doc", backlinksFor("tech/agent-navigation").join(), "tech/sound");
-  t.eq("backlinks land on the state doc too", backlinksFor("tech/systems/agent-navigation").join(), "tech/sound");
-  t.ok("ambiguous refs are linted", lint().every(([, why]) => !why.includes("ambiguous")));
+  t.eq("unambiguous bare name still resolves", resolve("sound.md"), "tech/sound");
+  t.eq("unknown resolves to nothing", resolve("tech/nope.md"), null);
+  t.eq("backlinks land on the design doc", backlinksFor("design/agent-navigation").join(), "tech/sound");
+  t.eq("backlinks land on the tech doc too", backlinksFor("tech/agent-navigation").join(), "tech/sound");
+  t.ok("no ambiguous refs in this fixture", lint().every(([, why]) => !why.includes("ambiguous")));
+
+  // ---- root docs are link-checked even without frontmatter ----------------
+  index([
+    parse("tech/sound.md", "---\ntype: tech\ncategory: content-generation\n---\n# Sound\n"),
+    parse("ROADMAP.md", "# Roadmap\n\nSee `tech/sound.md` and `tech/gone.md`.\n"),
+  ]);
+  const rows = lint();
+  t.ok("root doc broken link is caught", rows.some(([d, w]) => d.id === "roadmap" && w.includes("gone.md")));
+  t.ok("root doc is exempt from schema rules", !rows.some(([d, w]) => d.id === "roadmap" && w.includes("no type")));
 }
