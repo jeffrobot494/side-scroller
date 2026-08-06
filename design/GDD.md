@@ -12,33 +12,28 @@ tags: [vision]
 > **Status:** Playable end to end and built well past the original vertical
 > slice. `CLAUDE.md` is the accurate account of what exists; the status notes in
 > §13 and the repo layout in §12 predate most of it.
-> **Setting:** rewritten 2026-08-06 — the game is now about a timeline the aliens
-> already altered, not an invasion in progress. §1 is current; older sections
-> written against the invasion framing have not all been revisited.
+> **Setting:** §1 was rewritten 2026-08-06 and is current. Sections 3, 9.1, 10 and
+> 11 predate it and still describe an invasion in progress.
 > **Last updated:** 2026-08-06
 
 ---
 
 ## 1. High Concept
 
-**The invasion already succeeded, and nobody alive remembers it happening.**
+Within the last hundred years, lizard people altered Earth's timeline. How many
+interventions they made is unknown. The result is that every human on Earth serves
+them willingly, without knowing it.
 
-Sometime in the last hundred years, lizard people reached back and altered Earth's
-timeline. One intervention or a dozen — the shape of it is unknown. What is certain
-is that the timeline we live in is not ours, and that every human being on Earth is
-a willing, grateful, entirely unwitting servant of the species that rewrote them
-into it.
-
-The player runs the one secret organisation that detected it. Its purpose is to break
-the lizards' hold — to free the human race from their thrall.
+The player runs the secret organisation that detected this. Its purpose is to end the
+lizards' hold on humanity.
 
 | | |
 |---|---|
-| **The enemy** | Lizard people. Powerful time travellers, and far better at it than the player |
-| **Operations** | Cmdr. Voss's job becomes identifying **points of intervention** — moments where the lizards reached into history and bent it |
-| **A mission** | Travel to that moment and interfere with it |
-| **The opposition** | There are many interventions, and the lizards detect incursions and meet them. The squad is never unmolested when it arrives |
-| **The one fixed thing** | Humanity is enslaved and the player intends to end that. Everything else about the world is in play |
+| The enemy | Lizard people, and better time travellers than the player |
+| Operations | Cmdr. Voss identifies **points of intervention** — moments the lizards reached into and altered |
+| A mission | Travel to that moment and interfere |
+| Opposition | The lizards detect incursions and meet them, so the squad always arrives contested |
+| The fixed goal | End the lizards' hold on humanity. Nothing else about the world is stable |
 
 A mission therefore has a **when** as well as a **where**.
 
@@ -51,51 +46,47 @@ they die permanently. The campaign can be lost even if your people live. We
 manufacture grief and tension on purpose, and we lean into the brutal, unfair chaos
 of the fight.
 
-### 1.1 There is no correct timeline
+### 1.1 The story engine
 
-**The player is not restoring history.** There is no original, proper version being
-repaired and nothing is scored against one. The single constant is that humanity
-belongs to the lizards and the player means to undo it.
+Each mission outcome feeds a story generator that writes the history following from
+it. A win and a loss are both inputs; neither is measured against a target timeline,
+because there isn't one. The generator's output is not required to be tidy.
 
-Every mission alters history — not only the failures. When one ends, the story
-generator takes the outcome (binary success/failure to begin with; richer signals
-later) and writes what follows, open-endedly. The result is not required to be tidy
-or to trend back toward anything.
+Outcome signal is binary success/failure to begin with, richer later (§14).
 
-Worked example: kill the lizard assassin in 1939 and Hitler lives out the war we
-remember. Fail, and he does not — and a Europe with no Second World War is a Europe
-where France may look east, judge Germany weak, and invade. That world produces its
-own points of intervention, which become the next missions, which diverge again. As
-the player succeeds, the lizards shift from defending their original work to actively
-countering the player, and the divergence accelerates.
+That generated history supplies the next points of intervention, so divergence
+compounds over a campaign. As the player succeeds, the lizards intervene to counter
+them, adding divergence of their own.
 
-| Intended feel | |
+*Example.* The squad arrives in 1939 to interfere with the assassination of Hitler.
+Stop it and the war proceeds as recorded. Fail and it doesn't — the generator writes
+a Europe with no Second World War, where France might judge Germany weak and invade.
+Either outcome sets where the next missions come from.
+
+| Generated history should be | |
 |---|---|
-| **Recognisable** | Real centuries, real countries, people the player has heard of |
-| **Surprising** | Consequences are the LLM's to draw, and it will draw ones nobody considered |
-| **Often funny** | Compounded alternate history is inherently absurd |
-| **Occasionally shocking** | It is permitted to go somewhere the designers would not have chosen |
+| Recognisable | Real centuries, countries, and people |
+| Surprising | Consequences are the LLM's to draw, including ones nobody anticipated |
+| Often funny | Compounded alternate history tends toward the absurd |
+| Occasionally shocking | Permitted to go somewhere the designers would not have chosen |
 
-Compounding is the point. One divergence is a premise; six stacked on each other is a
-history nobody has read — including the people who made the game. No two campaigns
-produce the same world.
+Six stacked divergences produce a history nobody has read, including its authors. No
+two campaigns produce the same world.
 
 
 ### 1.2 The time machine is a prototype
 
-The machine works. It is not *good*. It consumes enormous amounts of energy and it is
-imprecise, and the constraints that fall out of that are where the novelty of this
-game lives.
+The machine consumes large amounts of energy and lands imprecisely. Three
+consequences are under consideration.
 
 | | |
 |---|---|
-| **Arriving off-target** | Miss by a decade and the target the squad came to kill is a child, or already dead. Improvise — find someone else to save, or someone else to stop |
-| **Paying for the return** | Getting home costs energy that must be found, salvaged, or stolen on site. Come up short and the soldiers are stranded in that century |
-| **A collapsing warp bubble** | The bubble fails on its own schedule and yanks the squad back to the present mid-mission, finished or not |
+| Arriving off-target | Miss by a decade and the intended target is a child, or already dead. The squad improvises — someone else to save, or to stop |
+| Paying for the return | Getting home costs energy found, salvaged, or stolen on site. Come up short and the soldiers stay in that century |
+| A collapsing warp bubble | The bubble fails on its own schedule and pulls the squad back mid-mission, finished or not |
 
-> **Not settled.** Which of these ship, and in what combination, is design work still
-> to be done — see §14. The three rows above are the space being explored, not a
-> specification, and nothing should be built against them yet.
+> **Not settled.** Which of these ship, and in what combination, is open design work
+> (§14). The three rows are the space being explored, not a specification.
 
 ---
 

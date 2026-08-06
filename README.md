@@ -1,8 +1,5 @@
 # XCOM Task Force — side-scroller
 
-**You are not fighting an invasion. You are fighting an occupation that already
-succeeded — and nobody alive remembers it happening.**
-
 An XCOM-style squad game with a strategy hub in DOM and run-and-gun missions on
 Canvas. Hire soldiers, send them into procedurally generated missions, fight
 data-defined enemies alongside AI companions, lose people permanently, sell loot,
@@ -13,83 +10,70 @@ modules load in the browser as native ESM.
 
 ## The setting
 
-Sometime in the last hundred years, the lizards reached back and changed
-something. One event, or a dozen — nobody knows the shape of it. What is certain
-is that the timeline we live in is not ours, and that every human being on Earth
-is a willing, grateful, entirely unwitting servant of a species that rewrote them
-into it.
+Within the last hundred years, lizard people altered Earth's timeline. How many
+interventions they made is unknown. The result is that every human on Earth serves
+them willingly, without knowing it.
 
-You belong to the one organisation that noticed. Your job is to undo it, and
-then to make them pay for it.
+The player runs the organisation that detected this.
 
 | | |
 |---|---|
-| **The enemy** | Lizard people. Accomplished time travellers, and far better at it than you |
-| **Your ops officer** | Spends the campaign identifying *points of intervention* — moments where the lizards reached into history and bent it |
-| **A mission** | Travel to that moment and interfere with it |
-| **The catch** | There are many interventions, and the lizards can detect an incursion and meet you at it. You are never alone when you arrive |
-| **The one fixed thing** | Humanity belongs to the lizards. You intend to end that. Everything else is negotiable |
+| The enemy | Lizard people, and better time travellers than the player |
+| Operations | Identifies *points of intervention* — moments the lizards reached into and altered |
+| A mission | Travel to that moment and interfere |
+| Opposition | The lizards detect incursions and meet them, so the squad always arrives contested |
+| The fixed goal | End the lizards' hold on humanity. Nothing else about the world is stable |
 
 A mission has a **when** as well as a **where**.
 
-## History is not restored. It is rewritten.
+## The story engine
 
-**There is no correct timeline.** You are not repairing history back toward some
-original, proper version — there isn't one, and nobody is keeping score against
-it. There is exactly one thing worth holding onto: humanity is enslaved, and you
-are going to undo that. Everything else about the world is in play.
+Each mission outcome feeds a story generator that writes the history following from
+it. A win and a loss are both inputs; neither is measured against a target timeline,
+because there isn't one.
 
-Every mission changes history. Not just the ones you lose — *every* mission,
-because you were there, because they were there, because someone died who
-otherwise wouldn't have. When it ends, the story generator takes the outcome and
-writes what follows. It is under no obligation to be tidy about it.
+That generated history supplies the next points of intervention, so divergence
+compounds over a campaign. As the player succeeds, the lizards intervene to counter
+them, adding divergence of their own.
 
-Kill the lizard assassin in 1939 and Hitler lives out the war you remember. Fail,
-and he doesn't — and a Europe with no Second World War is a Europe where France
-may look east, decide Germany is weak, and go. That world generates its own
-points of intervention, which become your next missions, which diverge again. And
-as you start winning, the lizards stop merely defending their original work and
-begin intervening to counter *you* — which is when it gets strange.
+*Example.* The squad arrives in 1939 to interfere with the assassination of Hitler.
+Stop it and the war proceeds as recorded. Fail and it doesn't — the generator writes
+a Europe with no Second World War, where France might judge Germany weak and invade.
+Either outcome sets where the next missions come from.
 
-The intended feel:
+What the generated history should be:
 
 | | |
 |---|---|
-| **Recognisable** | Real centuries, real countries, people you have heard of |
-| **Surprising** | The consequences are the LLM's to draw, and it will draw ones you didn't consider |
-| **Often funny** | Alternate history is inherently absurd once it compounds a few times |
-| **Occasionally shocking** | It is allowed to go somewhere you would not have chosen |
+| Recognisable | Real centuries, countries, and people |
+| Surprising | Consequences are the LLM's to draw, including ones nobody anticipated |
+| Often funny | Compounded alternate history tends toward the absurd |
+| Occasionally shocking | Permitted to go somewhere the designers would not have chosen |
 
-Compounding is the point. One divergence is a premise; six divergences stacked on
-each other is a history nobody has read before — including the people who made
-the game. Two campaigns will not produce the same world, and there is no version
-of the world you are supposed to end up with.
+Six stacked divergences produce a history nobody has read, including its authors. No
+two campaigns produce the same world.
 
 ## The time machine is a prototype
 
-This is the part that makes it a different game, and it is the part still being
-designed. Your machine works. It is not *good*.
-
-It swallows enormous amounts of energy and it is imprecise, and the design space
-that opens up is the interesting one:
+It consumes large amounts of energy and lands imprecisely. Three consequences are
+under consideration:
 
 | | |
 |---|---|
-| **You may not arrive when you meant to** | Miss by a decade and the target you came to kill is a child, or already dead. Improvise — find someone else to save, or someone else to stop |
-| **You may not be able to leave** | Getting home costs energy you have to find, salvage, or steal on-site. Come up short and your soldiers stay there, in that century, forever |
-| **You may be on a timer** | A warp bubble that collapses on its own schedule, yanking the squad back to the present mid-firefight — mission finished or not |
+| Arriving off-target | Miss by a decade and the intended target is a child, or already dead. The squad improvises — someone else to save, or to stop |
+| Paying for the return | Getting home costs energy found, salvaged, or stolen on site. Come up short and the soldiers stay in that century |
+| A collapsing warp bubble | The bubble fails on its own schedule and pulls the squad back mid-mission, finished or not |
 
-> **Undecided.** Which of these ship, and in what combination, gets settled in
-> the design phases on the sprint board — not here. Treat the three rows above as
-> the space being explored, not as a spec.
+> **Undecided.** Which of these ship, and in what combination, is settled in the
+> design phases on the sprint board. The three rows above are the space being
+> explored, not a spec.
 
 ## What exists today
 
-The mechanical skeleton is built and playable end to end: hub, generated
-missions, permadeath, the economy, an enemy-authoring system, and a campaign you
-can win. **The setting above is where it is going, not what you will see when you
-run it** — missions are currently sectors rather than centuries. The story layer
-that turns a lead into a point in time is this month's work; see
+The mechanical skeleton is built and playable end to end: hub, generated missions,
+permadeath, the economy, an enemy-authoring system, and a winnable campaign. The
+setting above describes the target, not the current build — missions are sectors
+rather than centuries today. The story layer is this month's work; see
 `sprints/2026-08.md`.
 
 ## Run it
