@@ -29,19 +29,18 @@ is that the timeline we live in is not ours, and that every human being on Earth
 a willing, grateful, entirely unwitting servant of the species that rewrote them
 into it.
 
-The player runs the one secret organisation that detected it. Its purpose is to undo
-the alteration and to repay it — to free the human race from the aliens' thrall.
+The player runs the one secret organisation that detected it. Its purpose is to break
+the lizards' hold — to free the human race from their thrall.
 
 | | |
 |---|---|
 | **The enemy** | Lizard people. Powerful time travellers, and far better at it than the player |
 | **Operations** | Cmdr. Voss's job becomes identifying **points of intervention** — moments where the lizards reached into history and bent it |
-| **A mission** | Travel to that moment and stop the intervention, restoring the timeline one thread at a time |
+| **A mission** | Travel to that moment and interfere with it |
 | **The opposition** | There are many interventions, and the lizards detect incursions and meet them. The squad is never unmolested when it arrives |
+| **The one fixed thing** | Humanity is enslaved and the player intends to end that. Everything else about the world is in play |
 
-A mission therefore has a **when** as well as a **where**. Fail one and the
-intervention stands: history keeps the shape the lizards gave it, and subsequent
-missions take place in the world that failure created.
+A mission therefore has a **when** as well as a **where**.
 
 The player runs a hidden underground base — hiring soldiers, commissioning weapons
 and machines, and choosing which points in time to strike — and personally fights the
@@ -52,7 +51,37 @@ they die permanently. The campaign can be lost even if your people live. We
 manufacture grief and tension on purpose, and we lean into the brutal, unfair chaos
 of the fight.
 
-### 1.1 The time machine is a prototype
+### 1.1 There is no correct timeline
+
+**The player is not restoring history.** There is no original, proper version being
+repaired and nothing is scored against one. The single constant is that humanity
+belongs to the lizards and the player means to undo it.
+
+Every mission alters history — not only the failures. When one ends, the story
+generator takes the outcome (binary success/failure to begin with; richer signals
+later) and writes what follows, open-endedly. The result is not required to be tidy
+or to trend back toward anything.
+
+Worked example: kill the lizard assassin in 1939 and Hitler lives out the war we
+remember. Fail, and he does not — and a Europe with no Second World War is a Europe
+where France may look east, judge Germany weak, and invade. That world produces its
+own points of intervention, which become the next missions, which diverge again. As
+the player succeeds, the lizards shift from defending their original work to actively
+countering the player, and the divergence accelerates.
+
+| Intended feel | |
+|---|---|
+| **Recognisable** | Real centuries, real countries, people the player has heard of |
+| **Surprising** | Consequences are the LLM's to draw, and it will draw ones nobody considered |
+| **Often funny** | Compounded alternate history is inherently absurd |
+| **Occasionally shocking** | It is permitted to go somewhere the designers would not have chosen |
+
+Compounding is the point. One divergence is a premise; six stacked on each other is a
+history nobody has read — including the people who made the game. No two campaigns
+produce the same world.
+
+
+### 1.2 The time machine is a prototype
 
 The machine works. It is not *good*. It consumes enormous amounts of energy and it is
 imprecise, and the constraints that fall out of that are where the novelty of this
@@ -349,10 +378,14 @@ The vertical slice is playable end to end (see DEVELOPMENT_PLAN §3):
   damage first).
 - **Mission JSON spec** — arenas, spawns, loot, exit.
 - **Art direction** beyond placeholders.
-- **Time-machine constraints (§1.1)** — which of arriving off-target, paying for the
+- **Time-machine constraints (§1.2)** — which of arriving off-target, paying for the
   return trip, and the collapsing warp bubble actually ship, and how they combine.
 - **Improvisation** — what the squad does when it lands in the wrong decade, and how
   a mission states an objective loose enough to survive that.
-- **Points of intervention** — how Operations surfaces them, and how a failed
-  intervention propagates into the missions that follow it.
+- **Points of intervention** — how Operations surfaces them out of the current
+  timeline, and how any mission outcome propagates into the missions that follow.
+- **Mission outcome signal** — success/failure is the starting point; what richer
+  signal the story generator should receive is undecided.
+- **Winning** — what "humanity is free" looks like as a state the campaign can reach,
+  given that there is no target timeline to arrive at.
 ```

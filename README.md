@@ -26,13 +26,44 @@ then to make them pay for it.
 |---|---|
 | **The enemy** | Lizard people. Accomplished time travellers, and far better at it than you |
 | **Your ops officer** | Spends the campaign identifying *points of intervention* — moments where the lizards reached into history and bent it |
-| **A mission** | Travel to that moment and stop the intervention, restoring the timeline one thread at a time |
+| **A mission** | Travel to that moment and interfere with it |
 | **The catch** | There are many interventions, and the lizards can detect an incursion and meet you at it. You are never alone when you arrive |
-| **The stakes** | Every restored thread is a piece of humanity handed back |
+| **The one fixed thing** | Humanity belongs to the lizards. You intend to end that. Everything else is negotiable |
 
-A mission has a **when** as well as a **where**. Fail one and the intervention
-stands — history keeps the shape the lizards gave it, and every later mission
-takes place in the world your failure left behind.
+A mission has a **when** as well as a **where**.
+
+## History is not restored. It is rewritten.
+
+**There is no correct timeline.** You are not repairing history back toward some
+original, proper version — there isn't one, and nobody is keeping score against
+it. There is exactly one thing worth holding onto: humanity is enslaved, and you
+are going to undo that. Everything else about the world is in play.
+
+Every mission changes history. Not just the ones you lose — *every* mission,
+because you were there, because they were there, because someone died who
+otherwise wouldn't have. When it ends, the story generator takes the outcome and
+writes what follows. It is under no obligation to be tidy about it.
+
+Kill the lizard assassin in 1939 and Hitler lives out the war you remember. Fail,
+and he doesn't — and a Europe with no Second World War is a Europe where France
+may look east, decide Germany is weak, and go. That world generates its own
+points of intervention, which become your next missions, which diverge again. And
+as you start winning, the lizards stop merely defending their original work and
+begin intervening to counter *you* — which is when it gets strange.
+
+The intended feel:
+
+| | |
+|---|---|
+| **Recognisable** | Real centuries, real countries, people you have heard of |
+| **Surprising** | The consequences are the LLM's to draw, and it will draw ones you didn't consider |
+| **Often funny** | Alternate history is inherently absurd once it compounds a few times |
+| **Occasionally shocking** | It is allowed to go somewhere you would not have chosen |
+
+Compounding is the point. One divergence is a premise; six divergences stacked on
+each other is a history nobody has read before — including the people who made
+the game. Two campaigns will not produce the same world, and there is no version
+of the world you are supposed to end up with.
 
 ## The time machine is a prototype
 
