@@ -9,27 +9,64 @@ tags: [vision]
 # Vision
 
 > **Working title:** XCOM Task Force (side-scroller)
-> **Status:** Playable vertical slice. The full core loop runs end to end as a
-> single-page app (hire → deploy → run-and-gun mission with companions +
-> permadeath → results → sell → commission → advance day → win/lose). LLM
-> authoring (Player2) is the remaining bolt-on; hand-authored blueprint JSON
-> stands in for it. See [DEVELOPMENT_PLAN](development-plan.md).
-> **Last updated:** 2026-07-21
+> **Status:** Playable end to end and built well past the original vertical
+> slice. `CLAUDE.md` is the accurate account of what exists; the status notes in
+> §13 and the repo layout in §12 predate most of it.
+> **Setting:** rewritten 2026-08-06 — the game is now about a timeline the aliens
+> already altered, not an invasion in progress. §1 is current; older sections
+> written against the invasion framing have not all been revisited.
+> **Last updated:** 2026-08-06
 
 ---
 
 ## 1. High Concept
 
-Aliens are secretly invading Earth. An XCOM-style task force must stop them before
-the globe descends into chaos. The player runs a hidden underground base — hiring
-soldiers, commissioning weapons and machines, and choosing which missions to take —
-and personally fights the **2D side-scrolling run-and-gun action missions** that are
-the heart of play.
+**The invasion already succeeded, and nobody alive remembers it happening.**
+
+Sometime in the last hundred years, lizard people reached back and altered Earth's
+timeline. One intervention or a dozen — the shape of it is unknown. What is certain
+is that the timeline we live in is not ours, and that every human being on Earth is
+a willing, grateful, entirely unwitting servant of the species that rewrote them
+into it.
+
+The player runs the one secret organisation that detected it. Its purpose is to undo
+the alteration and to repay it — to free the human race from the aliens' thrall.
+
+| | |
+|---|---|
+| **The enemy** | Lizard people. Powerful time travellers, and far better at it than the player |
+| **Operations** | Cmdr. Voss's job becomes identifying **points of intervention** — moments where the lizards reached into history and bent it |
+| **A mission** | Travel to that moment and stop the intervention, restoring the timeline one thread at a time |
+| **The opposition** | There are many interventions, and the lizards detect incursions and meet them. The squad is never unmolested when it arrives |
+
+A mission therefore has a **when** as well as a **where**. Fail one and the
+intervention stands: history keeps the shape the lizards gave it, and subsequent
+missions take place in the world that failure created.
+
+The player runs a hidden underground base — hiring soldiers, commissioning weapons
+and machines, and choosing which points in time to strike — and personally fights the
+**2D side-scrolling run-and-gun action missions** that are the heart of play.
 
 The game is about **drama**. Soldiers are people with names, faces, and stories, and
 they die permanently. The campaign can be lost even if your people live. We
 manufacture grief and tension on purpose, and we lean into the brutal, unfair chaos
 of the fight.
+
+### 1.1 The time machine is a prototype
+
+The machine works. It is not *good*. It consumes enormous amounts of energy and it is
+imprecise, and the constraints that fall out of that are where the novelty of this
+game lives.
+
+| | |
+|---|---|
+| **Arriving off-target** | Miss by a decade and the target the squad came to kill is a child, or already dead. Improvise — find someone else to save, or someone else to stop |
+| **Paying for the return** | Getting home costs energy that must be found, salvaged, or stolen on site. Come up short and the soldiers are stranded in that century |
+| **A collapsing warp bubble** | The bubble fails on its own schedule and yanks the squad back to the present mid-mission, finished or not |
+
+> **Not settled.** Which of these ship, and in what combination, is design work still
+> to be done — see §14. The three rows above are the space being explored, not a
+> specification, and nothing should be built against them yet.
 
 ---
 
@@ -198,8 +235,8 @@ JSON shape.
 
 ## 9. Missions
 
-- **AI-generated levels**, seeded by the current story, a location, and the strength
-  of the aliens.
+- **AI-generated levels**, seeded by the current story, a point in time, a location,
+  and the strength of the aliens.
 - Delivered as editable JSON the engine reads at runtime.
 - Operations can surface **high-risk / high-reward** missions. Some research or the
   most powerful gear may **require special parts recoverable only on missions** —
@@ -312,4 +349,10 @@ The vertical slice is playable end to end (see DEVELOPMENT_PLAN §3):
   damage first).
 - **Mission JSON spec** — arenas, spawns, loot, exit.
 - **Art direction** beyond placeholders.
+- **Time-machine constraints (§1.1)** — which of arriving off-target, paying for the
+  return trip, and the collapsing warp bubble actually ship, and how they combine.
+- **Improvisation** — what the squad does when it lands in the wrong decade, and how
+  a mission states an objective loose enough to survive that.
+- **Points of intervention** — how Operations surfaces them, and how a failed
+  intervention propagates into the missions that follow it.
 ```
