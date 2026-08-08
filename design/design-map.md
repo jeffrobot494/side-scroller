@@ -1,9 +1,8 @@
 ---
 type: design
 category: development-tools
-status: unbuilt
+status: built
 resolution: vague
-sprint: 2026-08
 ---
 
 # Design map

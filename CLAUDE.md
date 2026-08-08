@@ -21,11 +21,13 @@ exists, attack design Bo wrote, and do all the engineering.
 Approximations. The design map's Gaps tab and `test/docs.test.mjs` both enforce
 it once the matching design doc enters a sprint. Table in `DOC-SCHEMA.md`.
 
-**Tech specs are written by the `/spec` procedure, never freehand.** Read the
-code, write the seven parts citing real paths, run the bar, get a fresh-context
-subagent to attack it, then hand Bo only the four questions he can answer. Full
-steps in `.claude/commands/spec.md`. Bo does not review architecture and his
-approval is not a check on it — the repo and the review agent are.
+**Tech specs are written by the `/spec` procedure, never freehand — by whoever
+is about to build the thing.** Read the code, write the seven parts citing real
+paths, run the bar, get a fresh-context subagent to attack it, hand Bo only the
+four questions he can answer, and commit the spec on its own before any
+implementation commit. Full steps in `.claude/commands/spec.md`. Bo does not
+review architecture and his approval is not a check on it — the repo, the review
+agent, and the commit ordering are.
 
 **Docs lead with structure, not prose** — one sentence of orientation, then
 tables and bullets. See "House style" in `DOC-SCHEMA.md`. This applies to

@@ -5,6 +5,12 @@ argument-hint: <design-doc slug, e.g. behavior-lab>
 
 Write `tech/$1.md` from `design/$1.md`.
 
+**Whoever builds it writes it.** There is no separate spec author — the agent that
+will implement the feature runs this procedure first. What makes it a spec rather
+than a description of whatever got built is two things, and both are enforced
+below: it is **committed before any implementation commit**, and it is **attacked
+by a subagent that did not write it**.
+
 Bo does not review architecture. He reviews four things, listed in step 5. Every
 other judgement in this document is yours, and the point of the procedure is that
 it is made **from the repo**, not from memory.
@@ -25,9 +31,10 @@ If that list is empty, you have not looked hard enough — this repo is large.
 
 ## 2. Write the seven parts
 
-Structure per `DOC-SCHEMA.md`, in order: `needs` in frontmatter, then `Reuses`,
-`Where the code goes`, `The seam`, `Slices`, `Must not regress`, `Approximations`.
-Headings are matched exactly by the linter.
+Structure per `DOC-SCHEMA.md`: `needs` in frontmatter, then **`## Slices` first**,
+then `Reuses`, `Where the code goes`, `The seam`, `Must not regress`,
+`Approximations`. Any background about how the subsystem works goes *after* those
+six, never before. Headings are matched exactly by the linter.
 
 | Rule | |
 |---|---|
@@ -50,11 +57,18 @@ Spawn a subagent (`Explore` or `general-purpose`) with **no context from this
 conversation**. Give it: the repo, `CLAUDE.md`, `DOC-SCHEMA.md`, and the new spec.
 Ask it exactly this:
 
-> Read this tech spec against the actual codebase. Report only two things:
-> (1) anything it claims about the code that is not true, and (2) anything a
-> builder following it would get wrong — a seam that fights the existing
-> structure, a reuse that was missed, a slice that cannot land alone.
+> Read this tech spec against the actual codebase AND against the design doc it
+> implements. Report only three things:
+> (1) anything it claims about the code that is not true;
+> (2) anything a builder following it would get wrong — a seam that fights the
+> existing structure, a reuse that was missed, a slice that cannot land alone;
+> (3) anything the design asks for that the spec quietly drops, narrows, or
+> defers without saying so.
 > Do not suggest improvements. Do not comment on style.
+
+(3) exists because the author is also the builder, and a builder has an incentive
+to scope the spec to what it feels like building. Silent narrowing is the failure
+mode that separation used to catch.
 
 Fix what it finds. If it disagrees with a deliberate choice, say so in
 `Approximations` rather than silently overruling it.
@@ -68,4 +82,13 @@ Do not summarise the architecture. Ask these four, and nothing else:
 3. Are we rebuilding something the game already has? — with your `Reuses` list.
 4. What would you be upset to see break?
 
-Answer 4 goes into `Must not regress`. Then stop; do not start building.
+Answer 4 goes into `Must not regress`.
+
+## 6. Commit the spec on its own
+
+`git commit` the spec **before writing a line of implementation**, as its own
+commit. This is what makes it a commitment rather than a narration — a spec that
+lands in the same commit as the code it describes can be quietly edited to match
+whatever the code became.
+
+Then stop and wait. Do not start building in the same turn.

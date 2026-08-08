@@ -67,6 +67,42 @@ export default async function run(t) {
     t.ok(`${rel} names the code it builds on`, [...text.matchAll(CITATION)].length > 0);
   }
 
+  // ---- 3. the roadmap is the status index, so it must agree with the docs ---
+  // It went stale in Aug 2026 because it restated facts that live elsewhere.
+  // Restating is now the thing under test: anything ROADMAP claims about another
+  // doc has to still be true, and anything the docs claim is built has to be
+  // indexed there. What it may NOT restate — dates, slice numbers, taxonomy —
+  // simply is not there any more, so it cannot drift.
+  const road = readFileSync(join(ROOT, "ROADMAP.md"), "utf8");
+
+  const deadRefs = docs
+    .filter((d) => d.id === "roadmap")
+    .flatMap((d) => d.links)
+    .filter((ref) => DOC_DIRS.some((dir) => ref.startsWith(`${dir}/`)))
+    .filter((ref) => !existsSync(join(ROOT, ref)));
+  t.ok(`ROADMAP links all resolve${deadRefs.length ? ` — dead: ${deadRefs.join(", ")}` : ""}`, deadRefs.length === 0);
+
+  const unindexed = docs.filter((d) => d.status === "built" && !road.includes(d.path)).map((d) => d.path);
+  t.ok(
+    `every built system is indexed in ROADMAP${unindexed.length ? ` — missing: ${unindexed.join(", ")}` : ""}`,
+    unindexed.length === 0,
+  );
+
+  const sprints = mdIn("sprints").sort();
+  const newest = sprints[sprints.length - 1];
+  t.ok(`ROADMAP's Now points at the newest sprint (${newest})`, !newest || road.includes(newest));
+
+  // ---- 4. Slices leads a gated spec ---------------------------------------
+  // A builder opening a spec wants "what am I doing, in what order" before any
+  // explanation of how the subsystem works. Checked only for specs the sprint
+  // gate already covers, so older docs are not retro-fitted.
+  for (const d of inSprint) {
+    const rel = `tech/${d.name}.md`;
+    if (!existsSync(join(ROOT, rel))) continue;
+    const headings = readFileSync(join(ROOT, rel), "utf8").match(/^## .+$/gm) || [];
+    t.ok(`${rel} opens with "## Slices" (found "${headings[0] || "no sections"}")`, headings[0] === "## Slices");
+  }
+
   const blocking = lint().filter(([, , b]) => b).map(([d, why]) => `${d.path}: ${why}`);
   // One assertion, not one per gap — a wall of red is a wall people stop reading.
   t.ok(

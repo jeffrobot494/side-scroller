@@ -91,15 +91,22 @@ Seven things. A design doc entering a sprint means its tech spec is about to
 become instructions, so the linter requires all seven from that moment — six as
 named sections, one as frontmatter.
 
+`needs:` lives in the frontmatter. The other six are named sections, and the table
+below is **the order they appear in the document**:
+
 | # | Section | Answers |
 |---|---|---|
-| 1 | `needs:` (frontmatter) | What must exist first. `needs: []` if nothing |
+| 1 | `## Slices` | Ordered, independently landable, each saying whether it changes runtime behaviour |
 | 2 | `## Reuses` | What already exists that this builds on — the biggest source of accidental rewrites |
 | 3 | `## Where the code goes` | Module paths, and the repo conventions they must follow |
 | 4 | `## The seam` | What this owns, and what it must not touch |
-| 5 | `## Slices` | Ordered, independently landable, each saying whether it changes runtime behaviour |
-| 6 | `## Must not regress` | Which existing tests are the guard |
-| 7 | `## Approximations` | Where the implementation is deliberately not exact, and what catches the failure |
+| 5 | `## Must not regress` | Which existing tests are the guard |
+| 6 | `## Approximations` | Where the implementation is deliberately not exact, and what catches the failure |
+
+**`## Slices` is the first section in the document**, before any explanation of
+how the system works. A builder opening a spec wants "what am I doing, in what
+order" before "here is how the subsystem behaves" — house style applied to specs.
+Background sections go after the six, not before them.
 
 Heading text is matched exactly, so the linter can check it.
 
