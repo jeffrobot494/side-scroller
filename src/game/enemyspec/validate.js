@@ -136,6 +136,20 @@ function checkEntity(err, e, path, refs) {
   }
   if (e.health) checkRange(err, `${path}.health.max`, e.health.max, RANGES["health.max"]);
   if (e.body && e.body.gravity !== undefined) checkRange(err, `${path}.body.gravity`, e.body.gravity, RANGES["body.gravity"]);
+  if (e.body && e.body.jump !== undefined) checkRange(err, `${path}.body.jump`, e.body.jump, RANGES["body.jump"]);
+  // A soldier-locomotor body (a companion) is driven by Soldier.applyMovement,
+  // which takes its impulse from config.jumpSpeed and its gravity from the world
+  // unscaled — so these two fields are read by nobody. Silently ignoring them is
+  // the worst outcome: the author gets a number that looks authoritative and
+  // changes nothing. Reject instead (tech/agent-navigation.md, N2).
+  if (e.body && e.body.locomotor === "soldier") {
+    if (e.body.jump !== undefined) {
+      err(`${path}.body.jump`, "a soldier-locomotor body jumps with config.jumpSpeed; body.jump is ignored — remove it");
+    }
+    if (e.body.gravity !== undefined && e.body.gravity !== 1) {
+      err(`${path}.body.gravity`, "a soldier-locomotor body uses world gravity unscaled; body.gravity is ignored — remove it or set 1");
+    }
+  }
   if (e.contact) checkRange(err, `${path}.contact.damage`, e.contact.damage, RANGES["contact.damage"]);
   if (e.life) checkRange(err, `${path}.life.ttl`, e.life.ttl, RANGES["life.ttl"]);
 

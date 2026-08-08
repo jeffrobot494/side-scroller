@@ -28,11 +28,27 @@
 // characterization suite (test/locomotion.golden.json) is the guard.
 // ---------------------------------------------------------------------------
 
-import { stepActor } from "./entities.js";
+import { stepActor, canJump, consumeJump } from "./entities.js";
 import { config } from "../game/config.js";
 
 const cx = (e) => e.x + e.w / 2;
 const cy = (e) => e.y + e.h / 2;
+
+// How hard THIS body jumps (tech/agent-navigation.md, N2). One number per body,
+// authored as `body.jump` and falling back to `config.enemyJump` — not baked in
+// by normalize, so moving the config knob moves every spec that did not author
+// one. Exported because N3's profile builder must derive an envelope from the
+// same number the locomotor actually applies; two readers of one field is fine,
+// two definitions of the impulse is what this slice removed.
+//
+// Before N2 a legged body had TWO impulses that disagreed: the reflex hop
+// (`enemyHopImpulse` 560) out-jumped the brain's own scored `jump` action
+// (`enemyJumpImpulse` 520), so deciding to jump got you less height than not
+// deciding to. A jump envelope cannot be defined against that.
+export function bodyJump(ent) {
+  const j = ent.spec && ent.spec.body ? ent.spec.body.jump : undefined;
+  return j === undefined ? config.enemyJump : j;
+}
 
 export function locomotorFor(ent) {
   const b = ent.spec.body;
@@ -44,8 +60,9 @@ export function locomotorFor(ent) {
 const LEGGED = {
   apply(ent, req, dt, scene) {
     actuateHorizontal(ent, req);
-    if (req.kind === "driveX" && req.hopToward && ent.onGround && req.hopToward.y < cy(ent) - 40) {
-      ent.vy = -config.enemyHopImpulse;
+    if (req.kind === "driveX" && req.hopToward && canJump(ent) && req.hopToward.y < cy(ent) - 40) {
+      ent.vy = -bodyJump(ent);
+      consumeJump(ent);
     }
     // physics: shared grounded integrator, gravity scaled for fractional/2x bodies
     const g = ent.spec.body.gravity;
@@ -54,7 +71,9 @@ const LEGGED = {
     face(ent, req.target);
   },
   jump(ent, vy) {
-    if (ent.onGround) ent.vy = -(vy || config.enemyJumpImpulse);
+    if (!canJump(ent)) return;
+    ent.vy = -(vy || bodyJump(ent));
+    consumeJump(ent);
   },
 };
 
@@ -78,8 +97,12 @@ const FLYING = {
     ent.y = Math.max(-80, Math.min(scene.world.height - ent.h, ent.y));
     face(ent, req.target);
   },
+  // Inert, and kept only so `locomotorFor(x).jump()` is total. A flyer never
+  // calls stepActor, so nothing ever sets its `onGround` — `body.jump` is
+  // meaningless here, which is why validate.js does not police it on flyers the
+  // way it does on soldier bodies (where it reads as authoritative and is not).
   jump(ent, vy) {
-    if (ent.onGround) ent.vy = -(vy || config.enemyJumpImpulse);
+    if (ent.onGround) ent.vy = -(vy || bodyJump(ent));
   },
 };
 
@@ -133,9 +156,10 @@ const SOLDIER = {
   },
 };
 
-// A grounded soldier hops when its goal point sits well above and it's planted.
+// A grounded soldier hops when its goal point sits well above and it can still
+// jump — planted, or inside the coyote window, same as the legged hop above.
 function wantHop(s, point) {
-  return s.onGround && point.y < cy(s) - 60;
+  return canJump(s) && point.y < cy(s) - 60;
 }
 
 // The horizontal write shared by both bodies (a flyer layers vy on top).

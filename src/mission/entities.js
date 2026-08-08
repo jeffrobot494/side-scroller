@@ -43,7 +43,33 @@ export function stepActor(a, dt, world, platforms) {
   a.onGround = false;
   collideAxis(a, platforms, "y");
 
+  // Coyote time: keep a small window open after the ground disappears in which
+  // a jump still fires (tech/agent-navigation.md, N2). Routing plans a takeoff
+  // from a node's edge, and a body that arrives a frame late otherwise walks
+  // off and falls — silently, since the request looked satisfied. Held here
+  // because this is where `onGround` is decided; every caller reads it through
+  // canJump(). It only ever ALLOWS a jump, so no reachability claim gets looser
+  // than the envelope the graph is built from.
+  if (a.onGround) a.coyote = config.coyoteTime;
+  else if (a.coyote > 0) a.coyote = Math.max(0, a.coyote - dt);
+
   a.x = clamp(a.x, 0, world.width - a.w);
+}
+
+// May this actor jump right now — planted, or inside the grace window? The one
+// place that question is answered, so the window cannot be honoured by one body
+// and ignored by another.
+export function canJump(a) {
+  return a.onGround || a.coyote > 0;
+}
+
+// Spend the jump. Closing the window matters as much as opening it: without
+// this, a body that jumps on frame 1 is airborne with `coyote` still counting
+// down on frame 2 and can jump AGAIN — a double jump, which the whole envelope
+// model rules out (see "Jump is a single fixed impulse" in the spec).
+export function consumeJump(a) {
+  a.onGround = false;
+  a.coyote = 0;
 }
 
 function collideAxis(a, platforms, axis) {
@@ -170,9 +196,9 @@ export class Soldier {
       if (Math.abs(this.vx) <= drop) this.vx = 0;
       else this.vx -= Math.sign(this.vx) * drop;
     }
-    if (jump && this.onGround) {
+    if (jump && canJump(this)) {
       this.vy = -config.jumpSpeed;
-      this.onGround = false;
+      consumeJump(this);
     }
   }
 

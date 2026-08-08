@@ -246,6 +246,29 @@ the Lab: tall perches will look like near-misses, and the 3-attempt cap will fir
 on them more than on anything else. If that reads badly, 720 is the number that
 gives enemies the same margin the level generator already guarantees the player.
 
+**As built (N2).** The `SCHEMA` entry is `enemyJump` (665); `body.jump` falls back
+to it at jump time via `bodyJump()` in `src/mission/locomotion.js`, not at
+normalize time, so moving the editor knob moves every spec that did not author
+one. Three details the plan did not fix:
+
+| | As built | Why |
+|---|---|---|
+| Coyote time | `config.coyoteTime`, **0.1s**, held on the actor as `a.coyote` by `stepActor`. Read through `canJump(a)`, spent through `consumeJump(a)` — both exported from `entities.js` | The slice line said only "coyote time in `stepActor`". `stepActor` owns `onGround`, so it must own the window, and every jump site has to ask the same question or the window is honoured by one body and ignored by another |
+| It reaches the **player**, not just enemies | `Soldier.applyMovement` jumps on `canJump(this)` | Not a decision so much as a consequence: soldiers are moved by the same integrator. It only ever allows a jump, so no envelope claim gets looser — but it *is* a player-feel change and should be eyeballed |
+| Spending a jump shuts the window | `consumeJump` zeroes `coyote` as well as `onGround` | Without it the grace frames are a free second jump, which contradicts "jump is a single fixed impulse" below and would break `jumpEnvelope` as an exact bound |
+
+**Correction to the slice table: the fixture never covered `backHop`.** N2's row
+predicted `locomotion.golden.json` would move on both the traversal hop and
+`cowardly_duelist`'s `backHop`. Regenerating moved **2 of 22 cases**
+(`roster:husk_charger`, `tpl:tpl_charger`), both purely the traversal hop — apex
+31.3px higher, no state transitions, no `onGround` flips, no horizontal drift.
+Nothing in the suite sims the duelist's `backHop`, so the roster's only scored
+jump changed 520→665 with no fixture noticing. The gap is closed by explicit
+assertions in `test/locomotion-intents.test.mjs` (impulse source, `body.jump`
+override, live config read, the coyote window, no double jump, the validation
+rule) rather than by widening the golden — a trajectory fixture cannot say where
+an impulse *came from*, which is the thing N2 actually changed.
+
 **This is a combat-feel change as well as a traversal one.** `cowardly_duelist`'s
 `backHop` — the roster's only scored jump — goes 520→665, a 28% higher retreat
 hop. Signed off with the merge; flagged here because the fixture regeneration in

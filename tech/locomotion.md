@@ -140,7 +140,10 @@ guarded by the characterization test L1 adds, plus the existing
 the MotionRequest vocabulary; `enemyspec/runtime.js` `moveEntity` now picks the
 ONE request (`motionRequest` + `controllerRequest`) and delegates actuation +
 physics + facing + jump/hop to the locomotor. Jump/hop impulses are config knobs
-(`enemyJumpImpulse` 520, `enemyHopImpulse` 560). Guarded by
+(`enemyJumpImpulse` 520, `enemyHopImpulse` 560) — **superseded 2026-08-08:**
+`tech/agent-navigation.md` N2 collapsed both into one per-body number,
+`body.jump` falling back to `config.enemyJump` (665), because two impulses that
+disagreed made a jump envelope undefinable. Guarded by
 `test/locomotion-characterization.test.mjs` (golden: `test/locomotion.golden.json`).
 - **Step 0 — lock current behavior in a characterization test.** Add
   `test/locomotion-characterization.test.mjs`: instantiate the built-in roster
