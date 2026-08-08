@@ -246,6 +246,11 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   baseline). The game must stay playable at every step.
 - **Guard every `localStorage` access** (`try/catch` + `typeof localStorage`) so
   node imports don't throw.
-- **Git:** work on `main`; commit only when asked; one commit per task; end
+- **Git:** work on `main` unless a spec is being built, which gets its own
+  branch. **Commit every slice** — a tech spec's slices (N0, N1, …) are the
+  commit unit, landed as soon as the slice's bar is green, without being asked.
+  One commit per slice, never a slice split across commits or two slices in one.
+  The spec itself commits on its own, before the first implementation commit.
+  Anything that is not a slice keeps the old rule: commit only when asked. End
   commit messages with the `Co-Authored-By` trailer.
 - **Docs/tone:** dense, plainly-formatted, neutral — no salesy language.
