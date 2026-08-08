@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: built
+status: building
 resolution: sharp
 needs: []
 tags: [ai, movement, navigation]
@@ -22,6 +22,7 @@ Everything beyond a given destination: `idea/advanced-agent-navigation.md`.
 | N1 | **The graph.** `src/game/nav.js` — nodes per body profile, directed edge kinds with second-costs, least-time routes, its own fixture. Then refactor `auditGeometry` onto it | **Unchanged, and now provable** — N0's fixture is what proves it |
 | N2 | **One jump per body.** `body.jump` on the EnemySpec schema, read by `LEGGED.jump` and the instructed hop; `enemyHopImpulse` and `enemyJumpImpulse` retire into its default of **665**. Coyote time in `stepActor` | **Changed.** Every grounded enemy jumps higher: traversal hop 560→665, and `cowardly_duelist`'s `backHop` 520→665 — the only `{ jump: {} }` in the roster. Regenerate `test/locomotion.golden.json` deliberately. Generated levels do **not** move |
 | N3 | **Route following.** Body→envelope mapping **including the soldier-locomotor branch**, graph cache, routing in the `moveOrder` branch and the **point-resolving** controllers (`chase`, `moveTo`), explicit `driveX { hop }` in both locomotors, partial-path fallback, stuck detector, 3-attempt cap, navigation senses | **Changed.** Grounded agents on a resolved destination traverse terrain — companions included, on the player's envelope. `keepDistance` agents and all combat behaviour untouched |
+| N4 | **Retire the edge, not the destination.** An edge that hits the attempt cap is banned for that agent and excluded from routing, so the agent takes the next-best route. Bans and attempt counts survive a destination change; only a total routing failure still stops the agent | **Changed, and a bug fix.** An agent that fails a jump three times now routes around it instead of giving up. Where no alternative exists, behaviour is exactly as N3 |
 
 N0 exists because the suite cannot currently detect the refactor changing
 generated output: `test/gen.test.mjs` compares two `generateLevel` calls inside
@@ -32,6 +33,21 @@ with nothing behind it.
 
 The Behavior Lab (`design/behavior-lab.md`) is how N3 is evaluated by eye, and is
 scheduled alongside it in `sprints/2026-08.md`.
+
+**N4 exists because N3 shipped a defect, found by measurement.** On seed 2026 a
+`husk_charger` stands on a ground slab split in two by a 91px pillar. The graph
+links the halves with a flat hop — gap 100px against a 139.65px `flatReach` — but
+the body is only above the pillar for 0.28s, which at 210px/s is 58.7px of
+clearance. The hop cannot be made. The agent tried three times, landed exactly
+where it started, and stopped **while a working route existed the whole time**:
+up onto the pillar, then down the far side. Dijkstra never chose it because the
+impossible hop is cheaper (0.665s against 0.774s), and the cap retired the
+destination rather than the edge. Two of eight chargers stalled this way across
+eight generated levels.
+
+This is the failure the "edges ignore ceilings" approximation always predicted.
+The approximation is fine; what was wrong is what the cap did on catching it.
+N4 does not make the graph stricter — see "Must not regress" for why that matters.
 
 ## Reuses
 
@@ -100,7 +116,8 @@ left as a second implementation.
 |---|---|
 | `src/game/nav.js` (new) | Graph construction from a platform list + a body profile, and the route query. Pure data in, pure data out — no scene, no entities, no rendering |
 | `src/game/gen/levelgen.js` | `auditGeometry` becomes a caller of the shared builder. Its spawn-node lookup and exit test stay here — they are level facts, not graph facts |
-| `src/mission/navigation.js` (new — **as built**, see below) | Body→profile mapping, the scene-keyed graph cache, and the per-frame route follower |
+| `src/mission/navigation.js` (new — **as built**, see below) | Body→profile mapping, the scene-keyed graph cache, the per-frame route follower, and (N4) the per-agent ban ledger |
+| `src/game/nav.js` | N4: `route` and `costsFrom` take an optional set of edges to exclude. Nothing else in the module changes, and the graph itself is not made stricter |
 | `src/mission/enemyspec/runtime.js` | Calls the follower from the `moveOrder` branch and the point-resolving controllers |
 | `src/mission/enemyspec/perception.js` | The new navigation senses |
 | `src/game/enemyspec/schema.js` | The same sense names added to `vocabularyDoc()`, or authored specs cannot reference them |
@@ -157,6 +174,7 @@ when it drags a platform.
 | Controllers that resolve a point (`chase`, `moveTo`) | `holdRange` — `keepDistance` steering is untouched until destination scoring exists |
 | Which numbers a body profile is built from | The locomotors themselves. `SOLDIER` keeps translating onto `Soldier.applyMovement`; companions are not migrated to `LEGGED` |
 | `auditGeometry`'s implementation | Its `{ traversable, unreachable, offenders }` return shape, and the **object identity** of `offenders` — `generateLevel` culls via `groups.findIndex(g => g.includes(offenders[0]))` |
+| N4: which edges an agent will route over | Which edges **exist**. Banning is per agent and lives on the agent; the graph is shared and cached per profile, and one agent's failed jump must never become another's missing edge |
 
 **Routing attaches to the controllers, not only to `moveOrder`.** `ent.moveOrder`
 is written in exactly one place, the brain's `moveTo` action (`runtime.js:578`),
@@ -192,6 +210,7 @@ arrival — those stay in `src/mission/enemyspec/brain.js` and the utility scori
 | Suite | What it actually guards |
 |---|---|
 | `test/gen.test.mjs` | Determinism within a run, `report.traversable`, `report.unreachable === 0`. **Not** that generated levels are unchanged — that is N0's job |
+| `test/levelgen-golden.test.mjs` | **N4 cannot reach generation, structurally.** `auditGeometry` imports only `buildGraph` and `reachableFrom`; `route` and `costsFrom` have no generation-side caller. That is why N4 fixes the symptom in the router rather than making `linkBetween` reject the arc — a stricter link test would change what the audit culls, and this fixture is what would catch it. The stricter test is the honest fix and it is not this sprint's |
 | `test/locomotion-characterization.test.mjs` | Whole-`updateSpecEnemy` root trajectories against `test/locomotion.golden.json`, to a 2e-3 tolerance — and `brainState.current`. A routing change that shifts a state transition fails this even with the locomotor untouched. **N2 legitimately changes it** (`backHop` 520→665, traversal hop 560→665) — regenerate once, deliberately, and never as a reflex |
 | `test/locomotion-intents.test.mjs` | Dash verticals per body, fire-team routing, and the **companion escort outcome** — 180 frames of `updateCompanionSpec`, asserting the companion advances past +300 and stays within 160 of its leader. The escort loop is pure `moveTo`, so N3 changes its code path directly. This is the assertion most likely to break |
 | `test/enemyspec-brain.test.mjs` | Track and utility scoring **and** `sense.*` values — it pins the exact file N3 edits |
@@ -207,7 +226,8 @@ cannot be verified headlessly and is an eyeball check in the Lab.
 |---|---|---|
 | Takeoff is assumed to be at full horizontal speed | `LEGGED` sets `vx = req.v` instantly, so this holds for spec enemies; the player `Soldier` accelerates at 2600 px/s² toward `config.runSpeed` and under-reaches `flatReach` from a standstill | The 3-attempt cap. `levelgen` already ships this assumption for the soldier, so the graph inherits it rather than introducing it |
 | Drop edges get a flat-hop reachability *budget* | The link test gives a drop of any depth exactly `flatReach` of horizontal budget and ignores fall time. Conservative — it under-promises how far a fall carries — and unchanged by N1, because changing it would change what the audit accepts | Nothing. A drop the graph refuses is a drop an agent could actually have made, which costs a route, never a fall |
-| Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead can clip a jump the graph believes in | The stuck detector, then the attempt cap |
+| Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead — or a pillar between two spans of the same slab — can clip a jump the graph believes in | The stuck detector, then the attempt cap, which **retires the edge and reroutes** (N4). Before N4 it retired the destination, which is the bug N4 fixes |
+| N4: three failures ban an edge permanently, with no decay | An edge that cannot be flown is a fact about geometry and a body, not about the moment — which is also why bans survive a destination change. Without that, a chaser following a moving target resets its count every tick and jumps into the same pillar forever | Nothing, deliberately. A transient failure — knocked back mid-air, landed on a corpse — can retire a legal edge for that agent's lifetime. Accepted because a body that can make an edge makes it on the first attempt, and the alternative is a decay constant with no evidence behind it. Graph invalidation clears the ledger |
 | An up-edge is not charged for its takeoff clearance | `gapBetween` reports 0 for overlapping spans, but a body cannot take off from *underneath* the destination — platforms are solid from below. The real takeoff is a body width outside the destination's footprint, and that width was never charged against `maxRunTo(dh)` | The attempt cap. Confirmed reachable in generated terrain: the N0 fixture is unchanged, and generation's own audit uses the same uncharged measure, so nothing gets *promised* that was not promised before |
 | Nodes are built for a standing body | Crouching drops the hitbox 46→22, changing headroom but not the envelope | None needed. A crouched agent has strictly more clearance, so the graph errs safe |
 | Costs are seconds under ideal traversal | No allowance for turning, waiting, or being shot at | Nothing, deliberately. Costs order routes; they are not a schedule |
