@@ -18,25 +18,35 @@ is a roadmap where nothing is.
 
 ## Now
 
-**August 2026 sprint — `sprints/2026-08.md`.** Agents that know where they are.
+**August 2026 sprint — `sprints/2026-08.md`.** A submitted game-jam build.
 
-Floor: click a point in the Behavior Lab and one agent walks, climbs, and drops
-its way there. Full delivery: one enemy spec navigates in a real mission, and
-companions escort by navigating.
+| | |
+|---|---|
+| Deadline | **Aug 30, 10:00.** External, no slip |
+| Build window | Aug 6–26, minus Aug 15. Aug 27–29 is polish and submission |
+| Must be | Playable **and completable** by a judge in 15–20 minutes |
+| Succeeds if | A stranger finishes a campaign and can describe the premise |
 
-Nothing outside the sprint starts until it closes on Aug 31.
+Nineteen tasks, paired design/implement per feature: agent navigation and the
+Behavior Lab, AI companions, an intelligent enemy on the companion brain, campaign
+structure, the story generator, cutscenes, and enemy dialogue. Calendar is written
+after the Aug 8–9 velocity probe.
+
+Nothing outside the sprint starts until it closes.
 
 ## Next
 
-Ordered. Designed and ready to build; waiting on capacity, not on thinking.
+Ordered. Waiting on capacity, not on thinking.
 
 | # | Item | Design |
 |---|---|---|
-| 1 | Spatial senses — my node, target node, hops/seconds, gap ahead | `tech/agent-navigation.md` §N2 |
-| 2 | Travel — `objective`/`task` fields, destination, route following, explicit jump instruction | `tech/agent-navigation.md` §N3 |
-| 3 | Engage — destination scoring under combat weights, line of shot | `tech/agent-navigation.md` §N4 |
-| 4 | Roster content — objectives + nav-aware behavior on built-in enemies | `tech/agent-navigation.md` §N5 |
-| 5 | Sound Slice 4 — real clips into the existing cue slots | `tech/sound.md` |
+| 1 | Combat destination scoring — where to stand under fire, line of shot | `idea/advanced-agent-navigation.md` |
+| 2 | Sound Slice 4 — real clips into the existing cue slots | `tech/sound.md` |
+| 3 | Level generation Slice 2 — LLM flavour over the procedural baseline | `tech/level-generation.md` |
+| 4 | Runtime asset generation — images through Player2 | `tech/asset-generation.md` |
+
+Items 3 and 4 were cut from August on Aug 6; the cut is recorded with its reason
+in the sprint's Out of scope table.
 
 ## Needs design
 
@@ -44,12 +54,11 @@ Wanted, but starting would mean thinking first. Sketches exist; none is a design
 
 | Item | Sketch |
 |---|---|
-| Group coordination — team blackboard, attack tokens, roles that mean something | `tech/behavior-lab.md` Slice 3 |
-| Player-habit tracking — counters for jump/camp/dodge patterns, counter-actions | `tech/behavior-lab.md` Slice 4 |
-| LLM tuning in the loop — adjust intelligence weights, never difficulty | `tech/behavior-lab.md` Slice 5 |
-| Level generation Slice 2 — LLM flavor over the procedural baseline | `tech/level-generation.md` |
-| Asset generation — images through Player2 | `tech/asset-generation.md` |
-| Bond system · city traversal · design app · animation factory · parallax biomes | respective docs |
+| Group coordination — team blackboard, attack tokens, roles that mean something | none — parked |
+| Player-habit tracking — counters for jump/camp/dodge patterns, counter-actions | none — parked |
+| LLM tuning in the loop — adjust intelligence weights, never difficulty | none — parked |
+| Improved enemy generation | none — cut from August |
+| Bond system · city traversal · animation factory · parallax biomes | respective `idea/` docs |
 
 ## Stalled — needs a decision, not more work
 
@@ -58,8 +67,7 @@ leaving them in "Next" hides the fact that the blocker is a choice, not effort.
 
 | Item | Situation | Decision needed |
 |---|---|---|
-| Player2 integration | Chat completions wired (Enemy Designer Generate only). Image gen and the rest unused. Needs the app running + a client id in config. | Finish it, or scope it to text-only and stop listing image gen as pending |
-| Behavior Lab v1 | Built and working, but too complex to reason about. Being replaced. | Delete on v2 landing, or keep as a second tool |
+| Behavior Lab v1 | Built and working, but too complex to reason about. Being replaced by v2 this sprint. | Delete on v2 landing, or keep as a second tool |
 | Locomotor L4+ | L1–L3 built; `wheeled`/`limbed`/`crawler` deliberately deferred. | None for now — deferred on purpose, listed so it is not mistaken for an oversight |
 
 ## Shipped
@@ -74,7 +82,8 @@ description of what the game does today; this is only the index.
 | Level generation Slice 1 — seeded procedural levels, leads, difficulty budgets | `tech/level-generation.md` |
 | Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `tech/sound.md` |
 | Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `tech/weapon-designer.md` |
-| Behavior Lab Slice 1 — two teams, overlays, utility scoreboard, time control | `tech/behavior-lab.md` |
+| Behavior Lab Slice 1 — two teams, overlays, utility scoreboard, time control | v1, being replaced |
+| Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 
 ## Known issues
@@ -82,16 +91,22 @@ description of what the game does today; this is only the index.
 | Issue | Where |
 |---|---|
 | `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
-| Flyers can grind against terrain — steering pushes in while resolution pushes out | `tech/agent-navigation.md` non-goals |
-| Grounded bodies disagree on when a steering intent implies a jump; one ignores it entirely | fixed by Next #2 |
+| Flyers can grind against terrain — steering pushes in while resolution pushes out | out of scope in `sprints/2026-08.md` |
+| Grounded bodies guess when a steering intent implies a jump, from a 40px heuristic with no terrain knowledge | fixed by `tech/agent-navigation.md` N3 |
+| Two enemy jump impulses disagree, and the reflex hop out-jumps the deliberate jump | fixed by `tech/agent-navigation.md` N2 |
+| No coyote time — a jump one frame after leaving a ledge is silently dropped | fixed by `tech/agent-navigation.md` N2 |
+| `tech/behavior-lab.md` does not exist, blocking sprint task 4 | write it via `/spec` |
 
 ## Conventions
 
-- A document is exactly one of: **design** (what it should be), **roadmap**
-  (this file), **status** (`CLAUDE.md`, what exists now), **decision log** (why
-  we rejected things). Never two at once — that is what made `tech/behavior-lab.md`
-  unreadable.
-- Design docs hold still. They do not track their own progress and carry no DONE
-  annotations.
-- An item reaches Shipped only when its tests are green and `CLAUDE.md` describes
-  it.
+Document types, folders, naming, and the seven-part tech-spec rule live in
+`DOC-SCHEMA.md` — that file is the contract and this one does not restate it.
+
+What belongs here specifically:
+
+- **This file holds status.** Design and tech docs hold still: no DONE
+  annotations, no progress notes, no percentages.
+- **`CLAUDE.md` describes what exists**; this file describes what is next. When
+  they disagree about the present, `CLAUDE.md` wins; about the future, this does.
+- An item reaches **Shipped** only when its tests are green and `CLAUDE.md`
+  describes it.

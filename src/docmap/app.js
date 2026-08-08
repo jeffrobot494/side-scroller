@@ -198,6 +198,10 @@ export function lint() {
       // filename is usually prose — a naming example in DOC-SCHEMA, an old
       // filename quoted in WORKING-NOTES — and flagging those is noise.
       if (!ref.includes("/")) continue;
+      // ...and only into a folder the viewer actually indexes. A path into
+      // `src/` or `.claude/` is a real file this app never loads, so "does not
+      // exist" would be a lie. Tech specs cite code constantly.
+      if (!DOC_DIRS.some((dir) => ref.startsWith(dir))) continue;
       if (resolve(ref)) continue;
       const amb = (byName.get(nameOf(ref)) || []).length > 1;
       out.push([d, amb ? `links to "${ref}", which is ambiguous — use the full path` : `links to "${ref}", which does not exist`, false]);

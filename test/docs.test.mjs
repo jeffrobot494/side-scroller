@@ -28,13 +28,21 @@ const mdIn = (dir) => {
 // A backticked token that looks like a repo path. Trailing "/" means a folder.
 const CITATION = /`((?:src|test)\/[A-Za-z0-9_./-]*)`/g;
 
+// A spec has to name modules that do not exist yet — that is what "Where the code
+// goes" is for. It declares them by marking the path `(new)`, and that declaration
+// exempts the path everywhere in the document, so Slices can reference it too.
+const DECLARED_NEW = /`((?:src|test)\/[A-Za-z0-9_./-]*)`\s*\(new\)/g;
+const declaredNew = (text) => new Set([...text.matchAll(DECLARED_NEW)].map((m) => m[1]));
+
 export default async function run(t) {
   // ---- 1. every code path a tech spec cites must exist --------------------
   const bad = [];
   for (const rel of mdIn("tech")) {
     const text = readFileSync(join(ROOT, rel), "utf8");
+    const planned = declaredNew(text);
     for (const m of text.matchAll(CITATION)) {
       const cited = m[1];
+      if (planned.has(cited)) continue; // declared as a file this spec creates
       if (!existsSync(join(ROOT, cited))) bad.push(`${rel} cites \`${cited}\`, which does not exist`);
     }
   }
