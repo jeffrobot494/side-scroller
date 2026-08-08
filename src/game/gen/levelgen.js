@@ -23,6 +23,7 @@
 // ---------------------------------------------------------------------------
 
 import { config } from "../config.js";
+import { buildGraph, reachableFrom } from "../nav.js";
 import { missionRoster } from "../enemyspecs.js";
 import { makeRng, int, range, snap, pick, shuffle } from "./rng.js";
 import { jumpEnvelope } from "./reach.js";
@@ -184,7 +185,9 @@ export function generateLevel(params = {}) {
 const MAX_STACK_RISE = 380; // absolute height cap — keeps headroom in the 540px world
 const SOLDIER_W = 30; // mission soldier hitbox (entities.js)
 const SOLDIER_H = 46; // standing height — drives walk-under/stand clearances
-const HEADROOM = SOLDIER_H + 4; // vertical room required to stand or walk somewhere
+// The body the audit measures against. Physics come from `env` (the caller's
+// jump envelope), so only the box lives here; nav.js owns the headroom margin.
+const SOLDIER_PROFILE = { w: SOLDIER_W, h: SOLDIER_H };
 const CHAIN_MIN = 72; // min chained rise: 72 − 20 thickness = 52px ≥ SOLDIER_H
 const MIN_PERCH_RISE = 24; // shortest perch worth placing; below this a low-jump
 // level stays flat (you basically can't clear anything). Above it, perch/box
@@ -349,55 +352,25 @@ function lShape(rng, x0, x1, hop, step, chains) {
 function auditGeometry(ground, groups, env, exit) {
   const plats = [ground, ...groups.flat()];
 
-  // Usable stand segments per platform, in soldier-left-edge space: start from
-  // [x, x+w−30], then cut out spans where a piece above leaves < HEADROOM.
-  const nodes = [];
-  for (const p of plats) {
-    let segs = [[p.x, p.x + p.w - SOLDIER_W]];
-    for (const q of plats) {
-      if (q === p || q.y >= p.y) continue;
-      if (p.y - (q.y + q.h) >= HEADROOM) continue;
-      segs = cutSegs(segs, q.x - SOLDIER_W, q.x + q.w);
-    }
-    for (const [a, b] of segs) if (b - a >= 6) nodes.push({ p, a, b });
-  }
+  // The nodes and the reachability test are the shared nav graph now — the same
+  // code an agent routes on, so generation can never promise a level the runtime
+  // disagrees with. `env` is already the soldier's envelope; the profile just
+  // pairs it with the soldier's box.
+  const graph = buildGraph(plats, { ...SOLDIER_PROFILE, envelope: env });
 
-  // Flood-fill from the spawn's ground segment through jumpable/droppable links.
-  const start = nodes.find((n) => n.p === ground && n.a <= SPAWN_X && SPAWN_X <= n.b + SOLDIER_W);
-  const reached = new Set(start ? [start] : []);
-  const queue = start ? [start] : [];
-  while (queue.length) {
-    const na = queue.pop();
-    for (const nb of nodes) {
-      if (reached.has(nb)) continue;
-      const dh = na.p.y - nb.p.y; // >0 = target segment sits higher
-      if (dh > env.maxRise) continue;
-      const reach = dh > 0 ? env.maxRunTo(dh) : env.flatReach;
-      if (reach < 0) continue;
-      const gap = Math.max(nb.a - na.b, na.a - nb.b, 0);
-      if (gap > reach) continue;
-      reached.add(nb);
-      queue.push(nb);
-    }
-  }
+  // Spawn → the rest of the level, following edge direction.
+  const start = graph.nodes.find((n) => n.plat === ground && n.a <= SPAWN_X && SPAWN_X <= n.b + SOLDIER_W);
+  const reached = reachableFrom(graph, start ? start.id : null);
+  const reachedNodes = [...reached].map((id) => graph.nodes[id]);
 
-  const reachedPlats = new Set([...reached].map((n) => n.p));
+  // Offenders are the ORIGINAL platform objects: generateLevel culls by identity
+  // (`groups.findIndex((g) => g.includes(offenders[0]))`), so a copy breaks it.
+  const reachedPlats = new Set(reachedNodes.map((n) => n.plat));
   const offenders = plats.slice(1).filter((p) => !reachedPlats.has(p));
-  const traversable = [...reached].some(
-    (n) => n.p === ground && n.b + SOLDIER_W >= exit.x && n.a <= exit.x + exit.w
+  const traversable = reachedNodes.some(
+    (n) => n.plat === ground && n.b + SOLDIER_W >= exit.x && n.a <= exit.x + exit.w
   );
   return { traversable, unreachable: offenders.length, offenders };
-}
-
-// Remove [lo, hi] from a list of [a, b] intervals.
-function cutSegs(segs, lo, hi) {
-  const out = [];
-  for (const [a, b] of segs) {
-    if (hi <= a || lo >= b) { out.push([a, b]); continue; }
-    if (lo > a) out.push([a, lo]);
-    if (hi < b) out.push([hi, b]);
-  }
-  return out;
 }
 
 // Candidate stand points: the top of each perch, plus a spaced set of ground
