@@ -253,4 +253,13 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   The spec itself commits on its own, before the first implementation commit.
   Anything that is not a slice keeps the old rule: commit only when asked. End
   commit messages with the `Co-Authored-By` trailer.
+- **A slice that deviates from its spec edits the spec, in the same commit.**
+  Building always teaches something the spec got wrong — a number, an ordering,
+  an approximation that turned out cheap to fix. Whenever the code and the spec
+  disagree, the spec is what is wrong, because **the spec is the thing the next
+  session reads.** Record it where it belongs (an "As built" note under the
+  claim it corrects, not a changelog at the bottom), say what the plan assumed
+  and what shipped, and put the *reason* in the commit message. Never leave a
+  deviation living only in a commit message, a comment, or a conversation — all
+  three are invisible to whoever picks the spec up next.
 - **Docs/tone:** dense, plainly-formatted, neutral — no salesy language.
