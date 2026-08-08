@@ -57,6 +57,11 @@ const nameOf = (path) => path.split("/").pop().replace(/\.md$/i, "").toLowerCase
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 let mockups = new Set(); // paths of "<doc>.mockup.html" found beside a doc
+// Repo modules that exist on disk. The browser cannot stat the filesystem, so
+// this stays empty here and the "implementation has started" backstop is inert;
+// `test/docs.test.mjs` fills it in, which is where that check actually runs.
+let builtModules = new Set();
+export const setModules = (paths) => { builtModules = new Set(paths); };
 let docs = [];
 let byId = new Map();
 let byName = new Map(); // bare name -> [id...]; ambiguous names resolve to nothing
@@ -207,18 +212,71 @@ export function lint() {
       out.push([d, amb ? `links to "${ref}", which is ambiguous — use the full path` : `links to "${ref}", which does not exist`, false]);
     }
   }
-  // A design doc in a sprint is about to be built, so its tech spec must be
-  // complete. No tech doc at all is the loudest version of the same problem.
+  // An incomplete tech spec blocks ONLY the thing it specifies, and only once
+  // someone has started building it. Writing a design doc must never redden the
+  // bar — design work would be punished, which is backwards. `status` is the
+  // trigger: `building`/`built` means implementation has begun, so the spec has
+  // to be finished. `unbuilt` is a plan, and a plan is allowed to be incomplete.
+  const missingParts = (spec) => {
+    const gaps = TECH_SECTIONS.filter((s) => !new RegExp(`^##\\s+${s}\\s*$`, "mi").test(spec.body));
+    if (!spec.needs) gaps.push("`needs` in the frontmatter");
+    return gaps;
+  };
+  const started = (spec) => spec.status === "building" || spec.status === "built";
+  const specFor = (slug) => byId.get(`tech/${slug}`);
+
   for (const d of docs) {
     if (d.type !== "design" || !d.sprint) continue;
-    const spec = byId.get(`tech/${d.name}`);
-    if (!spec) { out.push([d, `in sprint ${d.sprint} with no tech spec — expected tech/${d.name}.md`, true]); continue; }
-    for (const s of TECH_SECTIONS) {
-      if (!new RegExp(`^##\\s+${s}\\s*$`, "mi").test(spec.body)) {
-        out.push([spec, `tech spec is missing "## ${s}"`, true]);
-      }
+    const spec = specFor(d.name);
+    if (!spec) {
+      out.push([d, `in sprint ${d.sprint} with no tech spec — write one before building, via /spec ${d.name}`, false]);
+      continue;
     }
-    if (!spec.needs) out.push([spec, "tech spec has no `needs` — list prerequisites, or `needs: []`", true]);
+    const gaps = missingParts(spec);
+    if (!gaps.length) continue;
+    const why = `tech spec is missing ${gaps.map((g) => (g.startsWith("`") ? g : `"## ${g}"`)).join(", ")}`;
+    // blocking only if this thing is being built right now
+    out.push([spec, started(spec) ? `${why} — and its status is "${spec.status}"` : why, started(spec)]);
+  }
+
+  // ...and a spec being built cannot rest on a prerequisite that is not finished.
+  // That is the one case where somebody else's incomplete spec blocks you.
+  for (const spec of docs) {
+    if (spec.type !== "tech" || !started(spec)) continue;
+    const needs = Array.isArray(spec.needs) ? spec.needs : String(spec.needs || "").split(",").map((s) => s.trim()).filter(Boolean);
+    for (const slug of needs) {
+      const dep = specFor(slug.replace(/^tech\//, "").replace(/\.md$/, ""));
+      if (!dep) { out.push([spec, `needs "${slug}", which has no tech spec`, true]); continue; }
+      const gaps = missingParts(dep);
+      if (gaps.length) out.push([spec, `needs "${slug}", whose spec is incomplete (${gaps.length} part(s) missing)`, true]);
+    }
+  }
+
+  // Backstop for a spec whose status was never flipped: if a module it declared
+  // as `(new)` now exists on disk, implementation has plainly begun.
+  for (const spec of docs) {
+    if (spec.type !== "tech" || started(spec)) continue;
+    const gaps = missingParts(spec);
+    if (!gaps.length) continue;
+    const declared = [...spec.body.matchAll(/`((?:src|test)\/[A-Za-z0-9_./-]*)`\s*\(new\)/g)].map((m) => m[1]);
+    if (declared.some((p) => builtModules.has(p))) {
+      out.push([spec, `implementation has started (${declared.find((p) => builtModules.has(p))} exists) but the spec is still missing ${gaps.length} part(s)`, true]);
+    }
+  }
+
+  // Sprint coverage. The gate above only sees design docs carrying `sprint:` —
+  // a feature whose design task is not done yet has no doc, so it is invisible,
+  // and the blocker count reads reassuringly low while most of the sprint is
+  // unrepresented. Not starting a task is not a gap, so this never blocks; being
+  // unable to see it is, so it is always shown.
+  const sprint = docs.filter((d) => d.type === "sprint").sort((a, b) => a.name.localeCompare(b.name)).pop();
+  if (sprint) {
+    const rows = sprint.body.split("\n").filter((l) => /^\|\s*\d+\s*\|/.test(l) && /—\s*design\s*\|/.test(l));
+    const missing = rows.filter((l) => !/design\/[a-z0-9-]+\.md/.test(l));
+    if (missing.length) {
+      const names = missing.map((l) => l.split("|")[2].trim().replace(/\s*—\s*design$/, ""));
+      out.push([sprint, `${rows.length - missing.length}/${rows.length} design tasks have a doc — not yet designed, so the spec gate cannot see them: ${names.join(", ")}`, false]);
+    }
   }
 
   for (const m of mockups) {

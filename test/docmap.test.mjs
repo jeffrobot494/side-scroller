@@ -2,7 +2,7 @@
 // The views need a browser; those are an eyeball check at /design.html.
 
 import { render, renderInline } from "../src/docmap/md.js";
-import { parse, index, resolve, backlinksFor, lint } from "../src/docmap/app.js";
+import { parse, index, resolve, backlinksFor, lint, setModules } from "../src/docmap/app.js";
 
 const link = (ref) => {
   const slug = ref.split("/").pop().replace(/\.md$/i, "").toLowerCase();
@@ -91,40 +91,61 @@ export default async function run(t) {
   t.ok("root doc broken link is caught", rows.some(([d, w]) => d.id === "roadmap" && w.includes("gone.md")));
   t.ok("root doc is exempt from schema rules", !rows.some(([d, w]) => d.id === "roadmap" && w.includes("no type")));
 
-  // ---- a tech spec entering a sprint must be complete --------------------
+  // ---- the seven parts, and WHEN they are enforced -----------------------
+  // An incomplete spec blocks only the thing it specifies, and only once someone
+  // is building from it. Writing a design doc must never redden the bar.
   const SECTIONS = ["Reuses","Where the code goes","The seam","Slices","Must not regress","Approximations"];
-  const full = "---\ntype: tech\ncategory: scenes\nneeds: [nav]\n---\n# T\n"
-    + SECTIONS.map((s) => `## ${s}\n\nx\n`).join("\n");
+  const spec = (status, parts = SECTIONS, needs = "[nav]") =>
+    `---\ntype: tech\ncategory: scenes\nstatus: ${status}\nneeds: ${needs}\n---\n# T\n`
+    + parts.map((s) => `## ${s}\n\nx\n`).join("\n");
+  const design = "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n";
 
-  index([
-    parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n"),
-    parse("tech/thing.md", full),
-  ]);
-  t.eq("a complete tech spec passes", lint().length, 0);
+  index([parse("design/thing.md", design), parse("tech/thing.md", spec("unbuilt"))]);
+  t.eq("a complete spec passes", lint().length, 0);
 
-  index([
-    parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n"),
-    parse("tech/thing.md", "---\ntype: tech\ncategory: scenes\n---\n# T\n\n## Slices\n\nx\n"),
-  ]);
-  const gaps = lint().map(([, w]) => w);
-  t.eq("five missing sections are named", gaps.filter((w) => w.includes("is missing")).length, 5);
-  t.ok("a present section is not flagged", !gaps.some((w) => w.includes('"## Slices"')));
-  t.ok("missing needs is flagged", gaps.some((w) => w.includes("needs")));
+  index([parse("design/thing.md", design), parse("tech/thing.md", spec("unbuilt", ["Slices"]))]);
+  let specRows = lint();
+  t.eq("an unbuilt spec missing parts does not block", specRows.filter(([, , b]) => b).length, 0);
+  t.ok("...but it is still reported", specRows.some(([, w]) => w.includes("missing")));
+  t.ok("the parts are named in one row", specRows.some(([, w]) => w.includes("Reuses") && w.includes("Approximations")));
+  t.ok("a present section is not named", !specRows.some(([, w]) => w.includes('"## Slices"')));
 
-  index([parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n")]);
-  t.ok("no tech spec at all is flagged", lint().some(([, w]) => w.includes("no tech spec")));
+  index([parse("design/thing.md", design), parse("tech/thing.md", spec("building", ["Slices"]))]);
+  t.ok("a spec being BUILT from must be complete", lint().some(([, w, b]) => b && w.includes("building")));
 
-  // and none of it fires for a design doc outside a sprint
+  index([parse("design/thing.md", design), parse("tech/thing.md", spec("built", SECTIONS, ""))]);
+  t.ok("missing `needs` blocks once built", lint().some(([, w, b]) => b && w.includes("needs")));
+
+  index([parse("design/thing.md", design)]);
+  specRows = lint();
+  t.ok("no spec at all is reported", specRows.some(([, w]) => w.includes("no tech spec")));
+  t.eq("...and does not block, so design work is never punished", specRows.filter(([, , b]) => b).length, 0);
+
   index([parse("design/thing.md", "---\ntype: design\ncategory: scenes\n---\n# Thing\n")]);
   t.eq("outside a sprint, nothing is required", lint().length, 0);
 
-  // ---- gaps are split into blocking and minor ----------------------------
+  // a prerequisite that is not finished blocks the thing that needs it
   index([
-    parse("design/thing.md", "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n"),
-    parse("tech/nocat.md", "---\ntype: tech\n---\n# No category\n"),
+    parse("design/thing.md", design),
+    parse("tech/thing.md", spec("building", SECTIONS, "[dep]")),
+    parse("tech/dep.md", spec("unbuilt", ["Slices"])),
   ]);
-  const split = lint();
-  t.ok("a missing tech spec blocks", split.some(([, w, b]) => b && w.includes("no tech spec")));
-  t.ok("a missing category does not block", split.some(([, w, b]) => !b && w === "no category"));
-  t.ok("every row carries a blocking flag", split.every(([, , b]) => typeof b === "boolean"));
+  t.ok("an incomplete prerequisite blocks its dependent", lint().some(([, w, b]) => b && w.includes('needs "dep"')));
+
+  index([
+    parse("design/thing.md", design),
+    parse("tech/thing.md", spec("building", SECTIONS, "[gone]")),
+  ]);
+  t.ok("a prerequisite with no spec blocks too", lint().some(([, w, b]) => b && w.includes('needs "gone"')));
+
+  // the backstop: status never flipped, but the declared module now exists
+  const withNew = "---\ntype: tech\ncategory: scenes\nstatus: unbuilt\nneeds: []\n---\n# T\n"
+    + "## Slices\n\n`src/game/nav.js` (new)\n";
+  index([parse("design/thing.md", design), parse("tech/thing.md", withNew)]);
+  t.eq("a declared module that does not exist yet does not block", lint().filter(([, , b]) => b).length, 0);
+  setModules(["src/game/nav.js"]);
+  t.ok("...but once it exists, the incomplete spec blocks", lint().some(([, w, b]) => b && w.includes("implementation has started")));
+  setModules([]);
+
+  t.ok("every row carries a blocking flag", lint().every(([, , b]) => typeof b === "boolean"));
 }

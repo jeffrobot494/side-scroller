@@ -5,9 +5,10 @@
 //   1. A spec that cites code which does not exist. Either it was written from
 //      memory instead of from the repo, or the module moved and the spec rotted.
 //      Both are silent failures that a builder then follows off a cliff.
-//   2. A design doc entering a sprint whose tech spec is missing one of the
-//      seven required parts. The viewer's Gaps tab already shows this; the
-//      regression bar is where it actually stops someone.
+//   2. A spec that is missing one of the seven required parts WHILE SOMEBODY IS
+//      BUILDING FROM IT. An incomplete spec for work nobody has started is a
+//      plan, not a defect — gating on that would punish writing design docs,
+//      which is backwards. See "When the seven are enforced" in DOC-SCHEMA.md.
 //
 // Rule 1 runs over tech/ only. Design docs are not supposed to name modules at
 // all (see the standing rule in CLAUDE.md), so a citation there is its own bug.
@@ -15,7 +16,7 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
-import { parse, index, lint } from "../src/docmap/app.js";
+import { parse, index, lint, setModules } from "../src/docmap/app.js";
 
 const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 const DOC_DIRS = ["design", "tech", "idea", "sprints", "archive"];
@@ -54,6 +55,16 @@ export default async function run(t) {
   for (const f of ["ROADMAP.md", "DOC-SCHEMA.md", "CLAUDE.md", "WORKING-NOTES.md"]) {
     if (existsSync(join(ROOT, f))) docs.push(parse(f, readFileSync(join(ROOT, f), "utf8")));
   }
+  // The browser cannot stat files, so feed lint() the module list for its
+  // "implementation has started" backstop.
+  const walk = (dir, acc = []) => {
+    for (const e of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`;
+      e.isDirectory() ? walk(rel, acc) : acc.push(rel);
+    }
+    return acc;
+  };
+  setModules([...walk("src"), ...walk("test")]);
   index(docs);
 
   // A spec about to be followed that names no module at all was written from
@@ -107,8 +118,8 @@ export default async function run(t) {
   // One assertion, not one per gap — a wall of red is a wall people stop reading.
   t.ok(
     blocking.length
-      ? `sprint work is not ready to build — ${blocking.length} blocking gap(s):\n      ${blocking.join("\n      ")}`
-      : "every sprint doc has a complete tech spec",
+      ? `work in progress has an incomplete spec — ${blocking.length} blocking gap(s):\n      ${blocking.join("\n      ")}`
+      : "nothing is being built from an incomplete spec",
     blocking.length === 0,
   );
 }

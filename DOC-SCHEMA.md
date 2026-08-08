@@ -110,6 +110,20 @@ Background sections go after the six, not before them.
 
 Heading text is matched exactly, so the linter can check it.
 
+**When the seven are enforced.** An incomplete spec blocks the thing it specifies
+and nothing else — writing a design doc must never redden the bar, or design work
+gets punished for existing. The trigger is the tech spec's `status`:
+
+| Spec `status` | Missing a part | |
+|---|---|---|
+| `unbuilt` | Reported in Gaps, **minor** | A plan is allowed to be incomplete |
+| `building` / `built` | **Blocking** | Somebody is building from it right now |
+| any, but a `(new)` module it declared exists | **Blocking** | Implementation plainly started; status was just never flipped |
+
+One case where another system's spec blocks yours: a spec that is `building` and
+whose `needs:` names a system with a missing or incomplete spec. That is the
+dependency the field exists to express.
+
 **What a tech spec should not contain:** file-by-file structure, function
 signatures, pseudocode. They read as authority and go stale the moment the
 implementation deviates. Name the seam and the reuse; let the builder pick the
