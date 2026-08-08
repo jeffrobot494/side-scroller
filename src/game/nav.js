@@ -184,6 +184,42 @@ export function nearestNode(graph, x, y) {
   return best;
 }
 
+// The node a body is actually STANDING on, or null if it is between/above them.
+// Distinct from nearestNode: that answers "which surface did the player mean",
+// this answers "where am I on the graph". A route is only valid from a node the
+// body genuinely occupies, so an airborne body must get null rather than a
+// plausible guess — routing off a guess is how an agent commits to a takeoff it
+// is not standing at. `x` is the body's LEFT edge, matching node span space.
+export function nodeUnder(graph, x, feetY, tol = 2) {
+  for (const n of graph.nodes) {
+    if (Math.abs(n.y - feetY) > tol) continue;
+    if (x >= n.a - tol && x <= n.b + tol) return n;
+  }
+  return null;
+}
+
+// "Get as close as you can, then stop" (design/agent-navigation.md). Among the
+// nodes actually reachable from `fromId`, the one whose span comes closest to
+// the destination point. Distance is measured to the SPAN, not its midpoint, so
+// a long ledge running toward the target scores by its near end.
+//
+// Closest-in-space, not cheapest: the agent is being asked to approach something
+// it cannot get to, and the honest reading of that is proximity. Least-time
+// would pick whatever is quick to reach, which can be behind it.
+export function bestPartial(graph, fromId, x, y) {
+  const { dist } = costsFrom(graph, fromId);
+  let best = null;
+  let bestD = Infinity;
+  for (const n of graph.nodes) {
+    if (!Number.isFinite(dist[n.id])) continue;
+    const dx = x < n.a ? n.a - x : x > n.b ? x - n.b : 0;
+    const dy = n.y - y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = n; }
+  }
+  return best;
+}
+
 // Least-time route. Dijkstra with a linear scan: graphs are tens of nodes, so a
 // heap would be more code for no measurable gain.
 // Returns { path: [nodeId], cost } or null when `toId` is not reachable.

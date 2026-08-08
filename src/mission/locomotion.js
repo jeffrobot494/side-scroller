@@ -60,7 +60,11 @@ export function locomotorFor(ent) {
 const LEGGED = {
   apply(ent, req, dt, scene) {
     actuateHorizontal(ent, req);
-    if (req.kind === "driveX" && req.hopToward && canJump(ent) && req.hopToward.y < cy(ent) - 40) {
+    // Two ways to be told to jump, and they are not the same instruction.
+    // `hop: true` is the ROUTER's — this edge is a jump edge and you are at its
+    // takeoff. `hopToward` is the old reflex: the target is above me, try. A
+    // routed agent never sets hopToward, so these never both fire.
+    if (req.kind === "driveX" && canJump(ent) && (req.hop || (req.hopToward && req.hopToward.y < cy(ent) - 40))) {
       ent.vy = -bodyJump(ent);
       consumeJump(ent);
     }
@@ -123,7 +127,9 @@ const SOLDIER = {
     switch (req.kind) {
       case "driveX":
         move = Math.sign(req.v);
-        if (req.hopToward && wantHop(s, req.hopToward)) jump = true;
+        // the router's explicit takeoff, or the old target-is-above reflex
+        if (req.hop && canJump(s)) jump = true;
+        else if (req.hopToward && wantHop(s, req.hopToward)) jump = true;
         break;
       case "burst":
         move = Math.sign(req.ux); // a soldier can't dash; commit to the run

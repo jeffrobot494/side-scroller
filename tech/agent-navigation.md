@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: unbuilt
+status: built
 resolution: sharp
 needs: []
 tags: [ai, movement, navigation]
@@ -100,7 +100,8 @@ left as a second implementation.
 |---|---|
 | `src/game/nav.js` (new) | Graph construction from a platform list + a body profile, and the route query. Pure data in, pure data out — no scene, no entities, no rendering |
 | `src/game/gen/levelgen.js` | `auditGeometry` becomes a caller of the shared builder. Its spawn-node lookup and exit test stay here — they are level facts, not graph facts |
-| `src/mission/enemyspec/runtime.js` | Graph cache keyed off the scene, and route following inside `motionRequest` |
+| `src/mission/navigation.js` (new — **as built**, see below) | Body→profile mapping, the scene-keyed graph cache, and the per-frame route follower |
+| `src/mission/enemyspec/runtime.js` | Calls the follower from the `moveOrder` branch and the point-resolving controllers |
 | `src/mission/enemyspec/perception.js` | The new navigation senses |
 | `src/game/enemyspec/schema.js` | The same sense names added to `vocabularyDoc()`, or authored specs cannot reference them |
 | `src/game/enemyspec/validate.js` | Rejects `body.jump` (and `body.gravity ≠ 1`) on a `locomotor: "soldier"` body — see below |
@@ -207,6 +208,7 @@ cannot be verified headlessly and is an eyeball check in the Lab.
 | Takeoff is assumed to be at full horizontal speed | `LEGGED` sets `vx = req.v` instantly, so this holds for spec enemies; the player `Soldier` accelerates at 2600 px/s² toward `config.runSpeed` and under-reaches `flatReach` from a standstill | The 3-attempt cap. `levelgen` already ships this assumption for the soldier, so the graph inherits it rather than introducing it |
 | Drop edges get a flat-hop reachability *budget* | The link test gives a drop of any depth exactly `flatReach` of horizontal budget and ignores fall time. Conservative — it under-promises how far a fall carries — and unchanged by N1, because changing it would change what the audit accepts | Nothing. A drop the graph refuses is a drop an agent could actually have made, which costs a route, never a fall |
 | Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead can clip a jump the graph believes in | The stuck detector, then the attempt cap |
+| An up-edge is not charged for its takeoff clearance | `gapBetween` reports 0 for overlapping spans, but a body cannot take off from *underneath* the destination — platforms are solid from below. The real takeoff is a body width outside the destination's footprint, and that width was never charged against `maxRunTo(dh)` | The attempt cap. Confirmed reachable in generated terrain: the N0 fixture is unchanged, and generation's own audit uses the same uncharged measure, so nothing gets *promised* that was not promised before |
 | Nodes are built for a standing body | Crouching drops the hitbox 46→22, changing headroom but not the envelope | None needed. A crouched agent has strictly more clearance, so the graph errs safe |
 | Costs are seconds under ideal traversal | No allowance for turning, waiting, or being shot at | Nothing, deliberately. Costs order routes; they are not a schedule |
 | The graph is static for a mission | Terrain does not move in a mission today | The explicit invalidation hook. Lab v2's platform dragging is the first caller, and it lands after this |
@@ -256,6 +258,25 @@ one. Three details the plan did not fix:
 | Coyote time | `config.coyoteTime`, **0.1s**, held on the actor as `a.coyote` by `stepActor`. Read through `canJump(a)`, spent through `consumeJump(a)` — both exported from `entities.js` | The slice line said only "coyote time in `stepActor`". `stepActor` owns `onGround`, so it must own the window, and every jump site has to ask the same question or the window is honoured by one body and ignored by another |
 | It reaches the **player**, not just enemies | `Soldier.applyMovement` jumps on `canJump(this)` | Not a decision so much as a consequence: soldiers are moved by the same integrator. It only ever allows a jump, so no envelope claim gets looser — but it *is* a player-feel change and should be eyeballed |
 | Spending a jump shuts the window | `consumeJump` zeroes `coyote` as well as `onGround` | Without it the grace frames are a free second jump, which contradicts "jump is a single fixed impulse" below and would break `jumpEnvelope` as an exact bound |
+
+**As built (N3).** Four things the plan did not have right.
+
+| | As built | Why |
+|---|---|---|
+| A new module, `src/mission/navigation.js` | The plan put the cache and the follower in `runtime.js`. They are ~180 lines of state machine with their own concerns (profiles, caching, takeoff geometry, attempt accounting) | `runtime.js` already runs to ~700 lines and its job is "decide the one MotionRequest". Folding the follower in would have buried the seam that makes routing testable without a brain. `nav.js` stays pure and generation-side; `navigation.js` is the mission-side adapter that knows about config, locomotors and scenes |
+| Takeoff must clear the destination's **footprint** | For an up-edge the takeoff is `to.a - w` or `to.b + w`, not the nearest point | Platforms are solid from below. Taking off from under the destination drives the body's head into its underside and it never rises — found by the chaser failing to climb a ledge the graph said was reachable |
+| While rising, close on the footprint edge — do not enter it, and do not stand still | The airborne branch drives to `to.a - w` / `to.b + w` until the feet clear `to.y`, then to the landing point | Entering early hits the platform's *side*. Holding position instead was the first fix and was wrong: it spends the whole rise stationary, and the graph prices horizontal budget from takeoff, not from the apex — it turned a legal 50px hop into a 43px one |
+| "As close as it can" is a **position**, not a node | On the final node the agent walks to the closest standable x to the destination, reachable or not | Reading it as a node parks an agent at its spawn whenever the destination is an unclimbable ledge, because the ground slab it already stands on *is* the best partial path. Caught by the characterization fixture — the charger stopped dead at spawn |
+
+**N3 changes `locomotion.golden.json` too, and the plan only anticipated N2.**
+Regenerating moved the same 2 of 22 cases (`roster:husk_charger`, `tpl:tpl_charger`)
+with **horizontal motion byte-identical** — the chargers walk exactly where they
+walked before. What changed is that the pointless pogo is gone: on the
+characterization scene the target's ledge is 120px up, past a legged body's
+110.6px `maxRise`, so the route correctly declines it, walks the agent to the end
+of its node, and stops. The one remaining jump sequence is the attempt cap doing
+its job against the 200px wall — three tries at an edge the graph believes in
+(`gapBetween` 70px, budget 139.65px) and the arc cannot make, then `navBlocked`.
 
 **Correction to the slice table: the fixture never covered `backHop`.** N2's row
 predicted `locomotion.golden.json` would move on both the traversal hop and

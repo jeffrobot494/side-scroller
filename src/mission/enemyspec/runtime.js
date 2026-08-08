@@ -21,6 +21,7 @@
 
 import { overlaps, Projectile } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
+import { routeRequest } from "../navigation.js";
 import { tickBrain } from "./brain.js";
 import { updateSense, nearestHostile } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
@@ -288,10 +289,16 @@ function motionRequest(root, ent, dt, scene) {
     if (expire) ent.dash = null;
   } else if (ent.moveOrder) {
     const o = ent.moveOrder;
-    req = { kind: "steer", point: { x: o.x, y: o.y }, speed: o.speed };
+    // Routed when the graph can say something, straight-line when it cannot.
+    // The arrival and timeout tests stay here either way: they are the ORDER's
+    // terms, not the route's, and a routed agent that reaches the point is done
+    // for the same reason an unrouted one is.
+    req = routeRequest(ent, { x: o.x, y: o.y }, o.speed, scene, dt)
+      || { kind: "steer", point: { x: o.x, y: o.y }, speed: o.speed };
     o.timeout -= dt;
     if (o.timeout <= 0 || Math.hypot(o.x - cx(ent), o.y - cy(ent)) < 12) {
       ent.moveOrder = null;
+      ent.nav = null;
       req = { kind: "stop" };
     }
   } else if (ent.motion) {
@@ -316,7 +323,8 @@ function controllerRequest(root, ent, m, dt, scene, target) {
       return { kind: "brakeX", factor: 0.8 };
     case "moveTo": {
       const at = resolveTargetPoint(root, ent, m.target, scene, target, m.offset);
-      return at ? { kind: "steer", point: at, speed: m.speed } : { kind: "coast" };
+      if (!at) return { kind: "coast" };
+      return routeRequest(ent, at, m.speed, scene, dt) || { kind: "steer", point: at, speed: m.speed };
     }
     case "patrol": {
       const half = (m.range || 160) / 2;
@@ -329,10 +337,12 @@ function controllerRequest(root, ent, m, dt, scene, target) {
     case "chase": {
       if (!target) return { kind: "stopX" };
       const point = { x: cx(target), y: cy(target) };
-      // a flyer steers in both axes; a legged body drives horizontally and lets
-      // its locomotor decide when to hop (target above) to traverse.
+      // a flyer steers in both axes; a legged body routes over the terrain, and
+      // falls back to the pre-N3 reflex (drive at them, hop if they are above)
+      // whenever the graph has nothing to say about where it is standing.
       if (ent.spec.body.gravity === 0) return { kind: "steer", point, speed: m.speed };
-      return { kind: "driveX", v: (point.x >= cx(ent) ? 1 : -1) * m.speed, hopToward: point };
+      return routeRequest(ent, point, m.speed, scene, dt)
+        || { kind: "driveX", v: (point.x >= cx(ent) ? 1 : -1) * m.speed, hopToward: point };
     }
     case "keepDistance": {
       if (!target) return { kind: "brakeX", factor: 0.7 };

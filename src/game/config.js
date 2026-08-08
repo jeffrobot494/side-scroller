@@ -428,6 +428,58 @@ export const SCHEMA = [
     // Behavior Lab (tech/behavior-lab.md): slow decisions down to watch them,
     // or blind/deafen one layer to prove the fault is in another. Live, and read
     // by every spec agent (enemies AND companions).
+    title: "Agent navigation",
+    items: [
+      {
+        key: "navEnabled",
+        label: "Route following",
+        type: "bool",
+        default: true,
+        help: "Grounded agents path through a node graph of the terrain instead of walking straight at their destination. Off = the pre-N3 behaviour (drive at the point, hop when it is above). Applies on next deploy.",
+      },
+      {
+        key: "navArriveRadius",
+        label: "Arrival radius",
+        type: "range",
+        default: 14,
+        min: 4,
+        max: 60,
+        step: 2,
+        help: "How close (px) counts as reaching a waypoint or the destination. Too small and an agent jitters on the spot; too large and it stops short of ledges. Live.",
+      },
+      {
+        key: "navTakeoffWindow",
+        label: "Takeoff window",
+        type: "range",
+        default: 12,
+        min: 2,
+        max: 60,
+        step: 2,
+        help: "How close (px) to a jump edge's takeoff point an agent must be before it commits to the jump. Wider = jumps earlier and may undershoot; narrower = more overruns past the lip. Live.",
+      },
+      {
+        key: "navRepathInterval",
+        label: "Repath interval",
+        type: "range",
+        default: 0.5,
+        min: 0.1,
+        max: 3,
+        step: 0.1,
+        help: "Seconds between forced route recomputes. A destination that MOVES repaths immediately regardless; this only bounds drift while it holds still. Live.",
+      },
+      {
+        key: "navJumpAttempts",
+        label: "Jump attempts before giving up",
+        type: "range",
+        default: 3,
+        min: 1,
+        max: 10,
+        step: 1,
+        help: "Failed attempts at one jump edge before the destination is treated as unreachable and the agent stops. Live.",
+      },
+    ],
+  },
+  {
     title: "Agent brain",
     items: [
       {
