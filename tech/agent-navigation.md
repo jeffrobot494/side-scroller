@@ -205,11 +205,20 @@ cannot be verified headlessly and is an eyeball check in the Lab.
 | Approximation | Why | What catches the failure |
 |---|---|---|
 | Takeoff is assumed to be at full horizontal speed | `LEGGED` sets `vx = req.v` instantly, so this holds for spec enemies; the player `Soldier` accelerates at 2600 px/s² toward `config.runSpeed` and under-reaches `flatReach` from a standstill | The 3-attempt cap. `levelgen` already ships this assumption for the soldier, so the graph inherits it rather than introducing it |
-| Drop edges are priced as flat hops | The existing link test gives a drop of any depth exactly `flatReach` of horizontal budget and ignores fall time. Conservative for reachability, wrong for cost: a 300px drop carries roughly twice as far and takes materially longer | Nothing in N1. If routes visibly prefer silly drops, fix the cost — it is one term, and the design's one-way rule already isolates it |
+| Drop edges get a flat-hop reachability *budget* | The link test gives a drop of any depth exactly `flatReach` of horizontal budget and ignores fall time. Conservative — it under-promises how far a fall carries — and unchanged by N1, because changing it would change what the audit accepts | Nothing. A drop the graph refuses is a drop an agent could actually have made, which costs a route, never a fall |
 | Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead can clip a jump the graph believes in | The stuck detector, then the attempt cap |
 | Nodes are built for a standing body | Crouching drops the hitbox 46→22, changing headroom but not the envelope | None needed. A crouched agent has strictly more clearance, so the graph errs safe |
 | Costs are seconds under ideal traversal | No allowance for turning, waiting, or being shot at | Nothing, deliberately. Costs order routes; they are not a schedule |
 | The graph is static for a mission | Terrain does not move in a mission today | The explicit invalidation hook. Lab v2's platform dragging is the first caller, and it lands after this |
+
+**As built (N1), differing from the plan above.** The plan had drop *cost* sharing
+the flat-hop approximation and listed fixing it as later work. `nav.js` prices a
+drop by fall time instead — `sqrt(2·dh/gravity)`, one term in `costOf` — because
+nothing reads costs until N3 and there was no reason to ship a known-wrong number
+into a fixture. The reachability budget in the table above is untouched, so the
+audit is unaffected and `levelgen.golden.json` passes byte-identical. Consequence:
+routes will not treat a 300px drop as free, which was the failure the original
+approximation predicted.
 
 **Reach — settled 2026-08-07, and the reason `body.jump` defaults to 665.**
 
