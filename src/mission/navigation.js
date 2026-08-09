@@ -19,7 +19,7 @@
 // layer has. See "Who decides to jump" in the spec.
 // ---------------------------------------------------------------------------
 
-import { bodyProfile, profileKey, buildGraph, nodeUnder, nearestNode, route, bestPartial } from "../game/nav.js";
+import { bodyProfile, profileKey, buildGraph, nodeUnder, nearestNode, route, bestPartial, edgeKey } from "../game/nav.js";
 import { bodyJump } from "./locomotion.js";
 import { config } from "../game/config.js";
 
@@ -57,21 +57,28 @@ export function graphFor(scene, profile) {
   return g;
 }
 
+// Drop every cached graph. The generation counter is how agents notice: their
+// route state — including the ban ledger — is keyed to the graph it was learned
+// against, and "this edge cannot be flown" stops being true the moment the
+// terrain moves under it.
 export function invalidateNavGraphs(scene) {
   scene.navGraphs = null;
+  scene.navGen = (scene.navGen || 0) + 1;
 }
 
 // ---- per-agent route state -----------------------------------------------
 
-function newNav() {
+function newNav(gen) {
   return {
+    gen, // the graph generation this state belongs to (see invalidateNavGraphs)
     dest: null, // the point the current path was built FOR
     path: null, // [nodeId] remaining, path[0] = the node we are standing on
     reachable: true, // false = this is the best partial path, so stop at its end
     repathIn: 0,
     leg: null, // { from, to } — a jump in progress, resolved on landing
-    attempts: {}, // "from->to" → failed jumps on that edge
-    blocked: false, // the cap fired: destination declared unreachable
+    attempts: {}, // edgeKey → failed jumps on that edge, not yet a ban
+    banned: new Set(), // edgeKey — proven unflyable BY THIS AGENT; routed around
+    blocked: false, // nowhere left to go: no route, and already at the best spot
   };
 }
 
@@ -137,21 +144,26 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   if (b.gravity === 0) return null; // flyers move in two dimensions already
   if (!scene.platforms || !scene.platforms.length) return null;
 
-  const nav = ent.nav || (ent.nav = newNav());
+  const gen = scene.navGen || 0;
+  if (!ent.nav || ent.nav.gen !== gen) ent.nav = newNav(gen);
+  const nav = ent.nav;
   const graph = graphFor(scene, profileFor(ent, scene, speed));
   if (!graph.nodes.length) return null;
 
   const destX = dest.x - ent.w / 2;
   const destY = dest.y;
 
-  // A destination that MOVED invalidates everything, including a give-up: the
-  // agent gave up on a point, not on the world. Chasers repath constantly
-  // through this branch, which is what "recompute immediately" means.
+  // A destination that MOVED forces a fresh route — "recompute immediately",
+  // which is the branch every chaser lives in.
+  //
+  // What does NOT reset here is the attempt count and the ban ledger. An edge
+  // that cannot be flown is a fact about geometry and this body, not about where
+  // the agent happens to be going; clearing it on every destination change means
+  // a chaser following a moving target never accumulates three strikes and
+  // throws itself at the same pillar forever (tech/agent-navigation.md N4).
   if (!nav.dest || dist2(destX, destY, nav.dest.x, nav.dest.y) > config.navArriveRadius ** 2) {
     nav.dest = { x: destX, y: destY };
     nav.path = null;
-    nav.blocked = false;
-    nav.attempts = {};
   }
 
   // ---- airborne: no repathing, only air control ---------------------------
@@ -172,9 +184,9 @@ export function routeRequest(ent, dest, speed, scene, dt) {
     if (to.y < ent.y + ent.h) {
       const lo = to.a - ent.w;
       const hi = to.b + ent.w;
-      return drive(ent, ent.x < (lo + hi) / 2 ? lo : hi, speed);
+      return drive(ent, ent.x < (lo + hi) / 2 ? lo : hi, speed, dt);
     }
-    return drive(ent, landingX(to, ent.x), speed);
+    return drive(ent, landingX(to, ent.x), speed, dt);
   }
 
   // ---- grounded: resolve where we are -------------------------------------
@@ -189,38 +201,43 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // ---- resolve a jump that was in flight ----------------------------------
   // "The agent was traversing A→B and is now grounded somewhere that is not B."
   if (nav.leg) {
-    const key = `${nav.leg.from}->${nav.leg.to}`;
+    const key = edgeKey(nav.leg.from, nav.leg.to);
     if (here.id === nav.leg.to) {
       delete nav.attempts[key]; // it worked; forget the near-misses
     } else {
+      // Landed somewhere that is not where this edge goes. After enough of
+      // those, retire the EDGE — not the destination. The graph tests a jump's
+      // landing, not its arc, so it can offer an edge through a pillar or under
+      // an overhang; the agent is the only thing that ever finds out. Banning
+      // and rerouting is what lets it take the long way round, which is usually
+      // there: the failing hop is often cheaper than a legal two-step, which is
+      // exactly why Dijkstra picked it.
       nav.attempts[key] = (nav.attempts[key] || 0) + 1;
-      if (nav.attempts[key] >= config.navJumpAttempts) nav.blocked = true;
+      if (nav.attempts[key] >= config.navJumpAttempts) {
+        nav.banned.add(key);
+        delete nav.attempts[key];
+      }
     }
     nav.leg = null;
     nav.path = null; // repath from wherever we actually landed
   }
 
   // ---- repath if the path is stale ----------------------------------------
-  // A blocked agent stops routing but does not freeze on the spot: it holds a
-  // one-node path, so the branch below still walks it to the closest point on
-  // the node it is standing on. Giving up on a jump is not a reason to give up
-  // on the ground.
   nav.repathIn -= dt;
-  if (nav.blocked) {
-    nav.path = [here.id];
-  } else if (!nav.path || nav.path[0] !== here.id || nav.repathIn <= 0) {
+  if (!nav.path || nav.path[0] !== here.id || nav.repathIn <= 0) {
     nav.repathIn = config.navRepathInterval;
     const goal = nearestNode(graph, destX, destY);
-    let r = goal ? route(graph, here.id, goal.id) : null;
+    let r = goal ? route(graph, here.id, goal.id, nav.banned) : null;
+    nav.reachable = !!r;
     if (!r) {
-      // Unreachable: go as close as the graph allows and stop there.
-      const partial = bestPartial(graph, here.id, destX, destY);
-      r = partial ? route(graph, here.id, partial.id) : null;
-      nav.reachable = false;
-    } else {
-      nav.reachable = true;
+      // Unreachable — or reachable only over an edge this body has proven it
+      // cannot fly. Either way: go as close as the graph allows and stop.
+      const partial = bestPartial(graph, here.id, destX, destY, nav.banned);
+      r = partial ? route(graph, here.id, partial.id, nav.banned) : null;
     }
     nav.path = r ? r.path : null;
+    // "Nowhere left to go": no route, and the best we can do is where we are.
+    nav.blocked = !nav.reachable && (!nav.path || nav.path.length === 1);
   }
   if (!nav.path) return null; // no route at all — fall back to steering
 
@@ -234,7 +251,7 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   if (nav.path.length === 1) {
     const want = clamp(destX, here.a, here.b);
     if (Math.abs(want - ent.x) <= config.navArriveRadius) return { kind: "stop" };
-    return drive(ent, want, speed);
+    return drive(ent, want, speed, dt);
   }
 
   // ---- otherwise: travel the next edge ------------------------------------
@@ -247,14 +264,35 @@ export function routeRequest(ent, dest, speed, scene, dt) {
 
   // A walk or a drop needs no decision: head for the destination span and let
   // the ledge do the rest. Only a jump has a moment that must be timed.
-  if (edge.kind === "walk" || edge.kind === "drop") return drive(ent, landingX(next, ent.x), speed);
+  if (edge.kind === "walk" || edge.kind === "drop") return drive(ent, landingX(next, ent.x), speed, dt);
 
-  const lip = takeoffX(here, next, ent.x, ent.w, edge.kind === "jump");
-  if (Math.abs(lip - ent.x) > config.navTakeoffWindow) return drive(ent, lip, speed);
+  const up = edge.kind === "jump";
+  const lip = takeoffX(here, next, ent.x, ent.w, up);
+  if (Math.abs(lip - ent.x) > config.navTakeoffWindow) return drive(ent, lip, speed, dt);
+  // The takeoff window is a tolerance on ARRIVING at the lip, and for an up-edge
+  // it must not become a licence to jump from under the destination: at the
+  // default 12px a body can commit while still overlapping the platform it means
+  // to land on, rise into its underside, and book a failure it was never given a
+  // chance to avoid.
+  //
+  // Only insist when a clear takeoff actually exists. Where `takeoffX` found no
+  // standable side it returns an unclear lip deliberately, so that the attempt
+  // happens and the cap retires the edge — refusing to jump there would drive
+  // the body at a lip it is already standing on, forever, and it would never
+  // learn the edge is a lie.
+  if (up) {
+    const clear = (x) => x <= next.a - ent.w || x >= next.b + ent.w;
+    if (clear(lip) && !clear(ent.x)) return drive(ent, lip, speed, dt);
+  }
 
   // At the takeoff. Commit: the hop flag is the whole point of the slice.
+  //
+  // Climbing, hold the takeoff column on this frame rather than heading for the
+  // landing point. We are standing clear of the destination precisely because
+  // the guard above insisted; steering at the landing point would walk straight
+  // back under it for the one frame before the airborne branch takes over.
   nav.leg = { from: here.id, to: next.id };
-  const req = drive(ent, landingX(next, ent.x), speed);
+  const req = up ? { kind: "driveX", v: 0 } : drive(ent, landingX(next, ent.x), speed, dt);
   req.hop = true;
   return req;
 }
@@ -262,10 +300,19 @@ export function routeRequest(ent, dest, speed, scene, dt) {
 // Full-speed horizontal toward a left-edge x, or a halt once inside the arrival
 // radius — driveX rather than steer, because a legged `steer` scales horizontal
 // speed by the normalized direction and crawls when its point is far above.
-function drive(ent, toX, speed) {
+function drive(ent, toX, speed, dt) {
   const dx = toX - ent.x;
-  if (Math.abs(dx) <= 1) return { kind: "driveX", v: 0 };
-  return { kind: "driveX", v: (dx > 0 ? 1 : -1) * speed };
+  // Full speed while there is ground to cover, but never more than the distance
+  // that remains. A fixed deadband cannot work here: one frame at 210px/s is
+  // 3.5px, so anything smaller than a frame's travel makes the body oscillate
+  // around its target forever instead of settling on it. That jitter is
+  // ordinarily invisible and once was not — a body holding station at the edge
+  // of a platform's footprint kept stepping back UNDER it and rising into the
+  // underside, which the router then scored as a failed jump.
+  const step = dt > 0 ? Math.abs(dx) / dt : speed;
+  const v = Math.min(speed, step);
+  if (v < 1) return { kind: "driveX", v: 0 };
+  return { kind: "driveX", v: (dx > 0 ? 1 : -1) * v };
 }
 
 // ---- observability ---------------------------------------------------------

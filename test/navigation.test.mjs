@@ -110,9 +110,9 @@ export default async function run(t) {
     );
     const c = chaser(200, 474);
     sim(c, sc, 8);
-    const tries = Object.values(c.nav.attempts).reduce((a, b) => a + b, 0);
-    t.eq(`attempts: gives up after exactly config.navJumpAttempts (${config.navJumpAttempts})`, tries, config.navJumpAttempts);
-    t.ok("attempts: and is marked blocked", c.nav.blocked === true);
+    t.eq(`attempts: exactly one edge is banned, after config.navJumpAttempts (${config.navJumpAttempts}) tries`, c.nav.banned.size, 1);
+    t.eq("attempts: the spent count is folded into the ban, not left dangling", Object.keys(c.nav.attempts).length, 0);
+    t.ok("attempts: with no way round, the agent is still blocked", c.nav.blocked === true);
     t.eq("attempts: the sense reports it", c.sense.navBlocked, true);
     t.ok("attempts: a blocked agent still holds its best position, not its panic spot", Math.abs(c.x - 530) < 2);
     t.ok("attempts: and stays stopped", Math.abs(c.vx) < 1);
@@ -127,8 +127,124 @@ export default async function run(t) {
     const c = chaser(200, 474);
     sim(c, sc, 8);
     config.navJumpAttempts = 3;
-    t.eq("attempts: one attempt is enough when the knob says so",
-      Object.values(c.nav.attempts).reduce((a, b) => a + b, 0), 1);
+    t.eq("attempts: one try is enough to ban when the knob says so", c.nav.banned.size, 1);
+  }
+
+  // ---- N4: retire the failed EDGE, not the destination ----------------------
+  // The husk_charger bug, lifted from generated seed 2026. A 91px pillar splits
+  // the ground slab in two, and a ledge continues at the same height to its
+  // right. The graph links the ground halves with a flat hop — 100px gap against
+  // a 139.65px flatReach — but the takeoff lip sits UNDER that ledge, so the
+  // body rises 45px into its underside and drops straight back. The hop cannot
+  // be flown, and the graph has no way to know: edges test the landing, not the
+  // arc.
+  //
+  // A legal route exists the whole time — right to the ledge's far end, up onto
+  // it, across to the pillar top, down the far side — and Dijkstra never picks
+  // it, because the impossible hop is cheaper. Before N4 the agent tried three
+  // times and gave up on the destination instead of on the edge.
+  const PILLAR = [
+    { x: 0, y: 500, w: 1400, h: 40 }, // ground
+    { x: 470, y: 409, w: 70, h: 91 }, // the pillar, floor to y=409
+    { x: 540, y: 409, w: 110, h: 20 }, // the ledge that roofs the takeoff
+  ];
+  {
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const c = chaser(600, 474); // right of the pillar; the target is left of it
+    sim(c, sc, 12);
+    t.ok(`N4: the chaser gets past the pillar (x ${c.x.toFixed(0)}, needs < 440)`, c.x < 440);
+    t.ok("N4: it banned the hop it could not fly", c.nav.banned.size >= 1);
+    t.ok("N4: and did NOT give up on the destination", c.nav.blocked === false);
+    t.eq("N4: the sense agrees it is still going somewhere", c.sense.navBlocked, false);
+  }
+  {
+    // the same scene with the cap set absurdly high never bans, so it never
+    // reroutes — which is precisely the pre-N4 behaviour, and shows the fix is
+    // the ban rather than anything else that changed
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    config.navJumpAttempts = 999;
+    const c = chaser(600, 474);
+    sim(c, sc, 12);
+    config.navJumpAttempts = 3;
+    t.ok(`N4: without banning it never gets past (x ${c.x.toFixed(0)})`, c.x > 440);
+  }
+  {
+    // a ban is a fact about geometry, so it must survive the destination moving.
+    // Without this a chaser resets its count every tick and never reaches three.
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const c = chaser(600, 474);
+    for (let i = 0; i < 60 * 12; i++) {
+      sc.soldiers[0].x = 100 + Math.sin(i / 30) * 60; // a target that keeps moving
+      updateSpecEnemy(c, STEP, sc, ctx);
+    }
+    t.ok("N4: a moving destination does not wipe the ban ledger", c.nav.banned.size >= 1);
+    t.ok(`N4: so the chaser still gets round (x ${c.x.toFixed(0)})`, c.x < 440);
+  }
+  {
+    // bans belong to the agent, not the shared graph — two bodies with the same
+    // profile share one graph object, and one's failure must not blind the other
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const a = chaser(600, 474);
+    const b = chaser(700, 474);
+    sim(a, sc, 12);
+    t.ok("N4: the first agent learned the edge is unflyable", a.nav.banned.size >= 1);
+    t.ok("N4: the second starts with a clean ledger", !b.nav || b.nav.banned.size === 0);
+    const g = [...sc.navGraphs.values()][0];
+    t.ok("N4: and the shared graph still has every edge it built",
+      g.edges.some((list) => list.length > 0));
+  }
+  {
+    // A body must never commit to a climb from UNDER its destination: platforms
+    // are solid from below, so that jump can only bonk. The takeoff window used
+    // to allow it — 12px of tolerance is more than enough to still be
+    // overlapping — which spent the attempt budget on jumps that were doomed
+    // before they started.
+    // Scoped to the DESTINATION's platform. A flat hop blocked by some third
+    // piece of terrain is the "edges ignore ceilings" approximation, which the
+    // attempt cap owns and which this guard is not about.
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const c = chaser(600, 474);
+    let badTakeoff = null;
+    let prevLeg = null;
+    for (let i = 0; i < 60 * 12; i++) {
+      const wasX = c.x; // where we stood when the decision was made, not after it
+      const wasFeet = c.y + c.h;
+      updateSpecEnemy(c, STEP, sc, ctx);
+      const leg = c.nav && c.nav.leg;
+      if (leg && !prevLeg) {
+        const g = [...sc.navGraphs.values()][0];
+        const to = g.nodes[leg.to];
+        const under = wasFeet > to.y && wasX < to.b + c.w && wasX + c.w > to.a;
+        if (under) badTakeoff = badTakeoff || { x: +wasX.toFixed(1), leg: `${leg.from}->${leg.to}` };
+      }
+      prevLeg = leg;
+    }
+    t.ok(`takeoff: never climbs from under its destination${badTakeoff ? ` (${JSON.stringify(badTakeoff)})` : ""}`, !badTakeoff);
+  }
+  {
+    // ...but insisting on clearance must never become a freeze. A perch with no
+    // standable takeoff on either side has to be ATTEMPTED and then retired,
+    // because an agent that refuses to try never learns the edge is a lie.
+    // Ground [0, 170]; the perch's clear positions are -30 and 230, neither of
+    // which is on it, so there is no good takeoff anywhere.
+    const sc = scene(
+      [{ x: 0, y: 500, w: 200, h: 40 }, { x: 0, y: 420, w: 200, h: 20 }],
+      [soldierAt(100, 420 - 46)],
+    );
+    const c = chaser(20, 474);
+    sim(c, sc, 10);
+    t.ok("takeoff: an unreachable perch is attempted, not refused", c.nav.banned.size >= 1 || c.y + c.h === 420);
+    t.ok("takeoff: and the agent does not freeze mid-approach undecided", c.nav.path !== null);
+  }
+  {
+    // moving the terrain invalidates what an agent learned about it
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const c = chaser(600, 474);
+    sim(c, sc, 12);
+    t.ok("N4: a ban exists before the terrain moves", c.nav.banned.size >= 1);
+    invalidateNavGraphs(sc);
+    updateSpecEnemy(c, STEP, sc, ctx);
+    t.eq("N4: invalidating the graph clears the ledger", c.nav.banned.size, 0);
   }
 
   // ---- profiles: the soldier-locomotor branch -------------------------------

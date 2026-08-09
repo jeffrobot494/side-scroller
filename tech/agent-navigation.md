@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: building
+status: built
 resolution: sharp
 needs: []
 tags: [ai, movement, navigation]
@@ -297,6 +297,21 @@ characterization scene the target's ledge is 120px up, past a legged body's
 of its node, and stops. The one remaining jump sequence is the attempt cap doing
 its job against the 200px wall — three tries at an edge the graph believes in
 (`gapBetween` 70px, budget 139.65px) and the arc cannot make, then `navBlocked`.
+
+**As built (N4). Banning was the smaller half — the pillar case hid two more N3
+defects**, both found by building the regression test and both general rather
+than specific to this geometry.
+
+| Defect | As built | Why it mattered |
+|---|---|---|
+| `drive()` had a fixed 1px deadband | It now caps the request at the distance remaining, so a body lands exactly on its target | One frame at 210px/s is 3.5px, so a 1px deadband can never be entered: every "hold this position" oscillated ±3.5px forever. Harmless until it wasn't — a body holding station at the edge of a platform's footprint kept stepping back **under** it and rising into the underside, which the router then scored as a failed jump |
+| The takeoff window let a climb start from under its destination | An up-edge now waits until the body is genuinely clear of the destination's footprint — **but only when a clear takeoff exists** | The 12px window is a tolerance on *arriving* at the lip, and 12px is more than enough to still be overlapping. The exception is not optional: where `takeoffX` finds no standable side it returns an unclear lip deliberately, so the attempt happens and the cap retires the edge. Insisting on clearance there would drive a body at a lip it is already standing on, forever, never learning the edge is a lie — a worse freeze than the bug N4 fixes |
+
+Measured after: across 120 generated levels and 77 chargers, **no agent is left
+blocked** (two of eight were, before), and the number reaching their target rose
+from 15 to 21. Seed 2026 — the case that started this — now closes from 1311px to
+17px. `test/locomotion.golden.json` did not move, which is the expected result:
+that scene's failing edge has no alternative route, so banning it changes nothing.
 
 **Correction to the slice table: the fixture never covered `backHop`.** N2's row
 predicted `locomotion.golden.json` would move on both the traversal hop and
