@@ -67,7 +67,7 @@ export function updateSense(root, scene, dt) {
   s.dist = Math.hypot(px - ex, py - ey);
   // God eye (Lab lever, off by default): skip occlusion so a navigation fault
   // can be told apart from "it simply never saw you".
-  s.los = config.labGodEye || !blocked(ex, ey, px, py, scene.platforms);
+  s.los = losBetween(ex, ey, px, py, scene.platforms);
   s.playerAbove = py < ey - 40;
   s.playerBelow = py > ey + 40;
   s.playerApproaching = Math.abs(t.vx || 0) > 60 && Math.sign(t.vx) === Math.sign(ex - px);
@@ -134,6 +134,16 @@ function groundAhead(root, platforms) {
     if (px >= p.x && px <= p.x + p.w && py >= p.y && py <= p.y + p.h) return true;
   }
   return false;
+}
+
+// Can a body standing at (x0, y0) see (x1, y1)? The exact test behind sense.los,
+// god eye included, exported so a caller can ask it about a place the agent is
+// NOT standing — which is what choosing somewhere to move to requires
+// (tech/ranged-repositioning.md). Exported rather than imported the other way
+// round on purpose: this module already imports navigation.js for navSense, so
+// the resolver takes this as an injected predicate instead of importing back.
+export function losBetween(x0, y0, x1, y1, platforms) {
+  return config.labGodEye || !blocked(x0, y0, x1, y1, platforms);
 }
 
 // Segment vs AABB occlusion — slab method per platform.

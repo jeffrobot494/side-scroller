@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: unbuilt
+status: building
 resolution: sharp
 sprint: 2026-08
 needs: [agent-navigation]
@@ -33,11 +33,31 @@ are `idea/advanced-agent-navigation.md`'s destination scoring, cut to September 
 using terrain intelligently will be disappointed; it stops them standing in
 places from which they can do nothing.**
 
+**As built (R1) — the size of the part, measured end to end.** The 61% above is
+a placement statistic: a gunner *parked at its band's outer edge* under a perch.
+It is not the fraction that ends up able to shoot, which is what matters. Over
+120 generated levels, every grounded `lurk_gunner`/`cowardly_duelist` at its own
+spawn, player pinned on a perch for 40 simulated seconds:
+
+| Player stands on | Can shoot, R1 off | Can shoot, R1 on |
+|---|---|---|
+| a mid-height perch | 49/185 (26%) | **169/185 (91%)** |
+| the level's highest perch | 5/185 (3%) | **42/185 (23%)** |
+
+The gap between the two rows is the honest limit, and it is not a bug in the
+follower: on the highest perch **139 of 185 agents (75%) have no reachable
+position anywhere on the level that is both inside the band and has line of
+sight.** There is nothing to filter down to. Only 4 agents (2%) had a spot and
+failed to be standing on it after 40s — no systematic stalling. So R1 is close to
+a complete fix wherever a firing position exists, and does nothing at all when
+the player takes the roof, which is a band problem rather than a routing one and
+neither this slice nor September's scoring addresses it.
+
 ## Slices
 
 | # | Slice | Runtime behaviour |
 |---|---|---|
-| R1 | **Enemies reposition.** A grounded enemy-team `keepDistance` agent that either has no line of sight to its target, or is outside its band and not closing, resolves the least-time reachable node that is inside the band and has line of sight, and routes there. It holds that choice until it arrives, regains sight, or the follower gives up, then hands back to `holdRange` | **Changed, enemy team only.** `lurk_gunner` and `cowardly_duelist` leave dead positions. With sight and a holdable band — the common case — nothing changes |
+| R1 ✅ | **Enemies reposition.** A grounded enemy-team `keepDistance` agent that either has no line of sight to its target, or is outside its band and not closing, resolves the least-time reachable node that is inside the band and has line of sight, and routes there. It holds that choice until it arrives, regains sight, or the follower gives up, then hands back to `holdRange` | **Changed, enemy team only.** `lurk_gunner` and `cowardly_duelist` leave dead positions. With sight and a holdable band — the common case — nothing changes |
 | R2 | **Companions too.** The same path for the player team, whose `combat` state runs `keepDistance` on a soldier body | **Changed for allies.** A squadmate in combat repositions instead of holding a line it cannot shoot along. This is the slice that touches how the game plays *with* you, which is why it is separate |
 
 R1 lands alone and is the whole enemy-facing fix. R2 is split off because it
@@ -49,6 +69,24 @@ accounting whenever the destination moves more than `navArriveRadius`, so a
 destination recomputed every sense tick would rebuild the route continuously and
 the attempt cap would never accumulate. Repositioning must pin its point or it
 defeats the mechanism it depends on.
+
+**As built (R1) — the window counts grounded time only.** Pinning the point was
+necessary and not sufficient. A window that expires mid-jump asks an agent to
+re-decide from the air, where there is no node under it to decide from: it hands
+back to `holdRange` with a leg still open, and the follower — which resolves a
+jump on the first *grounded* frame after takeoff — later books that leg as a
+failed attempt on an edge it was in the middle of clearing. Three of those retire
+a good edge permanently. The clock now stops while airborne, so every window ends
+somewhere a decision can actually be made. Two knobs, not one, in the SCHEMA:
+`navRepositionHold` (1.5s) and `navStallTime` (0.6s), plus `navReposition` to
+switch the whole feature off.
+
+**As built (R1) — "not closing" is measured as ground covered.** The obvious
+reading, "the distance to the target is not shrinking", tracks the *target's*
+movement and resets the moment it walks. `holdRange` drives at full speed
+whenever it is outside the band, so an agent that is trying and failing has a
+commanded velocity and a position that does not change: the trigger is therefore
+"outside the band and less than `navArriveRadius` from where the stall began".
 
 **This is a filter, not scoring.** Three hard filters — inside the band, has line
 of sight, reachable — and one tiebreak, least time. No weights, no elevation
@@ -79,6 +117,14 @@ Everything here exists; the slice is a resolver and a call site.
 | `src/mission/enemyspec/runtime.js` | The `keepDistance` branch calls it, injects the sight predicate, owns the pinned choice, and falls back to `holdRange` unchanged |
 | `src/mission/enemyspec/perception.js` | Exports the existing line-of-sight test |
 
+**As built:** `perception.js` exports `losBetween(x0, y0, x1, y1, platforms)` —
+the whole of what `sense.los` computes, `config.labGodEye` included, so the
+resolver's filter and the trigger that consults it can never disagree. The
+resolver probes **three** positions per candidate interval, not one: the point
+reached with the least walking, and each end of the band. They see past different
+corners, and in the regression scene only the far end has a sight line, so a
+single probe would have reported no candidate where one plainly exists.
+
 Conventions and constraints this must follow:
 
 - **The sight test is injected by the call site, not imported by the resolver.**
@@ -96,6 +142,13 @@ Conventions and constraints this must follow:
   `holdRange` takes the next frames, a completed jump can later be booked as a
   failure. Ending a reposition must clear the agent's route state, not just stop
   consulting it.
+
+  **As built:** "clear the route state" turned out to be too broad. `abortRoute`
+  in `src/mission/navigation.js` drops the leg, the path and the pinned
+  destination and **keeps `attempts` and `banned`** — an edge this body cannot
+  fly is a fact about geometry, and wiping the ledger every time an agent changes
+  its mind means it relearns the same dead jump for the whole mission. Same
+  reasoning as N4's decision not to reset the ledger when a destination moves.
 - **No new tunable constants in code.** Any commitment window or re-evaluation
   cadence goes in the config `SCHEMA`, beside the `Agent navigation` group.
 - **`src/game/nav.js` stays pure** and gains nothing. The resolver needs a scene
@@ -135,6 +188,7 @@ September's, so an agent can arrive somewhere it can see but not cleanly shoot.
 | `test/navigation.test.mjs` | The follower, unchanged by both slices |
 | `test/nav.test.mjs` | The graph the candidates come from |
 | `test/mission-enemyspec.test.mjs` | Mission enemies still instantiate and update |
+| **As built:** `test/reposition.test.mjs` | R1's own suite (48). The resolver alone, the whole loop against a feature-off control, both triggers, commitment, the enemy/ally split, and the two route-state invariants — a reposition ending mid-jump must take the pending leg with it, and the window must not tick while airborne. Every one of those was written after a mutation survived without it |
 
 The bar is `node test/run.mjs` green plus a served-page check. **Whether a
 repositioning gunner reads as smart or as twitchy cannot be asserted headlessly.**
@@ -154,6 +208,8 @@ depends on sight.
 | Sight is tested from the node's standing position, not the muzzle | Line of shot needs an emitter offset and an ally check | Nothing. The agent may arrive somewhere it can see but not cleanly shoot |
 | The band is measured to where the target is now | The target moves; the walk takes seconds | The commitment window bounds staleness; the choice is re-made when it expires or sight returns |
 | An agent that arrives and still cannot see stops | On the final node the follower returns a halt | The commitment window expiring is what unsticks it. Without one, an agent that arrives to a stale choice freezes — this is the specific failure that makes commitment part of R1 rather than a later polish |
+| **As built:** the chosen position can sit exactly on `max` | The band's far edge is often the only place that sees past a corner, and the filter has no margin term | Nothing. `holdRange` does nothing at exactly `max`, and closing from just outside it walks *into* better sight rather than out of it, so the failure mode is a step of dithering, not a lost target |
+| **As built:** a scan that finds nothing is not repeated for `navRepathInterval` | Sight is a segment test per candidate, and a blind agent would otherwise re-scan the whole graph every frame forever | Nothing. The delay is half a second and the geometry it is scanning did not change |
 
 ---
 
@@ -168,8 +224,8 @@ Measured against the shipping roster after `tech/agent-navigation.md` N3.
 |---|---|---|---|
 | `husk_charger` | grounded | `chase` | Yes |
 | Companion — `escort` | grounded (soldier) | `moveTo` via move order | Yes |
-| `lurk_gunner` | grounded | `keepDistance` | **No — R1** |
-| `cowardly_duelist` | grounded | `keepDistance` | **No — R1** |
+| `lurk_gunner` | grounded | `keepDistance` | ~~No — R1~~ **Yes, since R1** |
+| `cowardly_duelist` | grounded | `keepDistance` | ~~No — R1~~ **Yes, since R1** |
 | Companion — `combat` | grounded (soldier) | `keepDistance` | **No — R2** |
 | `spore_wisp`, `strafe_raider`, `sky_duelist`, `iron_moth` | flying | `hover` / `static` | No, by design |
 

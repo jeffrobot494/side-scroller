@@ -19,7 +19,7 @@
 // layer has. See "Who decides to jump" in the spec.
 // ---------------------------------------------------------------------------
 
-import { bodyProfile, profileKey, buildGraph, nodeUnder, nearestNode, route, bestPartial, edgeKey } from "../game/nav.js";
+import { bodyProfile, profileKey, buildGraph, nodeUnder, nearestNode, route, bestPartial, costsFrom, edgeKey } from "../game/nav.js";
 import { bodyJump } from "./locomotion.js";
 import { config } from "../game/config.js";
 
@@ -328,6 +328,114 @@ function drive(ent, toX, speed, dt) {
   const v = Math.min(speed, step);
   if (v < 1) return { kind: "driveX", v: 0 };
   return { kind: "driveX", v: (dx > 0 ? 1 : -1) * v };
+}
+
+// ---- band resolver (tech/ranged-repositioning.md, R1) -----------------------
+
+// Abandon the route WITHOUT forgetting what the body has learned.
+//
+// A caller that stops driving an agent mid-manoeuvre must say so. The follower
+// resolves a jump on the first GROUNDED frame after takeoff, so a leg left
+// pending while some other controller flies the landing gets booked as a failed
+// attempt on an edge that was never attempted — three of those and a perfectly
+// good edge is banned. Clearing `leg`/`path` drops the manoeuvre; `attempts` and
+// `banned` survive, because an unflyable edge is a fact about geometry and this
+// body and does not stop being true because the agent changed its mind.
+export function abortRoute(ent) {
+  if (!ent.nav) return;
+  ent.nav.leg = null;
+  ent.nav.path = null;
+  ent.nav.dest = null;
+}
+
+// Turn a distance BAND into a place to stand.
+//
+// `routeRequest` moves a body to a point; a `keepDistance` agent has no point,
+// only `holdRange { point, min, max }`. This is the missing half: among the nodes
+// this body can actually reach, the cheapest one offering a standing position
+// that is inside the band AND has line of sight to the target.
+//
+// Three hard filters — reachable, in band, can see — and one tiebreak, least
+// time. No weights: no elevation term, no ally spacing, no line of shot. That is
+// idea/advanced-agent-navigation.md's destination scoring and it replaces this
+// outright when it lands.
+//
+// `see(x, y)` is INJECTED, not imported: perception.js already imports this
+// module for navSense, so the sight test arrives from the call site that owns
+// both. Returns a world point in CENTRE space — what routeRequest consumes —
+// or null, which means "nothing better exists; hold distance where you are".
+export function holdPoint(ent, scene, speed, tp, min, max, see) {
+  if (!config.navEnabled || !config.navReposition) return null;
+  const b = ent.spec.body;
+  if (b.gravity === 0) return null; // a flyer already moves in two dimensions
+  if (!ent.onGround) return null; // "where I could stand" needs a node to stand on
+  if (!scene.platforms || !scene.platforms.length) return null;
+
+  const graph = graphFor(scene, profileFor(ent, scene, speed));
+  if (!graph.nodes.length) return null;
+  const here = nodeUnder(graph, ent.x, ent.y + ent.h);
+  if (!here) return null;
+
+  // Route around edges this body has already proven it cannot fly, so a spot is
+  // only offered if the follower can honestly be expected to deliver it. The
+  // ledger is only valid against the graph it was learned on.
+  const nav = ent.nav && ent.nav.gen === (scene.navGen || 0) ? ent.nav : null;
+  const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null);
+
+  let best = null;
+  let bestCost = Infinity;
+  for (const n of graph.nodes) {
+    const c = dist[n.id];
+    // Unreachable, or already beaten — checked BEFORE the sight test, which is
+    // the expensive one (a segment against every platform, per candidate).
+    if (!Number.isFinite(c) || c >= bestCost) continue;
+    const p = standPoint(n, ent, tp, min, max, see);
+    if (!p) continue;
+    best = p;
+    bestCost = c;
+  }
+  return best;
+}
+
+// Where on one node a body could stand to hold the band, or null.
+//
+// `holdRange` measures centre-to-centre in TWO dimensions, so a node's height
+// spends part of the band budget before any horizontal distance is covered: a
+// perch 300px above a target with max 340 has only 160px of horizontal room, and
+// a node further above than `max` cannot hold the band at any x. Solving for the
+// horizontal half of that gives two intervals — one either side of the target —
+// which are then clipped to the span the body actually fits on.
+function standPoint(n, ent, tp, min, max, see) {
+  const cyN = n.y - ent.h / 2; // a body standing here has its CENTRE at this y
+  const dy = cyN - tp.y;
+  const far = max * max - dy * dy;
+  if (far <= 0) return null; // too far above/below to be in band at any x
+  const hi = Math.sqrt(far);
+  const lo = Math.sqrt(Math.max(0, min * min - dy * dy));
+  // node spans are body-LEFT-EDGE; the band and the sight test are both centre
+  const spanLo = n.a + ent.w / 2;
+  const spanHi = n.b + ent.w / 2;
+  const cxE = ent.x + ent.w / 2;
+
+  const sides = [[tp.x - hi, tp.x - lo], [tp.x + lo, tp.x + hi]];
+  // Prefer the side of the target the agent is already on — with nothing to
+  // choose between two equally cheap spots, not crossing the target is the less
+  // surprising answer, and it keeps the choice deterministic.
+  if (Math.abs(cxE - (tp.x + lo)) < Math.abs(cxE - (tp.x - lo))) sides.reverse();
+
+  for (const [s, e] of sides) {
+    const a = Math.max(s, spanLo);
+    const b = Math.min(e, spanHi);
+    if (a > b) continue;
+    // Sight varies along the interval, so test more than one point: where the
+    // agent would arrive with the least walking, then each end of the band —
+    // hugging `min` and hugging `max` see past different corners. Three probes,
+    // not a tunable sample count: they are the positions that mean something.
+    for (const x of [clamp(cxE, a, b), a, b]) {
+      if (see(x, cyN)) return { x, y: cyN };
+    }
+  }
+  return null;
 }
 
 // ---- observability ---------------------------------------------------------

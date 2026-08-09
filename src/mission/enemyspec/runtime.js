@@ -21,9 +21,9 @@
 
 import { overlaps, Projectile } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
-import { routeRequest } from "../navigation.js";
+import { routeRequest, holdPoint, abortRoute } from "../navigation.js";
 import { tickBrain } from "./brain.js";
-import { updateSense, nearestHostile } from "./perception.js";
+import { updateSense, nearestHostile, losBetween } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
 import { config } from "../../game/config.js";
 
@@ -346,7 +346,11 @@ function controllerRequest(root, ent, m, dt, scene, target) {
     }
     case "keepDistance": {
       if (!target) return { kind: "brakeX", factor: 0.7 };
-      return { kind: "holdRange", point: { x: cx(target), y: cy(target) }, min: m.min, max: m.max, speed: m.speed };
+      const point = { x: cx(target), y: cy(target) };
+      // A band is not a point, so N3's follower cannot take this one. R1 turns it
+      // into a point when — and only when — standing still is doing nothing.
+      return repositionRequest(root, ent, m, point, scene, dt)
+        || { kind: "holdRange", point, min: m.min, max: m.max, speed: m.speed };
     }
     case "home": {
       if (!target) return { kind: "coast" };
@@ -370,6 +374,100 @@ function controllerRequest(root, ent, m, dt, scene, target) {
       };
   }
   return { kind: "coast" };
+}
+
+// RANGED REPOSITIONING (tech/ranged-repositioning.md, R1) — the frame of a
+// `keepDistance` agent that has decided standing here is pointless. Returns the
+// MotionRequest that walks it somewhere better, or null to mean "hold distance,
+// exactly as before". Null is the overwhelmingly common answer: an agent that
+// can see its target is working, and it shoots.
+//
+// This owns the CHOICE and its lifetime; navigation.js owns turning a band into
+// a place (holdPoint) and getting there (routeRequest). Nothing here reads or
+// writes the utility brain — when a repositioning agent shoots, and at whom, is
+// unchanged.
+function repositionRequest(root, ent, m, point, scene, dt) {
+  if (ent !== root) return null; // a part does not choose where the body stands
+  if (root.team === "player") return null; // R1 is enemy-only; R2 lifts this
+  if (root.spec.body.gravity === 0) return null; // flyers are excluded by design
+  if (!config.navEnabled || !config.navReposition) return null;
+
+  const st = root.repo || (root.repo = { hold: 0, dest: null, stall: 0, anchorX: ent.x, retry: 0 });
+  const d = Math.hypot(point.x - cx(ent), point.y - cy(ent));
+  const outside = d > m.max || d < m.min;
+
+  // "Outside the band and not closing." Measured as ground covered, not as
+  // distance to the target: `holdRange` drives at full speed when it is outside
+  // the band, so an agent that is trying and failing has a commanded velocity
+  // and a position that does not change. Comparing the DISTANCE across frames
+  // would instead track the target's movement and reset the moment it walked.
+  if (!outside || Math.abs(ent.x - st.anchorX) > config.navArriveRadius) {
+    st.stall = 0;
+    st.anchorX = ent.x;
+  } else {
+    st.stall += dt;
+  }
+
+  // ---- an existing choice: see it through ---------------------------------
+  // Commitment is not polish. The follower rebuilds its route whenever the
+  // destination moves more than the arrival radius, so a spot recomputed every
+  // frame against a moving target never survives long enough for a jump to fail
+  // three times — and the attempt cap is the only thing that lets an agent give
+  // up. Pinning the point is what makes the machinery underneath work at all.
+  const committed = st.hold > 0;
+  if (committed) {
+    // The window counts GROUNDED time only. Letting it expire mid-jump is when
+    // expiry does the most damage: the agent cannot re-decide (there is no node
+    // under it) and handing back would drop a leg the follower was about to
+    // resolve. Every window now ends somewhere a decision can actually be made.
+    if (ent.onGround) st.hold -= dt;
+    // Arrived and shooting, or the follower has run out of ideas: hand back.
+    if ((root.sense.los && !outside) || (ent.nav && ent.nav.blocked)) return release(st, ent);
+    // Mid-window: keep walking. A null from the follower (mid-fall, off the
+    // graph) is one frame of holdRange, not a reason to abandon the choice.
+    if (st.hold > 0) return routeRequest(ent, st.dest, m.speed, scene, dt);
+    // Window expired. Decide again below WITHOUT releasing first: re-deciding
+    // usually picks the same spot, and dropping the route in between would
+    // forgive a jump that is in flight — the attempt cap only counts legs the
+    // follower gets to resolve.
+  }
+
+  // ---- is a (new) choice wanted? -------------------------------------------
+  // Not while airborne: "somewhere I could stand instead" needs a node under the
+  // body, and a frame that could never have produced an answer must not spend
+  // the cooldown that rations the ones that could.
+  if (!ent.onGround) return null;
+  st.retry -= dt;
+  const wants = !root.sense.los || (outside && st.stall >= config.navStallTime);
+  if (!wants) return committed ? release(st, ent) : null;
+  // A scan that found nothing costs a sight test per node and will find nothing
+  // again this frame. Committed agents skip the cooldown — their window expiring
+  // IS the re-evaluation.
+  if (!committed && st.retry > 0) return null;
+  st.retry = config.navRepathInterval;
+
+  const see = (x, y) => losBetween(x, y, point.x, point.y, scene.platforms);
+  const dest = holdPoint(ent, scene, m.speed, point, m.min, m.max, see);
+  if (!dest) return committed ? release(st, ent) : null; // nowhere better exists
+
+  st.dest = dest;
+  st.hold = config.navRepositionHold;
+  return routeRequest(ent, dest, m.speed, scene, dt);
+}
+
+// Hand the agent back to `holdRange`. The route state goes with it: the follower
+// resolves a jump on the first grounded frame AFTER takeoff, so a leg left
+// pending while holdRange flies the landing would later be booked as a failed
+// attempt on an edge that was actually cleared. `abortRoute` drops the manoeuvre
+// and keeps the ban ledger.
+function release(st, ent) {
+  st.hold = 0;
+  st.dest = null;
+  st.stall = 0;
+  st.anchorX = ent.x;
+  st.retry = config.navRepathInterval;
+  abortRoute(ent);
+  return null;
 }
 
 // Resolve a moveTo/dash target to a world point. `offset: [along, up]` shifts
