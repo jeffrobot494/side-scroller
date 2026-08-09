@@ -20,7 +20,7 @@ watches, and both shipped with `tech/agent-navigation.md` N1–N3.
 
 | # | Slice | Runtime behaviour |
 |---|---|---|
-| B1 | **The observatory.** Its own Tools entry: a generated level drawn at 1:1, one soldier-bodied agent standing on a random node, click anywhere to make that point its goal, wheel to pan (**up pans left, down pans right**). It routes there and stops. Reload for a new level. Tuning renders from the config `SCHEMA` | **None in code.** Editor-only. But the tuning knobs are the shipped game's — see the warning below |
+| B1 | **The observatory, and the end of v1.** Delete `src/editor/tools/behavior-lab.js` and its test outright, then build v2 in their place: a generated level drawn at 1:1, one soldier-bodied agent standing on a random node, click anywhere to make that point its goal, wheel to pan (**up pans left, down pans right**). It routes there and stops. Reload for a new level. Tuning renders from the config `SCHEMA` | **None in code.** Editor-only. But the tuning knobs are the shipped game's — see the warning below. The Tools tab loses the two-team combat observatory and gains a navigation one |
 | B2 | **Overlays.** Graph and Path toggles, off by default: every node and directed edge of the agent's own profile, and the route it currently holds | **None.** Editor-only, and read-only against state the follower already keeps |
 | B3 | **Platform dragging.** Drag any platform in x and y; the graph is invalidated and rebuilt, and the agent's route state is cleared so it repaths from where it stands | **None.** Editor-only |
 
@@ -56,9 +56,9 @@ looks at would be the failure mode.
 | The soldier↔agent bridge | `src/mission/ai.js` | **The pattern the Lab must copy, not call.** `SOLDIER` drives `Soldier.applyMovement` and integrates nothing — the caller steps the Soldier, and mirrors its position back onto the agent each frame, or the router keeps routing from the spawn coordinates while the body walks away. `updateCompanionSpec` is where that mirror exists, but it hardcodes the companion spec, whose only movement targets a leader the Lab does not have |
 | A soldier-bodied agent | `src/game/companionspecs.js` | A working EnemySpec on `body.locomotor: "soldier"` — the shape to copy. Note it authors `body.gravity` explicitly, which a grounded agent must, because `moveTo` is in `FLYING_MOTIONS` and would otherwise default the body to a flyer |
 | Level + scene construction | `src/game/gen/levelgen.js`, `src/mission/entities.js` | `generateLevel` then `loadMission` gives a real world, real platforms and a real spawn — plus `stepActor`, which the Lab calls itself for its one Soldier |
-| Tool shell and discipline | `src/editor/tools/behavior-lab.js` | v1's canvas host, rAF loop, dispose pattern, and its pointer→world conversion, which corrects for the canvas being CSS-scaled |
+| Tool shell and discipline | `src/editor/tools/level-generator.js` | The `createX(container, onBack) → { dispose() }` convention from `CLAUDE.md`: one synchronous `draw()` at mount, a cancelled rAF on dispose, `TOOLS`/`MOUNTABLE`/`factory` registration. A canvas tool that is not v1 |
 | Schema-driven controls | `src/editor/controls.js`, `src/game/config.js` | The Tuning panel renders a `SCHEMA` group rather than bespoke sliders. The renderer works a whole group at a time — see Approximations |
-| Headless mount test | `test/behavior-lab.test.mjs` | The shape a new tool's test copies |
+| Headless mount test | `test/tools.test.mjs` | The shape a new tool's test copies — mount, assert a `dispose()`, dispose without throwing |
 
 ## Where the code goes
 
@@ -94,7 +94,7 @@ correction either way.
 
 | Owns | Must not touch |
 |---|---|
-| Its own tool module and its registration | `src/editor/tools/behavior-lab.js`. v1 keeps its slot; retiring it is a separate decision, not a side effect of this |
+| Its own tool module and its registration | `src/editor/tools/behavior-lab.js`. **v1 is deleted in B1, not kept beside it** — Bo's call, and the reason is that v2 is deliberately smaller. Nothing carries over: not the scoreboard, not step-decision, not the two-team view, not its CSS |
 | Where a destination comes from — a click, resolved to a surface | How a destination becomes movement. That is the shipped follower, and substituting anything else would make this a simulator of navigation rather than a window onto it |
 | Stepping its one Soldier and mirroring its position onto the agent | The locomotor and the router themselves. The Lab supplies the loop `src/mission/ai.js` supplies for companions; it does not supply a second way to move |
 | Drawing the graph and the held route | The graph's contents and the router's decisions. The Lab is read-only against both |
@@ -112,7 +112,8 @@ Tuning table the *actual* two knobs rather than two knobs that look relevant.
 
 | Suite | What it actually guards |
 |---|---|
-| `test/behavior-lab.test.mjs` | v1 still mounts headlessly and disposes cleanly. Every slice here leaves it untouched, so a failure means the shared editor plumbing moved |
+| `test/behavior-lab.test.mjs` | **Deleted with v1 in B1 and written again from nothing.** It asserted v1's scoreboard and two-team arena, none of which v2 has, so keeping it would be keeping v1. The path is reused so `tech/agent-navigation.md`'s citation stays true; the contents are not |
+| `test/tools.test.mjs` | Every other editor tool still mounts. This is the suite that catches shared editor plumbing moving — the job v1's test used to do incidentally |
 | `test/navigation.test.mjs` | The follower the tool exists to watch — profiles, the graph cache, takeoffs, the partial-path fallback and the attempt cap. **Note what it does not cover:** every route-following case there drives a *legged* body. Only `profileFor`'s numbers are asserted for a soldier body, so the Lab is the first end-to-end consumer of router + `SOLDIER`, and is as likely to find bugs there as to display them |
 | `test/nav.test.mjs` | The graph the overlay draws, including the reject boundaries a dragged platform will start hitting |
 | `test/levelgen-golden.test.mjs` | Generated levels are unchanged. Dragging edits a loaded scene and must never reach generation |
@@ -143,16 +144,15 @@ reason the tool is being built.
 *Background — what exists today. Not needed to start building; the six sections
 above are.*
 
-## Background: v1, and what changes
+## Background: v1, and why it is deleted rather than kept
 
-`src/editor/tools/behavior-lab.js` is a two-team combat observatory: both teams as
-spec agents on a generated level, pause / step-frame / step-decision, LOS and
-`sense.*` overlays, and the utility scoreboard. It answers *why did that agent
+`src/editor/tools/behavior-lab.js` was a two-team combat observatory: both teams
+as spec agents on a generated level, pause / step-frame / step-decision, LOS and
+`sense.*` overlays, and the utility scoreboard. It answered *why did that agent
 choose that action*.
 
 The design in `design/behavior-lab.md` asks a different question — *can that agent
-get there* — and answers it with one agent, no combat, and two overlays. The two
-tools overlap only in that both draw a generated level and both drive real agents.
+get there* — and answers it with one agent, no combat, and two overlays.
 
 | | v1 | v2 |
 |---|---|---|
@@ -162,6 +162,25 @@ tools overlap only in that both draw a generated level and both drive real agent
 | Level | Fixed once built | Platforms draggable |
 | Combat | Full — projectiles, damage, sound | None |
 
+**Both tools were going to keep their slots. Bo's decision is that v1 goes, and
+that nothing from it is carried across.** v2 is smaller on purpose, and treating
+v1's feature list as a floor is the specific way that intent gets lost. So this
+is a deletion, not a migration: no scoreboard, no step-decision, no two-team
+arena, no reuse of its CSS block in `src/editor/editor.css`. Anyone reading this
+later and reaching for a v1 feature should treat the absence as deliberate.
+
+**What survives v1, and why it is not a carry-over.** The four `lab*` knobs in the
+config `SCHEMA` — `labDecisionScale`, `labPerceptionScale`, `labAimErrorScale`,
+`labGodEye` — are read by `src/mission/enemyspec/brain.js` and
+`src/mission/enemyspec/perception.js`, not by the tool. They are runtime levers on
+the shipped game with their own Settings controls, and they are no-ops at their
+defaults. `labGodEye` in particular is now load-bearing elsewhere:
+`tech/ranged-repositioning.md` records that it suppresses repositioning, and
+`test/reposition.test.mjs` pins that. **v2 uses none of the four** — with one
+agent and no hostiles, aim error and god eye have nothing to act on — but they
+stay because deleting them would change the game, not the tool.
+
 `archive/behavior-lab-v1.md` is the superseded spec for v1 and records what was
 deferred out of it: metrics, a scripted ghost player, record/replay + A/B, and
-scenario presets. None of those return here.
+scenario presets. None of those return here. The archive is the only place v1
+continues to exist.
