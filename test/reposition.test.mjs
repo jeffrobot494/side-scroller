@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// RANGED REPOSITIONING (tech/ranged-repositioning.md, Slice R1).
+// RANGED REPOSITIONING (tech/ranged-repositioning.md, Slices R1 + R2).
 //
 // navigation.test.mjs proves an agent that has been given a POINT can get to
 // it. A `keepDistance` agent is never given one — it has a band — so this
@@ -16,6 +16,8 @@ import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { holdPoint, abortRoute, invalidateNavGraphs } from "../src/mission/navigation.js";
 import { losBetween } from "../src/mission/enemyspec/perception.js";
+import { updateCompanionSpec } from "../src/mission/ai.js";
+import { Soldier, STAND_H, stepActor } from "../src/mission/entities.js";
 import { config, resetConfig } from "../src/game/config.js";
 
 const STEP = 1 / 60;
@@ -31,6 +33,9 @@ function scene(platforms, soldiers = []) {
     specRoots: [],
   };
 }
+
+const rifle = { id: "rifle", name: "R", fireRate: 7, projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 1 }, effects: [] };
+const rosterSoldier = (id) => ({ id, name: id, callsign: "", stats: { aim: 6, health: 5, speed: 5, nerve: 5 }, traits: [], cost: 0, status: "roster", record: { missions: 1, kills: 0 }, wounds: 0 });
 
 const soldierAt = (x, y) => ({ kind: "soldier", x, y, w: 30, h: 46, vx: 0, vy: 0, onGround: true, alive: true, health: 1e9, maxHealth: 1e9 });
 
@@ -205,13 +210,13 @@ export default async function run(t) {
     t.ok("commit: with sight", losBetween(cx(g), cy(g), 715, 377, sc.platforms));
   }
 
-  // ---- R1 is enemies only ----------------------------------------------------
+  // ---- R2: both teams, on the same code path ---------------------------------
   {
-    // The companion's combat state runs keepDistance on a soldier body. R2 is the
-    // slice that changes ally behaviour; R1 must leave it exactly as it was, and
-    // "exactly" is the point — this is what makes R2 a real decision.
+    // R1 shipped with an explicit enemy-team guard so that changing how the game
+    // plays WITH you was a decision rather than a side effect. R2 removes it, and
+    // the thing to prove is that removing it was all there was to it: an ally in
+    // the identical situation makes the identical move.
     const sc = scene(SLAB, []);
-    sc.specRoots = [];
     const ally = gunner(200, 474, { team: "player" });
     const foe = gunner(200, 474);
     const hostile = { kind: "soldier", x: 700, y: 354, w: 30, h: 46, vx: 0, vy: 0, onGround: true, alive: true, health: 1e9, maxHealth: 1e9 };
@@ -220,8 +225,60 @@ export default async function run(t) {
     sim(ally, sc, 14);
     sim(foe, sc, 14);
     t.ok(`teams: the enemy repositions (x ${cx(foe).toFixed(0)})`, cx(foe) > 800);
-    t.ok(`teams: the ally does not — that is R2 (x ${cx(ally).toFixed(0)})`, cx(ally) < 600);
-    t.eq("teams: and keeps no reposition state at all", ally.repo, undefined);
+    t.ok(`teams: and so does the ally (x ${cx(ally).toFixed(0)})`, cx(ally) > 800);
+    t.ok("teams: to the same place — one code path, not two", Math.abs(ally.x - foe.x) < 1);
+  }
+  {
+    // The combination R1 never exercised: a real companion. A Soldier body driven
+    // through updateCompanionSpec, whose `combat` state sets keepDistance — so the
+    // band resolver has to work against the SOLDIER profile (config.jumpSpeed and
+    // config.runSpeed, unscaled world gravity), not a legged one, and against an
+    // agent whose x/y are a mirror of a body it does not integrate.
+    //
+    // Chest-high cover with the enemy behind it. The companion must climb ONTO
+    // the cover to have a shot, which is the case the slice is for and also the
+    // case that collides with the companion's own brain — `combat` exits the
+    // moment its target stops being level, so it will not settle up there. The
+    // assertion is therefore that it gets the shot at all, not that it stays.
+    const COVER = [
+      { x: 0, y: 500, w: 1400, h: 40 },
+      { x: 600, y: 420, w: 200, h: 80 },
+    ];
+    const runCover = () => {
+      const leader = new Soldier(rosterSoldier("L"), rifle, 500, 500 - STAND_H);
+      const comp = new Soldier(rosterSoldier("C"), rifle, 520, 500 - STAND_H);
+      const foe = instantiate(normalizeSpec({
+        id: "dummy", root: { health: { max: 1e6 }, visual: { size: [30, 46] }, motion: { type: "static" } },
+      }), 1000, 454);
+      foe.rng = () => 0.5;
+      const sc = scene(COVER, [leader, comp]);
+      sc.specRoots = [foe];
+      let sawTarget = false;
+      let highest = 500;
+      let fought = false;
+      for (let i = 0; i < 60 * 20; i++) {
+        if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+        updateCompanionSpec(comp, STEP, sc, leader, ctx);
+        stepActor(comp, STEP, sc.world, sc.platforms);
+        if (comp.agent.brainState.current === "combat") fought = true;
+        if (comp.agent.sense.los) sawTarget = true;
+        highest = Math.min(highest, comp.y + comp.h);
+      }
+      return { sawTarget, highest, fought, sc, comp };
+    };
+
+    const on = runCover();
+    config.navReposition = false;
+    const off = runCover();
+    config.navReposition = true;
+
+    t.ok("companion: it does engage — the brain reaches the keepDistance state", on.fought);
+    t.ok(`companion: it climbs the cover (feet reached ${on.highest})`, on.highest <= 420);
+    t.ok("companion: and gets a sight line on the enemy behind it", on.sawTarget);
+    t.ok(`off: without R2 it stays on the ground (feet ${off.highest})`, off.highest === 500);
+    t.ok("off: and never sees the enemy at all", !off.sawTarget);
+    t.ok("companion: routed on the SOLDIER profile, not a legged one",
+      [...on.sc.navGraphs.keys()].some((k) => k === `30x46@2000/${config.jumpSpeed}/${config.runSpeed}`));
   }
 
   // ---- it does not break the follower ---------------------------------------
@@ -300,6 +357,28 @@ export default async function run(t) {
     }
     t.ok("airtime: the gunner spent real frames airborne on a committed jump", held !== null);
     t.ok("airtime: and the commitment window did not tick while it was up there", !ticked);
+  }
+  {
+    // A commitment must not outlive the controller that made it. Arbitration is
+    // `dash > moveOrder > controller`, and a brain can leave `keepDistance`
+    // outright — the companion's combat state does it the moment its target stops
+    // being level, which repositioning can cause by climbing. Coming back to a
+    // destination chosen for a fight that is over, with a jump still open from it,
+    // is how a stale choice becomes a stuck agent.
+    const sc = scene(SLAB, [TARGET]);
+    const g = gunner(200, 474);
+    sim(g, sc, 1);
+    t.ok("stale: the gunner is committed before it is interrupted", g.repo.hold > 0 && !!g.repo.dest);
+    const pinned = g.repo.dest; // the object, not its value — it must be re-made
+    g.moveOrder = { x: 300, y: 474, speed: 140, timeout: 3 }; // preempts the controller
+    sim(g, sc, 1.5);
+    g.moveOrder = null;
+    updateSpecEnemy(g, STEP, sc, ctx); // first frame back on the controller
+    t.ok("stale: the choice is re-made, not resumed", g.repo.dest !== pinned);
+    // And the window with it: a resumed commitment would show the ~0.5s that was
+    // left when the interruption began.
+    t.ok(`stale: on a full window, or none at all (${g.repo.hold.toFixed(2)})`,
+      g.repo.hold === 0 || g.repo.hold > config.navRepositionHold - 0.05);
   }
   {
     // The contract abortRoute exists for, stated directly: drop the manoeuvre,

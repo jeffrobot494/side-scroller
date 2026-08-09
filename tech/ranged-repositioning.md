@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: building
+status: built
 resolution: sharp
 sprint: 2026-08
 needs: [agent-navigation]
@@ -58,11 +58,40 @@ neither this slice nor September's scoring addresses it.
 | # | Slice | Runtime behaviour |
 |---|---|---|
 | R1 ✅ | **Enemies reposition.** A grounded enemy-team `keepDistance` agent that either has no line of sight to its target, or is outside its band and not closing, resolves the least-time reachable node that is inside the band and has line of sight, and routes there. It holds that choice until it arrives, regains sight, or the follower gives up, then hands back to `holdRange` | **Changed, enemy team only.** `lurk_gunner` and `cowardly_duelist` leave dead positions. With sight and a holdable band — the common case — nothing changes |
-| R2 | **Companions too.** The same path for the player team, whose `combat` state runs `keepDistance` on a soldier body | **Changed for allies.** A squadmate in combat repositions instead of holding a line it cannot shoot along. This is the slice that touches how the game plays *with* you, which is why it is separate |
+| R2 ✅ | **Companions too.** The same path for the player team, whose `combat` state runs `keepDistance` on a soldier body | **Changed for allies.** A squadmate in combat repositions instead of holding a line it cannot shoot along. This is the slice that touches how the game plays *with* you, which is why it is separate |
 
 R1 lands alone and is the whole enemy-facing fix. R2 is split off because it
 changes ally behaviour in every mission and deserves to be accepted or rejected
 on its own — not because it is technically harder. Both are watched in the Lab.
+
+**As built (R2) — it is very nearly a no-op, and that is the finding.** R2 was
+one deleted guard, as planned. What it buys in the game as it stands is almost
+nothing. Over 60 generated levels, a real companion on `updateCompanionSpec` with
+the leader pinned, 30 simulated seconds each:
+
+| | R2 off | R2 on |
+|---|---|---|
+| had sight while in its `combat` state | 97% of frames | **99%** |
+| `escort`↔`combat` transitions | 7.3 per level | **7.1** |
+
+A companion escorts the player, and the player is usually in the open, so it
+almost never lacks a sight line to begin with — there is no 39% here to fix. The
+value of the slice is therefore **one code path instead of two**, not better ally
+behaviour: every later improvement to repositioning now lands on both teams at
+once. Take it on that basis or not at all; nothing measurable is lost by
+reverting it.
+
+**As built (R2) — it collides with the companion's own brain, and the collision
+is design, not code.** `combat` exits on `sense.playerAbove || sense.playerBelow`
+(`src/game/companionspecs.js`). Repositioning's job is to change elevation, so a
+companion that climbs onto cover to get a shot immediately stops considering
+itself in combat, escorts back down, re-engages, and climbs again. It is visible
+in `test/reposition.test.mjs`'s cover scene, which is why that test asserts the
+companion *gets* the shot rather than *keeps* it. The measurement above says this
+does not bite on today's generated levels — the companion rarely needs to climb —
+but the exit condition was written when a companion could not change its own
+elevation, and it will bite the moment ally behaviour gets more ambitious.
+**Bo's call; not changed here.**
 
 **Commitment is part of R1, not deferred.** The follower resets its give-up
 accounting whenever the destination moves more than `navArriveRadius`, so a
@@ -167,6 +196,17 @@ Conventions and constraints this must follow:
 | Grounded bodies | Flyers, which already move in two dimensions and get no graph |
 | The enemy team (R1); the player team (R2) | R1 must leave ally behaviour byte-identical, which is what makes R2 a real decision rather than a formality |
 
+**As built (R2) — a commitment must not outlive the controller that made it.**
+The spec assumed the only way to lose an agent mid-reposition was a jump. It is
+not: a dash or a `moveOrder` preempts the standing controller outright, and a
+brain can leave `keepDistance` altogether — the companion's `combat` state does
+exactly that, sometimes *because* the reposition worked. Control then returns
+seconds later to a destination pinned for a fight that is over, with a leg still
+open from it. The reposition state now stamps `root.age` on every call and
+releases when it finds a gap, so control returning always starts a fresh
+decision. Found in R2; it was latent in R1 for every dashing enemy, and the
+`cowardly_duelist` dashes constantly.
+
 **A committed *dash* outranks this; a fire action does not.** Arbitration is
 `dash > moveOrder > controller`, and only a `dash` or `moveTo` step preempts the
 standing controller. `cowardly_duelist`'s `backHop` and `lunge` carry dashes and
@@ -183,12 +223,13 @@ September's, so an agent can arrive somewhere it can see but not cleanly shoot.
 | Suite | What it actually guards |
 |---|---|
 | `test/locomotion-intents.test.mjs` | Two companion outcomes: the escort loop, and — **the one that matters for R2** — the combat block that drives the companion into `keepDistance` and asserts it holds a standoff without overrunning the enemy. R1 must leave both untouched; R2 is expected to move the second and must be re-justified, not re-baselined |
+| | **As built:** it did not move, and the reason is the point of the slice. That scene is flat ground with a clear sight line and a band the companion can hold, so the trigger never fires — the 91% case where R1/R2 do nothing by design. No re-justification was needed and none was invented |
 | `test/enemyspec-brain.test.mjs` | Track and utility scoring, and `sense.*` values. Note the honest version: moving an agent **does** change `sense.dist`/`los`/`playerApproaching`, which the duelist's gates read. The guarantee is that no scoring *rule* changes, not that no score does |
 | `test/locomotion-characterization.test.mjs` | Whole-trajectory fixtures. Both `keepDistance` enemies are in it, and on that scene neither has any band+sight candidate — the duelist has none anywhere, the gunner's only one is an unreachable wall top. **The fixture is expected to stay green.** A diff here means the resolver is choosing something it should have filtered out, and regenerating would bless a bug |
 | `test/navigation.test.mjs` | The follower, unchanged by both slices |
 | `test/nav.test.mjs` | The graph the candidates come from |
 | `test/mission-enemyspec.test.mjs` | Mission enemies still instantiate and update |
-| **As built:** `test/reposition.test.mjs` | R1's own suite (48). The resolver alone, the whole loop against a feature-off control, both triggers, commitment, the enemy/ally split, and the two route-state invariants — a reposition ending mid-jump must take the pending leg with it, and the window must not tick while airborne. Every one of those was written after a mutation survived without it |
+| **As built:** `test/reposition.test.mjs` | R1+R2's own suite (57). The resolver alone, the whole loop against a feature-off control, both triggers, commitment, the enemy/ally split, and the two route-state invariants — a reposition ending mid-jump must take the pending leg with it, the window must not tick while airborne, and a commitment must not span an interruption. R2 adds the real companion on `updateCompanionSpec`, climbing cover to get a shot, against a feature-off control. Every route-state invariant in it was written after a mutation survived without it |
 
 The bar is `node test/run.mjs` green plus a served-page check. **Whether a
 repositioning gunner reads as smart or as twitchy cannot be asserted headlessly.**
@@ -226,7 +267,7 @@ Measured against the shipping roster after `tech/agent-navigation.md` N3.
 | Companion — `escort` | grounded (soldier) | `moveTo` via move order | Yes |
 | `lurk_gunner` | grounded | `keepDistance` | ~~No — R1~~ **Yes, since R1** |
 | `cowardly_duelist` | grounded | `keepDistance` | ~~No — R1~~ **Yes, since R1** |
-| Companion — `combat` | grounded (soldier) | `keepDistance` | **No — R2** |
+| Companion — `combat` | grounded (soldier) | `keepDistance` | ~~No — R2~~ **Yes, since R2** |
 | `spore_wisp`, `strafe_raider`, `sky_duelist`, `iron_moth` | flying | `hover` / `static` | No, by design |
 
 So every grounded agent in the game either routes already or is covered by one of

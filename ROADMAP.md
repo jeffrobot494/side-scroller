@@ -81,6 +81,7 @@ description of what the game does today; this is only the index.
 | Level generation Slice 1 — seeded procedural levels, leads, difficulty budgets | `tech/level-generation.md` |
 | Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `tech/sound.md` |
 | Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `tech/weapon-designer.md` |
+| Ranged repositioning R1–R2 — a `keepDistance` agent that cannot see its target walks to somewhere it can, both teams | `tech/ranged-repositioning.md` |
 | Behavior Lab Slice 1 — two teams, overlays, utility scoreboard, time control | v1, being replaced |
 | Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `design/design-map.md` · `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |

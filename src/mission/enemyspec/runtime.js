@@ -388,11 +388,24 @@ function controllerRequest(root, ent, m, dt, scene, target) {
 // unchanged.
 function repositionRequest(root, ent, m, point, scene, dt) {
   if (ent !== root) return null; // a part does not choose where the body stands
-  if (root.team === "player") return null; // R1 is enemy-only; R2 lifts this
   if (root.spec.body.gravity === 0) return null; // flyers are excluded by design
   if (!config.navEnabled || !config.navReposition) return null;
 
-  const st = root.repo || (root.repo = { hold: 0, dest: null, stall: 0, anchorX: ent.x, retry: 0 });
+  const st = root.repo || (root.repo = { hold: 0, dest: null, stall: 0, anchorX: ent.x, retry: 0, seen: -1 });
+
+  // A commitment must not outlive the controller that made it. This branch only
+  // runs while `keepDistance` is the standing controller, and a brain can leave
+  // it at any moment — the companion's `combat` state exits the instant its
+  // target stops being level, which repositioning itself can cause by climbing.
+  // A dash or a moveOrder preempts it too. Coming back seconds later to a pinned
+  // destination chosen for a fight that is over, with a jump still open from it,
+  // is how a stale choice becomes a stuck agent.
+  if (st.seen >= 0 && root.age - st.seen > dt * 2) {
+    release(st, ent);
+    st.retry = 0; // an interruption is not a fruitless scan; re-decide at once
+  }
+  st.seen = root.age;
+
   const d = Math.hypot(point.x - cx(ent), point.y - cy(ent));
   const outside = d > m.max || d < m.min;
 
