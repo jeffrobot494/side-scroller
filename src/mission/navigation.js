@@ -262,9 +262,24 @@ export function routeRequest(ent, dest, speed, scene, dt) {
     return null;
   }
 
-  // A walk or a drop needs no decision: head for the destination span and let
-  // the ledge do the rest. Only a jump has a moment that must be timed.
-  if (edge.kind === "walk" || edge.kind === "drop") return drive(ent, landingX(next, ent.x), speed, dt);
+  // A DROP means leaving this ledge, and that is not the same as lining up with
+  // the node below. The node below is usually directly underneath and much wider
+  // — the ground slab spans most of a level — so "head for its x" resolves to
+  // the x the body is already standing on, and the agent waits on the lip
+  // forever, fully supported, for a fall that needs a step it was never told to
+  // take. Aim a body width PAST the lip instead; support ends partway there and
+  // gravity finishes it.
+  if (edge.kind === "drop") {
+    const right = next.a > here.b ? true : next.b < here.a ? false : destX >= ent.x;
+    return drive(ent, right ? here.b + ent.w : here.a - ent.w, speed, dt);
+  }
+  // A walk is a step onto a touching span at the same height. Same trap in
+  // miniature: if the spans overlap, the nearest point on the destination can be
+  // where we already are. Aim at its far end so the request always moves us.
+  if (edge.kind === "walk") {
+    const toX = landingX(next, ent.x);
+    return drive(ent, Math.abs(toX - ent.x) < 1 ? (next.a >= here.a ? next.b : next.a) : toX, speed, dt);
+  }
 
   const up = edge.kind === "jump";
   const lip = takeoffX(here, next, ent.x, ent.w, up);

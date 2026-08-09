@@ -313,6 +313,26 @@ from 15 to 21. Seed 2026 — the case that started this — now closes from 1311
 17px. `test/locomotion.golden.json` did not move, which is the expected result:
 that scene's failing edge has no alternative route, so banning it changes nothing.
 
+**As built, after playtest: dropping off a ledge was never implemented, only
+described.** Found by Bo, not by the suite — a chaser followed him onto a high
+platform, he dropped away, and it stood on the lip indefinitely.
+
+N3 drove a drop edge toward the destination node's nearest x. The node below a
+ledge is normally the ground slab, which spans most of a level, so that x is the
+one the body is already standing on: the request resolved to "stay exactly where
+you are", and the agent waited on a fully-supported lip for a fall that needed a
+step nobody asked it to take. It only recovered when the destination moved enough
+to pick a different route. A drop now aims a body width **past** the lip, on the
+side the destination is on; support ends partway there and gravity does the rest.
+The same trap in miniature applies to a `walk` onto an overlapping span, fixed
+alongside.
+
+Measured over a 90-second roaming chase across 60 generated levels: **10 frozen
+chargers before, 0 after**, and in the 120-level sweep the number making no
+progress went 5 → 0 while reached rose 21 → 25. Nothing in the suite covered a
+drop being *taken* — `test/navigation.test.mjs` asserted one-way edges existed in
+the graph and never that an agent used one. It does now.
+
 **Correction to the slice table: the fixture never covered `backHop`.** N2's row
 predicted `locomotion.golden.json` would move on both the traversal hop and
 `cowardly_duelist`'s `backHop`. Regenerating moved **2 of 22 cases**

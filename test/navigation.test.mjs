@@ -247,6 +247,36 @@ export default async function run(t) {
     t.eq("N4: invalidating the graph clears the ledger", c.nav.banned.size, 0);
   }
 
+  // ---- dropping off a ledge -------------------------------------------------
+  // Leaving a ledge is not the same as lining up with the node below it. The
+  // ground slab spans most of a level, so the nearest point on it is directly
+  // underfoot — and an agent told to "go there" stands on the lip forever,
+  // fully supported, waiting for a fall that needs a step nobody asked for.
+  // This froze chasers on high platforms whenever the player dropped away.
+  {
+    const sc = scene(
+      [{ x: 0, y: 500, w: 1400, h: 40 }, { x: 600, y: 350, w: 200, h: 20 }],
+      [soldierAt(200, 500 - 46)], // the target is on the ground, far to the left
+    );
+    const c = chaser(700, 350 - 26); // standing on the perch, directly above the ground node
+    c.onGround = true;
+    sim(c, sc, 8);
+    t.ok(`drop: the chaser leaves the ledge (feet ${feet(c)})`, feet(c) === 500);
+    t.ok(`drop: and goes on to reach the target (x ${c.x.toFixed(0)})`, Math.abs(c.x - 185) < 60);
+  }
+  {
+    // the same, dropping the other way — the side is chosen by where the
+    // destination is, not by a fixed preference
+    const sc = scene(
+      [{ x: 0, y: 500, w: 1400, h: 40 }, { x: 600, y: 350, w: 200, h: 20 }],
+      [soldierAt(1200, 500 - 46)],
+    );
+    const c = chaser(650, 350 - 26);
+    c.onGround = true;
+    sim(c, sc, 8);
+    t.ok("drop: it leaves by the side its destination is on", feet(c) === 500 && c.x > 800);
+  }
+
   // ---- profiles: the soldier-locomotor branch -------------------------------
   {
     const sc = scene([{ x: 0, y: 500, w: 1400, h: 40 }]);
