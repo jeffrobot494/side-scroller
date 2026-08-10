@@ -50,15 +50,19 @@ section + the tests are the source of truth for what currently exists):
   Aim slider + auto-fire/manual drive), **Behavior Lab**, Controls (rebind keys).
   Settings tab is schema-driven config; the **Sound tab** is the mixer + the cue
   bank.
-- **Behavior Lab v2 (Slice B1 of `tech/behavior-lab.md` — built):** *can that
+- **Behavior Lab v2 (Slices B1–B2 of `tech/behavior-lab.md` — built):** *can that
   agent get there?* A generated level drawn at **1:1** (960×540, never scaled to
   fit — panned with the wheel, up = left), **one** soldier-bodied agent standing
   on a random graph node, and a click anywhere to send it there. It routes with
   the shipped `routeRequest` and stops on arrival. Tuning is the config `SCHEMA`'s
   own "Movement / feel" group, so the knobs are the *real game's* and persist.
-  Two exports, deliberately: `createLabModel`/`labStep`/`labGoal`/`labPan` (no
-  DOM — what the test drives) and `createBehaviorLab` (the editor shell). B2
-  adds the Graph and Path overlays; B3 adds platform dragging.
+  **Graph** and **Path** overlay toggles (B2, off by default): every standable
+  node and every directed edge of *this body's* graph, coloured by kind so a
+  one-way drop reads as one-way, plus the route the agent is currently holding —
+  read off `nav.path`, never recomputed, so a stale route is visible rather than
+  hidden. The module is DOM-free apart from `createBehaviorLab`:
+  `createLabModel`/`labStep`/`labGoal`/`labPan`/`labGraph`/`labPath`/`labDraw`
+  are what the test drives. B3 adds platform dragging.
   **v1 was deleted, not kept** — the two-team combat observatory, its
   step-decision transport, its utility scoreboard, its CSS, and its four
   `lab*` config knobs (`labDecisionScale`, `labPerceptionScale`,

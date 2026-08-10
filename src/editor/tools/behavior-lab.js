@@ -75,6 +75,12 @@ const AGENT_DATA = {
 // Nothing here can be damaged, but updateSpecEnemy takes a ctx.
 const CTX = { friendlyFire: false, damageMult: 1, damage() {}, kill() {}, spark() {}, burst() {} };
 
+// Edges are DIRECTED and the colours say why: a drop is one-way, because
+// platforms are solid and you cannot climb back up the way you fell. Drawing
+// them all one colour would hide the single most surprising thing about the
+// graph.
+const EDGE_COLOR = { walk: "#4b5a6e", hop: "#4fd1c5", jump: "#7bd47b", drop: "#e2934a" };
+
 // ---- the model --------------------------------------------------------------
 
 export function createLabModel(seed = (Math.random() * 1e9) | 0, rng = Math.random) {
@@ -96,7 +102,10 @@ export function createLabModel(seed = (Math.random() * 1e9) | 0, rng = Math.rand
   agent.soldier = soldier;
   scene.soldiers = [soldier];
 
-  const lab = { seed, scene, soldier, agent, goal: null, panX: 0 };
+  // Overlays are off by default (design/behavior-lab.md): the first thing the
+  // Lab has to show is an agent moving, and 23 nodes with 81 edges over it is
+  // not that.
+  const lab = { seed, scene, soldier, agent, goal: null, panX: 0, show: { graph: false, path: false } };
 
   // "Starting on a random node" is the design's wording, and a node is the
   // router's own idea of a standable place — so the agent always begins
@@ -152,6 +161,161 @@ export function labRetune(lab) {
   lab.agent.nav = null;
 }
 
+// THE AGENT'S graph, not "the level's" — graphs are per body profile, and this
+// resolves the same profile and the same cache entry `routeRequest` does. With
+// one agent there is no second graph to be wrong about, but calling it the
+// level's would be the bug: change the body and this is a different picture of
+// the same terrain.
+export function labGraph(lab) {
+  return graphFor(lab.scene, profileFor(lab.agent, lab.scene, config.runSpeed));
+}
+
+// The route the agent is ACTUALLY HOLDING — read off its own state, never
+// recomputed. A tool that repathed to draw would show a fresher route than the
+// one being walked, which is exactly the thing you would come here to diagnose:
+// the follower repaths on config.navRepathInterval, and a stale path must be
+// visible rather than hidden. [] when there is no route.
+export function labPath(lab) {
+  const nav = lab.agent.nav;
+  return nav && nav.path ? nav.path : [];
+}
+
+// ---- drawing ----------------------------------------------------------------
+// A function of (ctx, lab), not a closure: the overlays are off by default, so a
+// throw inside one would never run at mount and would ship unseen. This way a
+// headless test can turn both on and execute every path.
+
+// Node spans are in body-LEFT-EDGE space (that is what the router works in),
+// so a span drawn raw sits half a body to the left of where the agent will
+// actually stand. Draw in CENTRE space, which is where the box on screen is.
+const spanL = (lab, n) => n.a + lab.soldier.w / 2;
+const spanR = (lab, n) => n.b + lab.soldier.w / 2;
+const spanMid = (lab, n) => (spanL(lab, n) + spanR(lab, n)) / 2;
+const onScreen = (lab, x0, x1) => Math.max(x0, x1) >= lab.panX && Math.min(x0, x1) <= lab.panX + VIEW_W;
+
+// Every standable node and every move between them, for THIS body.
+function drawGraph(ctx, lab) {
+  const g = labGraph(lab);
+
+  for (let i = 0; i < g.nodes.length; i++) {
+    const from = g.nodes[i];
+    for (const e of g.edges[i]) {
+      const to = g.nodes[e.to];
+      const x0 = spanMid(lab, from);
+      const x1 = spanMid(lab, to);
+      if (!onScreen(lab, x0, x1)) continue;
+      ctx.strokeStyle = EDGE_COLOR[e.kind] || "#4b5a6e";
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x0, from.y);
+      ctx.lineTo(x1, to.y);
+      ctx.stroke();
+      // An arrowhead near the destination: without it a one-way drop and a
+      // two-way pair of hops look identical.
+      const t = 0.78;
+      const hx = x0 + (x1 - x0) * t;
+      const hy = from.y + (to.y - from.y) * t;
+      const len = Math.hypot(x1 - x0, to.y - from.y) || 1;
+      const ux = (x1 - x0) / len;
+      const uy = (to.y - from.y) / len;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(hx + ux * 5, hy + uy * 5);
+      ctx.lineTo(hx - uy * 3.5, hy + ux * 3.5);
+      ctx.lineTo(hx + uy * 3.5, hy - ux * 3.5);
+      ctx.closePath();
+      ctx.fillStyle = EDGE_COLOR[e.kind] || "#4b5a6e";
+      ctx.fill();
+    }
+  }
+
+  ctx.globalAlpha = 1;
+  for (const n of g.nodes) {
+    if (!onScreen(lab, spanL(lab, n), spanR(lab, n))) continue;
+    ctx.fillStyle = "#7ad7ff";
+    ctx.fillRect(spanL(lab, n), n.y - 2, Math.max(2, spanR(lab, n) - spanL(lab, n)), 3);
+  }
+}
+
+// The route the agent holds right now, drawn over the graph.
+function drawPath(ctx, lab) {
+  const g = labGraph(lab);
+  const path = labPath(lab);
+  if (!path.length) return;
+  ctx.strokeStyle = "#ffd479";
+  ctx.lineWidth = 2.5;
+  ctx.globalAlpha = 0.95;
+  ctx.beginPath();
+  for (let i = 0; i < path.length; i++) {
+    const n = g.nodes[path[i]];
+    if (!n) break; // the graph was rebuilt under a held path; draw what is valid
+    const x = spanMid(lab, n);
+    if (i === 0) ctx.moveTo(x, n.y);
+    else ctx.lineTo(x, n.y);
+  }
+  ctx.stroke();
+  for (const id of path) {
+    const n = g.nodes[id];
+    if (!n) continue;
+    ctx.fillStyle = "#ffd479";
+    ctx.beginPath();
+    ctx.arc(spanMid(lab, n), n.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+export function labDraw(ctx, lab) {
+  ctx.fillStyle = "#0d1117";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  if (!lab) return;
+  const { scene, soldier, goal, panX } = lab;
+
+  ctx.save();
+  ctx.translate(-panX, 0);
+
+  for (const p of scene.platforms) {
+    if (p.x + p.w < panX || p.x > panX + VIEW_W) continue; // off-screen
+    ctx.fillStyle = "#27303c";
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.fillStyle = "#3a4757";
+    ctx.fillRect(p.x, p.y, p.w, 3); // the standable surface, which is the point
+  }
+
+  if (lab.show.graph) drawGraph(ctx, lab);
+  if (lab.show.path) drawPath(ctx, lab);
+
+  if (goal) {
+    ctx.strokeStyle = "#ffd479";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(goal.x, goal.y, 9, 0, Math.PI * 2);
+    ctx.moveTo(goal.x - 15, goal.y);
+    ctx.lineTo(goal.x + 15, goal.y);
+    ctx.moveTo(goal.x, goal.y - 15);
+    ctx.lineTo(goal.x, goal.y + 15);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#7ad7ff";
+  ctx.fillRect(soldier.x, soldier.y, soldier.w, soldier.h);
+  ctx.fillStyle = "#0d1117";
+  ctx.fillRect(soldier.facing > 0 ? soldier.x + soldier.w - 9 : soldier.x + 4, soldier.y + 9, 5, 5);
+
+  ctx.restore();
+
+  // The level is far wider than the view and never scaled to fit, so "where am
+  // I looking" and "what does it think it is doing" are not otherwise legible.
+  const s = lab.agent.sense || {};
+  const state = s.navBlocked ? "gave up" : !goal ? "idle" : s.routeReachable === false ? "getting as close as it can" : "routing";
+  ctx.fillStyle = "#8894a6";
+  ctx.font = "12px ui-monospace, monospace";
+  ctx.fillText(`${state} · ${s.routeSteps || 0} steps left`, 8, 20);
+  ctx.fillText(`x ${Math.round(panX)}–${Math.round(panX + VIEW_W)} of ${scene.world.width}`, 8, VIEW_H - 10);
+}
+
+
 // ---- the editor tool --------------------------------------------------------
 
 export function createBehaviorLab(container, onBack) {
@@ -168,8 +332,17 @@ export function createBehaviorLab(container, onBack) {
       </div>
       <div class="bl-bar">
         <button class="btn" data-bl="new">New level</button>
+        <button class="btn bl-tog" data-bl="graph" aria-pressed="false">Graph</button>
+        <button class="btn bl-tog" data-bl="path" aria-pressed="false">Path</button>
         <span class="bl-seed" data-bl="seed"></span>
         <span class="bl-hint">click = set goal · wheel = pan</span>
+      </div>
+      <div class="bl-legend" data-bl="legend" hidden>
+        <span><i style="background:${EDGE_COLOR.walk}"></i>walk</span>
+        <span><i style="background:${EDGE_COLOR.hop}"></i>hop</span>
+        <span><i style="background:${EDGE_COLOR.jump}"></i>jump (up)</span>
+        <span><i style="background:${EDGE_COLOR.drop}"></i>drop (one-way)</span>
+        <span class="bl-hint">arrows point the way the move goes · bars are where this body can stand</span>
       </div>
       <div class="bl-view"><canvas class="bl-canvas" width="${VIEW_W}" height="${VIEW_H}"></canvas></div>
       <div class="bl-tuning"><div id="bl-tune" class="cfg"></div></div>
@@ -179,57 +352,14 @@ export function createBehaviorLab(container, onBack) {
   const ctx = canvas.getContext("2d");
   const seedEl = container.querySelector('[data-bl="seed"]');
   const tuneEl = container.querySelector("#bl-tune");
+  const legendEl = container.querySelector('[data-bl="legend"]');
 
   function build() {
     lab = createLabModel();
     seedEl.textContent = `seed ${lab.seed} · ${lab.scene.world.width}px wide`;
   }
 
-  function draw() {
-    ctx.fillStyle = "#0d1117";
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-    if (!lab) return;
-    const { scene, soldier, goal, panX } = lab;
-
-    ctx.save();
-    ctx.translate(-panX, 0);
-
-    for (const p of scene.platforms) {
-      if (p.x + p.w < panX || p.x > panX + VIEW_W) continue; // off-screen
-      ctx.fillStyle = "#27303c";
-      ctx.fillRect(p.x, p.y, p.w, p.h);
-      ctx.fillStyle = "#3a4757";
-      ctx.fillRect(p.x, p.y, p.w, 3); // the standable surface, which is the point
-    }
-
-    if (goal) {
-      ctx.strokeStyle = "#ffd479";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(goal.x, goal.y, 9, 0, Math.PI * 2);
-      ctx.moveTo(goal.x - 15, goal.y);
-      ctx.lineTo(goal.x + 15, goal.y);
-      ctx.moveTo(goal.x, goal.y - 15);
-      ctx.lineTo(goal.x, goal.y + 15);
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = "#7ad7ff";
-    ctx.fillRect(soldier.x, soldier.y, soldier.w, soldier.h);
-    ctx.fillStyle = "#0d1117";
-    ctx.fillRect(soldier.facing > 0 ? soldier.x + soldier.w - 9 : soldier.x + 4, soldier.y + 9, 5, 5);
-
-    ctx.restore();
-
-    // The level is far wider than the view and never scaled to fit, so "where am
-    // I looking" and "what does it think it is doing" are not otherwise legible.
-    const s = lab.agent.sense || {};
-    const state = s.navBlocked ? "gave up" : !goal ? "idle" : s.routeReachable === false ? "getting as close as it can" : "routing";
-    ctx.fillStyle = "#8894a6";
-    ctx.font = "12px ui-monospace, monospace";
-    ctx.fillText(`${state} · ${s.routeSteps || 0} steps left`, 8, 20);
-    ctx.fillText(`x ${Math.round(panX)}–${Math.round(panX + VIEW_W)} of ${scene.world.width}`, 8, VIEW_H - 10);
-  }
+  const draw = () => labDraw(ctx, lab);
 
   function frame(now) {
     raf = requestAnimationFrame(frame);
@@ -264,8 +394,16 @@ export function createBehaviorLab(container, onBack) {
   function onBar(e) {
     const b = e.target.closest("[data-bl]");
     if (!b) return;
-    if (b.dataset.bl === "back") onBack();
-    if (b.dataset.bl === "new") { build(); draw(); }
+    const id = b.dataset.bl;
+    if (id === "back") return onBack();
+    if (id === "new") { build(); draw(); return; }
+    if (id === "graph" || id === "path") {
+      lab.show[id] = !lab.show[id];
+      b.setAttribute("aria-pressed", String(lab.show[id]));
+      b.classList.toggle("on", lab.show[id]);
+      legendEl.hidden = !lab.show.graph;
+      draw();
+    }
   }
 
   canvas.addEventListener("click", onClick);

@@ -21,7 +21,7 @@ watches, and both shipped with `tech/agent-navigation.md` N1–N3.
 | # | Slice | Runtime behaviour |
 |---|---|---|
 | B1 ✅ | **The observatory, and the end of v1.** Delete `src/editor/tools/behavior-lab.js` and its test outright, then build v2 in their place: a generated level drawn at 1:1, one soldier-bodied agent standing on a random node, click anywhere to make that point its goal, wheel to pan (**up pans left, down pans right**). It routes there and stops. Reload for a new level. Tuning renders from the config `SCHEMA` | **None in code.** Editor-only. But the tuning knobs are the shipped game's — see the warning below. The Tools tab loses the two-team combat observatory and gains a navigation one |
-| B2 | **Overlays.** Graph and Path toggles, off by default: every node and directed edge of the agent's own profile, and the route it currently holds | **None.** Editor-only, and read-only against state the follower already keeps |
+| B2 ✅ | **Overlays.** Graph and Path toggles, off by default: every node and directed edge of the agent's own profile, and the route it currently holds | **None.** Editor-only, and read-only against state the follower already keeps |
 | B3 | **Platform dragging.** Drag any platform in x and y; the graph is invalidated and rebuilt, and the agent's route state is cleared so it repaths from where it stands | **None.** Editor-only |
 
 Each lands alone: B1 is a usable tool on its own, B2 makes what it is doing
@@ -85,14 +85,26 @@ model as well as the shell:
 |---|---|
 | `createLabModel(seed, rng)` | Level, scene, agent, and the starting node. No DOM |
 | `labStep` · `labGoal` · `labPan` · `labRetune` | The verbs. No DOM |
-| `createBehaviorLab(container, onBack)` | The editor tool. Holds one model, draws it, translates clicks and wheels into the verbs |
+| `labGraph` · `labPath` | What the B2 overlays read. No DOM |
+| `labDraw(ctx, lab)` | The whole picture, as a function of a context and a model — see the B2 note below |
+| `createBehaviorLab(container, onBack)` | The editor tool. Holds one model, hands it to `labDraw`, translates clicks and wheels into the verbs |
 
-Still one module, so "where the code goes" is unchanged, and drawing stays in the
-shell. The gain is that everything worth asserting — that combat is gone, that
-the agent starts on a real node under the soldier profile, that a click produces a
-route the shipped follower walks, that the camera never follows — is assertable
-instead of taken on trust. Both slices left should extend the model, not the
-closure.
+Still one module, so "where the code goes" is unchanged. The gain is that
+everything worth asserting — that combat is gone, that the agent starts on a real
+node under the soldier profile, that a click produces a route the shipped follower
+walks, that the camera never follows — is assertable instead of taken on trust.
+Later slices should extend the model, not the closure.
+
+**As built (B2) — drawing came out of the closure too.** B1 left `draw()` inside
+the shell and said so. B2 moved it: the overlays are **off by default**, so
+nothing at mount ever executes `drawGraph` or `drawPath`, and a throw inside
+either would have shipped unseen behind a green suite. `labDraw(ctx, lab)` takes
+the context and the model, so the test turns both overlays on and executes every
+path. The stub context no-ops every call, so this proves the code runs, not what
+it looks like — but "it runs" is exactly what was unguarded. It immediately paid
+for itself: the only real crash the Path overlay can hit is a held path whose node
+ids no longer resolve after `labRetune` rebuilt the graph under it, and both
+guards against it are now pinned by mutation.
 
 Conventions this must follow, from `CLAUDE.md`:
 
@@ -166,7 +178,9 @@ reason the tool is being built.
 |---|---|---|
 | Dragging voids the generator's traversability guarantee | The design says so outright — a platform can be dragged out of reach | Nothing new. An unreachable goal is already shipped behaviour: the best partial path, then the attempt cap. The design asks for exactly that, so the tool inherits it rather than special-casing |
 | A drag rebuilds the graph but does not re-place the agent | The agent can be left standing on a platform that moved out from under it, or inside one | The router already hands back to straight-line steering when it cannot find the node under a body, so the failure is visible and recoverable rather than a freeze |
-| The Graph overlay draws one profile | Graphs are per body profile, and the Lab has one agent | None needed. With a single agent there is no second graph to be wrong about — but the overlay is the agent's graph, not "the level's", and mislabelling it would be the bug |
+| The Graph overlay draws one profile | Graphs are per body profile, and the Lab has one agent | None needed. With a single agent there is no second graph to be wrong about — but the overlay is the agent's graph, not "the level's", and mislabelling it would be the bug. **As built:** guarded by identity — the test asserts `labGraph()` returns the very object the router is routing on, not an equal one built alongside it |
+| **As built (B2):** the overlays draw node spans in CENTRE space, not the router's left-edge space | A span drawn raw sits half a body left of where the agent visibly stands, and the box on screen is drawn from its centre. Three separate router bugs came from confusing these two spaces; an overlay that quietly picked the wrong one would teach the confusion rather than expose it | Nothing automatic. Stated here and in the code, and the legend says the bars are where the body can stand |
+| **As built (B2):** an unreachable goal cannot be produced yet, so the partial-path case is undrawn and untested | The generator guarantees traversability, so every node on a level it built is reachable from every other, and `nearestNode` turns even a click into empty sky into a reachable surface | **B3.** Dragging a platform out of reach is the first thing that can make a partial route, which makes B3 the slice that exercises the "get as close as you can" overlay rather than merely the graph rebuild |
 | The level's generation `report` goes stale after a drag | `auditGeometry` ran once, at generation | Nothing. The report is not displayed; the graph is, and that is rebuilt on every drag |
 | The route is recomputed on the shipped repath cadence, not every frame | `config.navRepathInterval` governs it, and matching mission behaviour is the point | The Path overlay draws the route actually held, so a stale path is visible rather than hidden. A tool that repathed faster than the game would lie about the game |
 | Panning is horizontal only | The world is 540 tall and the canvas will be too | None needed while `WORLD_H` is 540. A taller world would silently clip, so the canvas height and the world height should not drift apart |

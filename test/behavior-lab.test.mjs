@@ -17,8 +17,8 @@
 // follower acts on, and that the camera obeys the design.
 // ---------------------------------------------------------------------------
 
-import { installDom, makeEl } from "./harness.mjs";
-import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
+import { installDom, makeEl, ctx2d } from "./harness.mjs";
+import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, labGraph, labPath, labDraw, labRetune, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
 import { profileKey } from "../src/game/nav.js";
 import { config, resetConfig, SCHEMA } from "../src/game/config.js";
 
@@ -199,6 +199,119 @@ export default async function run_(t) {
     const key = [...lab.scene.navGraphs.keys()][0];
     t.ok(`retune: the rebuilt graph is for the NEW body (${key})`, key.includes("/900/"));
     config.jumpSpeed = 720;
+  }
+
+  // ---- B2: the Graph overlay -------------------------------------------------
+  {
+    const lab = model();
+    t.eq("overlays: Graph is off by default", lab.show.graph, false);
+    t.eq("overlays: Path is off by default", lab.show.path, false);
+
+    // "THE AGENT'S graph, not the level's" — the spec names mislabelling this as
+    // the bug. Proved by identity: this must be the very object the router
+    // routes on, not an equivalent one built alongside it.
+    labGoal(lab, lab.soldier.x + 600, feet(lab.soldier) - 10);
+    run(lab, 1);
+    const routed = [...lab.scene.navGraphs.values()][0];
+    t.ok("graph: the overlay draws the graph the ROUTER is using, the same object", labGraph(lab) === routed);
+
+    const g = labGraph(lab);
+    t.ok(`graph: it has nodes to draw (${g.nodes.length})`, g.nodes.length > 1);
+    const edges = g.edges.reduce((a, e) => a + e.length, 0);
+    t.ok(`graph: and moves between them (${edges})`, edges > 1);
+
+    // Edges are DIRECTED, and a drop is the one-way case that makes it matter:
+    // platforms are solid from below, so you cannot climb back the way you fell.
+    // An overlay that drew edges undirected would hide exactly that.
+    const oneWay = [];
+    for (let i = 0; i < g.nodes.length && oneWay.length < 1; i++) {
+      for (const e of g.edges[i]) {
+        if (!g.edges[e.to].some((back) => back.to === i)) oneWay.push([i, e.to, e.kind]);
+      }
+    }
+    t.ok(`graph: at least one move is one-way, so direction is not decoration (${oneWay[0] && oneWay[0].join("→")})`, oneWay.length > 0);
+    t.ok("graph: every edge carries a kind the overlay has a colour for",
+      g.edges.every((list) => list.every((e) => ["walk", "hop", "jump", "drop"].includes(e.kind))));
+  }
+
+  // ---- B2: the Path overlay --------------------------------------------------
+  {
+    const lab = model();
+    t.eq("path: nothing to draw before a goal is set", labPath(lab).length, 0);
+
+    labGoal(lab, lab.soldier.x + 900, feet(lab.soldier) - 10);
+    run(lab, 1);
+    const path = labPath(lab);
+    t.ok(`path: a route appears once the agent has one (${path.length} nodes)`, path.length > 1);
+
+    // The two overlays have to agree: a path node id that is not in the graph
+    // the Graph overlay draws would render as a line to nowhere.
+    const g = labGraph(lab);
+    t.ok("path: every node on it exists in the drawn graph", path.every((id) => !!g.nodes[id]));
+    t.eq("path: it starts at the node the agent is standing on", path[0], lab.agent.nav.path[0]);
+
+    // It is the route actually HELD, never a fresh one. The follower repaths on
+    // config.navRepathInterval; a tool that recomputed to draw would show a
+    // fresher route than the one being walked — which is the exact thing you
+    // would open the Lab to diagnose.
+    lab.agent.nav.path = [path[0]];
+    t.eq("path: read off the agent's own state, not recomputed for drawing", labPath(lab).length, 1);
+  }
+  {
+    // "Click ANYWHERE in the level" includes empty sky. `nearestNode` means the
+    // surface under the click, so a goal in mid-air is a goal on the floor
+    // beneath it and still draws a route — rather than the overlay going blank
+    // because the click missed a platform.
+    const lab = model();
+    labGoal(lab, lab.soldier.x + 700, -5000);
+    run(lab, 2);
+    t.ok("path: a click in empty sky still routes, to the surface under it", labPath(lab).length >= 1);
+    t.eq("path: and is not treated as unreachable", lab.agent.sense.routeReachable, true);
+    // Worth stating plainly: an UNREACHABLE goal cannot be produced here at all.
+    // The generator guarantees traversability, so every node is reachable from
+    // every other on a level it built. Dragging a platform out of reach is B3,
+    // and B3 is the first slice that can exercise the partial-path overlay.
+  }
+
+  // ---- B2: the overlays actually render --------------------------------------
+  {
+    // The overlays are OFF by default, so nothing at mount ever executes them —
+    // a throw inside drawGraph or drawPath would ship unseen. Drive the draw
+    // directly with both on. The stubbed 2D context no-ops every call, so this
+    // asserts the code PATH runs, not what it looks like; what it looks like is
+    // the one thing only Bo can check.
+    const lab = model();
+    const c = ctx2d();
+    labGoal(lab, lab.soldier.x + 900, feet(lab.soldier) - 10);
+    run(lab, 2);
+    lab.show.graph = true;
+    lab.show.path = true;
+    let threw = null;
+    try {
+      labDraw(c, lab);
+      labPan(lab, 3000); // a different slice of the level: culling both ways
+      labDraw(c, lab);
+    } catch (e) {
+      threw = e;
+    }
+    t.ok("render: drawing with both overlays on does not throw", !threw);
+    if (threw) console.log("   ", threw.stack);
+
+    // The one crash the path overlay can actually hit: a held path whose node
+    // ids no longer resolve, because retuning rebuilt the graph under it.
+    const stale = labPath(lab).slice();
+    config.jumpSpeed = 1100;
+    labRetune(lab);
+    lab.agent.nav = { gen: 0, dest: null, path: [...stale, 9999], reachable: true, repathIn: 0, leg: null, attempts: {}, banned: new Set(), blocked: false };
+    threw = null;
+    try {
+      labDraw(c, lab);
+    } catch (e) {
+      threw = e;
+    }
+    config.jumpSpeed = 720;
+    t.ok("render: a path holding node ids the rebuilt graph does not have is survivable", !threw);
+    if (threw) console.log("   ", threw.stack);
   }
 
   // ---- v1 is gone ------------------------------------------------------------

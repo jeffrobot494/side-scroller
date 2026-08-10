@@ -299,6 +299,13 @@
 .bl-view { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
 .bl-canvas { display: block; width: 960px; height: 540px; cursor: crosshair; }
 
+.bl-tog[aria-pressed="true"], .bl-tog.on { border-color: var(--accent); color: var(--accent); }
+
+.bl-legend { display: flex; align-items: center; gap: 14px; margin: 0 0 8px; font-size: 12px; color: #8894a6; }
+.bl-legend span { display: flex; align-items: center; gap: 5px; }
+.bl-legend i { width: 14px; height: 3px; border-radius: 2px; }
+.bl-legend .bl-hint { margin-left: auto; }
+
 .bl-tuning { margin-top: 14px; }
 #bl-tune .cfg-group h2 { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); opacity: 0.85; }
 
