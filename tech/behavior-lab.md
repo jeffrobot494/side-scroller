@@ -120,6 +120,23 @@ Conventions this must follow, from `CLAUDE.md`:
   the companion spec. Anything beyond that is the tool growing its own copy of
   something.
 
+**As built (after playtest) — the camera OPENS on the agent.** Bo reported the
+agent "spawning all the way to the right". It is not: measured over 300 generated
+levels the spawn is uniform (mean 0.49 of level width, flat decile histogram).
+The camera was the defect — it started at the level's left edge regardless, and
+with a 960px view onto a 4,800–8,200px level **the agent was in shot 12% of the
+time**. Panning rightwards to hunt for it is what made a uniform spawn read as
+right-biased.
+
+`createLabModel` now clamps the opening `panX` so the agent is centred. This is
+**not** following: the camera still never moves on its own after that, which is
+the design's actual rule — "never follows" and "always starts at x=0" are
+different statements and only the first is in `design/behavior-lab.md`, which is
+silent on the opening position. Bo chose this over narrowing the spawn to a
+visible node, because that would have traded away "a random node" to fix a
+problem the spawn did not cause. Guarded by a 60-level sweep that requires **all**
+of them on screen; reverting it puts 52 of 60 off.
+
 **The canvas must be 540px tall and must not be CSS-downscaled.** The design says
 vertical panning is not needed because the level fits — true only at the full
 world height, and v1's canvas backing store is 420. The `.lg-canvas` rule the

@@ -116,6 +116,14 @@ export function createLabModel(seed = (Math.random() * 1e9) | 0, rng = Math.rand
   soldier.y = n ? n.y - soldier.h : 0;
   soldier.onGround = !!n;
 
+  // Open looking AT the agent. The camera never follows after this — that is the
+  // design — but starting at the level's left edge is not the same rule, and it
+  // meant opening the Lab on an empty stretch of level: the agent lands uniformly
+  // across a 4,800–8,200px level and the view is 960, so it was in shot 12% of
+  // the time. Panning right to look for it is what made a uniform spawn read as
+  // "it always spawns on the right".
+  lab.panX = clampPan(lab, soldier.x + soldier.w / 2 - VIEW_W / 2);
+
   return lab;
 }
 
@@ -147,10 +155,15 @@ export function labGoal(lab, x, y) {
   lab.agent.nav = null; // a new goal starts a new route, not an amended one
 }
 
+// The view never runs past either end of the level.
+function clampPan(lab, x) {
+  return Math.max(0, Math.min(lab.scene.world.width - VIEW_W, x));
+}
+
 // Wheel up pans LEFT, wheel down pans RIGHT (design/behavior-lab.md). There is
 // no vertical pan: the world is 540 tall and so is the view.
 export function labPan(lab, dy) {
-  lab.panX = Math.max(0, Math.min(lab.scene.world.width - VIEW_W, lab.panX + dy));
+  lab.panX = clampPan(lab, lab.panX + dy);
 }
 
 // runSpeed and jumpSpeed are IN the body profile the graph is keyed by, so a

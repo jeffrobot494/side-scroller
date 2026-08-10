@@ -144,7 +144,15 @@ export default async function run_(t) {
   // ---- the camera -----------------------------------------------------------
   {
     const lab = model();
-    t.eq("pan: starts at the left edge", lab.panX, 0);
+    // The camera OPENS on the agent. Distinct from following it, which it never
+    // does — but starting at the level's left edge meant the agent was in shot
+    // 12% of the time across 300 levels, and hunting rightwards for it made a
+    // uniform spawn read as "it always spawns on the right".
+    const mid = lab.soldier.x + lab.soldier.w / 2;
+    t.ok(`open: the agent is in the opening view (agent ${mid.toFixed(0)}, view ${lab.panX}–${lab.panX + VIEW_W})`,
+      mid >= lab.panX && mid <= lab.panX + VIEW_W);
+    t.ok("open: and roughly centred in it", Math.abs(mid - (lab.panX + VIEW_W / 2)) < 2 || lab.panX === 0 || lab.panX === lab.scene.world.width - VIEW_W);
+
     labPan(lab, 240);
     t.ok(`pan: wheel DOWN pans right (${lab.panX})`, lab.panX > 0);
     const right = lab.panX;
@@ -199,6 +207,25 @@ export default async function run_(t) {
     const key = [...lab.scene.navGraphs.keys()][0];
     t.ok(`retune: the rebuilt graph is for the NEW body (${key})`, key.includes("/900/"));
     config.jumpSpeed = 720;
+  }
+
+  {
+    // One seed proves the arithmetic; the defect was statistical. A level is
+    // 4,800–8,200px and the view is 960, so a spawn the camera does not account
+    // for is off-screen most of the time — which is how a uniform spawn came to
+    // look like "it always spawns on the right". Sweep real levels and real
+    // random node picks, and require ALL of them, not most.
+    let off = 0;
+    let worst = "";
+    for (let i = 0; i < 60; i++) {
+      const lab = createLabModel(9000 + i); // real Math.random for the node pick
+      const mid = lab.soldier.x + lab.soldier.w / 2;
+      if (mid < lab.panX || mid > lab.panX + VIEW_W) {
+        off++;
+        worst = `seed ${9000 + i}: agent ${mid.toFixed(0)}, view ${lab.panX}–${lab.panX + VIEW_W}`;
+      }
+    }
+    t.eq(`open: the agent is on screen on every level built (${worst})`, off, 0);
   }
 
   // ---- B2: the Graph overlay -------------------------------------------------
