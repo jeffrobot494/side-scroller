@@ -50,7 +50,7 @@ section + the tests are the source of truth for what currently exists):
   Aim slider + auto-fire/manual drive), **Behavior Lab**, Controls (rebind keys).
   Settings tab is schema-driven config; the **Sound tab** is the mixer + the cue
   bank.
-- **Behavior Lab v2 (Slices B1–B2 of `tech/behavior-lab.md` — built):** *can that
+- **Behavior Lab v2 (`tech/behavior-lab.md` B1–B3 — built):** *can that
   agent get there?* A generated level drawn at **1:1** (960×540, never scaled to
   fit — panned with the wheel, up = left), **one** soldier-bodied agent standing
   on a random graph node, and a click anywhere to send it there. It routes with
@@ -61,8 +61,14 @@ section + the tests are the source of truth for what currently exists):
   one-way drop reads as one-way, plus the route the agent is currently holding —
   read off `nav.path`, never recomputed, so a stale route is visible rather than
   hidden. The module is DOM-free apart from `createBehaviorLab`:
-  `createLabModel`/`labStep`/`labGoal`/`labPan`/`labGraph`/`labPath`/`labDraw`
-  are what the test drives. B3 adds platform dragging.
+  **Drag any platform** in x and y (B3): the graph rebuilds live under it and the
+  agent repaths from where it stands — and since the generator guarantees
+  traversability, dragging is the ONLY way to make a goal unreachable, so it is
+  what exercises "get as close as you can, then stop". The agent is deliberately
+  not moved with the platform. The module is DOM-free apart from
+  `createBehaviorLab`: `createLabModel` + the `lab*` verbs (`labStep`, `labGoal`,
+  `labPan`, `labInvalidate`, `labGraph`, `labPath`, `labDraw`, `labPlatformAt`,
+  `labDragStart/Move/End`) are what the test drives.
   **v1 was deleted, not kept** — the two-team combat observatory, its
   step-decision transport, its utility scoreboard, its CSS, and its four
   `lab*` config knobs (`labDecisionScale`, `labPerceptionScale`,

@@ -1,11 +1,13 @@
 // ---------------------------------------------------------------------------
 // BEHAVIOR LAB — one agent, one goal, one question: can it get there?
-// (design/behavior-lab.md; tech/behavior-lab.md Slice B1.)
+// (design/behavior-lab.md; tech/behavior-lab.md Slices B1–B3.)
 //
 // A generated level at 1:1, one soldier-bodied agent standing on a random node,
 // and a click to tell it where to go. It routes there with the SHIPPED router and
-// stops. No combat, no second agent, no scoreboard — this replaces a two-team
-// combat observatory, and the smallness is the point.
+// stops. Overlays show the graph it is routing on and the route it holds; any
+// platform can be dragged, which rebuilds the graph under it. No combat, no
+// second agent, no scoreboard — this replaces a two-team combat observatory, and
+// the smallness is the point.
 //
 // The Lab is a WINDOW. It owns the camera, the click and the drawing; it owns no
 // navigation. Every decision on screen is made by src/mission/navigation.js and
@@ -19,14 +21,14 @@
 // `src/mission/ai.js` has that loop, welded to the companion spec and a leader
 // this tool does not have.
 //
-// TWO EXPORTS, on purpose:
-//   createLabModel(seed) → the level, the agent, and the verbs (step/goal/pan).
-//                          No DOM. This is what a headless test can drive.
-//   createBehaviorLab(container, onBack) → { dispose() }   the editor tool.
-// The test harness's DOM is a thin stub — querySelector hands back a fresh mock
-// and listeners are no-ops — so a tool that keeps its state in a closure can only
-// ever be tested for "mounts without throwing". Splitting the model out is what
-// makes the behaviour above assertable at all.
+// A MODEL AND A SHELL, on purpose. `createLabModel` plus the `lab*` verbs —
+// step, goal, pan, invalidate, graph, path, draw, and the drag trio — are
+// DOM-free; `createBehaviorLab(container, onBack) → { dispose() }` is the editor
+// tool that owns one model and translates input into those verbs. The test
+// harness's DOM is a thin stub — querySelector hands back a fresh mock and
+// listeners are no-ops — so a tool that keeps its state in a closure can only
+// ever be tested for "mounts without throwing". The split is what makes any of
+// the behaviour above assertable.
 // ---------------------------------------------------------------------------
 
 import { generateLevel } from "../../game/gen/levelgen.js";
@@ -166,12 +168,61 @@ export function labPan(lab, dy) {
   lab.panX = clampPan(lab, lab.panX + dy);
 }
 
-// runSpeed and jumpSpeed are IN the body profile the graph is keyed by, so a
-// change to either means every cached graph — and every node id the agent is
-// holding — describes a body that no longer exists.
-export function labRetune(lab) {
+// Everything derived from the terrain or the body is now void. Two callers, one
+// meaning: retuning changes the body (runSpeed and jumpSpeed are IN the profile
+// the graph is keyed by), dragging changes the terrain. Either way the cached
+// graphs and every node id the agent is holding describe a world that no longer
+// exists — including what it learned about which jumps it cannot make, which was
+// a fact about geometry that has just moved.
+export function labInvalidate(lab) {
   invalidateNavGraphs(lab.scene);
   lab.agent.nav = null;
+}
+
+// ---- dragging (B3) ----------------------------------------------------------
+
+// The platform under a world point, topmost first so the pick matches what is
+// drawn on top. `scene.platforms` are CLONES made by loadMission, which is what
+// makes dragging safe: it edits this scene in memory and can never reach a seed,
+// a golden fixture, or the generator's own audit.
+export function labPlatformAt(lab, x, y) {
+  const ps = lab.scene.platforms;
+  for (let i = ps.length - 1; i >= 0; i--) {
+    const p = ps[i];
+    if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return p;
+  }
+  return null;
+}
+
+// Grab a platform. The offset is kept so it does not jump its corner to the
+// cursor. Returns the platform, or null when the point is empty air — which is
+// how the caller knows the gesture is a goal-click instead.
+export function labDragStart(lab, x, y) {
+  const p = labPlatformAt(lab, x, y);
+  lab.drag = p ? { plat: p, ox: x - p.x, oy: y - p.y } : null;
+  return p;
+}
+
+export function labDragMove(lab, x, y) {
+  if (!lab.drag) return false;
+  const { plat, ox, oy } = lab.drag;
+  plat.x = Math.max(0, Math.min(lab.scene.world.width - plat.w, x - ox));
+  plat.y = Math.max(0, Math.min(lab.scene.world.height - plat.h, y - oy));
+  // Rebuild live rather than on release: watching the graph change under the
+  // platform as it moves is the point of being able to move it. A graph is tens
+  // of nodes, so the cost is nothing.
+  //
+  // The agent is deliberately NOT moved with the platform. It can be left
+  // standing on air, or inside the thing it was standing on — the router hands
+  // back to straight-line steering when it cannot find a node under a body, so
+  // that reads as a visible mistake rather than a freeze, and re-dropping the
+  // platform under it fixes it.
+  labInvalidate(lab);
+  return true;
+}
+
+export function labDragEnd(lab) {
+  lab.drag = null;
 }
 
 // THE AGENT'S graph, not "the level's" — graphs are per body profile, and this
@@ -348,7 +399,7 @@ export function createBehaviorLab(container, onBack) {
         <button class="btn bl-tog" data-bl="graph" aria-pressed="false">Graph</button>
         <button class="btn bl-tog" data-bl="path" aria-pressed="false">Path</button>
         <span class="bl-seed" data-bl="seed"></span>
-        <span class="bl-hint">click = set goal · wheel = pan</span>
+        <span class="bl-hint">click = set goal · drag a platform = move it · wheel = pan</span>
       </div>
       <div class="bl-legend" data-bl="legend" hidden>
         <span><i style="background:${EDGE_COLOR.walk}"></i>walk</span>
@@ -392,10 +443,43 @@ export function createBehaviorLab(container, onBack) {
     };
   }
 
-  function onClick(e) {
+  // Press, move, release — because B3 gave the canvas two gestures. Pressing on
+  // a platform and moving DRAGS it; anything else SETS THE GOAL. A press that
+  // never moves is a click, so a platform can still be clicked as a destination.
+  //
+  // DRAG_SLOP is a pointer epsilon, not a tunable: it is how far a hand shakes
+  // while clicking, which has nothing to do with how the game plays and does not
+  // belong in the config SCHEMA. Same reasoning as nav.js's body-fit constants.
+  const DRAG_SLOP = 4;
+  let press = null;
+
+  function onPointerDown(e) {
     const p = toWorld(e);
-    labGoal(lab, p.x, p.y);
-    draw();
+    press = { sx: e.clientX, sy: e.clientY, world: p, moved: false };
+    if (labDragStart(lab, p.x, p.y) && canvas.setPointerCapture) {
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* not a real pointer event */ }
+    }
+  }
+
+  function onPointerMove(e) {
+    if (!press) {
+      const at = toWorld(e); // hover feedback: a platform is grabbable, air is not
+      if (canvas.style) canvas.style.cursor = labPlatformAt(lab, at.x, at.y) ? "grab" : "crosshair";
+      return;
+    }
+    if (!press.moved && Math.hypot(e.clientX - press.sx, e.clientY - press.sy) > DRAG_SLOP) press.moved = true;
+    if (!press.moved) return;
+    const p = toWorld(e);
+    if (labDragMove(lab, p.x, p.y)) draw();
+  }
+
+  function onPointerUp() {
+    if (press && !press.moved) {
+      labGoal(lab, press.world.x, press.world.y); // a press that did not move is a click
+      draw();
+    }
+    labDragEnd(lab);
+    press = null;
   }
 
   function onWheel(e) {
@@ -419,7 +503,10 @@ export function createBehaviorLab(container, onBack) {
     }
   }
 
-  canvas.addEventListener("click", onClick);
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
   canvas.addEventListener("wheel", onWheel, { passive: false });
   container.addEventListener("click", onBar);
 
@@ -429,7 +516,7 @@ export function createBehaviorLab(container, onBack) {
   tuneEl.innerHTML = controlsHTML(SCHEMA.filter((g) => g.title === TUNING_GROUP), config, isDefault);
   bindControls(tuneEl, (key, val) => {
     setConfig(key, val);
-    if (lab) labRetune(lab);
+    if (lab) labInvalidate(lab);
   });
 
   build();
@@ -440,7 +527,10 @@ export function createBehaviorLab(container, onBack) {
   return {
     dispose() {
       cancelAnimationFrame(raf);
-      canvas.removeEventListener("click", onClick);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
       canvas.removeEventListener("wheel", onWheel);
       container.removeEventListener("click", onBar);
     },

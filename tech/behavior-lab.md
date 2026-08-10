@@ -1,7 +1,7 @@
 ---
 type: tech
 category: development-tools
-status: building
+status: built
 resolution: sharp
 sprint: 2026-08
 needs: [agent-navigation]
@@ -22,11 +22,31 @@ watches, and both shipped with `tech/agent-navigation.md` N1–N3.
 |---|---|---|
 | B1 ✅ | **The observatory, and the end of v1.** Delete `src/editor/tools/behavior-lab.js` and its test outright, then build v2 in their place: a generated level drawn at 1:1, one soldier-bodied agent standing on a random node, click anywhere to make that point its goal, wheel to pan (**up pans left, down pans right**). It routes there and stops. Reload for a new level. Tuning renders from the config `SCHEMA` | **None in code.** Editor-only. But the tuning knobs are the shipped game's — see the warning below. The Tools tab loses the two-team combat observatory and gains a navigation one |
 | B2 ✅ | **Overlays.** Graph and Path toggles, off by default: every node and directed edge of the agent's own profile, and the route it currently holds | **None.** Editor-only, and read-only against state the follower already keeps |
-| B3 | **Platform dragging.** Drag any platform in x and y; the graph is invalidated and rebuilt, and the agent's route state is cleared so it repaths from where it stands | **None.** Editor-only |
+| B3 ✅ | **Platform dragging.** Drag any platform in x and y; the graph is invalidated and rebuilt, and the agent's route state is cleared so it repaths from where it stands | **None.** Editor-only |
 
 Each lands alone: B1 is a usable tool on its own, B2 makes what it is doing
 legible, B3 makes it interactive. B1 is also the slice that answers whether the
 routing built in N3 is any good, which is the reason the Lab is in this sprint.
+
+**As built (B3) — dragging is what finally exercises giving up.** "Makes it
+interactive" undersells it. The generator guarantees traversability, so on a level
+it built every node is reachable from every other, and `nearestNode` turns even a
+click into empty sky into a reachable surface: B1 and B2 **could not produce an
+unreachable goal at all**. "Get as close as you can, then stop" — the partial
+path, `sense.routeReachable`, `navBlocked`, the whole give-up branch of N3 — was
+written, drawn and never once run end to end in this tool. Dragging a platform out
+of reach is the first thing that runs it, and the regression test does exactly
+that: platform hauled to (6010, 55), agent walks 3,300px, stops at the closest
+reachable node, reports `reachable=false` and `blocked=true`, and still has a
+partial route for the Path overlay to draw.
+
+**As built (B3) — the canvas has two gestures now, so a click is a gesture that
+did not move.** Press on a platform and move: drag. Press anywhere and release
+without moving: set the goal. That keeps a platform clickable as a destination,
+which the design's "click anywhere in the level" requires. The 4px threshold is a
+pointer epsilon — how far a hand shakes while clicking — and is **not** a config
+`SCHEMA` entry, on the same reasoning `src/game/nav.js` gives for its body-fit
+constants: it describes the input device, not how the game plays.
 
 **Combat has to be removed, not merely omitted.** `loadMission` instantiates every
 `level.enemies` placement unconditionally and flattens the parts into
@@ -84,7 +104,8 @@ model as well as the shell:
 | Export | |
 |---|---|
 | `createLabModel(seed, rng)` | Level, scene, agent, and the starting node. No DOM |
-| `labStep` · `labGoal` · `labPan` · `labRetune` | The verbs. No DOM |
+| `labStep` · `labGoal` · `labPan` · `labInvalidate` | The verbs. No DOM |
+| `labPlatformAt` · `labDragStart` · `labDragMove` · `labDragEnd` | What B3 drags with. No DOM |
 | `labGraph` · `labPath` | What the B2 overlays read. No DOM |
 | `labDraw(ctx, lab)` | The whole picture, as a function of a context and a model — see the B2 note below |
 | `createBehaviorLab(container, onBack)` | The editor tool. Holds one model, hands it to `labDraw`, translates clicks and wheels into the verbs |
@@ -103,7 +124,7 @@ the context and the model, so the test turns both overlays on and executes every
 path. The stub context no-ops every call, so this proves the code runs, not what
 it looks like — but "it runs" is exactly what was unguarded. It immediately paid
 for itself: the only real crash the Path overlay can hit is a held path whose node
-ids no longer resolve after `labRetune` rebuilt the graph under it, and both
+ids no longer resolve after `labInvalidate` rebuilt the graph under it, and both
 guards against it are now pinned by mutation.
 
 Conventions this must follow, from `CLAUDE.md`:
@@ -194,7 +215,9 @@ reason the tool is being built.
 | Approximation | Why | What catches the failure |
 |---|---|---|
 | Dragging voids the generator's traversability guarantee | The design says so outright — a platform can be dragged out of reach | Nothing new. An unreachable goal is already shipped behaviour: the best partial path, then the attempt cap. The design asks for exactly that, so the tool inherits it rather than special-casing |
-| A drag rebuilds the graph but does not re-place the agent | The agent can be left standing on a platform that moved out from under it, or inside one | The router already hands back to straight-line steering when it cannot find the node under a body, so the failure is visible and recoverable rather than a freeze |
+| A drag rebuilds the graph but does not re-place the agent | The agent can be left standing on a platform that moved out from under it, or inside one | The router already hands back to straight-line steering when it cannot find the node under a body, so the failure is visible and recoverable rather than a freeze. **As built:** kept deliberately — dropping the platform back under the agent fixes it, and moving the agent with the platform would hide the one case worth watching |
+| **As built (B3):** the graph rebuilds on every pointer move, not on release | Watching the graph change under a platform as it moves is the reason to be able to move it, and a graph is tens of nodes — the rebuild costs nothing | Nothing needed. If a level ever got big enough for this to matter, it would be visible as drag lag |
+| **As built (B3):** a drag also wipes the agent's ban ledger, not just its route | `labInvalidate` clears `agent.nav` outright. A ban records "this body cannot fly that edge", which is a fact about geometry — and the geometry just moved | Nothing. Relearning a still-bad edge costs `config.navJumpAttempts` tries; keeping a stale ban would refuse an edge that dragging just made flyable |
 | The Graph overlay draws one profile | Graphs are per body profile, and the Lab has one agent | None needed. With a single agent there is no second graph to be wrong about — but the overlay is the agent's graph, not "the level's", and mislabelling it would be the bug. **As built:** guarded by identity — the test asserts `labGraph()` returns the very object the router is routing on, not an equal one built alongside it |
 | **As built (B2):** the overlays draw node spans in CENTRE space, not the router's left-edge space | A span drawn raw sits half a body left of where the agent visibly stands, and the box on screen is drawn from its centre. Three separate router bugs came from confusing these two spaces; an overlay that quietly picked the wrong one would teach the confusion rather than expose it | Nothing automatic. Stated here and in the code, and the legend says the bars are where the body can stand |
 | **As built (B2):** an unreachable goal cannot be produced yet, so the partial-path case is undrawn and untested | The generator guarantees traversability, so every node on a level it built is reachable from every other, and `nearestNode` turns even a click into empty sky into a reachable surface | **B3.** Dragging a platform out of reach is the first thing that can make a partial route, which makes B3 the slice that exercises the "get as close as you can" overlay rather than merely the graph rebuild |

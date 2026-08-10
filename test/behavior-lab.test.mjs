@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { installDom, makeEl, ctx2d } from "./harness.mjs";
-import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, labGraph, labPath, labDraw, labRetune, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
+import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, labGraph, labPath, labDraw, labInvalidate, labPlatformAt, labDragStart, labDragMove, labDragEnd, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
 import { profileKey } from "../src/game/nav.js";
 import { config, resetConfig, SCHEMA } from "../src/game/config.js";
 
@@ -199,8 +199,8 @@ export default async function run_(t) {
     run(lab, 2);
     const gen = lab.scene.navGen || 0;
     config.jumpSpeed = 900;
-    const { labRetune } = await import("../src/editor/tools/behavior-lab.js");
-    labRetune(lab);
+    const { labInvalidate } = await import("../src/editor/tools/behavior-lab.js");
+    labInvalidate(lab);
     t.ok("retune: the cached graphs are dropped", !lab.scene.navGraphs);
     t.ok("retune: and the generation moves, so every agent notices", (lab.scene.navGen || 0) > gen);
     run(lab, 1);
@@ -328,7 +328,7 @@ export default async function run_(t) {
     // ids no longer resolve, because retuning rebuilt the graph under it.
     const stale = labPath(lab).slice();
     config.jumpSpeed = 1100;
-    labRetune(lab);
+    labInvalidate(lab);
     lab.agent.nav = { gen: 0, dest: null, path: [...stale, 9999], reachable: true, repathIn: 0, leg: null, attempts: {}, banned: new Set(), blocked: false };
     threw = null;
     try {
@@ -339,6 +339,119 @@ export default async function run_(t) {
     config.jumpSpeed = 720;
     t.ok("render: a path holding node ids the rebuilt graph does not have is survivable", !threw);
     if (threw) console.log("   ", threw.stack);
+  }
+
+  // ---- B3: dragging platforms ------------------------------------------------
+  {
+    const lab = model();
+    const p = lab.scene.platforms[3];
+    t.ok("drag: a point inside a platform finds it", labPlatformAt(lab, p.x + 5, p.y + 5) === p);
+    t.eq("drag: a point in open air finds nothing", labPlatformAt(lab, p.x + 5, p.y - 200), null);
+    t.eq("drag: starting on air is not a drag — that is how a click stays a click", labDragStart(lab, p.x + 5, p.y - 200), null);
+    labDragEnd(lab);
+
+    // Grabbing keeps the offset, so the platform does not snap its corner to the
+    // cursor the moment you touch it — grab it 40px in and it stays 40px in.
+    const x0 = p.x;
+    t.ok("drag: starting on a platform grabs it", labDragStart(lab, p.x + 40, p.y + 8) === p);
+    labDragMove(lab, x0 + 40 + 120, p.y + 8);
+    t.eq("drag: it follows the pointer by the delta, not by snapping to it", Math.round(p.x - x0), 120);
+    labDragEnd(lab);
+  }
+  {
+    // Dragging makes platforms overlap, which nothing else in the game does.
+    // The pick has to match what is DRAWN — last drawn is on top — or you grab
+    // something you cannot see and the tool feels broken.
+    const lab = model();
+    const under = lab.scene.platforms[1];
+    const over = lab.scene.platforms[lab.scene.platforms.length - 1];
+    labDragStart(lab, over.x + 5, over.y + 5);
+    labDragMove(lab, under.x + 25, under.y + 5);
+    labDragEnd(lab);
+    const hit = labPlatformAt(lab, over.x + 5, over.y + 5);
+    t.ok("drag: where two platforms overlap, the pick is the one on top", hit === over);
+    t.ok("drag: and they really do overlap", over.x < under.x + under.w && over.x + over.w > under.x && over.y < under.y + under.h && over.y + over.h > under.y);
+  }
+  {
+    const lab = model();
+    const p = lab.scene.platforms[2];
+    const x0 = p.x;
+    const y0 = p.y;
+    labDragStart(lab, p.x + 10, p.y + 5);
+    labDragMove(lab, p.x + 10 + 200, p.y + 5 - 90);
+    labDragEnd(lab);
+    t.eq("drag: moves in x", Math.round(p.x - x0), 200);
+    t.eq("drag: and in y — the design says both", Math.round(p.y - y0), -90);
+  }
+  {
+    // Clamped to the world box, or a platform can be lost off an edge with no
+    // way to get it back.
+    const lab = model();
+    const p = lab.scene.platforms[2];
+    labDragStart(lab, p.x + 10, p.y + 5);
+    labDragMove(lab, -9999, -9999);
+    t.eq("drag: clamped at the top-left", `${p.x},${p.y}`, "0,0");
+    labDragMove(lab, 99999, 99999);
+    t.eq("drag: and at the bottom-right", `${p.x},${p.y}`, `${lab.scene.world.width - p.w},${lab.scene.world.height - p.h}`);
+    labDragEnd(lab);
+  }
+  {
+    // The graph rebuilds under the platform as it moves, and the agent's route
+    // state goes with it — node ids are re-derived, so a held path's ids no
+    // longer mean the same nodes.
+    const lab = model();
+    labGoal(lab, lab.soldier.x + 700, feet(lab.soldier) - 10);
+    run(lab, 1);
+    t.ok("rebuild: the agent has a route before the drag", !!lab.agent.nav && !!lab.agent.nav.path);
+    const before = labGraph(lab).nodes.map((n) => `${n.a},${n.b},${n.y}`).join("|");
+    const gen = lab.scene.navGen || 0;
+
+    const p = lab.scene.platforms[2];
+    labDragStart(lab, p.x + 10, p.y + 5);
+    labDragMove(lab, p.x + 10 + 150, p.y + 5 - 120);
+    labDragEnd(lab);
+
+    t.ok("rebuild: the graph generation moved", (lab.scene.navGen || 0) > gen);
+    t.eq("rebuild: the agent's route state was dropped, not carried over", lab.agent.nav, null);
+    const after = labGraph(lab).nodes.map((n) => `${n.a},${n.b},${n.y}`).join("|");
+    t.ok("rebuild: and the new graph describes the moved terrain", after !== before);
+    run(lab, 1);
+    t.ok("rebuild: the agent repaths from where it stands", !!lab.agent.nav && !!lab.agent.nav.path);
+  }
+  {
+    // A drag edits THIS scene and can never reach the generator. loadMission
+    // clones the level's platforms, which is the only reason dragging is safe —
+    // without it a drag would corrupt the level a seed produces, and
+    // levelgen.golden.json would be the thing that noticed.
+    const lab = model();
+    const p = lab.scene.platforms[2];
+    labDragStart(lab, p.x + 10, p.y + 5);
+    labDragMove(lab, p.x + 10 + 300, p.y + 5 - 200);
+    labDragEnd(lab);
+    const fresh = createLabModel(SEED, () => 0.5);
+    t.eq("isolation: the same seed still builds the original level", fresh.scene.platforms[2].x, p.x - 300);
+  }
+  {
+    // THE PAYOFF, and the reason B3 is worth more than "makes it interactive".
+    // The generator guarantees traversability, so on a level it built every node
+    // is reachable from every other — B1 and B2 could not produce an unreachable
+    // goal at all, which left "get as close as you can, then stop" written but
+    // never exercised end to end. Dragging a platform out of reach produces one.
+    const lab = model();
+    const p = lab.scene.platforms[2];
+    labDragStart(lab, p.x + 10, p.y + 5);
+    labDragMove(lab, lab.scene.world.width - 200, 60); // far away and high up
+    labDragEnd(lab);
+    labGoal(lab, p.x + p.w / 2, p.y - 10); // stand on it, if you can
+    run(lab, 20);
+
+    t.eq("unreachable: the agent knows it cannot get there", lab.agent.sense.routeReachable, false);
+    t.ok(`unreachable: it still went somewhere (feet ${feet(lab.soldier)})`, lab.soldier.onGround);
+    t.ok("unreachable: it is not standing on the platform it could not reach", feet(lab.soldier) !== p.y);
+    t.ok("unreachable: and it stopped rather than throwing itself at the gap", Math.abs(lab.soldier.vx) < 40);
+    // The Path overlay has something to draw for it: the partial route is still
+    // a route, and drawing nothing here would read as "the tool broke".
+    t.ok(`unreachable: the partial route is still drawable (${labPath(lab).length} nodes)`, labPath(lab).length >= 1);
   }
 
   // ---- v1 is gone ------------------------------------------------------------
