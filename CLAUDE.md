@@ -50,17 +50,22 @@ section + the tests are the source of truth for what currently exists):
   Aim slider + auto-fire/manual drive), **Behavior Lab**, Controls (rebind keys).
   Settings tab is schema-driven config; the **Sound tab** is the mixer + the cue
   bank.
-- **Behavior Lab (Slice 1 of `tech/behavior-lab.md` — built):** the agent
-  observatory. Both teams as spec agents on a *generated* level (real
-  `generateLevel` + `loadMission` + `updateSpecEnemy`/`updateCompanionSpec`),
-  pause/step-frame/**step-decision**/slow-mo, and the overlays that make a
-  decision visible: LOS, `sense.*`, preferred-range rings, move order, last-seen,
-  and the **utility scoreboard** (every action's score, its `when` gate or
-  cooldown, the winner). The one runtime hook it needed: `tickUtility` records
-  its scoring pass on `root.brainState.lastDecision`. Four no-op-by-default
-  levers live in the config `SCHEMA` group "Agent brain" (`labDecisionScale`,
-  `labPerceptionScale`, `labAimErrorScale`, `labGodEye`) and are read by every
-  spec agent. Deferred by plan: metrics, ghost player, replay/AB, presets.
+- **Behavior Lab v2 (Slice B1 of `tech/behavior-lab.md` — built):** *can that
+  agent get there?* A generated level drawn at **1:1** (960×540, never scaled to
+  fit — panned with the wheel, up = left), **one** soldier-bodied agent standing
+  on a random graph node, and a click anywhere to send it there. It routes with
+  the shipped `routeRequest` and stops on arrival. Tuning is the config `SCHEMA`'s
+  own "Movement / feel" group, so the knobs are the *real game's* and persist.
+  Two exports, deliberately: `createLabModel`/`labStep`/`labGoal`/`labPan` (no
+  DOM — what the test drives) and `createBehaviorLab` (the editor shell). B2
+  adds the Graph and Path overlays; B3 adds platform dragging.
+  **v1 was deleted, not kept** — the two-team combat observatory, its
+  step-decision transport, its utility scoreboard, its CSS, and its four
+  `lab*` config knobs (`labDecisionScale`, `labPerceptionScale`,
+  `labAimErrorScale`, `labGodEye`) are all gone. `archive/behavior-lab-v1.md` is
+  the only place it still exists. `tickUtility` still records its scoring pass on
+  `root.brainState.lastDecision` — nothing reads it now, and it is what a future
+  scoreboard would read.
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,

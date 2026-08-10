@@ -918,7 +918,7 @@ function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin
       break;
     }
     case "burst": {
-      for (let i = 0; i < count; i++) angles.push(base + (root.rng() - 0.5) * 0.1 * config.labAimErrorScale);
+      for (let i = 0; i < count; i++) angles.push(base + (root.rng() - 0.5) * 0.1);
       break;
     }
     case "single":
@@ -926,7 +926,7 @@ function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin
       break;
     case "aimed":
     default: {
-      const jitter = ((spreadDeg ?? 4) * Math.PI * config.labAimErrorScale) / 180;
+      const jitter = ((spreadDeg ?? 4) * Math.PI) / 180;
       for (let i = 0; i < count; i++) angles.push(base + (root.rng() - 0.5) * jitter);
       break;
     }

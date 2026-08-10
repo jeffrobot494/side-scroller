@@ -1,150 +1,217 @@
-// Behavior Lab (docs/BEHAVIOR-LAB.md Slice 1): the tool mounts headlessly, and
-// the runtime hooks it draws — the utility scoreboard breakdown and the four
-// no-op-by-default agent levers — behave. Visuals stay an eyeball check.
+// ---------------------------------------------------------------------------
+// BEHAVIOR LAB v2 (tech/behavior-lab.md, Slice B1).
+//
+// Written from nothing. The file this replaces asserted v1's scoreboard, its
+// two-team arena and its four `lab*` levers, none of which exist any more —
+// keeping any of it would have been keeping v1.
+//
+// What can be asserted headlessly is narrow, and worth being honest about:
+// whether a route reads as deliberate, whether a takeoff looks intentional,
+// whether giving up looks like giving up — none of that is here, and none of it
+// can be. That is the reason the tool exists rather than a gap in this file.
+//
+// What IS here is everything that would silently stop the tool being a window
+// onto the shipped router: that it mounts and disposes, that it REMOVED combat
+// rather than merely omitting it, that its agent stands on a real graph node
+// under the SOLDIER profile, that a click becomes a destination the shipped
+// follower acts on, and that the camera obeys the design.
+// ---------------------------------------------------------------------------
+
 import { installDom, makeEl } from "./harness.mjs";
-import { createBehaviorLab } from "../src/editor/tools/behavior-lab.js";
-import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
-import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
-import { Soldier } from "../src/mission/entities.js";
-import { config, SCHEMA } from "../src/game/config.js";
+import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
+import { profileKey } from "../src/game/nav.js";
+import { config, resetConfig, SCHEMA } from "../src/game/config.js";
 
-// A minimal utility brain with one action per outcome we want on the board:
-// one that scores, one gated by `when`, one parked on a cooldown.
-const SPEC = {
-  v: 1, id: "lab_probe", name: "Lab Probe", threat: 10, tier: 1, intelligence: 4,
-  root: {
-    id: "root", visual: { shape: "box", size: [30, 40], color: "#e05a5a" },
-    body: { gravity: 1 }, health: { max: 40 }, motion: { type: "static" },
-    emitters: { gun: { at: [0, 0], projectile: { speed: 400, damage: 1, life: 1 } } },
-  },
-  brain: {
-    mode: "utility", start: "fight",
-    states: {
-      fight: {
-        decisionInterval: 0.3,
-        actions: [
-          { id: "shoot", score: "1", cooldown: 0, steps: [{ fire: { emitter: "gun" } }, { wait: 0.05 }] },
-          { id: "flee", when: "sense.dist < 5", score: "9", steps: [{ wait: 0.05 }] },
-          // wins the opening pass, then sits on a long cooldown so later passes
-          // have something to report as cooling rather than simply absent
-          { id: "rest", score: "2", cooldown: 5, steps: [{ wait: 0.05 }] },
-        ],
-      },
-    },
-  },
+const STEP = 1 / 60;
+const run = (lab, seconds) => {
+  for (let i = 0; i < Math.round(seconds * 60); i++) labStep(lab, STEP);
+  return lab;
 };
+const feet = (s) => s.y + s.h;
 
-function makeScene(soldier) {
-  return {
-    world: { width: 1200, height: 540, gravity: 1600 },
-    platforms: [{ x: 0, y: 500, w: 1200, h: 40 }],
-    soldiers: [soldier], specRoots: [], enemies: [], projectiles: [], loot: [],
-  };
-}
-const CTX = { friendlyFire: false, damageMult: 1, damage() {}, kill() {}, spark() {}, burst() {} };
+// A fixed seed and a fixed rng: the same level and the same starting node every
+// run, because a tool test that picks its own scene at random reports a
+// different thing each time it is run.
+const SEED = 4242;
+const model = () => createLabModel(SEED, () => 0.5);
 
-export default async function run(t) {
-  // ---- headless mount ------------------------------------------------------
-  installDom();
-  let threw = null, tool = null;
-  try {
-    tool = createBehaviorLab(makeEl(), () => {});
-  } catch (e) {
-    threw = e;
-  }
-  t.ok("behavior-lab: mount does not throw", !threw);
-  if (threw) console.log("   ", threw && threw.stack);
-  t.ok("behavior-lab: returns dispose()", tool && typeof tool.dispose === "function");
-  try {
-    tool && tool.dispose();
-    t.ok("behavior-lab: dispose does not throw", true);
-  } catch {
-    t.ok("behavior-lab: dispose does not throw", false);
-  }
+export default async function run_(t) {
+  resetConfig();
 
-  // ---- the levers exist as config knobs, and default to no-ops -------------
-  const group = SCHEMA.find((g) => g.title === "Agent brain");
-  t.ok("levers: an 'Agent brain' schema group exists", !!group);
-  t.eq("levers: decision scale defaults to 1", config.labDecisionScale, 1);
-  t.eq("levers: perception scale defaults to 1", config.labPerceptionScale, 1);
-  t.eq("levers: aim error scale defaults to 1", config.labAimErrorScale, 1);
-  t.eq("levers: god eye defaults off", config.labGodEye, false);
-
-  // ---- the utility scoreboard the Lab draws --------------------------------
-  const data = { id: "s1", name: "Rook", callsign: "RK", stats: { health: 5, aim: 5, speed: 5 } };
-  const weapon = { id: "rifle", name: "R", fireMode: "projectile", fireRate: 7, spread: 0, projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 1 }, effects: [] };
-  const soldier = new Soldier(data, weapon, 600, 460);
-  const scene = makeScene(soldier);
-  const agent = instantiate(normalizeSpec(SPEC), 300, 460);
-  scene.specRoots = [agent];
-
-  t.ok("scoreboard: no decision recorded before the first tick", agent.brainState.lastDecision === null);
-
-  for (let i = 0; i < 6; i++) updateSpecEnemy(agent, 1 / 60, scene, CTX);
-  const d = agent.brainState.lastDecision;
-  t.ok("scoreboard: a decision is recorded", !!d);
-  t.eq("scoreboard: it names the state it scored in", d && d.state, "fight");
-  t.eq("scoreboard: every action appears, win or lose", d && d.actions.length, 3);
-  t.eq("scoreboard: the winner is flagged", d && d.chosen, "rest");
-
-  const by = Object.fromEntries((d ? d.actions : []).map((a) => [a.id, a]));
-  t.eq("scoreboard: an ungated action is scored", by.shoot && by.shoot.status, "scored");
-  t.ok("scoreboard: its score is the real number (1 ± noise)", by.shoot && Math.abs(by.shoot.score - 1) <= 0.1);
-  t.eq("scoreboard: a failing `when` reads as gated", by.flee && by.flee.status, "gated");
-  t.eq("scoreboard: the gate reason is the expression itself", by.flee && by.flee.detail, "sense.dist < 5");
-  t.ok("scoreboard: a gated action is not the winner", d && d.chosen !== "flee");
-
-  // `rest` won the opening pass and took its cooldown; the next decision must
-  // show it as cooling, not silently missing (a blank row is the bug this
-  // panel exists to catch).
-  for (let i = 0; i < 120; i++) updateSpecEnemy(agent, 1 / 60, scene, CTX);
-  const d2 = agent.brainState.lastDecision;
-  const rest = d2 && d2.actions.find((a) => a.id === "rest");
-  t.ok("scoreboard: a later decision replaces the earlier one", d2 && d2.at > d.at);
-  t.eq("scoreboard: a cooling action is listed as such", rest && rest.status, "cooldown");
-  t.ok("scoreboard: cooldown detail reports the time left", !!(rest && /s left$/.test(rest.detail)));
-  t.eq("scoreboard: the cooled-out favourite yields to the runner-up", d2 && d2.chosen, "shoot");
-
-  // ---- the levers actually reach the runtime -------------------------------
-  // The timer is only observable between decisions, so watch its peak: at ×1 it
-  // can never exceed the state's own 0.3s interval.
-  const peak = (frames) => {
-    let max = 0;
-    for (let i = 0; i < frames; i++) {
-      updateSpecEnemy(agent, 1 / 60, scene, CTX);
-      max = Math.max(max, agent.brainState.decisionTimer);
+  // ---- the editor tool contract ---------------------------------------------
+  {
+    installDom();
+    let threw = null;
+    let tool = null;
+    try {
+      tool = createBehaviorLab(makeEl(), () => {});
+    } catch (e) {
+      threw = e;
     }
-    return max;
-  };
-  t.ok("lever: at ×1 the decision timer never exceeds the state's interval", peak(240) <= 0.3 + 1e-9);
-  config.labDecisionScale = 3;
-  const stretched = peak(240);
-  t.ok("lever: decision scale stretches the decision timer", stretched > 0.3 && stretched <= 0.9 + 1e-9);
-  config.labDecisionScale = 1;
+    t.ok("mount: does not throw", !threw);
+    if (threw) console.log("   ", threw.stack);
+    t.ok("mount: returns dispose()", tool && typeof tool.dispose === "function");
+    try {
+      tool.dispose();
+      t.ok("dispose: does not throw", true);
+    } catch (e) {
+      t.ok("dispose: does not throw", false);
+      console.log("   ", e.stack);
+    }
+  }
 
-  // God eye: a wall between the two makes los false; the lever forces it true.
-  const walled = {
-    ...makeScene(soldier),
-    platforms: [{ x: 0, y: 500, w: 1200, h: 40 }, { x: 450, y: 300, w: 40, h: 200 }],
-  };
-  const blind = instantiate(normalizeSpec(SPEC), 300, 460);
-  walled.specRoots = [blind];
-  updateSpecEnemy(blind, 1 / 60, walled, CTX);
-  t.eq("god eye off: a wall blocks line of sight", blind.sense.los, false);
+  // ---- combat is removed, not omitted ---------------------------------------
+  {
+    // generateLevel ALWAYS places enemies and loadMission instantiates them
+    // unconditionally, so a scene built the normal way arrives full of hostiles.
+    // If this goes red the Lab has quietly become a combat arena again.
+    const lab = model();
+    t.eq("no combat: no spec agents at all", lab.scene.specRoots.length, 0);
+    t.eq("no combat: nothing damageable", lab.scene.enemies.length, 0);
+    t.eq("no combat: no projectiles", lab.scene.projectiles.length, 0);
+    t.eq("no combat: one body in the level", lab.scene.soldiers.length, 1);
+    // And it stays that way once it is running — nothing spawns on a timer.
+    run(lab, 5);
+    t.eq("no combat: still nothing after five seconds", lab.scene.specRoots.length + lab.scene.projectiles.length, 0);
+  }
 
-  config.labGodEye = true;
-  const seer = instantiate(normalizeSpec(SPEC), 300, 460);
-  walled.specRoots = [seer];
-  updateSpecEnemy(seer, 1 / 60, walled, CTX);
-  t.eq("god eye on: the same wall is ignored", seer.sense.los, true);
-  config.labGodEye = false;
+  // ---- the agent starts where the router can route from ----------------------
+  {
+    const lab = model();
+    const s = lab.soldier;
+    // "A random NODE", not a random point: a node is the router's own idea of a
+    // standable place, so the agent can always be routed from where it begins.
+    const graph = [...lab.scene.navGraphs.values()][0];
+    const on = graph.nodes.some((n) => Math.abs(n.y - feet(s)) < 2 && s.x >= n.a - 2 && s.x <= n.b + 2);
+    t.ok(`start: standing on a graph node (x ${s.x.toFixed(0)}, feet ${feet(s)})`, on);
+    t.ok("start: planted, not mid-fall", s.onGround && s.vy === 0);
+    t.eq("start: and with no goal until one is set", lab.goal, null);
 
-  // Perception scale stretches the sensor cadence (the timer reset after a pass).
-  config.labPerceptionScale = 2;
-  const slow = instantiate(normalizeSpec(SPEC), 300, 460);
-  const s2 = makeScene(soldier);
-  s2.specRoots = [slow];
-  updateSpecEnemy(slow, 1 / 60, s2, CTX);
-  t.ok("lever: perception scale stretches the sensor cadence", slow.memory.senseTimer > 0.3);
-  config.labPerceptionScale = 1;
+    // The profile is the SHIPPED soldier envelope. A legged profile here would
+    // give maxRise 110.6 where the truth is 129.6 — climbs refused that the body
+    // can make — and the tool would be lying about the game it exists to watch.
+    const want = profileKey({ w: 30, h: 46, gravity: lab.scene.world.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed });
+    t.ok(`start: on the soldier profile (${[...lab.scene.navGraphs.keys()].join(", ")})`, lab.scene.navGraphs.has(want));
+    t.eq("start: and only that one — there is only one body", lab.scene.navGraphs.size, 1);
+  }
+  {
+    // Left alone, it stays put. A tool whose agent wanders on its own would make
+    // every observation of a route ambiguous.
+    const lab = model();
+    const x0 = lab.soldier.x;
+    run(lab, 4);
+    t.ok(`idle: no goal, no movement (x ${x0.toFixed(0)} → ${lab.soldier.x.toFixed(0)})`, Math.abs(lab.soldier.x - x0) < 1);
+  }
+
+  // ---- a click is a destination, and the SHIPPED follower acts on it ---------
+  {
+    const lab = model();
+    const s = lab.soldier;
+    const before = s.x;
+    const target = Math.min(lab.scene.world.width - 60, before + 900);
+    labGoal(lab, target, feet(s) - 10);
+    t.ok("click: sets the goal to the point clicked", Math.abs(lab.goal.x - target) < 1);
+
+    run(lab, 8);
+    t.ok(`click: the agent travels toward it (x ${before.toFixed(0)} → ${s.x.toFixed(0)})`, s.x > before + 200);
+    // It moved because the ROUTER moved it. Route state on the agent is the
+    // proof that navigation.js decided, not the Lab.
+    t.ok("click: by routing — the agent holds real route state", !!lab.agent.nav);
+    t.ok("click: on a path through the graph, not a straight line", lab.agent.nav.path !== null);
+  }
+  {
+    // Arrival: it settles. This is the shipped follower's arrival radius, not a
+    // rule the Lab adds — "watch it get there, and stop on arrival".
+    const lab = model();
+    const s = lab.soldier;
+    labGoal(lab, s.x + s.w / 2 + 240, feet(s) - 10);
+    run(lab, 10);
+    const restX = s.x;
+    run(lab, 3);
+    t.ok(`arrive: it stops rather than orbiting (${Math.abs(s.x - restX).toFixed(1)}px over 3s)`, Math.abs(s.x - restX) < 20);
+  }
+  {
+    // A second click retargets. Without clearing the route state the agent would
+    // finish the old path first, which reads as the tool ignoring the click.
+    const lab = model();
+    labGoal(lab, lab.soldier.x + 600, feet(lab.soldier) - 10);
+    run(lab, 2);
+    t.ok("retarget: it is on a route", !!lab.agent.nav);
+    labGoal(lab, lab.soldier.x - 300, feet(lab.soldier) - 10);
+    t.eq("retarget: the old route is dropped, not amended", lab.agent.nav, null);
+  }
+
+  // ---- the camera -----------------------------------------------------------
+  {
+    const lab = model();
+    t.eq("pan: starts at the left edge", lab.panX, 0);
+    labPan(lab, 240);
+    t.ok(`pan: wheel DOWN pans right (${lab.panX})`, lab.panX > 0);
+    const right = lab.panX;
+    labPan(lab, -120);
+    t.ok(`pan: wheel UP pans left (${lab.panX})`, lab.panX < right);
+    labPan(lab, -1e6);
+    t.eq("pan: clamped at the left edge", lab.panX, 0);
+    labPan(lab, 1e6);
+    t.eq("pan: clamped so the view never runs past the level", lab.panX, lab.scene.world.width - VIEW_W);
+
+    // The camera NEVER follows: the agent walks out of shot and stays there
+    // until you pan. That is the design, and it is the opposite of what a
+    // mission camera does, so it is worth pinning.
+    const held = lab.panX;
+    labGoal(lab, 100, feet(lab.soldier) - 10);
+    run(lab, 5);
+    t.eq("pan: the camera does not follow the agent", lab.panX, held);
+
+    // Vertical panning is "not needed" only because the level fits. A view
+    // shorter than the world would silently clip the bottom with no way to see
+    // it, which is why the canvas height is the world height and not 420.
+    t.eq("pan: the view is the world's full height, so there is nothing to scroll to", VIEW_H, lab.scene.world.height);
+    t.ok(`pan: and narrower than the level, so panning is the only way across (${VIEW_W} of ${lab.scene.world.width})`,
+      VIEW_W < lab.scene.world.width);
+  }
+
+  // ---- the tuning panel is the shipped game's knobs --------------------------
+  {
+    const group = SCHEMA.find((g) => g.title === "Movement / feel");
+    t.ok("tuning: the group the panel renders exists", !!group);
+    const keys = group.items.map((i) => i.key);
+    t.ok(`tuning: the design's two knobs are both in it (${keys.join(", ")})`,
+      keys.includes("jumpSpeed") && keys.includes("runSpeed"));
+    // They are config.js's own entries, so a change here is a change to the game
+    // until it is reset. Asserted because it is a surprise, not a detail.
+    t.ok("tuning: they are live config keys, not a local copy", keys.every((k) => k in config));
+  }
+  {
+    // Retuning invalidates the graphs. runSpeed and jumpSpeed are IN the profile
+    // the graph is keyed by, so without this the agent keeps following a path
+    // whose node ids describe a body that no longer exists.
+    const lab = model();
+    labGoal(lab, lab.soldier.x + 600, feet(lab.soldier) - 10);
+    run(lab, 2);
+    const gen = lab.scene.navGen || 0;
+    config.jumpSpeed = 900;
+    const { labRetune } = await import("../src/editor/tools/behavior-lab.js");
+    labRetune(lab);
+    t.ok("retune: the cached graphs are dropped", !lab.scene.navGraphs);
+    t.ok("retune: and the generation moves, so every agent notices", (lab.scene.navGen || 0) > gen);
+    run(lab, 1);
+    const key = [...lab.scene.navGraphs.keys()][0];
+    t.ok(`retune: the rebuilt graph is for the NEW body (${key})`, key.includes("/900/"));
+    config.jumpSpeed = 720;
+  }
+
+  // ---- v1 is gone ------------------------------------------------------------
+  {
+    // Not a style check: these four were read by brain.js, perception.js and
+    // runtime.js on every decision, every sense tick and every shot. A
+    // resurrected knob is a multiplier back in a hot path and a v1 feature back
+    // in the game.
+    for (const k of ["labDecisionScale", "labPerceptionScale", "labAimErrorScale", "labGodEye"]) {
+      t.eq(`v1: ${k} is gone from the config`, config[k], undefined);
+    }
+    t.eq("v1: and so is the schema group that held them", SCHEMA.find((g) => g.title === "Agent brain"), undefined);
+  }
+
+  resetConfig();
 }

@@ -416,18 +416,6 @@ export default async function run(t) {
     config.navEnabled = true;
     t.ok("fallback: routing off disables repositioning too", cx(g) < 600);
   }
-  {
-    // God eye forces sense.los true, which is exactly the trigger R1 keys on —
-    // so the one lever meant to isolate a navigation fault switches this feature
-    // off. Pinned deliberately: the spec says so, and it should be a visible
-    // change if anyone reworks the lever.
-    const sc = scene(SLAB, [TARGET]);
-    config.labGodEye = true;
-    const g = gunner(200, 474);
-    sim(g, sc, 14);
-    config.labGodEye = false;
-    t.ok(`godeye: with god eye on, the gunner never repositions (x ${cx(g).toFixed(0)})`, cx(g) < 600);
-  }
 
   resetConfig();
 }

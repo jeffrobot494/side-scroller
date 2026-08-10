@@ -48,7 +48,7 @@ const TOOLS = [
   { id: "enemy", label: "Enemy Designer", desc: "Compose EnemySpec enemies — prompt the LLM or build by hand (parts, brains, emitters) — validate, preview, and save to the library." },
   { id: "levelgen", label: "Level Generator", desc: "Generate procedural missions from a seed; preview the layout and check the threat budget." },
   { id: "firing", label: "Firing Room", desc: "Fire any weapon at respawning dummies or waves of real enemies on a platformed range." },
-  { id: "behaviorlab", label: "Behavior Lab", desc: "Watch agents think: two teams on a generated level, frame/decision stepping, and the utility scoreboard behind every choice." },
+  { id: "behaviorlab", label: "Behavior Lab", desc: "Watch one agent navigate: click anywhere on a generated level to send it there and see whether it can get there." },
   { id: "controls", label: "Controls", desc: "Rebind keyboard controls (move, jump, fire, reload, …); gamepad uses built-in defaults." },
   { label: "Level Editor", desc: "Place platforms, spawns, loot, and the exit on a canvas." },
 ];

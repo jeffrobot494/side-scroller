@@ -423,11 +423,10 @@ export const SCHEMA = [
     ],
   },
   {
-    // Agent-brain levers. Every default here is a no-op (×1 / off), so a normal
-    // mission behaves exactly as it did — they exist to isolate a bug in the
-    // Behavior Lab (tech/behavior-lab.md): slow decisions down to watch them,
-    // or blind/deafen one layer to prove the fault is in another. Live, and read
-    // by every spec agent (enemies AND companions).
+    // How a grounded agent gets from where it is to where it wants to be
+    // (tech/agent-navigation.md) and, for a ranged one, how it decides where that
+    // is (tech/ranged-repositioning.md). Read by every spec agent, enemies AND
+    // companions.
     title: "Agent navigation",
     items: [
       {
@@ -503,48 +502,6 @@ export const SCHEMA = [
         max: 4,
         step: 0.1,
         help: "Seconds an agent may sit outside its preferred range without covering ground before it treats the spot as a dead end and repositions. Losing sight triggers a reposition immediately and does not wait for this. Live.",
-      },
-    ],
-  },
-  {
-    title: "Agent brain",
-    items: [
-      {
-        key: "labDecisionScale",
-        label: "Decision interval ×",
-        type: "range",
-        default: 1,
-        min: 0.25,
-        max: 3,
-        step: 0.05,
-        help: "Scales every utility brain's decisionInterval. >1 = thinks less often (more committed), <1 = twitchier. Live.",
-      },
-      {
-        key: "labPerceptionScale",
-        label: "Perception interval ×",
-        type: "range",
-        default: 1,
-        min: 0.25,
-        max: 3,
-        step: 0.05,
-        help: "Scales the 0.2s sensor cadence. >1 = slower reactions and staler sense.* / last-seen memory. Live.",
-      },
-      {
-        key: "labAimErrorScale",
-        label: "Aim error ×",
-        type: "range",
-        default: 1,
-        min: 0,
-        max: 3,
-        step: 0.05,
-        help: "Scales the random spread on aimed/burst spec fire. 0 = pinpoint (isolate a navigation bug from a whiffing one). Live.",
-      },
-      {
-        key: "labGodEye",
-        label: "God eye (no LOS occlusion)",
-        type: "bool",
-        default: false,
-        help: "Agents see through platforms — sense.los is always true when a hostile exists. Tells a perception bug apart from a pathing one. Live.",
       },
     ],
   },

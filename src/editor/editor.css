@@ -287,127 +287,24 @@
 }
 
 /* ==========================================================================
-   BEHAVIOR LAB (docs/behavior-lab.md) — arena + transport + inspector rail
+   BEHAVIOR LAB (design/behavior-lab.md) — one agent, one goal, 1:1 and panned
    ========================================================================== */
-.bl-grid { display: grid; grid-template-columns: minmax(0,1fr) 330px; gap: 18px; align-items: start; }
-.bl-canvas { margin-bottom: 0; cursor: crosshair; }
-.bl-rail { position: sticky; top: 16px; }
+.bl-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; }
+.bl-seed { font-family: ui-monospace, monospace; font-size: 12px; color: #8894a6; }
+.bl-hint { margin-left: auto; font-size: 12px; color: #8894a6; }
 
-.bl-panel { border: 1px solid var(--line); border-radius: 6px; background: rgba(20,25,32,0.5); padding: 12px; }
-.bl-panel + .bl-panel, .bl-grid > div > .bl-panel { margin-top: 12px; }
-.bl-h {
-  font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
-  margin: 0 0 10px; opacity: 0.85; display: flex; align-items: center; gap: 8px;
-}
-.bl-tag {
-  margin-left: auto; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; font-weight: 700;
-  color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
-}
-.bl-note { font-size: 11px; color: var(--muted); margin: 0 0 8px; line-height: 1.5; }
-.bl-note code { color: var(--credits); }
+/* The canvas is 1:1 ON SCREEN, which is the design's whole argument for panning
+   rather than scaling to fit — so no `width: 100%`, no `height: auto`. A window
+   narrower than the view scrolls; it never shrinks the agent. */
+.bl-view { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+.bl-canvas { display: block; width: 960px; height: 540px; cursor: crosshair; }
 
-/* transport bar */
-.bl-transport {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  border: 1px solid var(--line); border-radius: 6px; background: rgba(20,25,32,0.5);
-  padding: 8px 10px; margin-top: 10px;
-}
-.bl-t-btn {
-  border: 1px solid var(--line); border-radius: 4px; background: var(--track); color: var(--text);
-  padding: 5px 11px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
-}
-.bl-t-btn:hover { border-color: #4a5a70; }
-.bl-t-btn.on { color: #0d1117; background: var(--light); border-color: var(--light); }
-.bl-t-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
-.bl-clock { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
-.bl-clock b { color: var(--credits); font-variant-numeric: tabular-nums; }
+.bl-tuning { margin-top: 14px; }
+#bl-tune .cfg-group h2 { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); opacity: 0.85; }
 
-.bl-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0; font-size: 11px; color: var(--muted); }
-.bl-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.bl-key { width: 16px; height: 0; }
-
-/* rosters */
-.bl-roster { display: flex; flex-direction: column; gap: 6px; }
-.bl-agent {
-  display: flex; align-items: center; gap: 9px; text-align: left; width: 100%;
-  border: 1px solid var(--line); border-left-width: 3px; border-radius: 5px;
-  background: rgba(12,16,22,0.6); padding: 7px 9px; cursor: pointer; font-family: inherit;
-  transition: border-color 0.12s, background 0.12s;
-}
-.bl-agent:hover { background: rgba(30,38,48,0.7); }
-.bl-agent.blue { border-left-color: #4c9ce8; }
-.bl-agent.red { border-left-color: #e05a5a; }
-.bl-agent.sel { border-color: var(--light); background: rgba(255,202,122,0.08); }
-.bl-agent-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.bl-agent-name { font-size: 13px; font-weight: 600; color: var(--text); }
-.bl-agent-sub { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
-.bl-hp { width: 46px; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; flex: none; }
-.bl-hp span { display: block; height: 100%; background: var(--good); }
-.bl-roster-head {
-  display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 1.5px;
-  text-transform: uppercase; color: var(--muted); margin: 14px 0 7px;
-}
-.bl-panel .bl-roster-head:first-of-type { margin-top: 0; }
-.bl-roster-head .toggle { margin-left: auto; }
-.bl-swatch { width: 9px; height: 9px; border-radius: 2px; }
-
-/* selected-agent header */
-.bl-sel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.bl-sel-name { font-size: 15px; font-weight: 700; color: var(--text); }
-.wd-badge.bl-team-red { color: #e05a5a; border-color: #e05a5a; }
-.wd-badge.bl-team-blue { color: #4c9ce8; border-color: #4c9ce8; }
-
-/* sense readout */
-.bl-sense { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px 12px; }
-.bl-s {
-  display: flex; align-items: baseline; gap: 6px; font-size: 11px;
-  font-family: ui-monospace, Menlo, monospace; border-bottom: 1px solid rgba(51,61,74,0.3); padding-bottom: 3px;
-}
-.bl-s i { color: var(--muted); font-style: normal; }
-.bl-s b { margin-left: auto; color: var(--text); font-variant-numeric: tabular-nums; }
-.bl-s b.t { color: var(--good); }
-.bl-s b.f { color: #7a848f; }
-
-/* utility scoreboard */
-.bl-score { display: flex; flex-direction: column; gap: 5px; }
-.bl-act {
-  position: relative; border: 1px solid var(--line); border-radius: 4px;
-  background: rgba(12,16,22,0.6); padding: 6px 9px; overflow: hidden;
-}
-.bl-act-bar { position: absolute; inset: 0 auto 0 0; background: rgba(76,156,232,0.16); }
-.bl-act-top { position: relative; display: flex; align-items: baseline; gap: 8px; }
-.bl-act-name { font-size: 12px; font-weight: 600; color: var(--text); font-family: ui-monospace, Menlo, monospace; }
-.bl-act-score {
-  margin-left: auto; font-size: 12px; font-weight: 700; color: var(--text);
-  font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace;
-}
-.bl-act-gate { position: relative; font-size: 10px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; margin-top: 3px; word-break: break-word; }
-.bl-act.win { border-color: var(--light); box-shadow: 0 0 0 1px rgba(255,202,122,0.25); }
-.bl-act.win .bl-act-bar { background: rgba(255,202,122,0.20); }
-.bl-act.win .bl-act-score { color: var(--light); }
-.bl-act.gated { opacity: 0.5; }
-.bl-act.gated .bl-act-bar { background: rgba(120,130,145,0.10); }
-.bl-act.gated .bl-act-score { color: #7a848f; }
-.bl-act.cool .bl-act-gate { color: #c98b8b; }
-.bl-win-flag { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--light); font-weight: 700; }
-
-/* commitment */
-.bl-commit-name { font-size: 13px; font-weight: 700; color: var(--light); font-family: ui-monospace, Menlo, monospace; margin-bottom: 8px; }
-.bl-phases { display: flex; gap: 4px; }
-.bl-phase {
-  flex: 1; text-align: center; font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
-  color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 4px 2px; background: var(--track);
-}
-.bl-phase.on { color: #0d1117; background: var(--light); border-color: var(--light); font-weight: 700; }
-
-/* the lever panel is the config SCHEMA's own group — tighten it for the column */
-#bl-levers .cfg-group { margin-bottom: 0; }
-#bl-levers .cfg-group h2 { display: none; }
-#bl-levers .cfg-row { grid-template-columns: 1fr 200px; padding: 8px 4px; }
-
-@media (max-width: 1100px) { .bl-grid { grid-template-columns: 1fr; } .bl-rail { position: static; } }
-
-/* ---- Controls mapper -------------------------------------------------- */
+/* ==========================================================================
+   CONTROLS MAPPER
+   ========================================================================== */
 .cm-table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 14px; }
 .cm-table th { text-align: left; color: #8894a6; font-weight: 600; padding: 6px 10px; border-bottom: 1px solid rgba(90,110,140,0.25); }
 .cm-table td { padding: 8px 10px; border-bottom: 1px solid rgba(90,110,140,0.12); }

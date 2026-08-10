@@ -65,7 +65,6 @@ leaving them in "Next" hides the fact that the blocker is a choice, not effort.
 
 | Item | Situation | Decision needed |
 |---|---|---|
-| Behavior Lab v1 | Built and working, but too complex to reason about. Being replaced by v2 this sprint. | Delete on v2 landing, or keep as a second tool |
 | Locomotor L4+ | L1–L3 built; `wheeled`/`limbed`/`crawler` deliberately deferred. | None for now — deferred on purpose, listed so it is not mistaken for an oversight |
 
 ## Shipped
@@ -82,7 +81,7 @@ description of what the game does today; this is only the index.
 | Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `tech/sound.md` |
 | Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `tech/weapon-designer.md` |
 | Ranged repositioning R1–R2 — a `keepDistance` agent that cannot see its target walks to somewhere it can, both teams | `tech/ranged-repositioning.md` |
-| Behavior Lab Slice 1 — two teams, overlays, utility scoreboard, time control | v1, being replaced |
+| Behavior Lab v2 B1 — one agent on a generated level, click to set a goal, 1:1 panned view (v1 deleted) | `tech/behavior-lab.md` |
 | Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `design/design-map.md` · `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 

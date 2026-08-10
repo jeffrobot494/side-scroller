@@ -1,7 +1,7 @@
 ---
 type: design
 category: development-tools
-status: unbuilt
+status: building
 resolution: sharp
 sprint: 2026-08
 ---

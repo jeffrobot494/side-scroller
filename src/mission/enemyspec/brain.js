@@ -18,7 +18,6 @@
 // ---------------------------------------------------------------------------
 
 import { execStep, execStepsInstant, makeTrackStates, truthyEval, numberEval } from "./runtime.js";
-import { config } from "../../game/config.js";
 
 const STEP_GUARD = 24; // max instant steps executed per track per frame
 
@@ -115,10 +114,9 @@ function tickUtility(root, state, dt, scene, ctx) {
 
   bs.decisionTimer -= dt;
   if (bs.decisionTimer > 0) return;
-  bs.decisionTimer = state.decisionInterval * config.labDecisionScale;
+  bs.decisionTimer = state.decisionInterval;
 
-  // The scoreboard the Behavior Lab draws (tech/behavior-lab.md Slice 1): why
-  // each action lost, not just which one won. Built here because this is the
+  // Why each action lost, not just which one won. Built here because this is the
   // only place the numbers exist — recorded once per decision (not per frame),
   // so the cost is one small array every decisionInterval per agent.
   const breakdown = [];

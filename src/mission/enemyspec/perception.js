@@ -19,7 +19,6 @@
 //   sense.navBlocked        gave up: the same jump failed too many times
 // ---------------------------------------------------------------------------
 
-import { config } from "../../game/config.js";
 import { navSense } from "../navigation.js";
 
 const SENSE_INTERVAL = 0.2;
@@ -30,9 +29,7 @@ export function updateSense(root, scene, dt) {
   m.timeSinceSeen += dt;
   m.senseTimer -= dt;
   if (m.senseTimer > 0) return;
-  // config.labPerceptionScale is 1 in a normal mission; the Behavior Lab turns
-  // it up to watch stale sense data drive a bad decision (tech/behavior-lab.md).
-  m.senseTimer = SENSE_INTERVAL * config.labPerceptionScale;
+  m.senseTimer = SENSE_INTERVAL;
 
   const ex = root.x + root.w / 2;
   const ey = root.y + root.h / 2;
@@ -65,8 +62,6 @@ export function updateSense(root, scene, dt) {
   const py = t.y + t.h / 2;
 
   s.dist = Math.hypot(px - ex, py - ey);
-  // God eye (Lab lever, off by default): skip occlusion so a navigation fault
-  // can be told apart from "it simply never saw you".
   s.los = losBetween(ex, ey, px, py, scene.platforms);
   s.playerAbove = py < ey - 40;
   s.playerBelow = py > ey + 40;
@@ -137,13 +132,13 @@ function groundAhead(root, platforms) {
 }
 
 // Can a body standing at (x0, y0) see (x1, y1)? The exact test behind sense.los,
-// god eye included, exported so a caller can ask it about a place the agent is
-// NOT standing — which is what choosing somewhere to move to requires
+// exported so a caller can ask it about a place the agent is NOT standing —
+// which is what choosing somewhere to move to requires
 // (tech/ranged-repositioning.md). Exported rather than imported the other way
 // round on purpose: this module already imports navigation.js for navSense, so
 // the resolver takes this as an injected predicate instead of importing back.
 export function losBetween(x0, y0, x1, y1, platforms) {
-  return config.labGodEye || !blocked(x0, y0, x1, y1, platforms);
+  return !blocked(x0, y0, x1, y1, platforms);
 }
 
 // Segment vs AABB occlusion — slab method per platform.

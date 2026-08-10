@@ -1,7 +1,7 @@
 ---
 type: tech
 category: development-tools
-status: unbuilt
+status: building
 resolution: sharp
 sprint: 2026-08
 needs: [agent-navigation]
@@ -20,7 +20,7 @@ watches, and both shipped with `tech/agent-navigation.md` N1–N3.
 
 | # | Slice | Runtime behaviour |
 |---|---|---|
-| B1 | **The observatory, and the end of v1.** Delete `src/editor/tools/behavior-lab.js` and its test outright, then build v2 in their place: a generated level drawn at 1:1, one soldier-bodied agent standing on a random node, click anywhere to make that point its goal, wheel to pan (**up pans left, down pans right**). It routes there and stops. Reload for a new level. Tuning renders from the config `SCHEMA` | **None in code.** Editor-only. But the tuning knobs are the shipped game's — see the warning below. The Tools tab loses the two-team combat observatory and gains a navigation one |
+| B1 ✅ | **The observatory, and the end of v1.** Delete `src/editor/tools/behavior-lab.js` and its test outright, then build v2 in their place: a generated level drawn at 1:1, one soldier-bodied agent standing on a random node, click anywhere to make that point its goal, wheel to pan (**up pans left, down pans right**). It routes there and stops. Reload for a new level. Tuning renders from the config `SCHEMA` | **None in code.** Editor-only. But the tuning knobs are the shipped game's — see the warning below. The Tools tab loses the two-team combat observatory and gains a navigation one |
 | B2 | **Overlays.** Graph and Path toggles, off by default: every node and directed edge of the agent's own profile, and the route it currently holds | **None.** Editor-only, and read-only against state the follower already keeps |
 | B3 | **Platform dragging.** Drag any platform in x and y; the graph is invalidated and rebuilt, and the agent's route state is cleared so it repaths from where it stands | **None.** Editor-only |
 
@@ -34,6 +34,12 @@ routing built in N3 is any good, which is the reason the Lab is in this sprint.
 placements — so a scene built the normal way arrives full of live hostiles. The
 tool must clear them after building. v1 already does this dance when it swaps in a
 single-spec red team.
+
+**As built (B1):** confirmed and pinned — the generated levels the Lab builds
+arrive with up to five live spec agents. `createLabModel` clears `specRoots`,
+`enemies`, `projectiles` and `loot` after `loadMission`, and the test asserts all
+four are empty *and still empty after five seconds*, since "nothing spawned yet"
+and "nothing spawns" are different claims.
 
 **B1's tuning knobs are the real game's.** `runSpeed` and `jumpSpeed` are read
 live by `Soldier.applyMovement`, and the schema renderer persists every change to
@@ -66,6 +72,27 @@ looks at would be the failure mode.
 |---|---|
 | `src/editor/tools/` — one new tool module | The whole tool: shell, canvas, camera, click and wheel input, overlays, dragging |
 | `src/editor/editor.js` | One `TOOLS` entry, its id in `MOUNTABLE`, and one `factory` entry — the standard three-point registration |
+
+**As built (B1) — one module, but two exports, and the test is why.** The plan
+assumed the usual shape: everything inside `createBehaviorLab`'s closure. That
+shape can only ever be tested for "mounts without throwing", because
+`test/harness.mjs`'s DOM is a deliberate stub — `querySelector` returns a *fresh*
+mock element on every call, `addEventListener` is a no-op, and the 2D context
+records nothing. There is no way in from outside. So the module now exports the
+model as well as the shell:
+
+| Export | |
+|---|---|
+| `createLabModel(seed, rng)` | Level, scene, agent, and the starting node. No DOM |
+| `labStep` · `labGoal` · `labPan` · `labRetune` | The verbs. No DOM |
+| `createBehaviorLab(container, onBack)` | The editor tool. Holds one model, draws it, translates clicks and wheels into the verbs |
+
+Still one module, so "where the code goes" is unchanged, and drawing stays in the
+shell. The gain is that everything worth asserting — that combat is gone, that
+the agent starts on a real node under the soldier profile, that a click produces a
+route the shipped follower walks, that the camera never follows — is assertable
+instead of taken on trust. Both slices left should extend the model, not the
+closure.
 
 Conventions this must follow, from `CLAUDE.md`:
 
@@ -118,12 +145,16 @@ Tuning table the *actual* two knobs rather than two knobs that look relevant.
 | `test/reposition.test.mjs` | Ranged repositioning, R1+R2. **One assertion in it is expected to go:** the god-eye block, which pins that `labGodEye` suppresses repositioning. It is deleted with the knob, and `tech/ranged-repositioning.md`'s note about it with them. Nothing else in that suite may move — repositioning does not otherwise read a `lab*` knob |
 | `test/enemyspec-brain.test.mjs`, `test/locomotion-characterization.test.mjs` | The decision cadence and whole-trajectory fixtures. Removing a `× 1` multiplier must be arithmetically invisible; a diff in either means a site was changed rather than simplified |
 | `test/navigation.test.mjs` | The follower the tool exists to watch — profiles, the graph cache, takeoffs, the partial-path fallback and the attempt cap. **Note what it does not cover:** every route-following case there drives a *legged* body. Only `profileFor`'s numbers are asserted for a soldier body, so the Lab is the first end-to-end consumer of router + `SOLDIER`, and is as likely to find bugs there as to display them |
+| | **As built:** it found none. On seed 4242 the agent crosses 2,800px of a 6,220px level and climbs four surfaces (feet 447 → 500 → 470 → 395 → 263) onto the level's highest perch, six route steps down to zero, and stops. R2 had already put a soldier body through the router end to end, so the Lab is no longer the first — but it is the first with a route long enough to be worth watching |
 | `test/nav.test.mjs` | The graph the overlay draws, including the reject boundaries a dragged platform will start hitting |
 | `test/levelgen-golden.test.mjs` | Generated levels are unchanged. Dragging edits a loaded scene and must never reach generation |
-| `test/tools.test.mjs` | The other editor tools still mount |
 
 The bar is `node test/run.mjs` green plus a served-page check on `editor.html`.
 The new tool needs its own headless mount/dispose test in the same shape as v1's.
+**As built (B1):** it got considerably more than that — see the two-exports note
+above. Every claim in the new suite was mutation-tested; eight mutations, eight
+caught, including the one that matters most, replacing `moveTo` with a controller
+that steers in a straight line rather than routing.
 **Everything the Lab is for — whether a route reads as deliberate, whether a
 takeoff looks intentional, whether giving up looks like giving up — is an eyeball
 check and cannot be asserted here.** That is not a gap in the testing; it is the
