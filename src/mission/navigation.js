@@ -192,11 +192,27 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // ---- grounded: resolve where we are -------------------------------------
   const here = nodeUnder(graph, ent.x, ent.y + ent.h);
   if (!here) {
-    // Standing somewhere the graph does not model (a span too narrow to be a
-    // node, a moving host, mid-slope). Hand back to straight-line steering.
+    // MID STEP-OFF, and this is not an error state. Walking off a ledge means
+    // deliberately leaving the node's span — and a span is where a body fits
+    // WHOLLY on the platform, so `nodeUnder` stops recognising the body a body
+    // width before it stops being supported. Handing back to straight-line
+    // steering in that gap walks it right back on, and the agent paces the lip
+    // forever. Keep driving at the lip we committed to.
+    if (ent.onGround && nav.stepOff !== undefined) {
+      if (Math.abs(nav.stepOff - ent.x) > 1) return drive(ent, nav.stepOff, speed, dt);
+      // Arrived at the lip and STILL standing. The walk-off did not work,
+      // because a node's span can end before its platform does: `buildNodes`
+      // cuts a span where headroom runs out, so there is standable ground past
+      // the node that is not a node. Pressing on would be leaning against thin
+      // air forever. Give the agent back to straight-line steering.
+      nav.stepOff = undefined;
+    }
+    // Otherwise: somewhere the graph genuinely does not model (a span too narrow
+    // to be a node, a moving host, mid-slope). Straight-line steering.
     nav.leg = null;
     return null;
   }
+  nav.stepOff = undefined; // back on a node: no walk-off is in progress
 
   // ---- resolve a jump that was in flight ----------------------------------
   // "The agent was traversing A→B and is now grounded somewhere that is not B."
@@ -269,9 +285,32 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // forever, fully supported, for a fall that needs a step it was never told to
   // take. Aim a body width PAST the lip instead; support ends partway there and
   // gravity finishes it.
+  //
+  // WHICH lip is decided by the two spans, never by where the body currently is.
+  // A tie-break on `ent.x` looks reasonable and oscillates: the agent walks
+  // toward the lip that answer picks, crosses the comparison point, the answer
+  // flips, and it walks back — forever, on a correct path, a few pixels either
+  // side of the pivot. Any input a movement decision reads must not be something
+  // that movement changes.
   if (edge.kind === "drop") {
-    const right = next.a > here.b ? true : next.b < here.a ? false : destX >= ent.x;
-    return drive(ent, right ? here.b + ent.w : here.a - ent.w, speed, dt);
+    const overL = next.a < here.a; // the destination reaches past our left end
+    const overR = next.b > here.b; // ...and/or past our right end
+    let right;
+    if (overL && overR) right = destX >= (here.a + here.b) / 2; // either lip lands: go the way we are headed
+    else if (overL) right = false; // only the left lip drops onto it
+    else if (overR) right = true;
+    // Neither: the destination sits entirely under this ledge and NO lip reaches
+    // it — the graph offered an edge whose fall it does not model. Take the
+    // nearer lip; landing elsewhere repaths, which is the honest response.
+    else right = Math.abs(here.b - ent.x) < Math.abs(here.a - ent.x);
+    // Remember the lip we committed to, so the frames after `nodeUnder` stops
+    // recognising us keep heading for it. NOT a `leg`: a leg is resolved on the
+    // next grounded frame, and a walk-off takes many grounded frames, so every
+    // one of them would be booked as a failed attempt and three would ban a
+    // perfectly good edge.
+    const toX = right ? here.b + ent.w : here.a - ent.w;
+    nav.stepOff = toX;
+    return drive(ent, toX, speed, dt);
   }
   // A walk is a step onto a touching span at the same height. Same trap in
   // miniature: if the spans overlap, the nearest point on the destination can be

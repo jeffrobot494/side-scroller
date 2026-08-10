@@ -327,6 +327,22 @@ side the destination is on; support ends partway there and gravity does the rest
 The same trap in miniature applies to a `walk` onto an overlapping span, fixed
 alongside.
 
+**As built, after the Behavior Lab: that fix was wrong twice more, and the Lab is
+what showed it.** Bo put a goal directly below the agent, on a ledge overlapping
+the one it stood on, and watched it pace a few pixels back and forth forever
+while *holding a correct path*. Three defects, stacked:
+
+| | Defect | Fix |
+|---|---|---|
+| 1 | The tie-break for **which lip** to leave by was `destX >= ent.x` — a movement decision that reads the agent's own position. Walk toward the lip it picks, cross the destination's x, the answer flips; walk back and it flips again | Decide from the two **spans**, which do not move: leave by whichever side the destination reaches past. When it reaches past both, break the tie on `destX` against the node's midpoint — still not on `ent.x` |
+| 2 | Walking off a ledge means leaving the node's span, and a span is where a body fits **wholly** on the platform — so `nodeUnder` stops recognising the body a body-width before it stops being supported. In that gap the router handed back to straight-line steering, which walked it right back on | `nav.stepOff` remembers the committed lip and keeps driving through the gap. Deliberately **not** a `leg`: a leg resolves on the next grounded frame, a walk-off takes many, and each would have been booked as a failed attempt — three of them ban a good edge |
+| 3 | The fix for 2 introduced a new freeze. A node's span can end before its **platform** does, because `buildNodes` cuts a span where headroom runs out — so an agent can reach the lip it aimed for and still be standing on floor | Reaching the step-off target while still grounded means the walk-off failed; drop it and hand back to steering |
+
+Defect 3 was found by the freeze hunter on generated seed 40, not by reasoning —
+after the first two fixes measured clean on the reported case. **The general
+lesson is defect 1's:** no input to a movement decision may be something that
+movement changes.
+
 Measured over a 90-second roaming chase across 60 generated levels: **10 frozen
 chargers before, 0 after**, and in the 120-level sweep the number making no
 progress went 5 → 0 while reached rose 21 → 25. Nothing in the suite covered a

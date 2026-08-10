@@ -276,6 +276,76 @@ export default async function run(t) {
     sim(c, sc, 8);
     t.ok("drop: it leaves by the side its destination is on", feet(c) === 500 && c.x > 800);
   }
+  {
+    // TWO LEDGES THAT OVERLAP IN X, the lower one reaching further left. Found
+    // by eye in the Behavior Lab: the agent paced a few pixels back and forth on
+    // the upper ledge forever, holding a correct path it never walked.
+    //
+    // The old tie-break for which lip to leave by was `destX >= ent.x` — a
+    // decision that reads the agent's OWN position. Walk toward the lip it
+    // picks, cross the destination's x, and the answer flips; walk back, and it
+    // flips again. Nothing an agent does may change the input to the decision
+    // that told it to do it. Which lip a drop uses is now a fact about the two
+    // spans, which do not move.
+    const sc = scene(
+      [{ x: 0, y: 700, w: 1400, h: 40 }, { x: 365, y: 240, w: 165, h: 20 }, { x: 217, y: 365, w: 195, h: 20 }],
+      [soldierAt(375, 365 - 46)], // on the lower ledge, under the overlap
+    );
+    const c = chaser(400, 240 - 26);
+    c.onGround = true;
+    sim(c, sc, 4);
+    t.ok(`overlap: the chaser gets off the upper ledge (feet ${feet(c)})`, feet(c) === 365);
+    t.ok(`overlap: onto the ledge below, not the ground (x ${c.x.toFixed(0)})`, c.x >= 217 && c.x <= 382);
+    t.ok("overlap: and does not pace the lip", Math.abs(c.vx) < 1);
+  }
+  {
+    // The second half of the same bug, and the reason the first fix was not
+    // enough. A node's span is where the body fits WHOLLY on the platform, so
+    // walking off means leaving the span — and `nodeUnder` stops recognising the
+    // body a body-width before it stops being supported. In that gap the router
+    // used to hand back to straight-line steering, which walked it right back on.
+    const sc = scene(
+      [{ x: 0, y: 700, w: 1400, h: 40 }, { x: 365, y: 240, w: 165, h: 20 }, { x: 217, y: 365, w: 195, h: 20 }],
+      [soldierAt(375, 365 - 46)],
+    );
+    const c = chaser(400, 240 - 26);
+    c.onGround = true;
+    let offNodeGrounded = 0;
+    for (let i = 0; i < 60 * 4; i++) {
+      updateSpecEnemy(c, STEP, sc, ctx);
+      if (c.onGround && feet(c) === 240 && (c.x < 365 || c.x > 500)) offNodeGrounded++;
+    }
+    t.ok(`step-off: it spends frames grounded but off-span, and keeps going (${offNodeGrounded})`, offNodeGrounded > 0);
+    t.ok("step-off: ending up below, not back on the ledge", feet(c) === 365);
+  }
+  {
+    // The guard that keeps the above from becoming a NEW freeze, and the reason
+    // it is not obvious: a span can end before its PLATFORM does. `buildNodes`
+    // cuts a span where headroom runs out, so an agent told to walk a body width
+    // past the span's end can arrive there and still be standing on solid floor.
+    // A step-off that presses on regardless leans against nothing forever.
+    // (The freeze hunter caught this on generated seed 40. Reasoning did not.)
+    const sc = scene(
+      [
+        { x: 0, y: 700, w: 1400, h: 40 },
+        { x: 300, y: 400, w: 400, h: 20 }, // the ledge: platform runs 300–700
+        // A low roof over the ledge's right end. 27px of headroom: under the
+        // 30px `buildNodes` demands, so the span is cut to [300,570] — but over
+        // the 26px body, so the floor there is still walkable. That gap is the
+        // whole point; a roof sitting flush would be a wall and prove nothing.
+        { x: 600, y: 353, w: 300, h: 20 },
+        { x: 650, y: 520, w: 300, h: 20 }, // below and right: the drop destination
+      ],
+      [soldierAt(800, 520 - 46)],
+    );
+    const c = chaser(400, 400 - 26);
+    c.onGround = true;
+    sim(c, sc, 8);
+    // The step-off aims at 600 — past the node's end at 570, but still on the
+    // platform, which runs to 700. Reaching it and stopping is the freeze.
+    t.ok(`cut span: it does not stall at the node's end (x ${c.x.toFixed(0)}, feet ${feet(c)})`, feet(c) !== 400);
+    t.ok(`cut span: it gets down to the target's ledge`, feet(c) === 520);
+  }
 
   // ---- profiles: the soldier-locomotor branch -------------------------------
   {
