@@ -94,7 +94,8 @@ correction either way.
 
 | Owns | Must not touch |
 |---|---|
-| Its own tool module and its registration | `src/editor/tools/behavior-lab.js`. **v1 is deleted in B1, not kept beside it** — Bo's call, and the reason is that v2 is deliberately smaller. Nothing carries over: not the scoreboard, not step-decision, not the two-team view, not its CSS |
+| Its own tool module and its registration | `src/editor/tools/behavior-lab.js`. **v1 is deleted in B1, not kept beside it** — Bo's call, and the reason is that v2 is deliberately smaller. Nothing carries over: not the scoreboard, not step-decision, not the two-team view, not its CSS, not the four `lab*` config knobs |
+| Removing v1's four `lab*` knobs from the config `SCHEMA` and from the three runtime files that read them | Everything else those files do. The edit is a multiplier deleted per site, restoring the line to what it said before Slice 1 — not a rewrite of the decision timer, the sense cadence, or aim |
 | Where a destination comes from — a click, resolved to a surface | How a destination becomes movement. That is the shipped follower, and substituting anything else would make this a simulator of navigation rather than a window onto it |
 | Stepping its one Soldier and mirroring its position onto the agent | The locomotor and the router themselves. The Lab supplies the loop `src/mission/ai.js` supplies for companions; it does not supply a second way to move |
 | Drawing the graph and the held route | The graph's contents and the router's decisions. The Lab is read-only against both |
@@ -114,6 +115,8 @@ Tuning table the *actual* two knobs rather than two knobs that look relevant.
 |---|---|
 | `test/behavior-lab.test.mjs` | **Deleted with v1 in B1 and written again from nothing.** It asserted v1's scoreboard and two-team arena, none of which v2 has, so keeping it would be keeping v1. The path is reused so `tech/agent-navigation.md`'s citation stays true; the contents are not |
 | `test/tools.test.mjs` | Every other editor tool still mounts. This is the suite that catches shared editor plumbing moving — the job v1's test used to do incidentally |
+| `test/reposition.test.mjs` | Ranged repositioning, R1+R2. **One assertion in it is expected to go:** the god-eye block, which pins that `labGodEye` suppresses repositioning. It is deleted with the knob, and `tech/ranged-repositioning.md`'s note about it with them. Nothing else in that suite may move — repositioning does not otherwise read a `lab*` knob |
+| `test/enemyspec-brain.test.mjs`, `test/locomotion-characterization.test.mjs` | The decision cadence and whole-trajectory fixtures. Removing a `× 1` multiplier must be arithmetically invisible; a diff in either means a site was changed rather than simplified |
 | `test/navigation.test.mjs` | The follower the tool exists to watch — profiles, the graph cache, takeoffs, the partial-path fallback and the attempt cap. **Note what it does not cover:** every route-following case there drives a *legged* body. Only `profileFor`'s numbers are asserted for a soldier body, so the Lab is the first end-to-end consumer of router + `SOLDIER`, and is as likely to find bugs there as to display them |
 | `test/nav.test.mjs` | The graph the overlay draws, including the reject boundaries a dragged platform will start hitting |
 | `test/levelgen-golden.test.mjs` | Generated levels are unchanged. Dragging edits a loaded scene and must never reach generation |
@@ -169,16 +172,25 @@ is a deletion, not a migration: no scoreboard, no step-decision, no two-team
 arena, no reuse of its CSS block in `src/editor/editor.css`. Anyone reading this
 later and reaching for a v1 feature should treat the absence as deliberate.
 
-**What survives v1, and why it is not a carry-over.** The four `lab*` knobs in the
-config `SCHEMA` — `labDecisionScale`, `labPerceptionScale`, `labAimErrorScale`,
-`labGodEye` — are read by `src/mission/enemyspec/brain.js` and
-`src/mission/enemyspec/perception.js`, not by the tool. They are runtime levers on
-the shipped game with their own Settings controls, and they are no-ops at their
-defaults. `labGodEye` in particular is now load-bearing elsewhere:
-`tech/ranged-repositioning.md` records that it suppresses repositioning, and
-`test/reposition.test.mjs` pins that. **v2 uses none of the four** — with one
-agent and no hostiles, aim error and god eye have nothing to act on — but they
-stay because deleting them would change the game, not the tool.
+**The four `lab*` knobs go too.** `labDecisionScale`, `labPerceptionScale`,
+`labAimErrorScale` and `labGodEye` look like runtime levers rather than tool UI —
+they live in the config `SCHEMA` and are read by `src/mission/enemyspec/brain.js`,
+`src/mission/enemyspec/perception.js` and `src/mission/enemyspec/runtime.js`, not
+by the tool. That is a distinction without a difference: they were built as part
+of Behavior Lab Slice 1 to serve v1's investigation, and being implemented as
+runtime hooks instead of buttons does not make them something else. v2 uses none
+of them — one agent, no hostiles, and an agent on `moveTo` rather than a utility
+brain, so aim error, god eye and decision scale all act on nothing.
+
+`labGodEye` is the only one that looks load-bearing and is not.
+`tech/ranged-repositioning.md` records that god eye suppresses repositioning and
+`test/reposition.test.mjs` pins it — but that note and that assertion exist only
+because the knob does. Both are removed with it.
+
+What is left behind is a plain constant where each multiplier was: `brain.js`
+uses `state.decisionInterval` directly, `perception.js` uses `SENSE_INTERVAL`
+directly, `runtime.js` uses its own spread values. That is what those lines said
+before Slice 1.
 
 `archive/behavior-lab-v1.md` is the superseded spec for v1 and records what was
 deferred out of it: metrics, a scripted ghost player, record/replay + A/B, and
