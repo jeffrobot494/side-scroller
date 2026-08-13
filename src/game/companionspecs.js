@@ -34,26 +34,36 @@ const DEFAULT_COMPANION = {
     start: "escort",
     states: {
       // Follow the leader (sense.anchor* = the controlled soldier), holding a
-      // loose ~90px standoff so we don't body-block. Engage when an enemy is in
-      // range AND roughly level (matches updateCompanion's 520px / 70px window).
+      // loose ~90px standoff so we don't body-block. Engage on RANGE alone. The
+      // old ±40px band (sense.playerAbove/Below) was inherited from
+      // updateCompanion, which could only shoot horizontally; a companion that
+      // aims in 2D has no reason to ignore the alien on the ledge.
+      //
+      // Not gated on sense.los on purpose: engaging is what puts the agent in
+      // keepDistance, and keepDistance is what lets it reposition to FIND a
+      // sight line (tech/ranged-repositioning.md). Requiring the sight line to
+      // engage would mean cover permanently pins a companion in escort.
       escort: {
         enter: [{ setMotion: { type: "static" } }],
         tracks: [{ id: "follow", loop: true, steps: [
           { moveTo: { target: "anchor", offset: [-90, 0], speed: 320, timeout: 0.6 } },
           { wait: 0.12 },
         ] }],
-        transitions: [{ when: "sense.dist < 520 && !sense.playerAbove && !sense.playerBelow", to: "combat" }],
+        transitions: [{ when: "sense.dist < 520", to: "combat" }],
       },
       // Hold a firing standoff from the nearest enemy (keepDistance) and shoot on
-      // a loop; the weapon's own fire rate throttles it. Break off when the enemy
-      // is lost (too far, or no longer level) and re-form on the leader.
+      // a loop; the weapon's own fire rate throttles it. Only shoot at something
+      // we can SEE — the shot now follows the aim vector, so a companion under a
+      // ledge would otherwise empty a magazine into its underside. Break off on
+      // distance alone: an enemy that is close but unseeable is a repositioning
+      // problem, not a reason to go re-form on the leader.
       combat: {
         enter: [{ setMotion: { type: "keepDistance", min: 220, max: 340, speed: 320 } }],
         tracks: [{ id: "fight", loop: true, steps: [
-          { fire: { emitter: "weapon" } },
+          { if: { when: "sense.los", then: [{ fire: { emitter: "weapon" } }] } },
           { wait: 0.18 },
         ] }],
-        transitions: [{ when: "sense.dist > 640 || sense.playerAbove || sense.playerBelow", to: "escort" }],
+        transitions: [{ when: "sense.dist > 640", to: "escort" }],
       },
     },
   },

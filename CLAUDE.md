@@ -130,7 +130,13 @@ section + the tests are the source of truth for what currently exists):
   editor's Controls tool); `MissionInput` also polls a gamepad (fixed standard-
   mapping defaults) and the mouse. Manual aim (`config.aimMode`: mouse/gamepad/
   auto/keyboard) sets a soldier's `aimVec`; `keyboard` = the legacy up/forward
-  scheme. Note: the drawn gun still points by facing, not the aim vector.
+  scheme. The drawn gun and the muzzle flash follow `aimVec` when it is set
+  (`_drawGun`/`_gunTip`), falling back to facing when it isn't. **Companions aim
+  in 2D too:** `updateCompanionSpec` writes `aimVec` at the nearest hostile every
+  frame and the brain's `fire` goes down `fireDir()`, the same call the player
+  uses. Before Aug 2026 they engaged only within a ±40px vertical band and shot
+  horizontally — `test/companion-aim.test.mjs` is the guard. `facing` has one
+  writer, the locomotor; aim never touches it.
 - **Crouch:** hold S/↓ to kneel (lower hitbox to dodge fire + let allies shoot
   over you); enemies aim at standing height so crouch ducks under.
 - **Enemy creation system (EnemySpec):** a full entity-composition enemy format

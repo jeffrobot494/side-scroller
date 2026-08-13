@@ -12,6 +12,7 @@ import { Projectile, startReload } from "./entities.js";
 import { config } from "../game/config.js";
 import { weaponSound } from "../audio/cues.js";
 import { instantiate, updateSpecEnemy } from "./enemyspec/runtime.js";
+import { nearestHostile } from "./enemyspec/perception.js";
 import { DEFAULT_COMPANION_SPEC } from "../game/companionspecs.js";
 
 // Map a 1..10 Aim stat to a 0..1 accuracy (10 = perfectly tight, 1 = loosest).
@@ -171,10 +172,12 @@ function companionAgent(soldier) {
   if (soldier.agent) return soldier.agent;
   const a = instantiate(DEFAULT_COMPANION_SPEC, soldier.x, soldier.y, "player");
   a.soldier = soldier;
-  // brain `fire` → the Soldier's EQUIPPED weapon along its facing (updateCompanion
-  // parity), through the shared fire() path — not the emitter pipeline.
+  // brain `fire` → the Soldier's EQUIPPED weapon, down the SAME barrel the
+  // renderer draws: fireDir() reads the aimVec set in updateCompanionSpec below,
+  // exactly as it does for the player. Through the shared fire() path, not the
+  // emitter pipeline.
   a.fireWeapon = (_args, scene) => {
-    fire(scene, soldier, { x: soldier.facing, y: 0 }, "player", 0, aimAccuracy(soldier.data.stats.aim));
+    fire(scene, soldier, soldier.fireDir(), "player", 0, aimAccuracy(soldier.data.stats.aim));
   };
   soldier.agent = a;
   return a;
@@ -189,6 +192,25 @@ export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
   a.x = soldier.x; a.y = soldier.y; a.w = soldier.w; a.h = soldier.h;
   a.vx = soldier.vx; a.vy = soldier.vy; a.onGround = soldier.onGround; a.facing = soldier.facing;
   a.anchor = leader ? { x: leader.x + leader.w / 2, y: leader.y + leader.h / 2 } : null;
+  aimAt(soldier, nearestHostile(a, scene));
   // perception + brain + soldier locomotor (→ soldier.applyMovement / fire())
   updateSpecEnemy(a, dt, scene, ctx);
+}
+
+// Point a companion's gun at its target, in 2D. Set EVERY frame, not on
+// perception's 0.2s cadence — a barrel that snapped five times a second would
+// read as broken — and from the same muzzle origin fire() launches from, so the
+// drawn barrel and the round agree. Cleared when there is nothing to shoot, so
+// the sprite falls back to the forward pose.
+//
+// `facing` is deliberately NOT written here. The locomotor is its single writer
+// (locomotion.js — move direction, else toward the target), and sense.groundAhead
+// probes off it. Aim is a separate channel: the barrel reads aimVec, so a
+// companion can shoot straight up without the body claiming to face upward.
+function aimAt(soldier, foe) {
+  if (!foe || !foe.alive) { soldier.aimVec = null; return; }
+  const dx = foe.x + foe.w / 2 - (soldier.x + soldier.w / 2);
+  const dy = foe.y + foe.h / 2 - (soldier.y + soldier.h * 0.42);
+  const len = Math.hypot(dx, dy);
+  soldier.aimVec = len < 0.001 ? null : { x: dx / len, y: dy / len };
 }

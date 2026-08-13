@@ -93,6 +93,17 @@ but the exit condition was written when a companion could not change its own
 elevation, and it will bite the moment ally behaviour gets more ambitious.
 **Bo's call; not changed here.**
 
+**Resolved, Aug 2026 — the collision is gone.** The vertical band was one half of
+a separate bug (a companion could not shoot anything more than 40px above or
+below itself, because its shot direction was hardcoded horizontal). Fixing that
+took `sense.playerAbove/Below` out of both companion transitions: engagement is
+now range alone (`sense.dist < 520` / `> 640`) and the *trigger* carries the
+sight-line test instead. Repositioning and the companion brain no longer fight —
+a companion that climbs cover stays in combat and shoots from up there. Guarded
+by `test/companion-aim.test.mjs`, whose blocked-sight case asserts the split
+directly: it must still enter `combat` while sightless, because entering combat
+is what puts it in `keepDistance`, which is what calls this feature at all.
+
 **Commitment is part of R1, not deferred.** The follower resets its give-up
 accounting whenever the destination moves more than `navArriveRadius`, so a
 destination recomputed every sense tick would rebuild the route continuously and
