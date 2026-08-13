@@ -105,8 +105,14 @@ export function hostilesFor(root, scene) {
 // The nearest LIVING hostile to the agent's center — the primary target for
 // perception, movement, and aim. Replaces the old "first living soldier", which
 // made an entire wave of enemies fixate on soldiers[0] regardless of who was
-// actually closest. Degrades to the first entry (possibly dead) when nothing is
-// alive, matching the old null-tolerant callers.
+// actually closest.
+//
+// NULL when nothing in the list is alive, which is the honest answer and what
+// every caller here already handles. It used to degrade to `list[0]` — but a
+// mission never empties scene.specRoots (a dead root stays for the kill/loot
+// pass), so a cleared level handed companions a CORPSE as their target: they
+// held keepDistance off the death spot and kept firing forever, never dropping
+// back to escort. test/companion-idle.test.mjs is the guard.
 export function nearestHostile(root, scene) {
   const list = hostilesFor(root, scene);
   const ex = root.x + root.w / 2;
@@ -118,7 +124,7 @@ export function nearestHostile(root, scene) {
     const d = Math.hypot(e.x + e.w / 2 - ex, e.y + e.h / 2 - ey);
     if (d < bestD) { bestD = d; best = e; }
   }
-  return best || list[0] || null;
+  return best;
 }
 
 // Is there floor under a probe point just past my leading edge?

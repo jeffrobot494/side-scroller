@@ -136,7 +136,11 @@ section + the tests are the source of truth for what currently exists):
   frame and the brain's `fire` goes down `fireDir()`, the same call the player
   uses. Before Aug 2026 they engaged only within a ±40px vertical band and shot
   horizontally — `test/companion-aim.test.mjs` is the guard. `facing` has one
-  writer, the locomotor; aim never touches it.
+  writer, the locomotor; aim never touches it. **A dead root stays in
+  `scene.specRoots`** (the kill-credit/loot pass needs it), so anything choosing
+  a target must skip it: `nearestHostile` returns null when nothing is alive
+  rather than degrading to `list[0]`, which used to leave companions holding the
+  last corpse's death spot and firing at it forever.
 - **Crouch:** hold S/↓ to kneel (lower hitbox to dodge fire + let allies shoot
   over you); enemies aim at standing height so crouch ducks under.
 - **Enemy creation system (EnemySpec):** a full entity-composition enemy format
@@ -202,6 +206,14 @@ Static site — serve the folder and open a page. No bundler, no transpile.
 - **`test/harness.mjs`** provides the shared stubs — `installDom()`, `makeEl()`,
   `ctx2d()`, `stubLocalStorage()` — so tests never re-derive DOM/canvas/storage
   mocks. The runner gives each suite a fresh `localStorage` and installs the DOM.
+- **A regression case goes in the suite that already covers the subsystem** — a
+  new `test/*.test.mjs` is for a subsystem nothing tests yet, never for a bug in
+  one that does. A new file means re-deriving the scene/roster/weapon/`play()`
+  scaffolding the existing suite has, so a two-line fix ships a hundred lines of
+  copy, and the new case lands nowhere near the assertion it corrects. Read the
+  neighbouring suite first: the case that MISSED the bug is usually there, and
+  the new case belongs next to it saying why it missed. **Keep the ceremony in
+  proportion to the fix** — comment the non-obvious line, not every line.
 - **Regression bar before committing:** `node test/run.mjs` green, plus a
   serve-check that new files return 200 (`python3 -m http.server`). There is no
   browser here — verify logic headlessly and tell the user to eyeball visuals;

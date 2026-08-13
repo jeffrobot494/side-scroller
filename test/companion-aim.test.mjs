@@ -9,9 +9,13 @@
 // companion ENGAGES a target it cannot reach horizontally, and the round it
 // fires actually travels toward it. Spec enemies (patternAngles) and the player
 // (aimVec) already aimed in 2D; the companion bridge was the last flat shooter.
+//
+// The suite now also guards what a companion does when the level is CLEARED —
+// see the "cleared" cases at the bottom.
 import { instantiate } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
+import { nearestHostile } from "../src/mission/enemyspec/perception.js";
 import { Soldier, STAND_H, stepActor } from "../src/mission/entities.js";
 
 const STEP = 1 / 60;
@@ -169,6 +173,51 @@ export default async function run(t) {
     sc.specRoots.length = 0;
     updateCompanionSpec(comp, STEP, sc, leader, noopCtx);
     t.eq("aimVec: cleared with no hostile, so the sprite returns to the forward pose", comp.aimVec, null);
+  }
+
+  // ---- the level is CLEARED (bug fix, Aug 2026) -----------------------------
+  // Emptying specRoots, as the case above does, is the ONE thing a real mission
+  // never does: a dead root stays in scene.specRoots for the kill-credit/loot
+  // pass (mission.js). nearestHostile used to degrade to `list[0]` when nothing
+  // in the list was alive, so the last enemy's corpse stayed a valid target —
+  // sense.dist never crossed the 640 break-off (so the brain never left combat
+  // and never re-formed on the leader), keepDistance held the standoff band
+  // around the death spot, and sense.los kept the fight track pulling the
+  // trigger. These kill the root IN PLACE instead.
+  {
+    const sc = scene({ specRoots: [foeAt(500, 300)] });
+    sc.specRoots[0].alive = false;
+    const seen = nearestHostile({ x: 300, y: 300, w: 20, h: 24, team: "player" }, sc);
+    t.ok("cleared: a list of corpses is no target at all", seen === null);
+  }
+  {
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const foe = foeAt(650, 500 - 40);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foe] });
+    play(comp, sc, leader, 240);
+    t.eq("cleared: engaged while the enemy lived", comp.agent.brainState.current, "combat");
+
+    foe.alive = false; // the corpse STAYS in specRoots, exactly as in a mission
+    sc.projectiles.length = 0;
+    const after = play(comp, sc, leader, 240);
+
+    t.eq(`cleared: fires nothing at the corpse (${after.length} shots)`, after.length, 0);
+    t.eq("cleared: aim drops to the forward pose", comp.aimVec, null);
+    t.eq("cleared: and the brain goes back to escorting", comp.agent.brainState.current, "escort");
+    const gap = Math.abs((comp.x + comp.w / 2) - (leader.x + leader.w / 2));
+    t.ok(`cleared: so it re-forms on the leader instead of holding the death spot (gap ${Math.round(gap)}px)`, gap < 200);
+  }
+  {
+    // the fix must not read "one dead root in the list" as "nothing to fight"
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const dead = foeAt(400, 500 - 40);
+    dead.alive = false;
+    const sc = scene({ soldiers: [leader, comp], specRoots: [dead, foeAt(650, 500 - 40)] });
+    const shots = play(comp, sc, leader, 240);
+    t.ok(`survivor: still engages the living enemy past the corpse (${shots.length} shots)`, shots.length > 3);
+    t.ok("survivor: and the barrel is on the live one", comp.aimVec !== null);
   }
 
   // ---- the common case did not regress --------------------------------------

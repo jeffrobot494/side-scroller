@@ -177,6 +177,12 @@ function companionAgent(soldier) {
   // exactly as it does for the player. Through the shared fire() path, not the
   // emitter pipeline.
   a.fireWeapon = (_args, scene) => {
+    // No aim vector = nothing to shoot at (aimAt cleared it). The brain decides
+    // on perception's 0.2s cadence but the barrel is aimed every frame, so
+    // between the last enemy dying and the next sense tick the fight track can
+    // still pull the trigger — and that round would leave down `facing`, into
+    // empty air. The barrel is the authority on whether there is a shot.
+    if (!soldier.aimVec) return;
     fire(scene, soldier, soldier.fireDir(), "player", 0, aimAccuracy(soldier.data.stats.aim));
   };
   soldier.agent = a;
