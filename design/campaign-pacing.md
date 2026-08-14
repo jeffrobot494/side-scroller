@@ -94,6 +94,35 @@ the player must survive long enough for High work to appear, then clear two of
 it. The finale is no longer reachable by clearing the easiest thing on the board
 repeatedly.
 
+## What must be tunable
+
+Every number this design introduces is adjustable from the settings editor
+without a code change, and persists like the rest of the config. Nothing below is
+a magic constant. Names are indicative — the spec settles the exact keys.
+
+| Knob | Default | Range | Governs |
+|---|---|---|---|
+| `leadArrivalRate` | 1.25 | 0 – 3 | Expected new leads per day. Must permit values above 1; a plain probability cannot reach the board target |
+| `leadLifeMin` | 1 | 1 – 10 | Shortest lead lifespan, in days |
+| `leadLifeMax` | 3 | 1 – 10 | Longest lead lifespan, in days |
+| `leadCount` | 3 | 1 – 5 | Ceiling on the board. Existing knob; its meaning changes from a target to a cap |
+| `seedLeads` | 1 | 0 – 5 | Leads present on day 1 |
+| `bossHighWins` | 2 | 1 – 6 | High-threat wins required before the finale appears |
+| `dayPerDeploy` | on | on / off | Whether deploying advances the day. A switch on decision 1 itself, kept so the change can be A/B'd in play rather than reverted |
+
+Removed: the flat total-win count that previously gated the finale. It is
+replaced by `bossHighWins`, not kept alongside it.
+
+### Already tunable, and worth retuning
+
+These knobs are not introduced here, but this design changes what they do:
+
+| Knob | Default | Why it moves |
+|---|---|---|
+| `doomPerDay` | 6 | Days now arrive from deploys as well as idling, so the effective loss rate roughly doubles |
+| `healPerDay` | 1 | Becomes recovery per mission rather than per idle day |
+| `threatScaleCap` | 2.2 | Previously never reached; with days ticking per deploy it starts to bind |
+
 ## Interactions worth watching in play
 
 Consequences of the decisions together. Named so they are recognised in playtest
