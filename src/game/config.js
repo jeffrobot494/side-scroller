@@ -438,6 +438,16 @@ export const SCHEMA = [
         help: "Ceiling on how far generated enemy budgets scale up as the campaign drags on.",
       },
       {
+        key: "genSpawnClear",
+        label: "Spawn clearance",
+        type: "range",
+        default: 960,
+        min: 260,
+        max: 2000,
+        step: 20,
+        help: "Px of level in front of the player's spawn where no enemy may stand — one screen is 960. Enemy count is unchanged; the budget spends those threats further in.",
+      },
+      {
         key: "genPlatformDensity",
         label: "Terrain density",
         type: "range",

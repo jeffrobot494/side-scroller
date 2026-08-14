@@ -35,7 +35,7 @@ const GROUND_TOP = 500; // top surface of the ground slab
 const GROUND_H = 40;
 const PERCH_H = 20;
 const SPAWN_X = 120;
-const SPAWN_SAFE = 380; // no enemies within this x of the spawn
+const TERRAIN_START = 380; // first x a structure may stand on (unchanged)
 const EXIT_W = 60;
 const EXIT_H = 120;
 const MIN_ENEMY_GAP = 130; // min horizontal spacing between enemies
@@ -196,7 +196,7 @@ const MIN_PERCH_RISE = 24; // shortest perch worth placing; below this a low-jum
 function layTerrain(rng, env, width, exitX) {
   const groups = []; // one array of platforms per structure (cull unit)
   let dropped = 0;
-  const start = SPAWN_SAFE;
+  const start = TERRAIN_START;
   const end = exitX - 160;
   const span = end - start;
   const hop = Math.min(env.maxRise - 20, 122); // single jump up, with apex margin
@@ -373,13 +373,27 @@ function auditGeometry(ground, groups, env, exit) {
   return { traversable, unreachable: offenders.length, offenders };
 }
 
+// The player's beat before first contact: no enemy stands within this distance
+// of the spawn. Clamped so a large clearance on a short level cannot swallow the
+// whole anchor span and leave the level empty.
+function spawnSafeX(exitX) {
+  const want = SPAWN_X + Math.max(0, config.genSpawnClear ?? 960);
+  return Math.min(want, Math.max(TERRAIN_START, exitX - 40 - 600));
+}
+
 // Candidate stand points: the top of each perch, plus a spaced set of ground
 // points across the playable span (outside the spawn safe zone, up to the exit).
+// Perches are held out of the safe zone too — terrain still starts at
+// TERRAIN_START, so a perch can stand inside it, and until Aug 2026 only the
+// ground loop checked. A shooter perched over the spawn was the result.
 function buildAnchors(rng, perches, width, exitX) {
   const anchors = [];
-  for (const p of perches) anchors.push({ x: p.x + p.w / 2, surfaceY: p.y, kind: "perch" });
+  const start = spawnSafeX(exitX);
+  for (const p of perches) {
+    const x = p.x + p.w / 2;
+    if (x >= start) anchors.push({ x, surfaceY: p.y, kind: "perch" });
+  }
 
-  const start = SPAWN_SAFE;
   const end = exitX - 40;
   for (let x = start; x <= end; x += int(rng, 200, 300)) {
     anchors.push({ x: snap(x, 10), surfaceY: GROUND_TOP, kind: "ground" });

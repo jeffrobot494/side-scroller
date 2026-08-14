@@ -5,6 +5,7 @@ import * as ec from "../src/game/enemycost.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { ENEMIES } from "../src/game/content.js";
 import { missionSpecById, missionRoster } from "../src/game/enemyspecs.js";
+import { config } from "../src/game/config.js";
 
 export default async function run(t) {
   // ---- rng ----
@@ -51,7 +52,23 @@ export default async function run(t) {
   t.ok("gen: spawn left of exit", L.playerSpawn.x < L.exit.x);
   t.ok("gen: at least one enemy", L.enemies.length >= 1);
   t.ok("gen: every enemy type resolves to a built-in spec", L.enemies.every((e) => missionSpecById[e.type]));
-  t.ok("gen: no enemy in spawn safe zone", L.enemies.every((e) => e.x >= 380));
+  // The safe zone is a distance from the SPAWN, not an absolute x (it used to be
+  // x >= 380 against a spawn at 120, so it bought a quarter-screen of clearance),
+  // and it covers perched enemies as well as ground ones — terrain still starts
+  // at 380, so a ledge stands inside the zone and only the ground loop checked.
+  const safe = L.playerSpawn.x + config.genSpawnClear;
+  t.ok("gen: no enemy in the spawn safe zone", L.enemies.every((e) => e.x >= safe));
+  {
+    let breaches = 0, ledgesInZone = 0;
+    for (let seed = 0; seed < 60; seed++) {
+      const lv = generateLevel({ seed, difficulty: "high", scale: 2.2, roster: missionRoster({}) }).level;
+      const zone = lv.playerSpawn.x + config.genSpawnClear;
+      breaches += lv.enemies.filter((e) => e.x < zone).length;
+      ledgesInZone += lv.platforms.slice(1).filter((p) => p.x + p.w / 2 < zone).length;
+    }
+    t.eq("gen: ...on 60 high-threat levels, where density is worst", breaches, 0);
+    t.ok("gen: ...and ledges inside the zone exist to be skipped", ledgesInZone > 0);
+  }
   t.ok("gen: report budget respected", g1.report.legal && g1.report.spent <= g1.report.budget);
   t.ok("gen: report traversable", g1.report.traversable === true);
 
