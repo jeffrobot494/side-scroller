@@ -571,6 +571,7 @@ export class Hub {
           const parts = [];
           if (res.finished.length) parts.push(`Finished: ${res.finished.join(", ")}.`);
           if (res.expired.length) parts.push(`Lead lost: ${res.expired.join(", ")}.`);
+          if (res.arrived.length) parts.push(`Ops has ${res.arrived.length} new lead(s).`);
           this.setFlash(
             res.expired.length ? "bad" : "good",
             parts.length ? `A new day. ${parts.join(" ")}` : "A day passes. The clock ticks on."

@@ -53,7 +53,7 @@ export function createState() {
 
     log: [], // short human-readable campaign log (newest first)
   };
-  refillLeads(state);
+  seedBoard(state);
   return state;
 }
 
@@ -135,11 +135,36 @@ function placeBossIfEarned(state) {
   addUniqueLead(state, { boss: true });
 }
 
-// Top up the board to config.leadCount.
-export function refillLeads(state) {
-  if (state.outcome) return;
+// The ceiling counts ordinary leads only. The boss is placed over the cap by
+// definition, so letting it hold a slot would starve the board it arrived on.
+function ordinaryLeads(state) {
+  return state.leads.filter((l) => !l.winsCampaign).length;
+}
+
+// Day 1 opens on config.seedLeads, not a full board.
+function seedBoard(state) {
+  const want = Math.min(Math.max(0, Math.round(config.seedLeads)), config.leadCount);
   let guard = 0;
-  while (state.leads.length < config.leadCount && guard++ < 20) addUniqueLead(state, {});
+  while (ordinaryLeads(state) < want && guard++ < 20) addUniqueLead(state, {});
+}
+
+// Arrivals are the only source of ordinary leads: nothing tops the board up
+// after a mission. A rate is a floor plus one coin flip (approximation 1) — 1.25
+// is one guaranteed lead plus a 25% chance of a second — and never crosses the
+// ceiling. A board below it, or empty, is a legal state.
+function arriveLeads(state) {
+  if (state.outcome) return;
+  const rate = Math.max(0, config.leadArrivalRate);
+  let n = Math.floor(rate);
+  if (Math.random() < rate - n) n += 1;
+  const arrived = [];
+  for (let i = 0; i < n && ordinaryLeads(state) < config.leadCount; i++) {
+    const before = state.leads.length;
+    addUniqueLead(state, {});
+    if (state.leads.length > before) arrived.push(state.leads[state.leads.length - 1]);
+  }
+  for (const l of arrived) note(state, `${l.name} — new lead from Ops.`);
+  return arrived;
 }
 
 // ---- helpers --------------------------------------------------------------
@@ -245,6 +270,10 @@ export function advanceDay(state) {
     for (const l of expired) note(state, `${l.name} — the window closed. Lead dropped.`);
   }
 
+  // ...and new work arrives on the clock, after the rot, so a lead that expired
+  // today frees its slot today. Passing time is how the player fishes for work.
+  const arrived = arriveLeads(state) || [];
+
   // Doom clock: the invasion advances whether or not you acted.
   state.campaignHealth = Math.max(0, state.campaignHealth - config.doomPerDay);
   if (state.campaignHealth <= TUNING.loseAt) {
@@ -252,7 +281,12 @@ export function advanceDay(state) {
     note(state, "The invasion overran the sector. Campaign lost.");
   }
 
-  return { ok: true, finished: finished.map((f) => f.name), expired: expired.map((l) => l.name) };
+  return {
+    ok: true,
+    finished: finished.map((f) => f.name),
+    expired: expired.map((l) => l.name),
+    arrived: arrived.map((l) => l.name),
+  };
 }
 
 // ---- Mission bridge -------------------------------------------------------
@@ -313,7 +347,8 @@ export function applyMissionResult(state, result) {
     if (state.campaignHealth <= TUNING.loseAt) state.outcome = "lost";
   }
 
-  // The lead is spent whether or not the squad survived; refresh the board.
+  // The lead is spent whether or not the squad survived. Nothing refills the
+  // board — the deploy's day below is the only thing that can bring work in.
   state.leads = state.leads.filter((l) => l.id !== result.missionId);
 
   // A deploy costs a day, and it is the SAME day the time control buys — one
@@ -325,7 +360,6 @@ export function applyMissionResult(state, result) {
   if (config.dayPerDeploy) advanceDay(state);
 
   placeBossIfEarned(state);
-  refillLeads(state);
 
   return state;
 }

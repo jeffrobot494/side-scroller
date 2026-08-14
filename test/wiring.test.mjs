@@ -15,7 +15,7 @@ const winResult = (id, extra = {}) => ({ success: true, missionId: id, casualtie
 
 export default async function run(t) {
   const g = st.createState();
-  t.ok("board filled to 3 leads", g.leads.length === 3);
+  t.eq("board opens on seedLeads, not a full board", g.leads.length, config.seedLeads);
   t.ok("leads are mission-shaped + carry a level", g.leads.every((l) => l.id && l.name && l.brief && l.difficulty && l.level && l.report));
   t.ok("lead ids unique", new Set(g.leads.map((l) => l.id)).size === g.leads.length);
   t.ok("no boss lead at start", !g.leads.some((l) => l.winsCampaign));
@@ -29,9 +29,15 @@ export default async function run(t) {
   t.eq("soldier hp = base + stat×per-point (10+5×2)", m.soldiers[0].maxHealth, 20);
 
   const h0 = g.campaignHealth;
+  const board = g.leads.length;
   st.applyMissionResult(g, winResult(lead.id, { loot: [{ name: "X", value: 50 }] }));
   t.ok("cleared lead removed", !g.leads.some((l) => l.id === lead.id));
-  t.ok("board refilled to 3", g.leads.length === 3);
+  // Nothing tops the board up: the only leads that can appear are the ones the
+  // deploy's own day advance rolled, which cannot exceed ceil(leadArrivalRate).
+  t.ok(
+    "no top-up after a mission — only the deploy's day can bring work in",
+    g.leads.length <= board - 1 + Math.ceil(config.leadArrivalRate)
+  );
   t.ok("win recorded in completedMissions", g.completedMissions.includes(lead.id));
   t.ok("threat reward restored health", g.campaignHealth >= h0);
   t.ok("loot banked to stores", g.stores.some((i) => i.name === "X"));
@@ -39,10 +45,12 @@ export default async function run(t) {
   // ---- C4: the finale is gated on High wins, not a flat count ---------------
   // Leads are fabricated here: what the gate reads is the ADVERTISED difficulty,
   // and the generator's difficulty roll is not what is under test.
+  // Fabricated rather than picked off the board: after C5 there is no top-up, so
+  // searching the board for a fresh lead each pass is not something a test can
+  // rely on finding.
   for (let i = 0; i < 3; i++) {
-    const l = g.leads.find((x) => !x.winsCampaign);
-    l.difficulty = "Medium";
-    st.applyMissionResult(g, winResult(l.id));
+    g.leads.push(fakeLead(`m${i}`, "Medium"));
+    st.applyMissionResult(g, winResult(`m${i}`));
   }
   t.ok("4 wins recorded", g.completedMissions.length === 4);
   t.eq("ordinary wins count nothing toward the gate", g.highWins, 0);
@@ -79,11 +87,17 @@ export default async function run(t) {
   const target = g2.leads[0];
   const before = g2.campaignHealth;
   st.applyMissionResult(g2, { success: false, missionId: target.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] });
-  t.ok("failed lead consumed + refilled", !g2.leads.some((l) => l.id === target.id) && g2.leads.length === 3);
+  t.ok("failed lead consumed", !g2.leads.some((l) => l.id === target.id));
   t.ok("failure costs campaign health", g2.campaignHealth < before);
 
   // ---- C2: leads expire -----------------------------------------------------
-  {
+  // Arrivals are pinned off throughout: a day advance both rots and delivers
+  // (C5), and what is under test here is only the rot.
+  // A full board is seeded so a mixed set of lifespans is actually on it.
+  const arrivals = config.leadArrivalRate, seed = config.seedLeads;
+  config.leadArrivalRate = 0;
+  config.seedLeads = config.leadCount;
+  try {
     const g3 = st.createState();
     t.ok(
       "every lead carries a lifespan inside the window",
@@ -113,6 +127,9 @@ export default async function run(t) {
       config.leadLifeMin = min;
       config.leadLifeMax = max;
     }
+  } finally {
+    config.leadArrivalRate = arrivals;
+    config.seedLeads = seed;
   }
 
   // ---- C3: deploying costs a day --------------------------------------------
@@ -149,5 +166,51 @@ export default async function run(t) {
     st.applyMissionResult(g5, { success: false, missionId: doomed.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] });
     t.ok("a fatal failure ends the campaign", g5.outcome === "lost");
     t.eq("...and is not charged its day", g5.day, lastDay);
+  }
+
+  // ---- C5: arrivals replace the top-up --------------------------------------
+  {
+    // Rate 0: the board can only ever thin. An empty board is a legal state, not
+    // an error — the design's "thin is legal", and its one exit is passing days.
+    const rate = config.leadArrivalRate;
+    config.leadArrivalRate = 0;
+    try {
+      const g6 = st.createState();
+      for (let i = 0; i < 5; i++) st.advanceDay(g6);
+      t.eq("no arrivals with the rate at 0 → the board empties", g6.leads.length, 0);
+      t.ok("...and an empty board is not an error", g6.outcome !== "lost" || g6.campaignHealth === 0);
+
+      config.leadArrivalRate = 3; // whole number: three guaranteed, no coin flip
+      const g7 = st.createState();
+      const res = st.advanceDay(g7);
+      t.ok("a day advance is the only source of leads", res.arrived.length > 0);
+      t.ok(
+        "arrivals never cross the ceiling",
+        g7.leads.length <= config.leadCount && g7.leads.length === config.leadCount
+      );
+      const full = g7.leads.length;
+      st.advanceDay(g7);
+      t.ok("...and a full board takes none", g7.leads.filter((l) => !l.winsCampaign).length <= full);
+    } finally {
+      config.leadArrivalRate = rate;
+    }
+
+    // Approximation 1: a rate never yields more than ceil(rate) in one day.
+    // The doom clock is off so 40 days can pass without ending the campaign.
+    const doom = config.doomPerDay;
+    config.leadArrivalRate = 1.25;
+    config.doomPerDay = 0;
+    try {
+      const g8 = st.createState();
+      let most = 0;
+      for (let i = 0; i < 40; i++) {
+        g8.leads = []; // clear the ceiling out of the way each pass
+        most = Math.max(most, st.advanceDay(g8).arrived.length);
+      }
+      t.ok("a fractional rate is a floor plus one coin flip (never > ceil)", most === 2);
+    } finally {
+      config.leadArrivalRate = rate;
+      config.doomPerDay = doom;
+    }
   }
 }
