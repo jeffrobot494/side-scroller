@@ -301,6 +301,15 @@ export function applyMissionResult(state, result) {
 
   // The lead is spent whether or not the squad survived; refresh the board.
   state.leads = state.leads.filter((l) => l.id !== result.missionId);
+
+  // A deploy costs a day, and it is the SAME day the time control buys — one
+  // answer to "what does a day do". It is charged after the mission's own
+  // reward (so a win that outruns the doom tick counts first) and before the
+  // refill (so leads arriving after it keep their full lifespan).
+  // A campaign-ending mission is not charged: advanceDay refuses once
+  // state.outcome is set, at the exact moment the day can no longer matter.
+  if (config.dayPerDeploy) advanceDay(state);
+
   refillLeads(state);
 
   return state;

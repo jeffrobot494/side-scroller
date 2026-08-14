@@ -84,4 +84,40 @@ export default async function run(t) {
       config.leadLifeMax = max;
     }
   }
+
+  // ---- C3: deploying costs a day --------------------------------------------
+  {
+    const g3 = st.createState();
+    const day = g3.day;
+    const lead = g3.leads.find((l) => !l.winsCampaign);
+    const health = g3.campaignHealth;
+    st.applyMissionResult(g3, winResult(lead.id));
+    t.eq("resolving a mission advances the day", g3.day, day + 1);
+    // Approximation 2: the win's reward is banked before the day it cost.
+    t.ok(
+      "the mission's reward is applied before its day is charged",
+      g3.campaignHealth === Math.min(100, health + lead.threatReward) - config.doomPerDay
+    );
+
+    const prev = config.dayPerDeploy;
+    config.dayPerDeploy = false;
+    try {
+      const g4 = st.createState();
+      const d = g4.day;
+      st.applyMissionResult(g4, winResult(g4.leads[0].id));
+      t.eq("dayPerDeploy off restores the free deploy", g4.day, d);
+    } finally {
+      config.dayPerDeploy = prev;
+    }
+
+    // Approximation 3: advanceDay refuses once the campaign is over, so the
+    // mission that ends it is the one deploy never charged a day.
+    const g5 = st.createState();
+    g5.campaignHealth = 5;
+    const doomed = g5.leads[0];
+    const lastDay = g5.day;
+    st.applyMissionResult(g5, { success: false, missionId: doomed.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] });
+    t.ok("a fatal failure ends the campaign", g5.outcome === "lost");
+    t.eq("...and is not charged its day", g5.day, lastDay);
+  }
 }

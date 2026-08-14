@@ -128,7 +128,7 @@ increments `record.missions` directly and should not gain company.
 | Guard | What it protects |
 |---|---|
 | `test/wiring.test.mjs` | The campaign spine: a cleared lead is consumed, a win is recorded, threat reward restores health, a failure costs health, the boss lead ends the campaign, nothing refills after game over |
-| `test/soldier-health.test.mjs` | **C3's trap.** It resolves a mission with `missionId: "no-such-lead"` and asserts a survivor comes home with 7 wounds. An unconditional day advance heals 1 and makes it 6. Whether the fix is the test or the rule is C3's call to make deliberately — silently gating the day on "a lead was found" would contradict the slice |
+| `test/soldier-health.test.mjs` | **C3's trap.** It resolves a mission with `missionId: "no-such-lead"` and asserts a survivor comes home with 7 wounds. An unconditional day advance heals 1 and makes it 6. Whether the fix is the test or the rule is C3's call to make deliberately — silently gating the day on "a lead was found" would contradict the slice. **As built:** the test moved, not the rule — the day is charged whether or not a lead matched, and the assertion became `7 - config.healPerDay` rather than a literal 6, since approximation 5 expects that knob to be retuned |
 | `test/docs.test.mjs` | This spec's citations. **Not** its completeness: the seven-part gate only fires for design docs carrying `sprint:`, and `design/campaign-pacing.md` has none, so nothing in the bar checks the parts here |
 | `node test/run.mjs` | Green before every slice commit, per the standing bar |
 

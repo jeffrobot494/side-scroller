@@ -312,6 +312,13 @@ export const SCHEMA = [
         help: "Campaign health lost each day. 0 disables the doom clock.",
       },
       {
+        key: "dayPerDeploy",
+        label: "Deploying costs a day",
+        type: "bool",
+        default: true,
+        help: "Resolving a mission advances the day, so expiry, fabrication, healing and doom all tick per deploy. Off restores the old behaviour where only idling costs time.",
+      },
+      {
         key: "healPerDay",
         label: "Heal / day at base",
         type: "range",
