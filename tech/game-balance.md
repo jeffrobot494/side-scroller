@@ -80,14 +80,16 @@ Three properties of this as built:
 - **`extreme` is unreachable from `DIFF_BY_PRESSURE`.** Only `{ boss: true }`
   produces it. `DIFF_LABEL` and the `tag-diff-extreme` style in
   `src/hub/hub.js` exist for a band leads never generate.
-- **`state.day` increments only in `advanceDay()`.** `applyMissionResult()` does
-  not touch it, so deploying is free in clock terms and pressure reduces to
-  `1 + wins × 0.05` for a player who never idles.
-- **The default `bossAfter` is 4.** At 4 wins and no day advances the scale is
-  exactly 1.20, which is still inside the first band — where `high` has weight
-  0. `config.threatScaleCap` (default 2.2) would require `(day-1)×0.06 +
-  wins×0.05 = 1.2`, roughly twenty idle days on top of the wins, so it is not
-  reached in a normal campaign.
+- **`state.day` increments only in `advanceDay()`** — but `applyMissionResult()`
+  now calls it (`config.dayPerDeploy`, default on, from `tech/campaign-pacing.md`
+  C3), so deploying is no longer free in clock terms and pressure rises on both
+  terms even for a player who never idles.
+- **The finale gate is `config.bossHighWins` (default 2) cleared High leads**,
+  not a flat win count — `bossAfter` was deleted in that spec's C4. Since `high`
+  has weight 0 below scale 1.2, the gate cannot even begin until pressure has
+  risen: roughly four deploys' worth of days, or fewer with idling on top.
+  `config.threatScaleCap` (default 2.2) needs `(day-1)×0.06 + wins×0.05 = 1.2`,
+  which a day-per-deploy campaign now approaches rather than never reaching.
 
 ## What the budget buys
 
@@ -143,7 +145,7 @@ Nothing on this side is scaled by, or read by, the difficulty model.
 
 | Event | Campaign health | Where |
 |---|---|---|
-| Day advanced | −6 | `advanceDay()` in `src/game/state.js` |
+| Day advanced | −6 | `advanceDay()` in `src/game/state.js` — reached from the top-bar control AND from every resolved mission (`config.dayPerDeploy`) |
 | Mission success | + the lead's `threatReward` (16–40), capped at 100 | `applyMissionResult()` |
 | Squad wiped | −10, flat, regardless of difficulty | `applyMissionResult()` |
 | Boss lead cleared | Campaign won outright | `applyMissionResult()` |
@@ -158,10 +160,13 @@ Every value below currently exists as a `SCHEMA` default in
 `src/game/config.js`, and no design doc states what it should be or why. Listed
 as fact, not as a request.
 
+`leadCount` left this list: `design/campaign-pacing.md` now states its intent (a
+ceiling arrivals never cross), alongside the knobs that spec introduced —
+`leadArrivalRate`, `leadLifeMin`/`Max`, `seedLeads`, `bossHighWins`,
+`dayPerDeploy`. `bossAfter` was deleted with the flat win gate.
+
 | Key | Default | Governs |
 |---|---|---|
-| `leadCount` | 3 | Leads on the board at once |
-| `bossAfter` | 4 | Wins before the finale can appear |
 | `threatScaleCap` | 2.2 | Ceiling on the pressure multiplier |
 | `genPlatformDensity` | 0.8 | Fraction of terrain slots that get a structure |
 | `genMaxTiers` | 3 | Max chained jumps a structure climbs |
@@ -172,13 +177,12 @@ as fact, not as a request.
 
 ## Known issues
 
-**`doomPerDay` is duplicated, and the War Room prints the wrong copy.** The value
-exists twice: as a config knob in `src/game/config.js` (default 6) and as a field
-on `TUNING` in `src/game/content.js` (also 6). `advanceDay()` in
-`src/game/state.js` reads the config one, so that is the value the campaign
-actually loses each day. The War Room blurb in `src/hub/hub.js` prints the
-`TUNING` one. They agree only because both defaults are 6 — edit the knob in the
-editor and the War Room text states a rate the game is not using.
+**`doomPerDay` is duplicated.** The value exists twice: as a config knob in
+`src/game/config.js` (default 6) and as a field on `TUNING` in
+`src/game/content.js` (also 6). `advanceDay()` in `src/game/state.js` reads the
+config one, so that is the value the campaign actually loses each day. The
+`TUNING` copy is now read by nothing — the War Room blurb in `src/hub/hub.js`
+printed it until `tech/campaign-pacing.md` C1 pointed it at the config knob.
 
 `startMoney`, `startCampaignHealth`, and `loseAt` live only on `TUNING` and have
 no config knob, so they do not have this problem.

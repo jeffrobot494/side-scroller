@@ -6,6 +6,11 @@ import { loadMission } from "../src/mission/entities.js";
 
 const soldier = { id: "s1", name: "Rook", callsign: "RK", stats: { health: 5, aim: 5, speed: 5 } };
 const weapon = { id: "rifle", name: "R", fireMode: "projectile", fireRate: 7, spread: 0, projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 1 }, effects: [{ kind: "damage", amount: 12 }] };
+// A board entry with only the fields campaign resolution reads, so a gate case
+// does not depend on what the generator happened to roll.
+const fakeLead = (id, difficulty) => ({
+  id, name: id, brief: "", difficulty, threatReward: 0, winsCampaign: false, daysLeft: 9,
+});
 const winResult = (id, extra = {}) => ({ success: true, missionId: id, casualties: [], survivors: [], loot: [], killsBySoldier: [], ...extra });
 
 export default async function run(t) {
@@ -31,15 +36,40 @@ export default async function run(t) {
   t.ok("threat reward restored health", g.campaignHealth >= h0);
   t.ok("loot banked to stores", g.stores.some((i) => i.name === "X"));
 
-  // 3 more wins → boss eligible (BOSS_AFTER default 4)
+  // ---- C4: the finale is gated on High wins, not a flat count ---------------
+  // Leads are fabricated here: what the gate reads is the ADVERTISED difficulty,
+  // and the generator's difficulty roll is not what is under test.
   for (let i = 0; i < 3; i++) {
     const l = g.leads.find((x) => !x.winsCampaign);
+    l.difficulty = "Medium";
     st.applyMissionResult(g, winResult(l.id));
   }
   t.ok("4 wins recorded", g.completedMissions.length === 4);
-  const boss = g.leads.find((l) => l.winsCampaign);
-  t.ok("boss lead on the board", !!boss);
-  t.ok("boss has 0 threat reward", boss && boss.threatReward === 0);
+  t.eq("ordinary wins count nothing toward the gate", g.highWins, 0);
+  t.ok("...and never surface the finale", !g.leads.some((l) => l.winsCampaign));
+
+  // A full board must not be able to defer the finale, so the gate bypasses the
+  // ceiling. Pinned to a ceiling of 1 with a lead already occupying it: the boss
+  // has to land on top of a board that is full by every rule the board has.
+  const ceiling = config.leadCount;
+  config.leadCount = 1;
+  let boss;
+  try {
+    g.leads = [
+      fakeLead("h0", "High"),
+      fakeLead("h1", "High"),
+      fakeLead("filler", "Low"),
+    ];
+    for (let i = 0; i < config.bossHighWins; i++) st.applyMissionResult(g, winResult(`h${i}`));
+    t.eq("cleared High leads are counted", g.highWins, config.bossHighWins);
+    boss = g.leads.find((l) => l.winsCampaign);
+    t.ok("boss lead placed the moment the gate is met", !!boss);
+    t.ok("...over a board already at its ceiling", g.leads.length > config.leadCount);
+    t.ok("boss has 0 threat reward", boss && boss.threatReward === 0);
+    t.ok("boss lead does not expire", boss && boss.daysLeft === null);
+  } finally {
+    config.leadCount = ceiling;
+  }
 
   st.applyMissionResult(g, winResult(boss.id));
   t.ok("winning the boss ends the campaign", g.outcome === "won");

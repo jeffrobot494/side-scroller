@@ -48,6 +48,7 @@ export function createState() {
     // carries its own generated `level` (drop-in for loadMission). Filled below.
     leads: [],
     completedMissions: [], // ids of cleared leads (also the win counter)
+    highWins: 0, // cleared leads that advertised High — the finale gate counts these
     outcome: null, // null | "won" | "lost"
 
     log: [], // short human-readable campaign log (newest first)
@@ -123,11 +124,20 @@ function addUniqueLead(state, opts) {
   }
 }
 
-// Top up the board to LEAD_COUNT, adding the boss lead once eligible.
+// The finale is earned, not counted: two cleared High leads (config.bossHighWins)
+// place the boss immediately, bypassing the board ceiling — "immediate and
+// guaranteed" outranks the cap, so a full board can never defer the finale.
+// Called from mission resolution, which is the only place a High win happens.
+function placeBossIfEarned(state) {
+  if (state.outcome) return;
+  if (state.highWins < config.bossHighWins) return;
+  if (state.leads.some((l) => l.winsCampaign)) return;
+  addUniqueLead(state, { boss: true });
+}
+
+// Top up the board to config.leadCount.
 export function refillLeads(state) {
   if (state.outcome) return;
-  const bossEligible = state.completedMissions.length >= config.bossAfter;
-  if (bossEligible && !state.leads.some((l) => l.winsCampaign)) addUniqueLead(state, { boss: true });
   let guard = 0;
   while (state.leads.length < config.leadCount && guard++ < 20) addUniqueLead(state, {});
 }
@@ -279,8 +289,12 @@ export function applyMissionResult(state, result) {
 
   if (result.success) {
     for (const item of result.loot) state.stores.push(item);
-    if (!state.completedMissions.includes(result.missionId))
+    if (!state.completedMissions.includes(result.missionId)) {
       state.completedMissions.push(result.missionId);
+      // The gate reads the lead's ADVERTISED threat — what the player agreed to
+      // take on — not what the mission turned out to be.
+      if (mission && mission.difficulty === "High") state.highWins += 1;
+    }
     if (mission) {
       state.campaignHealth = Math.min(100, state.campaignHealth + mission.threatReward);
       note(
@@ -310,6 +324,7 @@ export function applyMissionResult(state, result) {
   // state.outcome is set, at the exact moment the day can no longer matter.
   if (config.dayPerDeploy) advanceDay(state);
 
+  placeBossIfEarned(state);
   refillLeads(state);
 
   return state;

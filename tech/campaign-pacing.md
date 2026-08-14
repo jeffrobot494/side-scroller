@@ -98,6 +98,7 @@ and with it the empty board the design names as legal.
 | `src/hub/hub.js` | C1's button move and the War Room's doom-rate text; the Ops lead row gains a remaining-days readout in C2 |
 | `src/hub/hub.css` | Only if the top-bar control needs a rule the existing `.topbar` / `.btn` classes do not give |
 | `design/missions.md` | The superseded "Expires in: 4 days" field, in C2's commit |
+| `tech/game-balance.md` | **As built, C4.** Not planned for, and not optional: that reference doc states "deploying is free in clock terms", prints `bossAfter`'s default as a live number, and lists the War Room's `TUNING.doomPerDay` misprint as a known issue. C1, C3 and C4 each falsify one. Corrected in C4's commit, which is the first one that deletes a knob the doc names |
 | `test/wiring.test.mjs` | The campaign guard grows the cases for each slice, in that slice's commit |
 
 Conventions this must follow: every number is a `SCHEMA` entry, never a constant
@@ -140,7 +141,7 @@ They are the behaviour the slice deletes, not collateral:
 | 11 | "board filled to 3 leads" | A new campaign opens on `seedLeads` |
 | 27 | "board refilled to 3" | Nothing refills after a mission |
 | 50 | "failed lead consumed + refilled" | Same `=== 3` check, folded into a consumption assertion. The consumption half must survive |
-| 33–36 | The four-win loop | It picks a non-boss lead each pass and would find none on an unrefilled board — a crash, not a failed assertion, taking the boss cases at 37–44 with it |
+| 33–36 | The four-win loop | It picks a non-boss lead each pass and would find none on an unrefilled board — a crash, not a failed assertion, taking the boss cases at 37–44 with it. **As built:** C4 got here first. The loop's four wins no longer produce a boss at all once the gate reads High wins, so C4 rewrote it into "ordinary wins surface nothing" and built the gate cases on fabricated leads (`fakeLead`) rather than on whatever the generator rolled. What C5 inherits is a loop that no longer searches the board |
 
 Anything else in that file that needs editing to make a slice pass means the
 slice is wrong.
