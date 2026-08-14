@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: unbuilt
+status: built
 resolution: sharp
 needs: []
 related: [campaign-pacing, game-balance, missions, level-generation]

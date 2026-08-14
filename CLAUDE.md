@@ -42,8 +42,26 @@ section + the tests are the source of truth for what currently exists):
 - **Missions are generated, not a fixed list.** Operations surfaces procedurally
   generated **leads** (`state.leads`); pick one → deploy → its generated `level`
   loads (`loadMission` unchanged). Difficulty/enemy budgets scale with campaign
-  pressure; a boss lead (`winsCampaign`) appears after enough wins. This is
-  Slice 1 of `tech/level-generation.md` (no LLM yet); later slices add the LLM.
+  pressure. This is Slice 1 of `tech/level-generation.md` (no LLM yet); later
+  slices add the LLM. How leads arrive, rot and gate the finale is campaign
+  pacing, below.
+- **The campaign is paced by the day (`tech/campaign-pacing.md` C1–C5 — built).**
+  `advanceDay()` in `src/game/state.js` is the single answer to what a day costs,
+  whoever asked for it. **Time is a global control** — "Advance the day ▸" lives
+  in the hub top bar, disabled outside the room screens because the deploy screen
+  holds a lead by id and that lead can now expire under it. **Leads expire**: each
+  rolls a `daysLeft` in `leadLifeMin`…`leadLifeMax` when generated; Ops prints
+  what is left. **Deploying costs a day** (`dayPerDeploy`, default on), so expiry,
+  fabrication, healing and doom are all paced per mission — off restores the old
+  free deploy so the decision is A/B-able in play. **The finale is earned, not
+  counted**: `state.highWins` counts cleared leads that *advertised* High, and at
+  `bossHighWins` (2) the boss lead is placed immediately, over the board ceiling.
+  The flat `bossAfter` gate is deleted, and the boss lead is the one lead that
+  never expires. **The board is weather, not a menu**: a campaign opens on
+  `seedLeads` (1), each day advance rolls `leadArrivalRate` (1.25 = one guaranteed
+  plus a 25% coin flip) new leads, `leadCount` became a ceiling arrivals never
+  cross rather than a target, and NOTHING refills after a mission. A thin or empty
+  board is a legal state whose only exit is passing days.
 - **Editor tools** (`editor.html` → Tools): Weapon Designer, Enemy Designer,
   Level Generator (seed → schematic preview), Firing Room (bigger platformed
   range: fire any weapon at respawning dummies OR waves of real enemies — an

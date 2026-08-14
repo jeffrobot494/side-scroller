@@ -33,18 +33,17 @@ the enemy budget a mission is allowed to spend.
 | Opening | Low and Medium leads only. High cannot be rolled |
 | Middle | Medium becomes the common case, High becomes possible |
 | Late | Medium and High equally likely, Low rare |
-| Finale | A single Extreme boss lead appears once enough operations are cleared, and ends the campaign when won |
+| Finale | A single Extreme boss lead appears once two High leads have been cleared, and ends the campaign when won |
 
-Two properties of this curve as built:
+Two properties of this curve as built. Both are what `design/campaign-pacing.md`
+changed, and they are the pacing half of this doc it supersedes:
 
-- **Days advance only when the player chooses to advance them.** Deploying on a
-  mission does not move the clock, so for a player who never idles, pressure is
-  driven by wins alone.
-- **The finale arrives before the late stage does.** With the shipped defaults,
-  a player who clears the required operations back-to-back reaches the boss while
-  still inside the opening band — the one where High-threat leads cannot be
-  rolled at all. The upper part of the curve is reachable only by deliberately
-  passing time.
+- **Every mission advances a day, and so does idling.** Deploying moves the
+  clock, so pressure rises on both terms even for a player who never waits.
+- **The finale cannot arrive before the middle stage does.** It is gated on two
+  cleared High leads, and High cannot be rolled inside the opening band — so the
+  player has to survive long enough for High work to appear, then take it twice.
+  Clearing the easiest thing on the board repeatedly no longer reaches the end.
 
 `Extreme` exists as a band and as a UI colour, but nothing except the boss lead
 ever generates at it.

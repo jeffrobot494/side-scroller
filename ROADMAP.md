@@ -82,6 +82,7 @@ description of what the game does today; this is only the index.
 | Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `tech/weapon-designer.md` |
 | Ranged repositioning R1–R2 — a `keepDistance` agent that cannot see its target walks to somewhere it can, both teams | `tech/ranged-repositioning.md` |
 | Behavior Lab v2 B1–B3 — one agent on a generated level, click to set a goal, 1:1 panned view, graph + path overlays, draggable platforms (v1 deleted) | `design/behavior-lab.md` · `tech/behavior-lab.md` |
+| Campaign pacing C1–C5 — the day is the only currency, leads expire and arrive on the clock, the finale is gated on High wins | `design/campaign-pacing.md` · `tech/campaign-pacing.md` |
 | Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `design/design-map.md` · `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 
@@ -90,7 +91,7 @@ description of what the game does today; this is only the index.
 | Issue | Where |
 |---|---|
 | `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
-| `doomPerDay` exists as both a config knob and a `TUNING` field; the War Room prints the copy the game does not use | `tech/game-balance.md` "Known issues" |
+| `doomPerDay` exists as both a config knob and a `TUNING` field; the `TUNING` copy is now read by nothing | `tech/game-balance.md` "Known issues" |
 | Flyers can grind against terrain — steering pushes in while resolution pushes out | out of scope in `sprints/2026-08.md` |
 | Grounded bodies guess when a steering intent implies a jump, from a 40px heuristic with no terrain knowledge | fixed by `tech/agent-navigation.md` N3 |
 | Two enemy jump impulses disagree, and the reflex hop out-jumps the deliberate jump | fixed by `tech/agent-navigation.md` N2 |

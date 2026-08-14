@@ -1,7 +1,7 @@
 ---
 type: design
 category: gameplay-systems
-status: unbuilt
+status: built
 resolution: sharp
 related: [missions, game-balance, level-generation]
 ---
