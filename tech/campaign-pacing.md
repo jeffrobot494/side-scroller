@@ -149,8 +149,12 @@ slice is wrong.
 guard — verify the button placement, the deploy-screen gate, and the Ops
 remaining-days readout by hand in the browser, and say so when handing them over.
 
-Bo's answer to "what would you be upset to see break?" is added here before C1
-starts.
+**Bo's answer to "what would you be upset to see break?": a winnable campaign.**
+Everything on the finale path is therefore load-bearing — High leads keep
+appearing as pressure rises, two High wins place the boss, the boss lead is never
+deferred by a full board and never rots. C4's cases in `test/wiring.test.mjs`
+carry this, and approximation 4 (the boss does not expire) is what protects it
+under C2.
 
 ## Approximations
 

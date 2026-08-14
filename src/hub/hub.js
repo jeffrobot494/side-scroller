@@ -15,7 +15,8 @@ import {
   advanceDay,
   livingRoster,
 } from "../game/state.js";
-import { BLUEPRINTS, WEAPONS, TUNING } from "../game/content.js";
+import { BLUEPRINTS, WEAPONS } from "../game/content.js";
+import { config } from "../game/config.js";
 import { soldierMaxHp } from "../game/soldiers.js";
 
 const LOCATIONS = [
@@ -87,6 +88,10 @@ export class Hub {
     const g = this.game;
     const h = g.campaignHealth;
     const color = h > 50 ? "var(--good)" : h > 25 ? "var(--credits)" : "var(--bad)";
+    // Passing a day is global, but only from a room screen: the deploy screen
+    // holds a lead by id and would dereference an expired one, and results is
+    // mid-resolution. Both render this bar, so the control is disabled there.
+    const canAdvance = this.mode === "hub";
     return `
       <header class="topbar">
         <div class="brand">XCOM&nbsp;TASK&nbsp;FORCE</div>
@@ -99,6 +104,10 @@ export class Hub {
           </span>
           <span class="credits">§ ${g.money.toLocaleString()}</span>
           <span class="roster-count">${livingRoster(g).length} on roster</span>
+          <button class="btn btn-day" data-action="advance" ${canAdvance ? "" : "disabled"}
+            title="${canAdvance ? "Advance the day — the invasion advances too." : "Finish here first."}">
+            Advance the day ▸
+          </button>
           <a class="dev-link" href="./editor.html" title="Open the settings & tuning editor">⚙</a>
         </div>
       </header>`;
@@ -348,10 +357,9 @@ export class Hub {
       <section class="squad-block">
         <h2>Campaign Health</h2>
         <div class="big-meter"><span class="big-fill" style="width:${h}%;background:${color}"></span></div>
-        <p class="muted">Sector integrity at <strong>${h}</strong>. The invasion advances <strong>${TUNING.doomPerDay}</strong> each day. Reach 0 and the sector falls. Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
+        <p class="muted">Sector integrity at <strong>${h}</strong>. The invasion advances <strong>${config.doomPerDay}</strong> each day. Reach 0 and the sector falls. Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
         <div class="card-foot">
           <span class="cost">Day ${g.day}</span>
-          <button class="btn" data-action="advance">Advance the day ▸</button>
         </div>
       </section>
       <section class="recruit-block">
