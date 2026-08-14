@@ -296,13 +296,20 @@ export class Hub {
       ? g.leads
           .map((m) => {
             const status = `<span class="tag tag-diff-${m.difficulty.toLowerCase()}">${m.difficulty} threat</span>`;
+            // Leads rot. The boss carries no lifespan and shows no clock.
+            const life =
+              typeof m.daysLeft === "number"
+                ? `<span class="tag tag-life${m.daysLeft <= 1 ? " urgent" : ""}">${
+                    m.daysLeft === 1 ? "expires tomorrow" : `${m.daysLeft} days left`
+                  }</span>`
+                : "";
             const action = `<button class="btn" data-action="predeploy" data-id="${m.id}" ${
               canDeploy ? "" : "disabled"
             }>${canDeploy ? "Deploy squad" : "No soldiers"}</button>`;
             return `
         <article class="mission-row ${m.winsCampaign ? "is-boss" : ""}">
           <div class="mission-main">
-            <div class="mission-title">${m.name} ${status}</div>
+            <div class="mission-title">${m.name} ${status} ${life}</div>
             <p class="mission-brief">${m.brief}</p>
             ${m.winsCampaign ? `<div class="win-flag">★ Destroying this ends the invasion in the sector.</div>` : ""}
           </div>
@@ -560,10 +567,15 @@ export class Hub {
 
       case "advance": {
         const res = advanceDay(g);
-        if (res.ok && res.finished.length)
-          this.setFlash("good", `A new day. Finished: ${res.finished.join(", ")}.`);
-        else if (res.ok) this.setFlash("good", "A day passes. The clock ticks on.");
-        else this.setFlash("bad", res.reason);
+        if (res.ok) {
+          const parts = [];
+          if (res.finished.length) parts.push(`Finished: ${res.finished.join(", ")}.`);
+          if (res.expired.length) parts.push(`Lead lost: ${res.expired.join(", ")}.`);
+          this.setFlash(
+            res.expired.length ? "bad" : "good",
+            parts.length ? `A new day. ${parts.join(" ")}` : "A day passes. The clock ticks on."
+          );
+        } else this.setFlash("bad", res.reason);
         this.render();
         break;
       }

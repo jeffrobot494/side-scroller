@@ -32,7 +32,7 @@ mission. You pick one, then the level generates.
 | Hook | "A defector is transmitting before they silence her." |
 | Advertised threat | Moderate — may be a lie |
 | Reward hint | Intel cache |
-| Expires in | 4 days |
+| Expires in | 2 days — rolled in the 1–3 window `design/campaign-pacing.md` sets |
 
 Choosing from leads feels like commanding an operation. Choosing from a list
 feels like picking a level.

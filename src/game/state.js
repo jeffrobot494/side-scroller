@@ -85,6 +85,14 @@ function pickDifficulty(scale) {
   return "medium";
 }
 
+// Days a fresh lead sits on the board before it rots, rolled per lead. A max
+// below the min is read as "no window" rather than an error.
+function rollLifespan() {
+  const min = Math.max(1, Math.round(config.leadLifeMin));
+  const max = Math.max(min, Math.round(config.leadLifeMax));
+  return min + ((Math.random() * (max - min + 1)) | 0);
+}
+
 function makeLead(state, opts = {}) {
   const seed = (Math.random() * 1e9) | 0;
   const scale = pressureScale(state);
@@ -98,7 +106,10 @@ function makeLead(state, opts = {}) {
     roster: missionRoster({ boss: !!opts.boss }),
     scale,
   });
-  return { ...mission, level, report };
+  // The boss lead carries no lifespan: the finale is promised as immediate and
+  // guaranteed once earned, and a finale that rotted would make an earned
+  // campaign unwinnable (arrivals only ever produce ordinary leads).
+  return { ...mission, level, report, daysLeft: opts.boss ? null : rollLifespan() };
 }
 
 // Add one lead with a collision-free id (level ids are gen_<seed>).
@@ -211,6 +222,19 @@ export function advanceDay(state) {
     }
   }
 
+  // Leads rot. Whole days only, and one tick per day advance whatever asked for
+  // the day — a deploy's day expires the leads it left behind, same as idling.
+  const expired = [];
+  for (const lead of state.leads) {
+    if (typeof lead.daysLeft !== "number") continue; // the boss never expires
+    lead.daysLeft -= 1;
+    if (lead.daysLeft <= 0) expired.push(lead);
+  }
+  if (expired.length) {
+    state.leads = state.leads.filter((l) => !expired.includes(l));
+    for (const l of expired) note(state, `${l.name} — the window closed. Lead dropped.`);
+  }
+
   // Doom clock: the invasion advances whether or not you acted.
   state.campaignHealth = Math.max(0, state.campaignHealth - config.doomPerDay);
   if (state.campaignHealth <= TUNING.loseAt) {
@@ -218,7 +242,7 @@ export function advanceDay(state) {
     note(state, "The invasion overran the sector. Campaign lost.");
   }
 
-  return { ok: true, finished: finished.map((f) => f.name) };
+  return { ok: true, finished: finished.map((f) => f.name), expired: expired.map((l) => l.name) };
 }
 
 // ---- Mission bridge -------------------------------------------------------

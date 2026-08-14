@@ -382,6 +382,9 @@ body::after {
 .tag-diff-medium { background: #3a3320; color: #dcc47f; }
 .tag-diff-high { background: #3a2a1c; color: #e5b483; }
 .tag-diff-extreme { background: #3a1c1c; color: #e59090; }
+/* How long the lead has left. Reads as a clock, not a threat, until it's short. */
+.tag-life { background: #23282f; color: var(--muted); }
+.tag-life.urgent { background: #3a1c1c; color: #e59090; }
 
 /* ---- Deploy screen ---- */
 .deploy-card.chosen { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 3px 10px rgba(0,0,0,0.45); }

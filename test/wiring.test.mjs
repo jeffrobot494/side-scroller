@@ -1,5 +1,7 @@
-// State wiring: generated leads → loadMission → result consume/refill → boss → win/lose.
+// State wiring: generated leads → loadMission → result consume/refill → boss → win/lose,
+// plus campaign pacing: lead lifespans and expiry on a day advance.
 import * as st from "../src/game/state.js";
+import { config } from "../src/game/config.js";
 import { loadMission } from "../src/mission/entities.js";
 
 const soldier = { id: "s1", name: "Rook", callsign: "RK", stats: { health: 5, aim: 5, speed: 5 } };
@@ -49,4 +51,37 @@ export default async function run(t) {
   st.applyMissionResult(g2, { success: false, missionId: target.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] });
   t.ok("failed lead consumed + refilled", !g2.leads.some((l) => l.id === target.id) && g2.leads.length === 3);
   t.ok("failure costs campaign health", g2.campaignHealth < before);
+
+  // ---- C2: leads expire -----------------------------------------------------
+  {
+    const g3 = st.createState();
+    t.ok(
+      "every lead carries a lifespan inside the window",
+      g3.leads.every((l) => l.daysLeft >= config.leadLifeMin && l.daysLeft <= config.leadLifeMax)
+    );
+
+    const days = g3.leads.map((l) => l.daysLeft);
+    st.advanceDay(g3);
+    t.ok(
+      "a day advance ticks every surviving lead down by one",
+      g3.leads.every((l) => days.includes(l.daysLeft + 1))
+    );
+    t.ok("a lead at zero left the board", g3.leads.length === days.filter((d) => d > 1).length);
+
+    // Pinned to a 1-day window so the whole board rots in one tick, whatever the
+    // roll — expiry must be able to empty the board, not just thin it.
+    const min = config.leadLifeMin, max = config.leadLifeMax;
+    config.leadLifeMin = config.leadLifeMax = 1;
+    try {
+      const g4 = st.createState();
+      const names = g4.leads.map((l) => l.name);
+      const res = st.advanceDay(g4);
+      t.ok("a 1-day board empties on the first day advance", g4.leads.length === 0);
+      t.ok("expiry is reported to the caller", names.every((n) => res.expired.includes(n)));
+      t.ok("...and logged", g4.log.some((e) => e.text.includes("Lead dropped")));
+    } finally {
+      config.leadLifeMin = min;
+      config.leadLifeMax = max;
+    }
+  }
 }
