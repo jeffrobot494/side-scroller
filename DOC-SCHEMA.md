@@ -144,6 +144,24 @@ information.
 
 This applies to every doc type, and to summaries written in chat.
 
+## A design doc is timeless and authoritative
+
+It states what is true of the game. It never explains itself, never justifies a
+choice by how the code got there, and never comments on its own provenance.
+
+| Banned in `design/` | Belongs in |
+|---|---|
+| Why an implementation works the way it does | `tech/` |
+| What a system used to do, or the bug that shaped it | `tech/`, or the commit |
+| Notes on how the doc was written or how settled it is | `status` and `resolution`, which exist for exactly this |
+| Hedges — "this describes what is, not what was decided" | Nowhere. The doc is the decision |
+
+The test: **strike every sentence that would stop being true if the code were
+thrown away and rebuilt.** What survives is the design.
+
+Undecided things are still stated, not apologised for — name the capability that
+does not exist, in the same voice as the ones that do.
+
 ## Rules
 
 - Status lives in `ROADMAP.md`. Design and tech docs never

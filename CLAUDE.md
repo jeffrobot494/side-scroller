@@ -33,6 +33,11 @@ agent, and the commit ordering are.
 tables and bullets. See "House style" in `DOC-SCHEMA.md`. This applies to
 answers in chat too.
 
+**A design doc is timeless and authoritative — no implementation commentary.**
+No rationale for why the code works that way, no bug archaeology, no hedging
+about how settled the doc is. Strike any sentence that would stop being true if
+the code were thrown away and rebuilt. Full rule in `DOC-SCHEMA.md`.
+
 ## Current status
 
 Playable end to end, and built well beyond the original "vertical slice" (the
