@@ -200,11 +200,20 @@ export class Mission {
         const acc = aimAccuracy(s.data.stats.aim);
         if (wantFire && fire(scene, s, s.fireDir(), "player", dt, acc)) this.shake = Math.min(0.5, this.shake + 0.12);
       } else {
-        s.setCrouch(false); // companions never kneel; a swapped-away soldier stands back up
         // "spec" (default) runs the shared agent brain over the soldier
         // locomotor; "legacy" is the original hand-written updateCompanion.
-        if (config.companionBrain === "legacy") updateCompanion(s, dt, scene, leader);
-        else updateCompanionSpec(s, dt, scene, leader, this._ctx);
+        //
+        // Stance: on the spec path the duck reflex owns it (ai.js tickDuck →
+        // the locomotor's crouch channel), INCLUDING standing a swapped-away
+        // soldier back up — the unconditional stand that used to live here is
+        // what delivered that, so relaxing it hands over the obligation. The
+        // legacy squad AI has no knee, so it keeps the forced stand.
+        if (config.companionBrain === "legacy") {
+          s.setCrouch(false);
+          updateCompanion(s, dt, scene, leader);
+        } else {
+          updateCompanionSpec(s, dt, scene, leader, this._ctx);
+        }
       }
       const fallVy = s.vy;
       stepActor(s, dt, scene.world, scene.platforms);

@@ -121,6 +121,12 @@ const SOLDIER = {
   apply(ent, req, dt, scene) {
     const s = ent.soldier;
     if (!s) return;
+    // The crouch channel (tech/soldier-ducking.md, D1). The duck reflex decides
+    // (ai.js), the locomotor actuates — the same deferred shape as pendingJump
+    // below. setCrouch keeps the feet planted; applyMovement then applies the
+    // kneeling lock, so the cost of a duck is the one already modelled.
+    // Undefined = nobody is driving the stance (the Behavior Lab), leave it.
+    if (ent.crouchIntent !== undefined) s.setCrouch(ent.crouchIntent);
     let move = 0;
     let jump = !!ent.pendingJump; // a brain `jump` step queued this (SOLDIER.jump)
     ent.pendingJump = false;
@@ -152,10 +158,13 @@ const SOLDIER = {
     if (move !== 0) s.facing = move > 0 ? 1 : -1;
     else if (req.target) s.facing = cx(req.target) >= cx(s) ? 1 : -1;
     ent.facing = s.facing;
-    // mirror the body back so perception/expressions read a live velocity
+    // mirror the body back so perception/expressions read a live velocity — and
+    // a live BOX, since the stance above moved the top edge of it.
     ent.vx = s.vx;
     ent.vy = s.vy;
     ent.onGround = s.onGround;
+    ent.y = s.y;
+    ent.h = s.h;
   },
   jump(ent) {
     ent.pendingJump = true;

@@ -139,6 +139,35 @@ export default async function run(t) {
     t.eq("companion: brain reached the combat state", comp.agent.brainState.current, "combat");
   }
 
+  // ---- L3 + D1: the crouch channel, the locomotor's third translation --------
+  // The reflex that decides to duck lives outside the locomotor (ai.js); the
+  // locomotor is what actuates it, exactly as it does the pending jump. So the
+  // seam is: an intent goes in, a stance comes out, and the movement lock that
+  // makes a duck cost something comes with it.
+  {
+    const sc = scene();
+    const comp = new Soldier(rosterSoldier("C"), rifle, 300, 500 - STAND_H);
+    comp.onGround = true;
+    const agent = instantiate(DEFAULT_COMPANION_SPEC, comp.x, comp.y, "player");
+    agent.soldier = comp;
+    const drive = { kind: "driveX", v: config.runSpeed, target: null };
+
+    locomotorFor(agent).apply(agent, drive, STEP, sc);
+    t.ok("crouch: no intent, no stance — a companion runs as before", !comp.crouched && comp.vx > 0);
+
+    agent.crouchIntent = true;
+    comp.vx = 0;
+    locomotorFor(agent).apply(agent, drive, STEP, sc);
+    t.ok("crouch: the intent puts the body on a knee", comp.crouched === true);
+    t.eq("crouch: and the kneeling lock takes the run with it", comp.vx, 0);
+    t.eq("crouch: the agent mirror sees the box it now has, not the one it had", agent.h, comp.h);
+
+    agent.crouchIntent = false;
+    locomotorFor(agent).apply(agent, drive, STEP, sc);
+    t.ok("crouch: dropping the intent stands it back up, running", !comp.crouched && comp.vx > 0);
+    t.eq("crouch: mirror follows back up", agent.h, STAND_H);
+  }
+
   // ---- N2: one jump per body, and a window to spend it in --------------------
   // locomotion.golden.json pins whole trajectories, so it catches the impulse
   // CHANGING. It cannot say where the impulse comes from, and it exercises

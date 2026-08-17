@@ -1,8 +1,9 @@
 ---
 type: tech
 category: artificial-intelligence
-status: unbuilt
+status: building
 resolution: sharp
+sprint: 2026-08
 needs: [locomotion]
 related: [soldier-behavior, ranged-repositioning, behavior-lab]
 ---
@@ -49,6 +50,14 @@ needs a D1 baseline where the geometry is known to work to be judged against.
 | The reflex — scan, roll, hold | `src/mission/ai.js` | Beside `updateCompanionSpec`, the companion-only per-frame seam. Not in the spec runtime: spec bodies have no knee |
 | The actuator — a crouch channel | `src/mission/locomotion.js` | The `SOLDIER` locomotor is the single actuation point for a companion body and stays so. It gains a third channel beside the move and jump it already translates |
 | The knobs — hold duration (D1); chance curve and latency curve (D2) | `src/game/config.js` | "Movement / feel" |
+
+**As built (D1): two knobs, not one.** `duckHoldTime` is the hold duration above,
+and doubles as the off switch (0 = the reflex never fires, which is what the A/B
+cases drive). `duckLookahead` (default 1.5s) bounds the forward walk: without a
+cap the walk runs a round's whole remaining lifetime — up to 3s for a spore pod,
+per soldier, per round, every frame — for a verdict that is nearly always decided
+in the first fraction of a second. A round that needs longer than the lookahead
+to arrive is never ducked.
 | Tests | `test/crouch.test.mjs` for the predicate's geometry; `test/companion-aim.test.mjs` for both slices' behaviour | See *The test scaffolding does not exist yet*, below — this is not a free reuse |
 
 ### What the predicate must be told
@@ -196,6 +205,21 @@ so a round aimed at standing centre passes over the crouched box. Enemies aim at
 their target's *live* centre, which is why this works and also why it is not
 permanent cover: a shot already in flight misses, the next is aimed lower.
 `test/crouch.test.mjs` measures both halves today.
+
+**As built (D1): a centre-aimed round does NOT pass over the crouched box.**
+`STAND_H` 46 and `CROUCH_H` 22 put the standing centre 23px above the feet and
+the crouched box's top edge 22px above them — one pixel apart — and a round's
+box hangs *below* its aim point (`Projectile` takes a top-left). So a round
+placed exactly on the standing centre lands on the crouched box too, and the
+predicate correctly refuses it. What a knee actually answers is a round arriving
+in the **top half** of the standing box, above the crouched head: the ±2° jitter
+`patternAngles` puts on every `aimed` shot, fans, arcs, and any round whose aim
+point went stale because the soldier moved. Under a stationary gunner's aimed
+stream that is roughly half the rounds — enough that a squadmate spends most of a
+sustained firefight kneeling, and takes ~20% less damage for it
+(`test/companion-aim.test.mjs`). **Whether a knee should clear a centre-aimed
+round is a design question, not a bug in this feature** — it is a `CROUCH_H`
+question, and moving that number changes the player's crouch too.
 
 The cost is modelled already — a kneeling soldier cannot run or jump, but can
 pivot and fire. Nothing here adjusts that balance; it adds a second thing that

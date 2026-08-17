@@ -12,11 +12,20 @@
 //
 // The suite now also guards what a companion does when the level is CLEARED —
 // see the "cleared" cases at the bottom.
-import { instantiate } from "../src/mission/enemyspec/runtime.js";
+//
+// It also owns the BEHAVIOUR half of the duck reflex (tech/soldier-ducking.md):
+// who kneels, when, and for how long — the geometry half (which rounds a knee
+// answers) is duckableShot's, in crouch.test.mjs. See the "ducking" cases at the
+// bottom; they are what brought a firing enemy and a projectile step into this
+// suite, which had a squadmate and no incoming fire.
+import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
 import { nearestHostile } from "../src/mission/enemyspec/perception.js";
-import { Soldier, STAND_H, stepActor } from "../src/mission/entities.js";
+import { updateProjectiles } from "../src/mission/combat.js";
+import { Soldier, Projectile, STAND_H, stepActor } from "../src/mission/entities.js";
+import { config } from "../src/game/config.js";
+import { makeRng } from "../src/game/gen/rng.js";
 
 const STEP = 1 / 60;
 // aim 10 → accuracy 1 → zero spread, so a shot's velocity IS the aim vector.
@@ -74,6 +83,72 @@ function bearing(comp, foe) {
 function onTarget(s) {
   const len = Math.hypot(s.p.vx, s.p.vy);
   return (s.p.vx / len) * s.want.x + (s.p.vy / len) * s.want.y;
+}
+
+// ---- incoming fire (the ducking cases) ------------------------------------
+
+// A stationary gunner streaming AIMED rounds at the nearest soldier. Its shots
+// jitter up to ±2° off the target's centre (patternAngles' default), which is
+// what puts rounds in the upper half of a standing box: a perfectly centred
+// round grazes the crouched box top and is correctly NOT duckable.
+const GUNNER = normalizeSpec({
+  v: 1, id: "test_gunner", name: "Test Gunner", threat: 50,
+  root: {
+    id: "root", tags: ["enemy"],
+    visual: { shape: "box", size: [38, 38], color: "#f00" },
+    health: { max: 1e9 }, // indestructible: the companion shoots back
+    motion: { type: "static" },
+    emitters: { gun: { at: [0, 0], projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 2, damage: 4 } } },
+  },
+  brain: { start: "fire", states: { fire: { tracks: [{ id: "g", loop: true, steps: [
+    { fire: { emitter: "gun", pattern: "aimed" } },
+    { wait: 0.12 },
+  ] }] } } },
+});
+
+// ctx that keeps score for ONE soldier (the leader is in the scene too).
+function tally(who) {
+  const c = {
+    dealt: 0, friendlyFire: false, damageMult: 1,
+    damage(target, amount) { target.health -= amount; if (target === who) c.dealt += amount; },
+    kill() {}, spark() {}, burst() {},
+  };
+  return c;
+}
+
+// The mission's own frame order (mission.js _update): soldiers, THEN enemies,
+// THEN projectiles — so a round is never in scene.projectiles on the frame it
+// was fired, and the reflex first sees it a frame late. Returns the stance log.
+function underFire(comp, sc, leader, gunner, frames, ctx) {
+  const stance = [];
+  for (let i = 0; i < frames; i++) {
+    if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+    updateCompanionSpec(comp, STEP, sc, leader, ctx);
+    stepActor(comp, STEP, sc.world, sc.platforms);
+    if (gunner) updateSpecEnemy(gunner, STEP, sc, ctx);
+    updateProjectiles(sc, STEP, ctx);
+    stance.push(comp.crouched);
+  }
+  return stance;
+}
+
+// One firefight, from a fixed seed so the gunner's jitter stream is identical
+// between runs and the stance is the only variable.
+function firefight(seed, frames = 600) {
+  const real = Math.random;
+  Math.random = makeRng(seed);
+  try {
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    comp.health = comp.maxHealth = 1e6; // survives the whole stream
+    const gunner = instantiate(GUNNER, 760, 500 - 38);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [gunner] });
+    const ctx = tally(comp);
+    const stance = underFire(comp, sc, leader, gunner, frames, ctx);
+    return { comp, stance, dealt: ctx.dealt, kneeled: stance.filter(Boolean).length };
+  } finally {
+    Math.random = real;
+  }
 }
 
 export default async function run(t) {
@@ -228,5 +303,56 @@ export default async function run(t) {
     const shots = play(comp, sc, leader, 240);
     t.ok(`level: still fires on a level enemy (${shots.length} shots)`, shots.length > 3);
     t.ok("level: and those rounds are still ~flat", shots.every((s) => Math.abs(s.p.vy) < 120));
+  }
+
+  // ---- ducking: a squadmate gets the knee (D1) ------------------------------
+  // Reaction is deliberately certain and immediate in D1 — the whole mechanism
+  // minus the Speed dice, so the geometry can be judged before they are added.
+  {
+    const on = firefight(20260816);
+    t.ok(`duck: a squadmate under aimed fire kneels (${on.kneeled}/${on.stance.length} frames down)`, on.kneeled > 0);
+    t.ok("duck: and is standing again by the end — it holds briefly, it does not stay down",
+      on.stance[on.stance.length - 1] === false);
+    // it never stays down: every kneel ends within the hold, plus the frame the
+    // reflex needs to notice the next round
+    const longest = on.stance.reduce((acc, c) => (c ? { run: acc.run + 1, max: Math.max(acc.max, acc.run + 1) } : { run: 0, max: acc.max }), { run: 0, max: 0 }).max;
+    t.ok(`duck: no kneel outlasts the hold knob (longest ${longest} frames, hold ${config.duckHoldTime}s)`,
+      longest <= Math.ceil(config.duckHoldTime / STEP) + 2);
+
+    // The A/B the feature exists for. Same seed, same gunner, same shot stream;
+    // duckHoldTime 0 is the switch that turns the reflex off entirely.
+    const hold = config.duckHoldTime;
+    config.duckHoldTime = 0;
+    const off = firefight(20260816);
+    config.duckHoldTime = hold;
+    t.eq("duck: with the hold at 0 nobody kneels at all", off.kneeled, 0);
+    t.ok(`duck: and ducking is what makes the difference in damage taken (${Math.round(on.dealt)} vs ${Math.round(off.dealt)})`,
+      on.dealt < off.dealt);
+  }
+
+  // ---- ducking: friendly rounds are not something to kneel at ---------------
+  {
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(900, 500 - 40)] });
+    const ctx = tally(comp);
+    // the leader's round, on the line through the companion's standing head
+    const spec = { w: 12, h: 4, color: "#fff", life: 2, gravity: 0 };
+    sc.projectiles.push(new Projectile(120, 500 - 40, 900, 0, spec, "player", [], leader));
+    const stance = underFire(comp, sc, leader, null, 90, ctx);
+    t.ok("duck: a squadmate does not kneel at its own side's fire", stance.every((c) => c === false));
+  }
+
+  // ---- ducking: the swap-away stand-up this feature took over ---------------
+  // mission.js used to force every non-controlled soldier to stand every frame,
+  // which is what stood a swapped-away soldier up. The reflex owns that now.
+  {
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp] });
+    comp.setCrouch(true); // the player was kneeling in this body, then hit Tab
+    t.ok("swap: kneeling at the moment control leaves", comp.crouched === true);
+    updateCompanionSpec(comp, STEP, sc, leader, noopCtx);
+    t.ok("swap: stands back up on the same tick it becomes a squadmate", comp.crouched === false);
   }
 }

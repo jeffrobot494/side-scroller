@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { Projectile, startReload } from "./entities.js";
+import { duckableShot } from "./combat.js";
 import { config } from "../game/config.js";
 import { weaponSound } from "../audio/cues.js";
 import { instantiate, updateSpecEnemy } from "./enemyspec/runtime.js";
@@ -189,10 +190,51 @@ function companionAgent(soldier) {
   return a;
 }
 
+// ---- the duck reflex (tech/soldier-ducking.md, D1) ------------------------
+// A reflex BELOW the brain, not a brain state: a state would be entered and left
+// on perception's 0.2s cadence — far too slow for a round in flight — and would
+// fight escort/combat the way the old vertical band did.
+//
+// It owns exactly two things: whether this squadmate is kneeling and for how
+// long, and the verdict attached to one round for one soldier. It writes the
+// stance nowhere itself — `agent.crouchIntent` is a deferred channel the soldier
+// locomotor actuates, the same shape as the pending jump beside it
+// (locomotion.js).
+//
+// Relaxing mission.js's unconditional stand-up means this function now OWNS
+// standing a swapped-away soldier back up: with no hold running it asks for a
+// stand every frame, and the locomotor delivers it on the same tick.
+function tickDuck(soldier, agent, dt, scene, ctx) {
+  const d = soldier.duck || (soldier.duck = { hold: 0, judged: new WeakSet() });
+  if (d.hold > 0) d.hold = Math.max(0, d.hold - dt);
+
+  // Grounded only: kneeling mid-jump changes the box without changing the
+  // trajectory, which reads as a glitch rather than a dodge.
+  if (d.hold <= 0 && soldier.onGround && config.duckHoldTime > 0) {
+    for (const p of scene.projectiles) {
+      // ONE verdict per round per soldier — a soldier who misses a round coming
+      // does not get a second look at it, and re-judging across a round's flight
+      // would turn a chance into a certainty (D2). The verdict cannot live on
+      // the round: one round can threaten more than one squadmate.
+      if (d.judged.has(p)) continue;
+      d.judged.add(p);
+      if (duckableShot(scene, p, soldier, dt, ctx)) {
+        d.hold = config.duckHoldTime;
+        break;
+      }
+    }
+  }
+  agent.crouchIntent = d.hold > 0;
+}
+
 export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
   if (!soldier.alive) return;
   autoReload(soldier); // companions reload themselves when they run dry
   const a = companionAgent(soldier);
+  // Stance is decided BEFORE the body is mirrored onto the agent below, and
+  // actuated later by the locomotor, which mirrors the changed box back — so
+  // perception never reasons about a standing box for a kneeling soldier.
+  tickDuck(soldier, a, dt, scene, ctx || {});
   // sync the real body → agent so perception/aim reason about where we ACTUALLY
   // are (the locomotor drives the Soldier; the agent's own x/y is just a mirror).
   a.x = soldier.x; a.y = soldier.y; a.w = soldier.w; a.h = soldier.h;

@@ -2,10 +2,16 @@
 // EnemySpec enemies aim at the target's live centre, so crouching lets you duck a
 // shot already in flight (aimed at your standing centre) and shrinks your target,
 // but is NOT permanent immunity — the gunner re-aims at your lower crouched centre.
-import { Soldier, overlaps, STAND_H, CROUCH_H } from "../src/mission/entities.js";
+//
+// It also owns the GEOMETRY half of the duck reflex (tech/soldier-ducking.md):
+// duckableShot() — would kneeling save this soldier from this round — because
+// this is where a soldier is shot at. The behaviour half (who kneels, when, for
+// how long) is in companion-aim.test.mjs, where the squadmate lives.
+import { Soldier, Projectile, overlaps, STAND_H, CROUCH_H } from "../src/mission/entities.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
-import { updateProjectiles, updateStatuses } from "../src/mission/combat.js";
+import { updateProjectiles, updateStatuses, duckableShot } from "../src/mission/combat.js";
+import { losBetween } from "../src/mission/enemyspec/perception.js";
 import { makeRng } from "../src/game/gen/rng.js";
 
 const G = 300; // ground top
@@ -55,6 +61,20 @@ function turretDamage(soldier, seed) {
   } finally {
     Math.random = real;
   }
+}
+
+// ---- duck predicate fixtures ---------------------------------------------
+// The soldier under judgement: x 200..230, feet on the ground at G=300, so its
+// standing box is y 254..300 and its crouched box y 278..300.
+const STEP = 1 / 60;
+const FLOOR = { x: 0, y: G, w: 1000, h: 40 };
+const duckScene = (platforms = [FLOOR]) => ({ world: { gravity: 2000, width: 1000, height: 340 }, platforms });
+const duckTarget = () => new Soldier(data, rifle, 200, G - STAND_H);
+
+// A round in flight, described the way ai.js stamps one out.
+function shot(x, y, vx, vy, o = {}) {
+  const spec = { w: o.w ?? 12, h: o.h ?? 4, color: "#fff", life: o.life ?? 1, gravity: o.gravity ?? 0 };
+  return new Projectile(x, y, vx, vy, spec, o.team || "enemy", o.effects || [], o.owner || null);
 }
 
 export default async function run(t) {
@@ -107,5 +127,79 @@ export default async function run(t) {
     t.ok("ally shot passes over the crouched soldier", overlaps(allyShot, s) === false);
     s.setCrouch(false);
     t.ok("...but would hit them standing", overlaps(allyShot, s) === true);
+  }
+
+  // ---- the duck predicate: which rounds a knee actually answers -------------
+  // The reflex is only as good as this: a squadmate kneeling at a shot that was
+  // never going to land is the most visible way the feature can look broken.
+  {
+    const sc = duckScene();
+    const head = () => shot(60, 262, 900, 0); // 262..266: over the crouched box
+    t.ok("duck: a round on the standing box that misses the crouched one",
+      duckableShot(sc, head(), duckTarget(), STEP, {}) === true);
+    t.ok("duck: a round aimed low hits both boxes, so kneeling is no answer",
+      duckableShot(sc, shot(60, 284, 900, 0), duckTarget(), STEP, {}) === false);
+    t.ok("duck: a round already sailing over the head is nothing to react to",
+      duckableShot(sc, shot(60, 230, 900, 0), duckTarget(), STEP, {}) === false);
+
+    // The two ways a round stops existing before it arrives. Both are stopping
+    // conditions on the same forward walk, in the runtime's own order.
+    const wall = duckScene([FLOOR, { x: 140, y: 200, w: 20, h: 100 }]);
+    t.ok("duck: a round the cover takes never produces a duck",
+      duckableShot(wall, head(), duckTarget(), STEP, {}) === false);
+    t.ok("duck: nor does one that runs out of lifetime on the way",
+      duckableShot(sc, shot(60, 262, 900, 0, { life: 0.05 }), duckTarget(), STEP, {}) === false);
+  }
+
+  // ---- blasts are excluded by RULE, not by geometry ------------------------
+  // A blast resolves by centre distance from the impact point, so a soldier
+  // whose crouched box the round missed is still caught by a detonation on the
+  // soldier behind them. Same geometry as the duckable round above.
+  {
+    const sc = duckScene();
+    const boom = shot(60, 262, 900, 0, { effects: [{ kind: "explode", radius: 90, amount: 20 }] });
+    t.ok("duck: an explosive round is never duckable, whatever the geometry says",
+      duckableShot(sc, boom, duckTarget(), STEP, {}) === false);
+  }
+
+  // ---- who may hit whom is combat's rule, not geometry ---------------------
+  {
+    const sc = duckScene();
+    const s = duckTarget();
+    const mate = shot(60, 262, 900, 0, { team: "player" });
+    t.ok("duck: a squadmate does not kneel at its own side's fire",
+      duckableShot(sc, mate, s, STEP, { friendlyFire: false }) === false);
+    t.ok("duck: ...but does once friendly fire is on",
+      duckableShot(sc, mate, s, STEP, { friendlyFire: true }) === true);
+    t.ok("duck: and never at a round it fired itself",
+      duckableShot(sc, shot(60, 262, 900, 0, { team: "player", owner: s }), s, STEP, { friendlyFire: true }) === false);
+  }
+
+  // ---- arcs are walked, not drawn as a straight line -----------------------
+  // A lobbed pod (spore_wisp's: gravity 0.4, life 3) is wrong in BOTH directions
+  // under a straight sight line, so each case below pairs the verdict with what
+  // losBetween — the real sight test — says about the same muzzle and target.
+  {
+    // (a) a low block the sight line clears and the pod drops into.
+    const block = duckScene([FLOOR, { x: 150, y: 270, w: 20, h: 30 }]);
+    const flat = { x: 60, y: 258, vx: 300, vy: 0 };
+    t.ok("arc: the sight line from the muzzle to where the round lands is clear",
+      losBetween(flat.x, flat.y + 2, 215, 262, block.platforms) === true);
+    t.ok("arc: a straight round on that line is duckable",
+      duckableShot(block, shot(flat.x, flat.y, flat.vx, flat.vy, { w: 8, h: 8, life: 3 }), duckTarget(), STEP, {}) === true);
+    t.ok("arc: the same round WITH gravity falls into the block, so no duck",
+      duckableShot(block, shot(flat.x, flat.y, flat.vx, flat.vy, { w: 8, h: 8, life: 3, gravity: 0.4 }), duckTarget(), STEP, {}) === false);
+  }
+  {
+    // (b) a tall wall the sight line is blocked by and the pod lobs over. The
+    // target is far right, where the arc comes back down onto a standing head.
+    const tall = duckScene([FLOOR, { x: 150, y: 200, w: 20, h: 100 }]);
+    const far = new Soldier(data, rifle, 405, G - STAND_H);
+    t.ok("arc: the sight line to the far target is BLOCKED by the wall",
+      losBetween(60, 292, 420, 277, tall.platforms) === false);
+    const pod = shot(60, 290, 300, -500, { w: 8, h: 8, life: 3, gravity: 0.4 });
+    t.ok("arc: the lobbed pod clears it and is duckable anyway",
+      duckableShot(tall, pod, far, STEP, {}) === true);
+    t.ok("arc: judging it did not disturb the round", pod.x === 60 && pod.y === 290 && pod.life === 3);
   }
 }

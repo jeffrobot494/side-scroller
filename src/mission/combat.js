@@ -22,7 +22,8 @@
 // pierce + homing are read off the projectile here.
 // ---------------------------------------------------------------------------
 
-import { overlaps } from "./entities.js";
+import { overlaps, STAND_H, CROUCH_H } from "./entities.js";
+import { config } from "../game/config.js";
 
 function centerOf(a) {
   return { x: a.x + a.w / 2, y: a.y + a.h / 2 };
@@ -124,12 +125,79 @@ function advance(p, dt, scene) {
       p.vy = Math.sin(na) * speed;
     }
   }
-  // Arc: a projectile with gravity>0 falls under a fraction of world gravity, so
-  // lobbed weapons (rockets, grenades) drop. gravity===0 (the default) leaves
-  // every existing weapon on a straight line, unchanged.
-  if (p.gravity > 0) p.vy += p.gravity * scene.world.gravity * dt;
-  p.x += p.vx * dt;
-  p.y += p.vy * dt;
+  const n = stepProjectile(p, p, dt, scene.world);
+  p.x = n.x;
+  p.y = n.y;
+  p.vy = n.vy;
+}
+
+// ONE frame of a round's motion as a NEW state — the gravity fraction, then the
+// integration. `advance` applies it in place; the duck predicate below walks a
+// round forward with it WITHOUT touching the round it is judging, which is why
+// this is non-mutating rather than the in-place step it replaced.
+//
+// Arc: a projectile with gravity>0 falls under a fraction of world gravity, so
+// lobbed weapons (rockets, grenades) drop. gravity===0 (the default) leaves
+// every existing weapon on a straight line, unchanged.
+//
+// Homing steering stays in `advance` alone: a predicted round flies straight,
+// which is exactly why a duck against a homing round sometimes fails
+// (tech/soldier-ducking.md, approximation 2).
+export function stepProjectile(p, from, dt, world) {
+  const vy = p.gravity > 0 ? from.vy + p.gravity * world.gravity * dt : from.vy;
+  return { x: from.x + from.vx * dt, y: from.y + vy * dt, vx: from.vx, vy };
+}
+
+// ---- duck prediction (tech/soldier-ducking.md, D1) ------------------------
+
+// Would kneeling save THIS soldier from THIS round? Read-only: neither the
+// round nor the soldier is touched.
+//
+// The walk reproduces updateProjectiles' own order — advance, expire, terrain —
+// so a predicted hit and an actual hit cannot disagree on the last frame of a
+// round's life, which is the frame that matters most. It answers on the first
+// frame the round reaches the soldier: true when the round lands on the standing
+// box and misses the crouched one.
+//
+// Bodies are NOT blockers, friendly or hostile: anything in the line of fire can
+// move, duck, or die before the round arrives, so a soldier behind one stays
+// ready. It will sometimes kneel for a round something else absorbs; being
+// caught standing because someone else was expected to take it is worse.
+export function duckableShot(scene, p, s, dt, ctx = {}) {
+  if (p.dead || !s.alive || p.owner === s) return false;
+  // Who a round may hit is updateProjectiles' rule, not geometry — without it a
+  // squadmate ducks its own side's fire and the leader's.
+  if (p.team === "player" && !ctx.friendlyFire) return false;
+  // "Anything where getting smaller does not help" (design/soldier-behavior.md).
+  // A blast resolves by CENTRE DISTANCE from the impact point across every
+  // opposing actor, so a crouched box the round missed is caught anyway by a
+  // detonation on the soldier behind. A purely geometric predicate gets this
+  // wrong, so it is a rule rather than an approximation.
+  if ((p.effects || []).some((e) => e.kind === "explode")) return false;
+
+  // Both boxes hang off the feet line, the way setCrouch preserves it — so this
+  // answers the same question whichever stance the soldier is in right now.
+  const feet = s.y + s.h;
+  const stand = { x: s.x, y: feet - STAND_H, w: s.w, h: STAND_H };
+  const crouch = { x: s.x, y: feet - CROUCH_H, w: s.w, h: CROUCH_H };
+
+  const box = { x: p.x, y: p.y, w: p.w, h: p.h };
+  let at = { x: p.x, y: p.y, vx: p.vx, vy: p.vy };
+  let life = p.life;
+  const steps = Math.ceil(config.duckLookahead / dt);
+  for (let i = 0; i < steps; i++) {
+    at = stepProjectile(p, at, dt, scene.world);
+    life -= dt;
+    if (life <= 0) return false; // died of old age before it arrived
+    box.x = at.x;
+    box.y = at.y;
+    // Terrain is a stopping condition on the same walk, not a separate pass: a
+    // straight line-of-sight test would report an arcing pod blocked when it
+    // clears the wall, and clear when it arcs into it.
+    for (const plat of scene.platforms) if (overlaps(box, plat)) return false;
+    if (overlaps(box, stand)) return !overlaps(box, crouch);
+  }
+  return false;
 }
 
 // ---- effect resolution ----------------------------------------------------

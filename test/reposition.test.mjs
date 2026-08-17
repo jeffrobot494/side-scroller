@@ -17,6 +17,8 @@ import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.j
 import { holdPoint, abortRoute, invalidateNavGraphs } from "../src/mission/navigation.js";
 import { losBetween } from "../src/mission/enemyspec/perception.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
+import { updateProjectiles } from "../src/mission/combat.js";
+import { makeRng } from "../src/game/gen/rng.js";
 import { Soldier, STAND_H, stepActor } from "../src/mission/entities.js";
 import { config, resetConfig } from "../src/game/config.js";
 
@@ -415,6 +417,85 @@ export default async function run(t) {
     sim(g, sc, 14);
     config.navEnabled = true;
     t.ok("fallback: routing off disables repositioning too", cx(g) < 600);
+  }
+
+  // ---- escorting under fire (tech/soldier-ducking.md, D1) --------------------
+  // A duck costs a squadmate its legs, and escort is a move order with a
+  // wall-clock timeout that keeps ticking while the body cannot move. So a duck
+  // does interrupt escorting and the held route is discarded rather than
+  // resumed — the squadmate re-issues from where it now stands. This case is
+  // here to make that cost visible and bounded, not to deny it.
+  {
+    // The gunner sits past the 640px break-off, so the companion stays in
+    // ESCORT the whole way and never turns to fight it.
+    const FLAT = [{ x: 0, y: 500, w: 1400, h: 40 }];
+    const GUN = normalizeSpec({
+      v: 1, id: "escort_gunner", name: "EG", threat: 50,
+      root: { id: "root", tags: ["enemy"], visual: { size: [38, 38] }, health: { max: 1e9 }, motion: { type: "static" },
+        emitters: { gun: { at: [0, 0], projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 2, damage: 3 } } } },
+      brain: { start: "fire", states: { fire: { tracks: [{ id: "g", loop: true, steps: [
+        { fire: { emitter: "gun", pattern: "aimed" } }, { wait: 0.12 },
+      ] }] } } },
+    });
+
+    // One escort run, from a fixed seed so the gunner's shot jitter is the same
+    // in both. Returns how far left the companion got, and whether it kneeled.
+    const escortRun = (seconds, fire) => {
+      const real = Math.random;
+      Math.random = makeRng(20260816);
+      try {
+        const leader = new Soldier(rosterSoldier("L"), rifle, 150, 500 - STAND_H);
+        const comp = new Soldier(rosterSoldier("C"), rifle, 800, 500 - STAND_H);
+        comp.health = comp.maxHealth = 1e6;
+        const g = fire ? instantiate(GUN, 1360, 500 - 38) : null;
+        const sc = scene(FLAT, [leader, comp]);
+        if (g) sc.specRoots = [g];
+        let kneeled = 0;
+        let states = new Set();
+        for (let i = 0; i < Math.round(seconds * 60); i++) {
+          updateCompanionSpec(comp, STEP, sc, leader, ctx);
+          stepActor(comp, STEP, sc.world, sc.platforms);
+          if (g) updateSpecEnemy(g, STEP, sc, ctx);
+          updateProjectiles(sc, STEP, ctx);
+          if (comp.crouched) kneeled++;
+          states.add(comp.agent.brainState.current);
+        }
+        return { comp, kneeled, states, gap: Math.abs(cx(comp) - (cx(leader) - 90)) };
+      } finally {
+        Math.random = real;
+      }
+    };
+
+    const under = escortRun(4, true);
+    t.ok(`escort: it kneels while escorting (${under.kneeled} frames down)`, under.kneeled > 0);
+    t.ok("escort: and never breaks off to fight the distant gunner", !under.states.has("combat"));
+
+    // The price, stated as a comparison rather than assumed: the same four
+    // seconds of the same fire, with the reflex switched off, covers more ground.
+    const hold = config.duckHoldTime;
+    config.duckHoldTime = 0;
+    const standing = escortRun(4, true);
+    config.duckHoldTime = hold;
+    t.eq("escort: with the hold at 0 it never kneels", standing.kneeled, 0);
+    t.ok(`escort: ducking costs real progress (${Math.round(under.gap)}px short vs ${Math.round(standing.gap)}px)`,
+      under.gap > standing.gap);
+
+    // …and it is a delay, not a deadlock. The escort loop settles at a stable
+    // station of its own (the moveTo/wait cycle, not this feature), so the
+    // baseline is that station rather than zero: given longer under the same
+    // fire, a ducking squadmate still reaches it.
+    // …and it is a crawl, not a deadlock. The escort loop settles on a station of
+    // its own (its moveTo/wait cycle, not this feature), so the baseline is that
+    // station rather than zero: unshot at the squadmate is there in ~3s, while
+    // under sustained fire it keeps closing at a fraction of the rate and is
+    // still short 20 seconds later. Whether that reads as pinned down or as
+    // broken is a play question, and the hold knob is the dial.
+    const station = escortRun(6, false).gap;
+    const late = escortRun(20, true).gap;
+    t.ok(`escort: unshot at it settles on a station (${Math.round(station)}px off the offset)`, station < under.gap);
+    t.ok(`escort: under fire it is still closing, not stuck (${Math.round(under.gap)}px at 4s → ${Math.round(late)}px at 20s)`,
+      late < under.gap - 50);
+    t.ok(`escort: but nowhere near the station it reaches in 3 unshot seconds`, late > station);
   }
 
   resetConfig();
