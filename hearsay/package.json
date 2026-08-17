@@ -1,0 +1,15 @@
+{
+  "name": "hearsay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Epistemic access control for AI agents. Grok 4.6 decides who knows what; a fast model does the talking.",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

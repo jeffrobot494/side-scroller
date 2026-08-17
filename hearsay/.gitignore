@@ -1,0 +1,20 @@
+# Dependencies — never tracked. npm's .bin/* shims are symlinks that break
+# `git add` on Windows with "Invalid argument".
+node_modules/
+
+# Secrets. .env.example is tracked; .env never is.
+.env
+.env.local
+
+# Generated world state. Rebuild with `npm run seed`.
+data.json
+
+# Scratch
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# NOTE: cache/ is deliberately NOT ignored. Warmed propagations are the demo's
+# offline insurance — committing them means a fresh clone can run the whole
+# demo with no network and no xAI key.
