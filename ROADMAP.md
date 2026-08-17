@@ -83,6 +83,7 @@ description of what the game does today; this is only the index.
 | Ranged repositioning R1–R2 — a `keepDistance` agent that cannot see its target walks to somewhere it can, both teams | `tech/ranged-repositioning.md` |
 | Behavior Lab v2 B1–B3 — one agent on a generated level, click to set a goal, 1:1 panned view, graph + path overlays, draggable platforms (v1 deleted) | `design/behavior-lab.md` · `tech/behavior-lab.md` |
 | Campaign pacing C1–C5 — the day is the only currency, leads expire and arrive on the clock, the finale is gated on High wins | `design/campaign-pacing.md` · `tech/campaign-pacing.md` |
+| Soldier ducking D1–D2 — squadmates kneel under a round a knee would dodge, and the Speed stat decides whether and how fast | `design/soldier-behavior.md` · `tech/soldier-ducking.md` |
 | Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `design/design-map.md` · `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 

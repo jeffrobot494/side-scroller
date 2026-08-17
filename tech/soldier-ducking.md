@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: building
+status: built
 resolution: sharp
 sprint: 2026-08
 needs: [locomotion]

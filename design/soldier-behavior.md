@@ -16,7 +16,7 @@ one body to another instantly.
 | | Driven by | |
 |---|---|---|
 | **Controlled** | You | Full manual: move, jump, kneel, aim, fire, reload, swap away |
-| **Squadmate** | Itself | Follows you, picks its own targets, fires, reloads. Cannot kneel |
+| **Squadmate** | Itself | Follows you, picks its own targets, fires, reloads. Kneels only to duck a shot |
 
 Control moves automatically to the next living soldier when the one you are
 driving dies. The soldier you leave behind stands back up if it was kneeling and
@@ -62,8 +62,8 @@ Details that matter to how it reads on screen:
 | **Its gun tracks its target smoothly** | The barrel follows continuously rather than snapping between poses |
 | **It lowers its weapon when the field is clear** | With nothing alive to shoot, it stops firing and goes back to escorting |
 
-**A squadmate cannot kneel.** This is the single largest gap between what you can
-do and what they can do, and it is what the ducking plan below closes.
+**A squadmate kneels only as a reflex.** It never chooses to kneel the way you
+can — see *Ducking* below, and the standing gap in *Undecided*.
 
 ## How a soldier's stats change what they do
 
@@ -73,16 +73,13 @@ Four stats. Two of them currently do something.
 |---|---|
 | **Aim** | Tightens shot grouping. A high-Aim soldier's rounds land where the barrel points; a low-Aim soldier's scatter. Applies to you and to squadmates equally — your own aim stat widens your shots too |
 | **Health** | Sets maximum hit points. Persistent wounds are deducted from it |
-| **Speed** | **Nothing.** Described as "movement and reaction speed"; no soldier moves faster or reacts sooner because of it |
+| **Speed** | Decides a squadmate's duck: whether they react to a shot at all, and how long they take to get down once they do. A slow soldier misses more of them, and is visibly late on the ones it catches. No soldier moves faster because of it |
 | **Nerve** | **Nothing.** Described as composure under fire — panics, freezes, breaks. None of that exists |
 
 Traits ("Reckless", "Fearless", "Green") are displayed in the barracks and affect
 nothing.
 
-## Ducking — planned, not built
-
-**The gap.** Kneeling is a real defensive tool and squadmates cannot use it. They
-stand still and eat shots that a knee would have avoided.
+## Ducking
 
 **The capability.** A squadmate notices a shot coming that kneeling would avoid,
 and sometimes gets down in time.
@@ -130,7 +127,7 @@ not deliver.
 | | |
 |---|---|
 | **A squadmate never kneels except to dodge** | Ducking covers reacting to incoming fire. Kneeling to clear your line of fire, or to make itself small on approach, does not exist |
-| **Speed and Nerve do nothing** | Two of the four stats on the hire screen change no behaviour. Nerve is described as composure under fire — panic, freezing, breaking — and none of it exists |
+| **Nerve does nothing** | Described as composure under fire — panic, freezing, breaking — and none of it exists. Speed reaches exactly one behaviour, the duck |
 | **Traits do nothing** | "Reckless", "Fearless", "Green" and the rest are printed beside soldiers who behave identically |
 | **The escort position is fixed, and always to your left** | Not behind you — a literal fixed offset, so walking left puts your squad in front of you. It does not vary by facing, weapon, soldier, or situation |
 | **Squadmates take no account of each other** | Two will hold the same standoff from the same hostile in the same place. No spreading out, no roles, no flanking |

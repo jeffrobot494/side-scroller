@@ -166,6 +166,22 @@ section + the tests are the source of truth for what currently exists):
   last corpse's death spot and firing at it forever.
 - **Crouch:** hold S/↓ to kneel (lower hitbox to dodge fire + let allies shoot
   over you); enemies aim at standing height so crouch ducks under.
+- **Squadmates duck (`tech/soldier-ducking.md` D1–D2 — built).** A reflex BELOW
+  the brain, not a brain state: `tickDuck` (`src/mission/ai.js`) scans
+  `scene.projectiles` each frame and asks `duckableShot` (`src/mission/combat.js`)
+  whether kneeling would save this soldier from this round — a forward walk on
+  `updateProjectiles`' own order (advance, expire, terrain) off a non-mutating
+  `stepProjectile`, so a predicted hit and a real hit cannot disagree. Terrain and
+  lifetime end the walk (cover is never ducked behind uselessly); `explode` rounds
+  are excluded by rule; homing is predicted straight. The verdict is one per round
+  **per soldier**, then `stats.speed` rolls a chance and sets a latency
+  (`duckChance*`/`duckLatency*`), and the drop is a `crouchIntent` the SOLDIER
+  locomotor actuates — the same deferred shape as its pending jump. **Speed's
+  first behavioural consumer.** Two consequences worth knowing: mission.js no
+  longer force-stands squadmates, so *this* owns swap-away stand-up (legacy
+  companions keep the forced stand and never duck); and a round aimed at a
+  standing centre is NOT duckable — the crouched box top is 1px below it — so what
+  a knee answers is a round arriving in the upper half of the body.
 - **Enemy creation system (EnemySpec):** a full entity-composition enemy format
   + runtime (`src/game/enemyspec/` = schema/expr/validate/normalize/templates/
   dryrun/generate; `src/mission/enemyspec/` = runtime/brain/perception/render):
