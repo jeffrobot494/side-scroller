@@ -3,7 +3,9 @@ type: tech
 category: artificial-intelligence
 status: built
 resolution: sharp
+needs: []
 tags: [ai, enemies, companions, refactor, movement]
+related: [agent-navigation, behavior-lab, soldier-ducking]
 ---
 
 # Locomotion
@@ -129,6 +131,59 @@ enemyspec-specific, since Soldiers use it too), imported by the enemyspec runtim
 and by the companion path. Tunable numbers (jump impulse, walk accel, dash speed
 defaults) go in the config `SCHEMA` per the editor convention.
 
+## Reuses
+
+| What | Where | Why |
+|---|---|---|
+| The grounded integrator | `src/mission/entities.js` (`stepActor`, `canJump`, `consumeJump`) | Soldiers and legged spec bodies already move against the same gravity + per-axis platform collision. A locomotor picks the request; it does not own physics twice |
+| The player's own movement code | `src/mission/entities.js` (`Soldier.applyMovement`) | The `soldier` locomotor drives a companion down the SAME path input drives the player — accel, crouch lock, reload slow — rather than a parallel implementation that would drift |
+| The controller vocabulary | `src/game/enemyspec/schema.js` (`MOTIONS`) | The 10 motion controllers stay authored data. This changes what a controller *emits*, not what an author can write |
+| Per-entity movement state | `src/mission/enemyspec/runtime.js` (`ent.dash`, `ent.moveOrder`, `ent.patrolDir`) | Arbitration stays exactly where `moveEntity` had it, so the locomotor can be stateless |
+| Config schema | `src/game/config.js` (`SCHEMA`, "Movement / feel") | Repo convention: an impulse or a speed is a knob, not a constant |
+
+## Where the code goes
+
+| Piece | Module | Notes |
+|---|---|---|
+| The MotionRequest vocabulary and the three locomotors | `src/mission/locomotion.js` | Body-level, not enemyspec-specific — Soldiers use it too |
+| Choosing the ONE request (arbitration + controller translation) | `src/mission/enemyspec/runtime.js` (`moveEntity`, `motionRequest`, `controllerRequest`) | The brain layer resolves every world point, so the locomotor stays purely mechanical |
+| The companion bridge — mirror the body, aim, step the agent | `src/mission/ai.js` (`updateCompanionSpec`) | One place a Soldier is synced onto its agent and back |
+| The default companion, as data | `src/game/companionspecs.js` | Mirrors `enemyspecs.js`; a smarter companion is a data change |
+| Tests | `test/locomotion-characterization.test.mjs` + `test/locomotion.golden.json`, `test/locomotion-intents.test.mjs` | The golden pins trajectories; the intents suite pins the seam properties a golden cannot see |
+
+## The seam
+
+**This owns:** how one body satisfies exactly ONE request per frame — its
+horizontal write, its vertical semantics, its physics integration, its `facing`,
+and its jump/hop impulse.
+
+**This must not touch:**
+
+| | Why |
+|---|---|
+| Which target an agent has | Perception's (`nearestHostile`), resolved before the request is built |
+| When an agent decides anything | The brain's, on its own cadence |
+| Where a steering request points | The brain resolves every point to world coordinates; a locomotor that resolved targets would be a second brain |
+| The controlled soldier | Input drives it and the locomotor is skipped entirely, which is what preserves control-swap |
+| `aimVec` | A separate channel — a body can face one way and shoot another |
+
+**Orderings this sits inside:**
+
+| | |
+|---|---|
+| Perception and the brain run BEFORE actuation (`updateSpecEnemy`) | A request is built from last frame's post-step position, and the box the locomotor changes is seen on the next tick |
+| The mission steps a Soldier itself, after the bridge | The `soldier` locomotor never integrates physics; it only writes movement input and mirrors the result back onto the agent |
+
+## Must not regress
+
+`node test/run.mjs` fully green, with two suites carrying the weight:
+
+| Suite | What it pins |
+|---|---|
+| `test/locomotion-characterization.test.mjs` + `test/locomotion.golden.json` | Whole trajectories for the built-in roster and the motion templates. A changed golden is a behaviour change to be explained and accepted, never regenerated |
+| `test/locomotion-intents.test.mjs` | The seam itself — a dash is body-agnostic, a jump has one impulse, a companion escorts and engages on the shared brain |
+| `test/enemyspec-runtime.test.mjs`, `test/mission-enemyspec.test.mjs` | Spec enemies still move and fight in a real mission |
+
 ## Slices
 
 Each is independently testable. L1 and L2 change no observable behavior and are
@@ -212,6 +267,15 @@ as a fallback). Guard: `test/locomotion-intents.test.mjs`.
   validated in the Behavior Lab, then retire it.
 - Bar: companions behave at least as well as today, now on the shared brain; a
   smarter companion is then a data change, not code.
+
+## Approximations
+
+| # | Where it is not exact | What catches the failure |
+|---|---|---|
+| 1 | **One request per frame, never blended.** An agent that wants to hold range *and* climb expresses one of them; the other waits a frame | The arbitration order (dash > moveOrder > controller) is fixed and tested, so which one wins is at least predictable |
+| 2 | **The locomotor is stateless, so it cannot smooth anything.** Every request is actuated from scratch, which is why a body snaps between intents rather than easing | `test/locomotion.golden.json` — a smoothing pass would show up as a whole-trajectory diff |
+| 3 | **A soldier body gets no kinematic styles at all.** `orbit`/`hover`/`home` are flying-only, and `body.jump`/fractional `body.gravity` on a soldier body are rejected rather than ignored | `validateSpec` cases in `test/locomotion-intents.test.mjs` |
+| 4 | **`vertical` is a hint, not a command.** A legged body decides for itself whether a request that points upward means jump — pre-N3 that was a 40px heuristic with no terrain knowledge | Replaced by routed takeoffs in `tech/agent-navigation.md` N3; the heuristic survives only where the graph can say nothing |
 
 ## Out of scope (later, pure additions)
 
