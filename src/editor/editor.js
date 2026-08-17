@@ -14,7 +14,7 @@ import {
   exportConfig,
   importConfig,
 } from "../game/config.js";
-import { controlsHTML, bindControls } from "./controls.js";
+import { controlsTabsHTML, bindControls, showControlsTab } from "./controls.js";
 import { createWeaponDesigner } from "./tools/weapon-designer.js";
 import { createEnemyDesigner } from "./tools/enemy-designer.js";
 import { createLevelGenerator } from "./tools/level-generator.js";
@@ -34,6 +34,7 @@ applyWeaponOverrides();
 const root = document.getElementById("editor");
 let tab = "settings";
 let toolId = null; // which Tools-tab tool is open (null = the tool grid)
+let settingsTab = 0; // which SCHEMA group the Settings tab is showing
 let activeTool = null; // the mounted tool instance ({ dispose })
 
 // Auditioning a cue needs a live AudioContext, which browsers only grant inside
@@ -101,8 +102,9 @@ function settingsView() {
       run/jump speed) take effect immediately, even mid-mission. Load-time values (gravity) apply on your
       next deploy — reload the game after big changes. To make a tweak permanent, Export and paste the
       values into <code>src/game/config.js</code> defaults. Volumes live on the <strong>Sound</strong> tab.
+      A dot on a group means something in it differs from the default.
     </p>
-    <div id="cfg" class="cfg">${controlsHTML(SETTINGS_SCHEMA, config, isDefault)}</div>
+    <div id="cfg" class="cfg">${controlsTabsHTML(SETTINGS_SCHEMA, config, isDefault, settingsTab)}</div>
     <section class="ed-io">
       <div class="ed-io-btns">
         <button class="btn" data-action="reset">Reset all to defaults</button>
@@ -132,6 +134,13 @@ function toolsView() {
 }
 
 root.addEventListener("click", (e) => {
+  // Settings sub-tabs. Handled before the main tabs because both are buttons in
+  // the same tree, and this one must not re-render.
+  const cfgTab = e.target.closest("[data-cfg-tab]");
+  if (cfgTab) {
+    settingsTab = showControlsTab(document.getElementById("cfg"), cfgTab.dataset.cfgTab);
+    return;
+  }
   const tb = e.target.closest("[data-tab]");
   if (tb) {
     toolId = null;
@@ -151,7 +160,7 @@ root.addEventListener("click", (e) => {
   switch (act.dataset.action) {
     case "reset":
       resetConfig();
-      render();
+      render(); // settingsTab survives: render() reads it back out of module state
       msg("Reset all settings to defaults.");
       break;
     case "export":

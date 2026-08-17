@@ -274,6 +274,13 @@ export const SCHEMA = [
         default: true,
         help: "Frame-rate meter in the top-right of the base and the mission. Live.",
       },
+      {
+        key: "debugOverlays",
+        label: "Debug overlays in missions",
+        type: "bool",
+        default: false,
+        help: "Unlocks the in-mission nav overlay keys (Graph / Path — rebindable in the Controls tool), which draw the squad's node graph and the routes companions are holding, the same views the Behavior Lab shows. Off means the keys do nothing, so a build handed to someone else cannot land in a debug view. Live.",
+      },
     ],
   },
   {

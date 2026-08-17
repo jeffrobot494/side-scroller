@@ -11,7 +11,11 @@
 // ---------------------------------------------------------------------------
 
 // Logical actions the action layer understands. `reload` is new (magazine/reload).
-export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload"];
+// debugGraph/debugPath toggle the mission's nav overlays and are inert unless
+// config.debugOverlays is on — they are bound here rather than hardcoded because
+// nothing in this game hardcodes a key, and being rebindable is what lets them
+// move off a key a player might hit.
+export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload", "debugGraph", "debugPath"];
 
 // Human labels for the remap UI.
 export const ACTION_LABELS = {
@@ -23,6 +27,8 @@ export const ACTION_LABELS = {
   fire: "Fire",
   swap: "Swap soldier",
   reload: "Reload",
+  debugGraph: "Debug: nav graph",
+  debugPath: "Debug: companion paths",
 };
 
 // Default physical-key → action map (KeyboardEvent.code). Two keys may share an
@@ -42,6 +48,8 @@ export const DEFAULT_KEYS = {
   Tab: "swap",
   ShiftLeft: "jump",
   KeyR: "reload",
+  KeyG: "debugGraph",
+  KeyH: "debugPath",
 };
 
 // Fixed gamepad map (W3C "standard" mapping). Buttons fold into the same held +

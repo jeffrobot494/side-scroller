@@ -6,6 +6,8 @@ import { createEnemyDesigner } from "../src/editor/tools/enemy-designer.js";
 import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
 import { createFiringRoom } from "../src/editor/tools/firing-room.js";
 import { createSoundPage } from "../src/editor/sound-page.js";
+import { controlsTabsHTML, showControlsTab } from "../src/editor/controls.js";
+import { SCHEMA, config, resetConfig, setConfig, isDefault } from "../src/game/config.js";
 import { Soldier } from "../src/mission/entities.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
@@ -108,5 +110,65 @@ export default async function run(t) {
     t.ok("input: S → crouch", inp.isDown("crouch"));
     inp.disable();
     t.ok("input: disable clears state", !inp.isDown("right") && !inp.isDown("crouch"));
+  }
+
+  // ---- Settings: one group per tab, not one long scroll --------------------
+  // The renderer is a pure string function, so the layout is assertable without
+  // a DOM. What matters: every group reachable, exactly one visible at a time,
+  // and the tab strip flagging which groups hold a change.
+  {
+    resetConfig();
+    const settings = SCHEMA.filter((g) => g.title !== "Sound"); // the Sound tab owns those
+    const html = controlsTabsHTML(settings, config, isDefault, 0);
+    const tabs = [...html.matchAll(/data-cfg-tab="(\d+)"/g)].map((m) => m[1]);
+    const panels = [...html.matchAll(/data-cfg-panel="(\d+)"(\s*hidden)?/g)];
+
+    t.eq(`tabs: one per schema group (${settings.length})`, tabs.length, settings.length);
+    t.eq("tabs: one panel per group too", panels.length, settings.length);
+    t.eq("tabs: exactly one panel is visible", panels.filter((m) => !m[2]).length, 1);
+    t.eq("tabs: and it is the requested one", panels.findIndex((m) => !m[2]), 0);
+    t.ok("tabs: every group title is on a tab", settings.every((g) => html.includes(`>${g.title}<`)));
+    // Every knob still renders — tabbing must not drop controls off the page.
+    const rows = [...html.matchAll(/data-row="/g)].length;
+    const all = settings.reduce((n, g) => n + g.items.length, 0);
+    t.eq(`tabs: every setting still has a row (${all})`, rows, all);
+
+    const later = controlsTabsHTML(settings, config, isDefault, 3);
+    const p3 = [...later.matchAll(/data-cfg-panel="(\d+)"(\s*hidden)?/g)];
+    t.eq("tabs: a different active index opens a different panel", p3.findIndex((m) => !m[2]), 3);
+
+    // The changed dot: a non-default value lights its own tab and no other.
+    const target = settings.findIndex((g) => g.items.some((it) => it.type === "bool"));
+    const knob = settings[target].items.find((it) => it.type === "bool");
+    setConfig(knob.key, !config[knob.key]);
+    const dirty = controlsTabsHTML(settings, config, isDefault, 0);
+    const flagged = [...dirty.matchAll(/data-cfg-tab="(\d+)"\s*\n?\s*class="[^"]*changed/g)].map((m) => Number(m[1]));
+    t.ok(`tabs: the group holding a change is flagged (${settings[target].title})`, flagged.includes(target));
+    t.eq("tabs: and only that group", flagged.length, 1);
+    resetConfig();
+  }
+
+  // ---- showControlsTab swaps panels in place -------------------------------
+  // Switching must not re-render: the caller binds events once, and a rebuild
+  // would wipe a half-typed Import textarea. Driven against a minimal fake root
+  // because the shared harness element does not implement querySelectorAll.
+  {
+    const mk = (attr, i) => {
+      const el = { dataset: { [attr]: String(i) }, hidden: i !== 0, _cls: new Set(i === 0 ? ["active"] : []), _aria: null };
+      el.setAttribute = (k, v) => { if (k === "hidden") el.hidden = true; else el._aria = v; };
+      el.removeAttribute = (k) => { if (k === "hidden") el.hidden = false; };
+      el.classList = { toggle: (c, on) => (on ? el._cls.add(c) : el._cls.delete(c)) };
+      return el;
+    };
+    const panels = [0, 1, 2].map((i) => mk("cfgPanel", i));
+    const tabs = [0, 1, 2].map((i) => mk("cfgTab", i));
+    const root = { querySelectorAll: (sel) => (sel.includes("panel") ? panels : tabs) };
+
+    const shown = showControlsTab(root, 2);
+    t.eq("switch: returns the index it opened", shown, 2);
+    t.ok("switch: only the chosen panel is visible", panels.filter((p) => !p.hidden).length === 1 && !panels[2].hidden);
+    t.ok("switch: the active tab moved with it", tabs[2]._cls.has("active") && !tabs[0]._cls.has("active"));
+    t.eq("switch: out-of-range is clamped, never a blank page", showControlsTab(root, 99), 2);
+    t.eq("switch: and a junk index falls back to the first", showControlsTab(root, "nope"), 0);
   }
 }

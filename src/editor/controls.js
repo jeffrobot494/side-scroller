@@ -7,17 +7,55 @@
 // ---------------------------------------------------------------------------
 
 export function controlsHTML(schema, config, isDefault) {
-  return schema
-    .map(
-      (group) => `
+  return schema.map((group) => groupHTML(group, config, isDefault)).join("");
+}
+
+// The same controls, one group at a time behind a tab strip. Every panel is in
+// the DOM and the inactive ones carry `hidden`, so the caller binds events once
+// and switching tabs is a class toggle rather than a re-render — which is what
+// keeps a half-typed Import textarea alive across a tab click.
+//
+// A tab whose group holds a non-default value gets the same dot a changed row
+// gets, so "what did I change" is answerable without opening all ten.
+export function controlsTabsHTML(schema, config, isDefault, active = 0) {
+  const tabs = schema
+    .map((group, i) => {
+      const changed = isDefault ? group.items.some((it) => isDefault(it.key) === false) : false;
+      return `<button type="button" role="tab" aria-selected="${i === active}" data-cfg-tab="${i}"
+        class="${i === active ? "active" : ""}${changed ? " changed" : ""}">${group.title}<span class="cfg-dot" title="Changed from default">●</span></button>`;
+    })
+    .join("");
+
+  const panels = schema
+    .map((group, i) => `<div data-cfg-panel="${i}"${i === active ? "" : " hidden"}>${groupHTML(group, config, isDefault)}</div>`)
+    .join("");
+
+  return `<div class="cfg-tabs" role="tablist">${tabs}</div><div class="cfg-panels">${panels}</div>`;
+}
+
+// Show panel `index`, hide the rest, and move the active tab. Returns the index
+// actually shown so a caller can remember it.
+export function showControlsTab(root, index) {
+  if (!root) return 0;
+  const panels = root.querySelectorAll("[data-cfg-panel]");
+  const tabs = root.querySelectorAll("[data-cfg-tab]");
+  const i = Math.max(0, Math.min(panels.length - 1, Number(index) || 0));
+  panels.forEach((p, n) => { if (n === i) p.removeAttribute("hidden"); else p.setAttribute("hidden", ""); });
+  tabs.forEach((t, n) => {
+    t.classList.toggle("active", n === i);
+    t.setAttribute("aria-selected", String(n === i));
+  });
+  return i;
+}
+
+function groupHTML(group, config, isDefault) {
+  return `
       <section class="cfg-group">
         <h2>${group.title}</h2>
         <div class="cfg-items">
           ${group.items.map((it) => rowHTML(it, config[it.key], isDefault ? isDefault(it.key) : true)).join("")}
         </div>
-      </section>`
-    )
-    .join("");
+      </section>`;
 }
 
 function rowHTML(item, value, isDef) {
@@ -82,7 +120,14 @@ export function bindControls(root, onChange) {
 
 function mark(root, key) {
   const row = root.querySelector(`[data-row="${key}"]`);
-  if (row) row.classList.add("changed");
+  if (!row) return;
+  row.classList.add("changed");
+  // Light the owning tab too, so a change made on one tab is still findable
+  // from another. No-op in the untabbed layout, which has no panels.
+  const panel = row.closest("[data-cfg-panel]");
+  if (!panel) return;
+  const tab = root.querySelector(`[data-cfg-tab="${panel.dataset.cfgPanel}"]`);
+  if (tab) tab.classList.add("changed");
 }
 
 function fmt(n) {

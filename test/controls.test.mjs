@@ -2,7 +2,8 @@
 // the shared projectile renderer's shape defaulting, and the Controls tool mount.
 import { installDom, makeEl } from "./harness.mjs";
 import { keyBindings, DEFAULT_KEYS, setKeyBinding, resetKeys, bindingsForAction,
-  padBindings, DEFAULT_PAD, setPadButton, setPadAxis, resetPad, padButtonsForAction } from "../src/game/controlmap.js";
+  padBindings, DEFAULT_PAD, setPadButton, setPadAxis, resetPad, padButtonsForAction,
+  ACTIONS, ACTION_LABELS } from "../src/game/controlmap.js";
 import { MissionInput } from "../src/mission/input.js";
 import { defaultShape } from "../src/mission/render.js";
 import { createControlsMapper } from "../src/editor/tools/controls-mapper.js";
@@ -106,6 +107,23 @@ export default async function run(t) {
   t.ok("shape: long+thin → bolt", defaultShape({ w: 20, h: 4 }) === "bolt");
   t.ok("shape: tiny → pellet", defaultShape({ w: 5, h: 4 }) === "pellet");
   t.ok("shape: default → bullet", defaultShape({ w: 10, h: 4 }) === "bullet");
+
+  // ---- debug overlay actions ---------------------------------------------
+  // The mission's nav overlays are bound like everything else rather than
+  // hardcoded, which is what lets them move off a key a player might hit. The
+  // config gate (config.debugOverlays) is what keeps them out of someone else's
+  // build; the bindings themselves are always present.
+  resetKeys();
+  t.ok("controlmap: default KeyG → debugGraph", keyBindings.KeyG === "debugGraph");
+  t.ok("controlmap: default KeyH → debugPath", keyBindings.KeyH === "debugPath");
+  t.ok("controlmap: both debug actions are rebindable like any other",
+    ACTIONS.includes("debugGraph") && ACTIONS.includes("debugPath"));
+  t.ok("controlmap: they carry labels, so the Controls tool can list them",
+    !!ACTION_LABELS.debugGraph && !!ACTION_LABELS.debugPath);
+  setKeyBinding("KeyP", "debugPath");
+  t.ok("rebind: KeyP now toggles paths", keyBindings.KeyP === "debugPath");
+  t.ok("rebind: the old debug key was cleared", keyBindings.KeyH === undefined);
+  resetKeys();
 
   // ---- Controls tool mounts headlessly -----------------------------------
   {

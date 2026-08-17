@@ -36,6 +36,7 @@ import { loadMission, Soldier, stepActor } from "../../mission/entities.js";
 import { instantiate, updateSpecEnemy } from "../../mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../../game/enemyspec/normalize.js";
 import { profileFor, graphFor, invalidateNavGraphs } from "../../mission/navigation.js";
+import { drawNavGraph, drawNavPath, NAV_EDGE_COLOR } from "../../mission/render.js";
 import { WEAPONS } from "../../game/content.js";
 import { SCHEMA, config, setConfig, isDefault } from "../../game/config.js";
 import { controlsHTML, bindControls } from "../controls.js";
@@ -81,7 +82,8 @@ const CTX = { friendlyFire: false, damageMult: 1, damage() {}, kill() {}, spark(
 // platforms are solid and you cannot climb back up the way you fell. Drawing
 // them all one colour would hide the single most surprising thing about the
 // graph.
-const EDGE_COLOR = { walk: "#4b5a6e", hop: "#4fd1c5", jump: "#7bd47b", drop: "#e2934a" };
+// Legend colours come from the shared renderer so the swatches match the lines.
+const EDGE_COLOR = NAV_EDGE_COLOR;
 
 // ---- the model --------------------------------------------------------------
 
@@ -249,85 +251,20 @@ export function labPath(lab) {
 // throw inside one would never run at mount and would ship unseen. This way a
 // headless test can turn both on and execute every path.
 
-// Node spans are in body-LEFT-EDGE space (that is what the router works in),
-// so a span drawn raw sits half a body to the left of where the agent will
-// actually stand. Draw in CENTRE space, which is where the box on screen is.
-const spanL = (lab, n) => n.a + lab.soldier.w / 2;
-const spanR = (lab, n) => n.b + lab.soldier.w / 2;
-const spanMid = (lab, n) => (spanL(lab, n) + spanR(lab, n)) / 2;
-const onScreen = (lab, x0, x1) => Math.max(x0, x1) >= lab.panX && Math.min(x0, x1) <= lab.panX + VIEW_W;
-
-// Every standable node and every move between them, for THIS body.
+// Both overlays draw through the shared renderer (src/mission/render.js), so the
+// Lab and the mission's in-game debug overlay cannot drift apart. Spans arrive in
+// body-LEFT-EDGE space — what the router works in — and `halfW` shifts them into
+// centre space, which is where the box on screen is.
 function drawGraph(ctx, lab) {
-  const g = labGraph(lab);
-
-  for (let i = 0; i < g.nodes.length; i++) {
-    const from = g.nodes[i];
-    for (const e of g.edges[i]) {
-      const to = g.nodes[e.to];
-      const x0 = spanMid(lab, from);
-      const x1 = spanMid(lab, to);
-      if (!onScreen(lab, x0, x1)) continue;
-      ctx.strokeStyle = EDGE_COLOR[e.kind] || "#4b5a6e";
-      ctx.globalAlpha = 0.5;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x0, from.y);
-      ctx.lineTo(x1, to.y);
-      ctx.stroke();
-      // An arrowhead near the destination: without it a one-way drop and a
-      // two-way pair of hops look identical.
-      const t = 0.78;
-      const hx = x0 + (x1 - x0) * t;
-      const hy = from.y + (to.y - from.y) * t;
-      const len = Math.hypot(x1 - x0, to.y - from.y) || 1;
-      const ux = (x1 - x0) / len;
-      const uy = (to.y - from.y) / len;
-      ctx.globalAlpha = 0.9;
-      ctx.beginPath();
-      ctx.moveTo(hx + ux * 5, hy + uy * 5);
-      ctx.lineTo(hx - uy * 3.5, hy + ux * 3.5);
-      ctx.lineTo(hx + uy * 3.5, hy - ux * 3.5);
-      ctx.closePath();
-      ctx.fillStyle = EDGE_COLOR[e.kind] || "#4b5a6e";
-      ctx.fill();
-    }
-  }
-
-  ctx.globalAlpha = 1;
-  for (const n of g.nodes) {
-    if (!onScreen(lab, spanL(lab, n), spanR(lab, n))) continue;
-    ctx.fillStyle = "#7ad7ff";
-    ctx.fillRect(spanL(lab, n), n.y - 2, Math.max(2, spanR(lab, n) - spanL(lab, n)), 3);
-  }
+  drawNavGraph(ctx, labGraph(lab), {
+    halfW: lab.soldier.w / 2,
+    viewL: lab.panX,
+    viewR: lab.panX + VIEW_W,
+  });
 }
 
-// The route the agent holds right now, drawn over the graph.
 function drawPath(ctx, lab) {
-  const g = labGraph(lab);
-  const path = labPath(lab);
-  if (!path.length) return;
-  ctx.strokeStyle = "#ffd479";
-  ctx.lineWidth = 2.5;
-  ctx.globalAlpha = 0.95;
-  ctx.beginPath();
-  for (let i = 0; i < path.length; i++) {
-    const n = g.nodes[path[i]];
-    if (!n) break; // the graph was rebuilt under a held path; draw what is valid
-    const x = spanMid(lab, n);
-    if (i === 0) ctx.moveTo(x, n.y);
-    else ctx.lineTo(x, n.y);
-  }
-  ctx.stroke();
-  for (const id of path) {
-    const n = g.nodes[id];
-    if (!n) continue;
-    ctx.fillStyle = "#ffd479";
-    ctx.beginPath();
-    ctx.arc(spanMid(lab, n), n.y, 4, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
+  drawNavPath(ctx, labGraph(lab), labPath(lab), { halfW: lab.soldier.w / 2 });
 }
 
 export function labDraw(ctx, lab) {

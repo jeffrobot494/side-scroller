@@ -8,10 +8,12 @@
 // ---------------------------------------------------------------------------
 
 import { MissionInput } from "./input.js";
-import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload } from "./entities.js";
+import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload, STAND_H } from "./entities.js";
 import { fire, updateCompanion, updateCompanionSpec, aimAccuracy } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
-import { drawProjectile } from "./render.js";
+import { drawProjectile, drawNavGraph, drawNavPath } from "./render.js";
+import { graphFor } from "./navigation.js";
+import { bodyProfile } from "../game/nav.js";
 import {
   updateSpecEnemy, collidables,
   applyDamage as specDamage, killEntity as specKill,
@@ -47,6 +49,9 @@ export class Mission {
     this.introTimer = 2.2;
     this.endBanner = null; // { success, timer } once the mission resolves
     this.result = null;
+    // Nav debug overlays, off every deploy. Toggled by the debugGraph/debugPath
+    // actions and only while config.debugOverlays is on.
+    this.debug = { graph: false, path: false };
 
     // Bridge to the shared combat module: rules run in combat.js, cosmetics +
     // bookkeeping stay here. friendlyFire/damageMult read live from config.
@@ -164,6 +169,44 @@ export class Mission {
     if (this.input.justPressed("swap")) this._swapControl(1);
     // Auto-swap off a dead soldier.
     if (!this.currentSoldier().alive) this._swapControl(1);
+    // Debug overlays. The keys are always bound; the config gate is what keeps
+    // them out of a build handed to somebody else. Edge-triggered, so holding
+    // the key does not strobe.
+    if (config.debugOverlays) {
+      if (this.input.justPressed("debugGraph")) this.debug.graph = !this.debug.graph;
+      if (this.input.justPressed("debugPath")) this.debug.path = !this.debug.path;
+    }
+  }
+
+  // The graph the SQUAD routes on. Soldier bodies all share one profile — the
+  // locomotor jumps with config.jumpSpeed under unscaled world gravity whatever
+  // the spec's body fields claim (see profileFor in navigation.js) — so this is
+  // the same cache entry every companion's router already resolved, not a
+  // second graph built for the picture. STAND_H, not the live height: a
+  // kneeling soldier is still routed as a standing one, and reading `s.h` would
+  // flip the whole overlay to a different graph the instant you crouch.
+  _squadGraph() {
+    const s = this.currentSoldier();
+    if (!s) return null;
+    return graphFor(this.scene, bodyProfile({
+      w: s.w,
+      h: STAND_H,
+      gravity: this.scene.world.gravity,
+      jumpSpeed: config.jumpSpeed,
+      runSpeed: config.runSpeed,
+    }));
+  }
+
+  // Routes the squad is HOLDING — read off each companion's own nav state, never
+  // recomputed. A view that repathed to draw would show a fresher route than the
+  // one being walked, which is the thing you turn this on to catch.
+  _drawSquadPaths(ctx, graph) {
+    for (const s of this.scene.soldiers) {
+      if (!s.alive || s === this.currentSoldier()) continue; // the player holds no route
+      const nav = s.agent && s.agent.nav;
+      if (!nav || !nav.path || !nav.path.length) continue;
+      drawNavPath(ctx, graph, nav.path, { halfW: s.w / 2, color: s.color });
+    }
   }
 
   _swapControl(dir) {
@@ -512,6 +555,23 @@ export class Mission {
     );
 
     this._drawPlatforms(ctx, scene, z);
+    // Nav overlays sit on the terrain and under everything alive, so bodies and
+    // shots stay readable through them. One graph resolution per frame, shared
+    // by both toggles.
+    if (config.debugOverlays && (this.debug.graph || this.debug.path)) {
+      const graph = this._squadGraph();
+      if (graph) {
+        if (this.debug.graph) {
+          drawNavGraph(ctx, graph, {
+            halfW: this.currentSoldier().w / 2,
+            viewL: this.camera.x,
+            viewR: this.camera.x + W / z,
+          });
+        }
+        if (this.debug.path) this._drawSquadPaths(ctx, graph);
+      }
+      ctx.globalAlpha = 1;
+    }
     this._drawExit(ctx, scene.exit, z);
     for (const l of scene.loot) this._drawLoot(ctx, l);
     for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z);

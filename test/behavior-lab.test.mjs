@@ -21,6 +21,7 @@ import { installDom, makeEl, ctx2d } from "./harness.mjs";
 import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, labGraph, labPath, labDraw, labInvalidate, labPlatformAt, labDragStart, labDragMove, labDragEnd, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
 import { profileKey } from "../src/game/nav.js";
 import { config, resetConfig, SCHEMA } from "../src/game/config.js";
+import { drawNavGraph, drawNavPath } from "../src/mission/render.js";
 
 const STEP = 1 / 60;
 const run = (lab, seconds) => {
@@ -259,6 +260,42 @@ export default async function run_(t) {
     t.ok(`graph: at least one move is one-way, so direction is not decoration (${oneWay[0] && oneWay[0].join("→")})`, oneWay.length > 0);
     t.ok("graph: every edge carries a kind the overlay has a colour for",
       g.edges.every((list) => list.every((e) => ["walk", "hop", "jump", "drop"].includes(e.kind))));
+  }
+
+  // ---- the overlays are drawn by the SHARED renderer -------------------------
+  // Both drawers moved to src/mission/render.js so the Lab and the mission's
+  // in-game debug overlay cannot drift apart. These pin the two properties the
+  // move could break: spans are shifted into centre space by halfW (a raw span
+  // sits half a body left of where the agent stands), and a path node that no
+  // longer exists in the graph is survivable rather than a throw — which is
+  // exactly the state a rebuilt graph under a held path produces.
+  {
+    const lab = model();
+    const g = labGraph(lab);
+    const halfW = lab.soldier.w / 2;
+    const calls = [];
+    const spy = {
+      ...ctx2d(),
+      fillRect: (x, y, w, h) => calls.push({ x, w }),
+      beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fill() {}, arc() {}, closePath() {},
+    };
+    drawNavGraph(spy, g, { halfW, viewL: -Infinity, viewR: Infinity });
+    const node = g.nodes[0];
+    const drawn = calls.find((c) => Math.abs(c.x - (node.a + halfW)) < 0.001);
+    t.ok("shared: node spans are drawn in centre space, shifted by half a body", !!drawn);
+    t.eq("shared: every node got a span", calls.length, g.nodes.length);
+
+    // Culling: a window left of the whole level draws nothing.
+    const none = [];
+    drawNavGraph({ ...spy, fillRect: (x) => none.push(x) }, g, { halfW, viewL: -9e5, viewR: -8e5 });
+    t.eq("shared: off-screen nodes are culled, not drawn", none.length, 0);
+
+    let threw = null;
+    try { drawNavPath(spy, g, [0, 999999], { halfW }); } catch (e) { threw = e; }
+    t.ok("shared: a path holding a node the graph no longer has does not throw", !threw);
+    try { drawNavGraph(spy, null, {}); drawNavPath(spy, g, null, {}); }
+    catch (e) { threw = e; }
+    t.ok("shared: no graph / no path is a no-op, not a crash", !threw);
   }
 
   // ---- B2: the Path overlay --------------------------------------------------

@@ -18,6 +18,109 @@
 
 export const PROJECTILE_SHAPES = ["bullet", "orb", "bolt", "missile", "pellet", "wave"];
 
+// ---- navigation overlays --------------------------------------------------
+// The nav graph and a held route, drawn in WORLD space by whoever has already
+// set the transform. Shared by the Behavior Lab (1:1, panned) and the mission's
+// debug overlay (camera + zoom) so the two cannot drift apart — one set of edge
+// colours, one arrowhead, one legend.
+//
+// Deliberately takes a graph and a path rather than a scene: navigation.js
+// resolves which graph belongs to which body, and this module must not acquire
+// an opinion about that (or an import cycle with it).
+//
+// `halfW` is the body's half-width. Node spans are in body-LEFT-EDGE space —
+// that is what the router works in — so a span drawn raw sits half a body left
+// of where the agent actually stands. Callers pass halfW to shift into CENTRE
+// space, which is where the box on screen is.
+
+export const NAV_EDGE_COLOR = { walk: "#4b5a6e", hop: "#4fd1c5", jump: "#7bd47b", drop: "#e2934a" };
+
+const NODE_COLOR = "#7ad7ff";
+const PATH_COLOR = "#ffd479";
+
+// Every standable node and every directed move between them, for ONE body.
+// viewL/viewR cull to what is on screen; a generated level is far wider than any
+// viewport and drawing all of it every frame is wasted work.
+export function drawNavGraph(ctx, graph, { halfW = 0, viewL = -Infinity, viewR = Infinity } = {}) {
+  if (!graph || !graph.nodes) return;
+  const mid = (n) => (n.a + n.b) / 2 + halfW;
+  const visible = (x0, x1) => Math.max(x0, x1) >= viewL && Math.min(x0, x1) <= viewR;
+
+  for (let i = 0; i < graph.nodes.length; i++) {
+    const from = graph.nodes[i];
+    for (const e of graph.edges[i]) {
+      const to = graph.nodes[e.to];
+      if (!to) continue;
+      const x0 = mid(from);
+      const x1 = mid(to);
+      if (!visible(x0, x1)) continue;
+      const color = NAV_EDGE_COLOR[e.kind] || NAV_EDGE_COLOR.walk;
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x0, from.y);
+      ctx.lineTo(x1, to.y);
+      ctx.stroke();
+      // An arrowhead near the destination: without it a one-way drop and a
+      // two-way pair of hops look identical.
+      const t = 0.78;
+      const hx = x0 + (x1 - x0) * t;
+      const hy = from.y + (to.y - from.y) * t;
+      const len = Math.hypot(x1 - x0, to.y - from.y) || 1;
+      const ux = (x1 - x0) / len;
+      const uy = (to.y - from.y) / len;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(hx + ux * 5, hy + uy * 5);
+      ctx.lineTo(hx - uy * 3.5, hy + ux * 3.5);
+      ctx.lineTo(hx + uy * 3.5, hy - ux * 3.5);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+  }
+
+  ctx.globalAlpha = 1;
+  for (const n of graph.nodes) {
+    const l = n.a + halfW;
+    const r = n.b + halfW;
+    if (!visible(l, r)) continue;
+    ctx.fillStyle = NODE_COLOR;
+    ctx.fillRect(l, n.y - 2, Math.max(2, r - l), 3);
+  }
+}
+
+// A route an agent is HOLDING — never recomputed by the caller. A view that
+// repathed to draw would show a fresher route than the one being walked, which
+// is exactly the thing you would turn this on to diagnose.
+export function drawNavPath(ctx, graph, path, { halfW = 0, color = PATH_COLOR } = {}) {
+  if (!graph || !graph.nodes || !path || !path.length) return;
+  const mid = (n) => (n.a + n.b) / 2 + halfW;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.globalAlpha = 0.95;
+  ctx.beginPath();
+  for (let i = 0; i < path.length; i++) {
+    const n = graph.nodes[path[i]];
+    if (!n) break; // the graph was rebuilt under a held path; draw what is valid
+    const x = mid(n);
+    if (i === 0) ctx.moveTo(x, n.y);
+    else ctx.lineTo(x, n.y);
+  }
+  ctx.stroke();
+  for (const id of path) {
+    const n = graph.nodes[id];
+    if (!n) continue;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(mid(n), n.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 // Pick a look for a projectile with no explicit shape (keeps old content valid).
 export function defaultShape(p) {
   if (p.w >= 12 && p.h >= 12) return "orb"; // big and round → plasma orb
