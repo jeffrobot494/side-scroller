@@ -484,18 +484,18 @@ export default async function run(t) {
     // station of its own (the moveTo/wait cycle, not this feature), so the
     // baseline is that station rather than zero: given longer under the same
     // fire, a ducking squadmate still reaches it.
-    // …and it is a crawl, not a deadlock. The escort loop settles on a station of
-    // its own (its moveTo/wait cycle, not this feature), so the baseline is that
-    // station rather than zero: unshot at the squadmate is there in ~3s, while
-    // under sustained fire it keeps closing at a fraction of the rate and is
-    // still short 20 seconds later. Whether that reads as pinned down or as
-    // broken is a play question, and the hold knob is the dial.
+    // …and it is a delay, not a deadlock. The escort loop settles on a station
+    // of its own (its moveTo/wait cycle, not this feature), so the baseline is
+    // that station rather than zero: unshot at the squadmate is there in ~3s,
+    // under this fire in ~6s. D1 — where every reaction was certain and
+    // immediate — left it crawling instead, still 300px short after twenty
+    // seconds. The Speed dice are what make ducking while escorting affordable,
+    // which is the risk approximation 4 named.
     const station = escortRun(6, false).gap;
     const late = escortRun(20, true).gap;
     t.ok(`escort: unshot at it settles on a station (${Math.round(station)}px off the offset)`, station < under.gap);
-    t.ok(`escort: under fire it is still closing, not stuck (${Math.round(under.gap)}px at 4s → ${Math.round(late)}px at 20s)`,
-      late < under.gap - 50);
-    t.ok(`escort: but nowhere near the station it reaches in 3 unshot seconds`, late > station);
+    t.ok(`escort: under fire it still gets there, later (${Math.round(under.gap)}px short at 4s → ${Math.round(late)}px)`,
+      late <= station + 20);
   }
 
   resetConfig();

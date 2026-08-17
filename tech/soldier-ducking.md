@@ -50,6 +50,14 @@ needs a D1 baseline where the geometry is known to work to be judged against.
 | The reflex — scan, roll, hold | `src/mission/ai.js` | Beside `updateCompanionSpec`, the companion-only per-frame seam. Not in the spec runtime: spec bodies have no knee |
 | The actuator — a crouch channel | `src/mission/locomotion.js` | The `SOLDIER` locomotor is the single actuation point for a companion body and stays so. It gains a third channel beside the move and jump it already translates |
 | The knobs — hold duration (D1); chance curve and latency curve (D2) | `src/game/config.js` | "Movement / feel" |
+| Tests | `test/crouch.test.mjs` for the predicate's geometry; `test/companion-aim.test.mjs` for both slices' behaviour | See *The test scaffolding does not exist yet*, below — this is not a free reuse |
+
+**As built (D2): four knobs for the two curves.** `duckChanceSlow`/
+`duckChanceFast` and `duckLatencySlow`/`duckLatencyFast` are the value at Speed 1
+and at Speed 10; the stat interpolates linearly between them, the same shape
+`aimAccuracy` gives Aim. Two knobs per curve rather than one, because a curve
+with a fixed end is not tunable at the end that matters — a designer wants to say
+"nobody is hopeless" or "nobody is superhuman" without touching the other end.
 
 **As built (D1): two knobs, not one.** `duckHoldTime` is the hold duration above,
 and doubles as the off switch (0 = the reflex never fires, which is what the A/B
@@ -58,7 +66,6 @@ cap the walk runs a round's whole remaining lifetime — up to 3s for a spore po
 per soldier, per round, every frame — for a verdict that is nearly always decided
 in the first fraction of a second. A round that needs longer than the lookahead
 to arrive is never ducked.
-| Tests | `test/crouch.test.mjs` for the predicate's geometry; `test/companion-aim.test.mjs` for both slices' behaviour | See *The test scaffolding does not exist yet*, below — this is not a free reuse |
 
 ### What the predicate must be told
 
@@ -190,7 +197,7 @@ table because they snapshot spec bodies and synthetic fixtures and will not
 | 1 | **Arcs are sampled, not solved.** A round with gravity is stepped forward, so a coarse step can miss a graze at the edge of the box | Predicate cases at known trajectories in `test/crouch.test.mjs`, including the arcing pod `spore_wisp` fires |
 | 2 | **Homing rounds are predicted as flying straight**, so a duck against one sometimes fails — as the design intends. This is reachable today: `hornet_smg` and `seeker` carry homing (`src/game/arsenal.js`) and become a threat to soldiers when friendly fire is on, and an enemy emitter projectile may be authored with a homing effect as data | Nothing asserts a homing round is dodged. Named so the failure reads as intended rather than as a bug |
 | 3 | **Only rounds in `scene.projectiles` are scanned.** Entity-projectiles are not: the boss's wing seekers, and the five shards each seeker spawns when destroyed. Of the six ordinary roster enemies, five fire plain projectiles and `husk_charger` has no emitter at all — it is contact-only and nothing about ducking applies to it | Named here rather than fixed. Widening the scan is additive and needs no seam change |
-| 4 | **A duck does interrupt escorting, and the route is discarded rather than resumed.** The escort track issues a move order with a wall-clock timeout that keeps ticking while the body cannot move, so a duck lasting a fraction of a second can expire the order and clear both it and the held route. The squadmate re-issues on the next loop, from where it now stands | **Nothing today.** `test/reposition.test.mjs` has no escort case and no incoming fire. D1 must add one. The accepted risk: a squadmate under sustained fire ducks repeatedly and makes little progress. Whether that reads as pinned down or as broken is a play question, and the hold-duration knob is the dial |
+| 4 | **A duck does interrupt escorting, and the route is discarded rather than resumed.** The escort track issues a move order with a wall-clock timeout that keeps ticking while the body cannot move, so a duck lasting a fraction of a second can expire the order and clear both it and the held route. The squadmate re-issues on the next loop, from where it now stands | `test/reposition.test.mjs` grew the escort-under-fire case D1 owed it. **As built: the risk was real at D1 and the dice answered it.** With every reaction certain and immediate, a squadmate under sustained fire crawled — 20 seconds of fire left it further from its station than 3 unshot seconds would have. At D2 an average soldier reaches the same station in about twice the unshot time. The hold knob is still the dial, but the chance curve is what made escorting under fire affordable |
 | 5 | **Grounded only.** A soldier in the air does not duck | Kneeling mid-jump changes the box without changing the trajectory, which reads as a glitch rather than a dodge |
 | 6 | **One verdict per round *per soldier*.** A single round can threaten more than one squadmate, so the verdict cannot live on the round alone | Deliberate — re-judging across a round's flight turns a chance into a certainty |
 | 7 | **Latency shows as a delayed snap, not as a soldier starting to move.** The stance is a two-state height swap with no transition, so a slow soldier stands through the delay and then drops, arriving late and getting hit. The design's reading — a slow soldier visibly caught out — survives; the in-between pose does not exist | Named. If the delayed snap does not read on screen, the fix is a stance transition, not a different latency curve |

@@ -30,7 +30,7 @@ import { makeRng } from "../src/game/gen/rng.js";
 const STEP = 1 / 60;
 // aim 10 → accuracy 1 → zero spread, so a shot's velocity IS the aim vector.
 const rifle = { id: "rifle", name: "R", fireRate: 7, projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 1 }, effects: [] };
-const roster = (id) => ({ id, name: id, callsign: "", stats: { aim: 10, health: 5, speed: 5, nerve: 5 }, traits: [], cost: 0, status: "roster", record: { missions: 1, kills: 0 }, wounds: 0 });
+const roster = (id, speed = 5) => ({ id, name: id, callsign: "", stats: { aim: 10, health: 5, speed, nerve: 5 }, traits: [], cost: 0, status: "roster", record: { missions: 1, kills: 0 }, wounds: 0 });
 const noopCtx = { friendlyFire: false, damageMult: 1, damage() {}, kill() {}, spark() {}, burst() {} };
 
 function scene(extra = {}) {
@@ -134,21 +134,32 @@ function underFire(comp, sc, leader, gunner, frames, ctx) {
 
 // One firefight, from a fixed seed so the gunner's jitter stream is identical
 // between runs and the stance is the only variable.
-function firefight(seed, frames = 600) {
+function firefight(seed, speed = 5, frames = 600) {
   const real = Math.random;
   Math.random = makeRng(seed);
   try {
     const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
-    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const comp = new Soldier(roster("C", speed), rifle, 300, 500 - STAND_H);
     comp.health = comp.maxHealth = 1e6; // survives the whole stream
     const gunner = instantiate(GUNNER, 760, 500 - 38);
     const sc = scene({ soldiers: [leader, comp], specRoots: [gunner] });
     const ctx = tally(comp);
     const stance = underFire(comp, sc, leader, gunner, frames, ctx);
-    return { comp, stance, dealt: ctx.dealt, kneeled: stance.filter(Boolean).length };
+    return { comp, stance, dealt: ctx.dealt, kneeled: stance.filter(Boolean).length, first: stance.indexOf(true) };
   } finally {
     Math.random = real;
   }
+}
+
+// Three seeds summed, so a claim about the dice is not a claim about one lucky
+// stream. Every field of firefight() adds.
+function firefights(speed, opts = {}) {
+  const runs = [20260816, 1, 2].map((seed) => firefight(seed, speed, opts.frames));
+  return {
+    kneeled: runs.reduce((a, r) => a + r.kneeled, 0),
+    dealt: runs.reduce((a, r) => a + r.dealt, 0),
+    first: runs.map((r) => r.first),
+  };
 }
 
 export default async function run(t) {
@@ -354,5 +365,42 @@ export default async function run(t) {
     t.ok("swap: kneeling at the moment control leaves", comp.crouched === true);
     updateCompanionSpec(comp, STEP, sc, leader, noopCtx);
     t.ok("swap: stands back up on the same tick it becomes a squadmate", comp.crouched === false);
+  }
+
+  // ---- ducking: Speed decides (D2) -----------------------------------------
+  // The stat does two different jobs, so they are measured apart. CHANCE decides
+  // whether a soldier is the kind of person who saw it coming — invisible on
+  // screen, so it is measured in outcomes. LATENCY decides how good they look
+  // doing it, and IS visible, so it is measured in frames.
+  {
+    const slow = firefights(1);
+    const fast = firefights(10);
+    t.ok(`speed: a fast squadmate reacts far more often (${fast.kneeled} frames down vs ${slow.kneeled}, 3 seeds)`,
+      fast.kneeled > slow.kneeled * 1.5);
+    t.ok(`speed: and takes less fire for it (${Math.round(fast.dealt)} vs ${Math.round(slow.dealt)})`,
+      fast.dealt < slow.dealt);
+  }
+  {
+    // Latency alone: with the roll forced to succeed, both soldiers commit to
+    // the same duck on the same frame and then STAND through their delay — the
+    // bodies are identical until the drop, which is what makes the frame counts
+    // comparable at all.
+    const chance = [config.duckChanceSlow, config.duckChanceFast];
+    config.duckChanceSlow = 1;
+    config.duckChanceFast = 1;
+    const slow = firefights(1);
+    const fast = firefights(10);
+    [config.duckChanceSlow, config.duckChanceFast] = chance;
+
+    t.ok(`speed: the fast soldier is down within a few frames every time (${fast.first.join(", ")})`,
+      fast.first.every((f) => f >= 0 && f <= Math.ceil(config.duckLatencyFast / STEP) + 2));
+    t.ok(`speed: the slow one stands through its delay first (${slow.first.join(", ")})`,
+      slow.first.every((f, i) => f > fast.first[i]));
+    // the gap between them IS the difference between the two latency knobs
+    const want = Math.round((config.duckLatencySlow - config.duckLatencyFast) / STEP);
+    const got = slow.first[0] - fast.first[0];
+    t.ok(`speed: and the gap is the latency curve, not noise (${got} frames, want ~${want})`, Math.abs(got - want) <= 2);
+    t.ok(`speed: being late costs hit points even when the reaction lands (${Math.round(slow.dealt)} vs ${Math.round(fast.dealt)})`,
+      slow.dealt > fast.dealt);
   }
 }

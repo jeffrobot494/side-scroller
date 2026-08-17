@@ -205,26 +205,52 @@ function companionAgent(soldier) {
 // standing a swapped-away soldier back up: with no hold running it asks for a
 // stand every frame, and the locomotor delivers it on the same tick.
 function tickDuck(soldier, agent, dt, scene, ctx) {
-  const d = soldier.duck || (soldier.duck = { hold: 0, judged: new WeakSet() });
+  const d = soldier.duck || (soldier.duck = { hold: 0, wait: 0, judged: new WeakSet() });
   if (d.hold > 0) d.hold = Math.max(0, d.hold - dt);
+  else if (d.wait > 0) {
+    // A duck that has been decided but has not landed yet. The soldier stands
+    // through it — the stance is a two-state height swap with no in-between
+    // pose, so latency shows as a delayed snap, and a slow soldier gets clipped
+    // in the gap. That is the half of Speed the player can actually watch.
+    d.wait = Math.max(0, d.wait - dt);
+    if (d.wait === 0) d.hold = config.duckHoldTime;
+  }
 
   // Grounded only: kneeling mid-jump changes the box without changing the
   // trajectory, which reads as a glitch rather than a dodge.
-  if (d.hold <= 0 && soldier.onGround && config.duckHoldTime > 0) {
+  if (d.hold <= 0 && d.wait <= 0 && soldier.onGround && config.duckHoldTime > 0) {
     for (const p of scene.projectiles) {
       // ONE verdict per round per soldier — a soldier who misses a round coming
-      // does not get a second look at it, and re-judging across a round's flight
-      // would turn a chance into a certainty (D2). The verdict cannot live on
+      // does not get a second look at it. Re-judging across a round's flight
+      // would turn the chance below into a certainty. The verdict cannot live on
       // the round: one round can threaten more than one squadmate.
       if (d.judged.has(p)) continue;
       d.judged.add(p);
-      if (duckableShot(scene, p, soldier, dt, ctx)) {
-        d.hold = config.duckHoldTime;
-        break;
-      }
+      if (!duckableShot(scene, p, soldier, dt, ctx)) continue;
+      // Whether they react at all is the roll; a failed one is spent, not
+      // retried, which is what makes a soldier who was not paying attention
+      // indistinguishable from one who was too slow.
+      const t = speedT(soldier);
+      if (Math.random() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) continue;
+      const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
+      if (latency > 0) d.wait = latency;
+      else d.hold = config.duckHoldTime;
+      break;
     }
   }
   agent.crouchIntent = d.hold > 0;
+}
+
+// Where a soldier sits on the 1..10 Speed stat, as 0..1 — the same shape
+// aimAccuracy gives the Aim stat. Speed's first consumer that changes play.
+function speedT(soldier) {
+  const s = soldier.data && soldier.data.stats ? soldier.data.stats.speed : 5;
+  const v = ((s ?? 5) - 1) / 9;
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
 export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
