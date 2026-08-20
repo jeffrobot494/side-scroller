@@ -83,7 +83,15 @@ server works:
 
 ```bash
 python3 -m http.server 8000     # then open http://localhost:8000
+npm start                       # same thing via server.mjs, honours $PORT
 ```
+
+`server.mjs` exists so the repo can be **hosted** — a platform like Railway runs
+a process and expects it to bind `$PORT` rather than serving a folder. It is
+zero-dependency node, adds no build step, and serves directory listings so
+`design.html` (which discovers docs by scraping one) works when deployed. Note
+what that means: everything in the repo is readable at the deployed URL,
+including `editor.html`.
 
 Four pages, all served from the repo root:
 
