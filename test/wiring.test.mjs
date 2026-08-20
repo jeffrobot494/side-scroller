@@ -132,40 +132,45 @@ export default async function run(t) {
     config.seedLeads = seed;
   }
 
-  // ---- C3: deploying costs a day --------------------------------------------
+  // ---- C3: a mission no longer buys its own day (multiplayer-state S4) ------
+  // C3 shipped as `if (config.dayPerDeploy) advanceDay(state)` at the end of
+  // applyMissionResult. S4 deleted it: two commanders resolving two missions
+  // against one shared clock would have bought two days of everybody's doom.
+  // The day moved to the ready gate in src/game/session.js, and the cap that
+  // keeps "one mission per day" true moved to the deploy command.
+  //
+  // Three of the four assertions that used to live here CANNOT be re-expressed
+  // in this suite — it imports state.js, config.js and entities.js and never
+  // the session, and config.dayPerDeploy is no longer read in state.js at all.
+  // Their replacements are in test/session.test.mjs, next to the gate.
   {
     const g3 = st.createState();
     const day = g3.day;
     const lead = g3.leads.find((l) => !l.winsCampaign);
     const health = g3.campaignHealth;
     st.applyMissionResult(g3, winResult(lead.id));
-    t.eq("resolving a mission advances the day", g3.day, day + 1);
-    // Approximation 2: the win's reward is banked before the day it cost.
-    t.ok(
-      "the mission's reward is applied before its day is charged",
-      g3.campaignHealth === Math.min(100, health + lead.threatReward) - config.doomPerDay
+    t.eq("resolving a mission does NOT advance the day", g3.day, day);
+    // ...and with no day charged behind it, nothing subtracts doom from the
+    // win. This used to read `- config.doomPerDay`; that term was the deploy's
+    // own day, and it is now spent at the gate instead.
+    t.eq(
+      "the win's reward lands with no doom tick behind it",
+      g3.campaignHealth,
+      Math.min(100, health + lead.threatReward)
     );
 
-    const prev = config.dayPerDeploy;
-    config.dayPerDeploy = false;
-    try {
-      const g4 = st.createState();
-      const d = g4.day;
-      st.applyMissionResult(g4, winResult(g4.leads[0].id));
-      t.eq("dayPerDeploy off restores the free deploy", g4.day, d);
-    } finally {
-      config.dayPerDeploy = prev;
-    }
-
-    // Approximation 3: advanceDay refuses once the campaign is over, so the
-    // mission that ends it is the one deploy never charged a day.
+    // The rule that DISSOLVED, recorded so it is not re-derived: "the mission
+    // that ends the campaign is never charged a day" was a fact about a charge
+    // that no longer exists. What survives at this level is only the ending
+    // itself; "a finished campaign cannot turn another day" is the gate's rule
+    // and is asserted against the gate.
     const g5 = st.createState();
     g5.campaignHealth = 5;
     const doomed = g5.leads[0];
     const lastDay = g5.day;
     st.applyMissionResult(g5, { success: false, missionId: doomed.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] });
     t.ok("a fatal failure ends the campaign", g5.outcome === "lost");
-    t.eq("...and is not charged its day", g5.day, lastDay);
+    t.eq("...and no day passes on the way out", g5.day, lastDay);
   }
 
   // ---- C5: arrivals replace the top-up --------------------------------------

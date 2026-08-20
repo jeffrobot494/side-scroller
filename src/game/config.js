@@ -380,10 +380,10 @@ export const SCHEMA = [
       },
       {
         key: "dayPerDeploy",
-        label: "Deploying costs a day",
+        label: "One mission per day",
         type: "bool",
         default: true,
-        help: "Resolving a mission advances the day, so expiry, fabrication, healing and doom all tick per deploy. Off restores the old behaviour where only idling costs time.",
+        help: "A squad deploys to one mission per day; the day itself turns at the ready gate, once every commander is ready. Off lifts the cap, so a commander may deploy as often as they like between two days.",
       },
       {
         key: "healPerDay",

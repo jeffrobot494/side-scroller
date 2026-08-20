@@ -118,6 +118,18 @@ export class Hub {
     // holds a lead by id and would dereference an expired one, and results is
     // mid-resolution. Both render this bar, so the control is disabled there.
     const canAdvance = this.mode === "hub";
+    // At one commander the gate turns on the press — the presser is always the
+    // last to ready — so the control keeps the name it has always had and
+    // single-player reads exactly as it did. At two or more it becomes the
+    // toggle mockup §1 draws, lit while you are ready.
+    const force = g.taskForce || [];
+    const solo = force.length < 2;
+    const me = force.find((p) => p.id === g.playerId);
+    const lit = !solo && me && me.ready;
+    const label = solo ? "Advance the day ▸" : lit ? "Ready" : "Ready ▸";
+    const tip = solo
+      ? canAdvance ? "Advance the day — the invasion advances too." : "Finish here first."
+      : lit ? "Click again to stand down." : "The day turns when every commander is ready.";
     return `
       <header class="topbar">
         <div class="brand">XCOM&nbsp;TASK&nbsp;FORCE</div>
@@ -130,13 +142,42 @@ export class Hub {
           </span>
           <span class="credits">§ ${g.money.toLocaleString()}</span>
           <span class="roster-count">${livingRoster(g).length} on roster</span>
-          <button class="btn btn-day" data-action="advance" ${canAdvance ? "" : "disabled"}
-            title="${canAdvance ? "Advance the day — the invasion advances too." : "Finish here first."}">
-            Advance the day ▸
+          <button class="btn btn-day${lit ? " btn-ready-on" : ""}" data-action="advance" ${canAdvance ? "" : "disabled"}
+            title="${tip}">
+            ${label}
           </button>
           <a class="dev-link" href="./editor.html" title="Open the settings & tuning editor">⚙</a>
         </div>
-      </header>`;
+      </header>${this._taskforce(force, g.playerId)}`;
+  }
+
+  // Mockup §1. Hidden entirely at one commander, the same rule
+  // src/hub/hotseat.js follows and for the same reason: index.html with no
+  // query string must not grow a bar naming its only player.
+  //
+  // Readiness is ALL it shows. No credits, no roster, no lead counts, and
+  // nothing about what a ready commander readied for — design/multiplayer.md
+  // allows exactly this much and no more.
+  _taskforce(force, mine) {
+    if (force.length < 2) return "";
+    const waiting = force.filter((p) => !p.ready).length;
+    const chips = force
+      .map(
+        (p) => `<span class="pchip${p.ready ? " ready" : ""}${p.id === mine ? " me" : ""}">
+            <span class="dot"></span>${p.name}
+            <span class="st">${p.ready ? "ready" : "still deciding"}</span>
+          </span>`
+      )
+      .join("");
+    return `
+      <div class="tfstrip">
+        <span class="tflabel">Task force</span>
+        ${chips}
+        <span class="tfspacer"></span>
+        <span class="tfnote">${
+          waiting ? `Waiting on ${waiting} · the day turns when everyone is ready` : "Everyone is ready."
+        }</span>
+      </div>`;
   }
 
   _locButton(loc) {
@@ -298,7 +339,7 @@ export class Hub {
       </div>
       <section class="squad-block">
         <h2>Commission a Weapon</h2>
-        <p class="muted">Fabrication takes time — advance the day in the War Room to finish a build. Finished weapons appear in the armory and can be assigned on deploy.</p>
+        <p class="muted">Fabrication takes time — a build finishes when a day passes. Finished weapons appear in the armory and can be assigned on deploy.</p>
         <div class="blueprint-grid">${cards}</div>
       </section>
       <section class="recruit-block two-col">
@@ -343,7 +384,7 @@ export class Hub {
         </article>`;
           })
           .join("")
-      : `<p class="empty">Ops is still scanning the sector. Advance a day for fresh leads.</p>`;
+      : `<p class="empty">Ops is still scanning the sector. Pass a day for fresh leads.</p>`;
 
     const stores = g.stores;
     const total = stores.reduce((s, i) => s + i.value, 0);
@@ -573,7 +614,7 @@ export class Hub {
 
       case "commission": {
         const res = this.api.command({ type: "commission", blueprintId: btn.dataset.id });
-        this.setFlash(res.ok ? "good" : "bad", res.ok ? "Fabrication started. Advance the day to finish it." : res.reason);
+        this.setFlash(res.ok ? "good" : "bad", res.ok ? "Fabrication started. It finishes when a day passes." : res.reason);
         this.render();
         break;
       }
@@ -591,8 +632,21 @@ export class Hub {
       }
 
       case "advance": {
-        const res = this.api.command({ type: "advanceDay" });
-        if (res.ok) {
+        const res = this.api.command({ type: "ready" });
+        // THREE outcomes, not two. A ready that is not the last one and a
+        // stand-down are both `ok` and turn no day, so they carry no `finished`
+        // / `expired` / `arrived` — reading those here is a TypeError on most
+        // Ready clicks in a two-commander campaign, which is exactly the shape
+        // this branch had before S4.
+        if (!res.ok) this.setFlash("bad", res.reason);
+        else if (!res.dayTurned) {
+          this.setFlash(
+            "good",
+            res.ready
+              ? `Ready. Waiting on ${res.waitingOn} more.`
+              : "Stood down. The day is held."
+          );
+        } else {
           const parts = [];
           if (res.finished.length) parts.push(`Finished: ${res.finished.join(", ")}.`);
           if (res.expired.length) parts.push(`Lead lost: ${res.expired.join(", ")}.`);
@@ -601,7 +655,7 @@ export class Hub {
             res.expired.length ? "bad" : "good",
             parts.length ? `A new day. ${parts.join(" ")}` : "A day passes. The clock ticks on."
           );
-        } else this.setFlash("bad", res.reason);
+        }
         this.render();
         break;
       }

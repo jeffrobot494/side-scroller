@@ -57,7 +57,7 @@ function seats() {
 // view of it. Single-player is a session with one player — there is no second
 // path through which state changes. Plan: tech/multiplayer-state.md.
 const roster = seats();
-const session = createSession({ playerIds: roster.map((p) => p.id) });
+const session = createSession({ players: roster });
 
 // The seat on screen. THREE bindings capture a player and all three move
 // together on a swap: the hub's view, the ambient layer's, and the command

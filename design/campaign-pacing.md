@@ -15,7 +15,7 @@ current behaviour is `design/game-balance.md`, which this replaces on landing.
 
 | | Decision |
 |---|---|
-| 1 | Deploying on a mission advances the day |
+| 1 | A squad deploys to one mission per day |
 | 2 | A lead expires after 1–3 days and leaves the board |
 | 3 | Time is passed from the persistent top bar, not from inside the War Room |
 | 4 | The finale appears once the player has won two High-threat missions |
@@ -39,7 +39,7 @@ opportunity: the board becomes weather, not a menu.
 | Every mission costs a day | There is no free action. Deploying and idling both advance the invasion |
 | Leads rot | The board is a set of opportunities with a shelf life, not a menu that waits |
 | Leads arrive on their own schedule | Passing time is how you fish for work, and fishing costs campaign health |
-| Time is a global control | Passing a day is always one click away, from anywhere in the base |
+| Time passes in lockstep | Time passes for players in lockstep, once all players are ready |
 | The finale is earned, not counted | Reaching the end means proving you can take the hardest work available, not grinding easy wins |
 
 ## The board

@@ -601,3 +601,41 @@ body::after {
   font-size: 11.5px;
 }
 .hotseat-note { opacity: 0.7; }
+
+/* ---- task-force strip (multiplayer-state S4, mockup §1) -------------------
+   Readiness across the task force, drawn under the top bar. Emitted only at
+   two or more commanders, so single-player renders nothing here at all. */
+.tfstrip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  background: rgba(0, 0, 0, 0.22);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.tflabel { color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10.5px; }
+.tfspacer { flex: 1; }
+.tfnote { color: var(--muted); font-size: 11.5px; }
+.pchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.pchip.me { border-color: var(--accent); }
+.pchip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.pchip.ready .dot { background: var(--good); }
+.pchip .st { color: var(--muted); font-size: 11px; }
+.pchip.ready .st { color: var(--good); }
+
+/* The day control while you are ready — lit, and clicking it stands you down. */
+.btn-ready-on {
+  background: rgba(76, 175, 114, 0.16);
+  border-color: #3a7a55;
+  color: var(--good);
+  font-weight: 600;
+}
+.btn-ready-on::after { content: " ✔"; }

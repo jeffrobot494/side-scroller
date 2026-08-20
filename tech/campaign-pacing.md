@@ -35,6 +35,19 @@ Five, ordered. Each lands alone and is committed alone.
 War Room into the persistent top bar, so passing a day is one click from any
 room. The War Room keeps the campaign-health meter and the log.
 
+**As built, amended by `tech/multiplayer-state.md` S4: one click, but not one
+commander.** At two or more players the control reads **Ready**, is a toggle,
+and turns the day only when the last commander sets it — so a day is one click
+from any room and still not yours alone to spend. Single-player is untouched:
+one seat means the presser is always the last to ready, so the label, the
+click and the rendered markup are byte-for-byte what they were.
+`design/campaign-pacing.md` was reworded to match — "Time passes for players in
+lockstep, once all players are ready". The constraint below still holds and
+gained a caveat: gating the control to room screens protected your own deploy
+screen when only you could turn the day, and under the gate somebody else's
+click can rot the lead your screen is holding. Nothing reaches it today because
+a seat swap drops the deploy screen; S5 is where that stops being true.
+
 Two constraints the move carries:
 
 | | |
@@ -56,6 +69,18 @@ window. Applying a supersede the design already declared, not authoring design.
 advances the day — the same day advance the time control uses, so expiry,
 fabrication, healing and doom all tick once per deploy. Off restores today's
 behaviour exactly, which is what makes the decision A/B-able in play.
+
+**As built, superseded by `tech/multiplayer-state.md` S4: the charge is gone
+and `dayPerDeploy` means something else.** C3 shipped as an `advanceDay` call
+at the end of `applyMissionResult`. That cannot survive a second commander —
+two results resolving against one shared doom clock would buy two days of
+everybody's time — so the day moved to the ready gate in `src/game/session.js`,
+which spends exactly one whether nobody, one or every commander deployed.
+`dayPerDeploy` survives as the CAP that keeps C3's rule true rather than as the
+charge that implemented it: on, a commander may deploy once between two day
+turns; off, as often as they like, which is the free deploy it always restored.
+Resolving a mission now advances nothing. `design/campaign-pacing.md` decision 1
+was reworded to match — "A squad deploys to one mission per day".
 
 **C4 — The finale gate is two High wins.** A cleared mission whose lead
 advertised High is counted; at `bossHighWins` the boss lead is placed

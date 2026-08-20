@@ -58,11 +58,13 @@ export default async function run(t) {
     });
     const v1 = g.roster.find((s) => s.id === "v1");
     const v2 = g.roster.find((s) => s.id === "v2");
-    // Resolving a mission advances the day (config.dayPerDeploy), and that day
-    // mends everyone — including the survivor whose wounds were just written
-    // back. Expressed as a subtraction because healPerDay is a tuning knob:
-    // the wounds land at 7, the deploy's day takes healPerDay off them.
-    t.eq("survivor's wounds updated from result", v1.wounds, 7 - config.healPerDay);
+    // A plain 7 since multiplayer-state S4. This used to read
+    // `7 - config.healPerDay`, because resolving a mission charged its own day
+    // (config.dayPerDeploy) and that day mended the survivor whose wounds the
+    // same call had just written back. The charge moved to the ready gate, so
+    // the write-back is now the last thing that touches these wounds and the
+    // healing happens when somebody turns the day.
+    t.eq("survivor's wounds updated from result", v1.wounds, 7);
     t.eq("survivor banks kills too", v1.record.kills, 2);
     t.eq("survivor can be healed by a mission (wounds → 0)", v2.wounds, 0);
     t.ok("casualty dropped from roster (no wound bookkeeping)", !g.roster.some((s) => s.id === "kia"));

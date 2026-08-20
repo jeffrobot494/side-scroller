@@ -428,17 +428,17 @@ export function applyMissionResult(state, result) {
   }
 
   // The lead is spent whether or not the squad survived. Nothing refills the
-  // board — the deploy's day below is the only thing that can bring work in.
+  // board — only a day advance brings work in, and resolving a mission is no
+  // longer one (S4).
   state.leads = state.leads.filter((l) => l.id !== result.missionId);
 
-  // A deploy costs a day, and it is the SAME day the time control buys — one
-  // answer to "what does a day do". It is charged after the mission's own
-  // reward (so a win that outruns the doom tick counts first) and before the
-  // refill (so leads arriving after it keep their full lifespan).
-  // A campaign-ending mission is not charged: advanceDay refuses once
-  // state.outcome is set, at the exact moment the day can no longer matter.
-  if (config.dayPerDeploy) advanceDay(state);
-
+  // NO DAY IS CHARGED HERE. Until S4 this ended with `if (config.dayPerDeploy)
+  // advanceDay(state)`, which cannot survive more than one player: two results
+  // resolving against one shared clock would buy two days of everybody's doom.
+  // The day now belongs to the ready gate in src/game/session.js, which spends
+  // exactly one whether nobody, one or every commander deployed, and
+  // config.dayPerDeploy became the cap on deploys per round rather than a
+  // charge. See tech/multiplayer-state.md, S4.
   placeBossIfEarned(state);
 
   return state;
