@@ -5,6 +5,11 @@
 // it: send a COMMAND to change something, read a VIEW to see something. The
 // hub owns no campaign rules and performs no campaign writes — it asks.
 //
+// The campaign is one WORLD — the date, the doom clock, the board, the log —
+// with one base per player over it (S2). Each player's campaign is flat and
+// state-shaped, so every action in state.js is handed what it has always been
+// handed, and a view is a projection of ONE player's campaign.
+//
 // Single-player is a session with one player. There is deliberately no second
 // path: two ways to mutate state would need a decision every time an action is
 // added, and this way costs one refactor instead.
@@ -21,11 +26,13 @@
 // ---------------------------------------------------------------------------
 
 import {
-  createState,
+  createWorld,
+  createPlayerState,
   hire,
   commission,
   sellAllLoot,
   advanceDay,
+  restDay,
   applyMissionResult,
   livingRoster,
 } from "./state.js";
@@ -115,13 +122,30 @@ function deployCommand(campaign, cmd) {
 }
 
 export function createSession(opts = {}) {
-  const campaign = opts.state || createState();
+  // `opts.state` seats a caller-built campaign as the first player and takes its
+  // world; `opts.world` supplies the world directly. Both exist for tests — the
+  // game passes neither.
+  const seatOne = opts.state || null;
+  const world = opts.world || (seatOne && seatOne.world) || createWorld();
 
   // A Map, iterated everywhere. No players[0], no .a/.b, no "the other player"
   // that returns exactly one. S4's readiness and S5's pending choice become
   // fields on these records, so those slices add a field, not a structure.
   const players = new Map();
-  for (const id of opts.playerIds || ["p1"]) players.set(id, { id, view: null });
+  for (const id of opts.playerIds || ["p1"]) {
+    const campaign = players.size === 0 && seatOne ? seatOne : createPlayerState(world);
+    players.set(id, { id, campaign, view: null });
+  }
+
+  // A day is spent by everybody, whoever asked for it: the world half runs once
+  // inside advanceDay, and every OTHER player's half runs here. Without this the
+  // commander who did not press the button never finishes a weapon and never
+  // heals, on a day their doom clock was charged for.
+  function restEveryoneElse(acting) {
+    for (const other of players.values()) {
+      if (other !== acting) restDay(other.campaign);
+    }
+  }
 
   function command(playerId, cmd) {
     const player = players.get(playerId);
@@ -132,6 +156,8 @@ export function createSession(opts = {}) {
     // — normalising a failure, adding empty arrays, stripping a field — would
     // change what the hub prints, and the hub's flash strings are the thing
     // this slice must not move.
+    const campaign = player.campaign;
+
     switch (cmd.type) {
       case "hire":
         return hire(campaign, cmd.recruitId);
@@ -139,15 +165,28 @@ export function createSession(opts = {}) {
         return commission(campaign, cmd.blueprintId);
       case "sellLoot":
         return sellAllLoot(campaign);
-      case "advanceDay":
-        return advanceDay(campaign);
+      case "advanceDay": {
+        const res = advanceDay(campaign);
+        // The result names only THIS player's finished jobs. What the others
+        // built is their own business — the design says a base is invisible.
+        if (res.ok) restEveryoneElse(player);
+        return res;
+      }
       case "deploy":
         return deployCommand(campaign, cmd);
-      case "missionResult":
+      case "missionResult": {
+        // A deploy charges a day from inside applyMissionResult (state.js), and
+        // it does not always: config.dayPerDeploy can be off, and advanceDay
+        // refuses once the same result has set `outcome`. So the day is not
+        // predicted here, it is OBSERVED — and if it moved, everybody spent it.
+        // S4 lifts the charge out to the ready gate and this goes with it.
+        const before = world.day;
         // applyMissionResult returns the state object itself; returning that
         // would hand the campaign back through the seam we just built.
         applyMissionResult(campaign, cmd.result);
+        if (world.day !== before) restEveryoneElse(player);
         return { ok: true };
+      }
       default:
         return fail("Unknown command.");
     }
@@ -160,7 +199,7 @@ export function createSession(opts = {}) {
   function view(playerId) {
     const player = players.get(playerId);
     if (!player) throw new Error(`No such player: ${playerId}`);
-    if (!player.view) player.view = makeView(campaign, player);
+    if (!player.view) player.view = makeView(player.campaign, player);
     return player.view;
   }
 

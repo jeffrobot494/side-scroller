@@ -2,7 +2,7 @@
 // figures animate over time, and toggling the config off empties the scene.
 
 import { createHubAmbient } from "../src/hub/ambient.js";
-import { createState } from "../src/game/state.js";
+import { createState, hire } from "../src/game/state.js";
 import { config, resetConfig } from "../src/game/config.js";
 
 export default async function run(t) {
@@ -38,6 +38,20 @@ export default async function run(t) {
   config.hubAmbience = true;
   amb.step(1 / 30);
   t.ok("re-enabling repopulates the scene", amb.people().length > 0);
+
+  // The hot-seat swap re-points this at another commander's base (S2). The crew
+  // scales with the living roster, so a base with more soldiers has more of it.
+  {
+    const busy = createState();
+    for (let i = 0; i < 5; i++) hire(busy, busy.recruits[0].id);
+    const quiet = amb.people().length;
+    amb.setView(busy);
+    amb.step(1 / 30);
+    t.ok("setView re-points the crowd at another base", amb.people().length > quiet);
+    amb.setView(game);
+    amb.step(1 / 30);
+    t.eq("...and swapping back restores it", amb.people().length, quiet);
+  }
 
   amb.setVisible(false);
   t.eq("setVisible(false) hides the canvas", amb.el.style.display, "none");

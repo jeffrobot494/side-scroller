@@ -1,10 +1,21 @@
 // ---------------------------------------------------------------------------
-// UNIFIED GAME STATE  (Phase 0 — one app, one state)
+// UNIFIED GAME STATE
 //
 // A single authoritative object the whole game reads and writes: hub, mission,
 // and results all share this. Mutations go through the exported action
 // functions so the rules (affordability, permadeath, campaign win/lose) live in
 // one place. This is what a save/load would serialize.
+//
+// It is built in two halves (tech/multiplayer-state.md, S2). A WORLD holds the
+// things one campaign has exactly one of — the date, the doom clock, the board,
+// the log — and a PLAYER holds a base: credits, roster, armory, stores,
+// fabrication, record. A player's campaign is still one FLAT object; its world
+// fields are read-through accessors onto the shared world rather than values of
+// its own, which is why every action below is handed something indistinguishable
+// from the old state and keeps its signature, its body and its tests.
+//
+// `createState()` is the one-player composition of the two, so single-player and
+// multiplayer construct through the same path rather than two.
 // ---------------------------------------------------------------------------
 
 import { RECRUIT_POOL } from "./soldiers.js";
@@ -18,16 +29,47 @@ import { missionRoster } from "./enemyspecs.js";
 let nextId = 1;
 const uid = (p) => `${p}_${nextId++}`;
 
-export function createState() {
+// The fields a campaign has exactly one of however many players share it. Every
+// one is reached through an accessor on a player's campaign, GET and SET both:
+// advanceDay and applyMissionResult REPLACE `leads` rather than splicing it, so
+// a world field carried by plain reference would detach the first time either
+// ran and quietly hand each player a private board.
+const WORLD_FIELDS = ["day", "campaignHealth", "leads", "outcome", "log", "cleared"];
+
+export function createWorld() {
+  const world = {
+    day: 1,
+    campaignHealth: TUNING.startCampaignHealth,
+
+    // Operations leads (procedurally generated). Each lead is MISSION-shaped and
+    // carries its own generated `level` (drop-in for loadMission). Filled below.
+    // ONE set for the world, not one per player.
+    leads: [],
+
+    outcome: null, // null | "won" | "lost"
+    log: [], // short human-readable campaign log (newest first)
+
+    // Cleared leads, by anybody. Board difficulty scales off how much of the war
+    // has been fought, and `completedMissions.length` is a player's own record —
+    // which stops having one answer the moment there are two of them. Equal to
+    // that length in single-player, which is what it replaced there.
+    cleared: 0,
+  };
+  seedBoard(world);
+  return world;
+}
+
+// One base, over a world it shares with the other players. Flat and
+// state-shaped: the world fields are accessors, so nothing downstream can tell
+// which half a field came from.
+export function createPlayerState(world) {
   // Editor edits to BUILT-IN weapons are patches applied over arsenal.js, in
   // place, so BLUEPRINTS (which hold direct references) see them too. Must run
   // before the armory line below, which clones out of WEAPONS.
   applyWeaponOverrides();
 
   const state = {
-    day: 1,
     money: TUNING.startMoney,
-    campaignHealth: TUNING.startCampaignHealth,
 
     recruits: RECRUIT_POOL.map((s) => structuredClone(s)),
     roster: [],
@@ -44,17 +86,28 @@ export function createState() {
     // Engineering build queue: { blueprintId, name, daysLeft }.
     building: [],
 
-    // Operations leads (procedurally generated). Each lead is MISSION-shaped and
-    // carries its own generated `level` (drop-in for loadMission). Filled below.
-    leads: [],
     completedMissions: [], // ids of cleared leads (also the win counter)
     highWins: 0, // cleared leads that advertised High — the finale gate counts these
-    outcome: null, // null | "won" | "lost"
-
-    log: [], // short human-readable campaign log (newest first)
   };
-  seedBoard(state);
+
+  for (const key of WORLD_FIELDS) {
+    Object.defineProperty(state, key, {
+      get: () => world[key],
+      set: (v) => { world[key] = v; },
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  // Which world this base belongs to. Non-enumerable so it stays out of
+  // Object.keys, JSON and anything walking the campaign's fields; the session
+  // needs it to seat a second player over the same world.
+  Object.defineProperty(state, "world", { value: world, enumerable: false });
+
   return state;
+}
+
+export function createState() {
+  return createPlayerState(createWorld());
 }
 
 // ---- lead generation (Slice 1) --------------------------------------------
@@ -71,7 +124,7 @@ const DIFF_BY_PRESSURE = [
 const LENGTHS = ["short", "medium", "medium", "long"];
 
 function pressureScale(state) {
-  return Math.min(config.threatScaleCap, 1 + (state.day - 1) * 0.06 + state.completedMissions.length * 0.05);
+  return Math.min(config.threatScaleCap, 1 + (state.day - 1) * 0.06 + state.cleared * 0.05);
 }
 
 function pickDifficulty(scale) {
@@ -230,10 +283,16 @@ export function sellAllLoot(state) {
 // Advancing a day ticks fabrication timers and the doom clock, then checks for
 // a campaign loss. Returns a summary the UI can flash.
 
-export function advanceDay(state) {
-  if (state.outcome) return { ok: false, reason: "The campaign is over." };
-
-  state.day += 1;
+// What a day does to ONE base: fabrication timers tick and the wounded mend.
+// Split out of advanceDay because a day is a world event and this is not — with
+// two players the world half must run once and this must run for every one of
+// them, or the commander who did not press the button never finishes a weapon
+// and never heals. The design says the non-deploying player spends the same day
+// at base; this is that day.
+//
+// Call it AFTER the world's day has been bumped: the log notes it writes are
+// stamped with state.day, and they belong to the day that just started.
+export function restDay(state) {
   const finished = [];
 
   for (const job of state.building) {
@@ -256,6 +315,18 @@ export function advanceDay(state) {
       }
     }
   }
+
+  return finished.map((f) => f.name);
+}
+
+export function advanceDay(state) {
+  if (state.outcome) return { ok: false, reason: "The campaign is over." };
+
+  state.day += 1;
+
+  // This player's own half. The session runs restDay for everyone else — see
+  // tech/multiplayer-state.md, "state.js keeps its action signatures".
+  const finished = restDay(state);
 
   // Leads rot. Whole days only, and one tick per day advance whatever asked for
   // the day — a deploy's day expires the leads it left behind, same as idling.
@@ -283,7 +354,7 @@ export function advanceDay(state) {
 
   return {
     ok: true,
-    finished: finished.map((f) => f.name),
+    finished,
     expired: expired.map((l) => l.name),
     arrived: arrived.map((l) => l.name),
   };
@@ -325,6 +396,10 @@ export function applyMissionResult(state, result) {
     for (const item of result.loot) state.stores.push(item);
     if (!state.completedMissions.includes(result.missionId)) {
       state.completedMissions.push(result.missionId);
+      // ...and the world's tally, which is what board pressure scales off. A
+      // reader with no writer freezes the board at day-one difficulty and
+      // nothing fails loudly, so these two lines stay together.
+      state.cleared += 1;
       // The gate reads the lead's ADVERTISED threat — what the player agreed to
       // take on — not what the mission turned out to be.
       if (mission && mission.difficulty === "High") state.highWins += 1;

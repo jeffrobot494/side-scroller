@@ -11,9 +11,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { createSession } from "../src/game/session.js";
-import { createState, livingRoster } from "../src/game/state.js";
+import { createState, createWorld, livingRoster } from "../src/game/state.js";
 import { WEAPONS } from "../src/game/content.js";
-import { resetConfig } from "../src/game/config.js";
+import { config, resetConfig } from "../src/game/config.js";
 
 const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -212,6 +212,119 @@ export default async function run(t) {
     for (const cmd of bad) if (s.command("p1", { type: "deploy", ...cmd }).ok) allRejected = false;
     t.ok("every malformed deploy is rejected", allRejected);
     t.eq("...and none of them charged a mission", soldier.record.missions, charged);
+  }
+
+
+  // ---- two bases, one world (S2) -----------------------------------------
+  // Three players, not two, throughout: the design is written for two and
+  // nothing here may make a third impossible.
+  {
+    const world = createWorld();
+    const s = createSession({ world, playerIds: ["usa", "china", "brazil"] });
+    const usa = s.view("usa"), china = s.view("china"), brazil = s.view("brazil");
+
+    t.ok("every player reads the same day", usa.day === china.day && china.day === brazil.day);
+    t.ok("...the same doom clock", usa.campaignHealth === brazil.campaignHealth);
+    t.ok("...the same board, by identity", usa.leads === china.leads && china.leads === brazil.leads);
+    t.ok("...and the same log", usa.log === brazil.log);
+
+    t.ok("bases are separate objects", usa.roster !== china.roster && usa.armory !== china.armory);
+    s.command("usa", { type: "hire", recruitId: usa.recruits[0].id });
+    t.eq("a hire lands on one roster only", [usa.roster.length, china.roster.length], [1, 0]);
+    t.ok("...and spends one player's credits", usa.money < china.money);
+    t.eq("...and leaves the others' recruit lists whole", china.recruits.length, brazil.recruits.length);
+
+    // The failure a plain reference would produce: advanceDay REPLACES
+    // state.leads rather than splicing it, so a world field that was merely
+    // aliased detaches here and hands each player a private board.
+    const board = usa.leads;
+    // Rot is the only thing that REASSIGNS the array (arrivals push into it), so
+    // the leads have to be made to expire on this tick. Their lifespans were
+    // rolled at generation, which is why this sets daysLeft rather than config.
+    for (const l of board) l.daysLeft = 1;
+    s.command("brazil", { type: "advanceDay" });
+    t.ok("the board survives being reassigned", usa.leads === china.leads);
+    t.ok("...and it really was reassigned", usa.leads !== board);
+    t.eq("one command moves the day once, for everyone", [usa.day, china.day, brazil.day], [2, 2, 2]);
+    resetConfig();
+  }
+
+  // ---- a day is spent by everybody, whoever asked for it ------------------
+  {
+    const world = createWorld();
+    const s = createSession({ world, playerIds: ["usa", "china", "brazil"] });
+    const usa = s.view("usa"), china = s.view("china");
+
+    // Fabrication timers and wound healing are the PLAYER half of a day. Before
+    // S2 they lived inside advanceDay, so only the commander who pressed the
+    // button got them — the other two paid a doom tick for a day their base
+    // never lived through.
+    for (const id of ["usa", "china"]) s.command(id, { type: "commission", blueprintId: "bp_railgun" });
+    const fresh = usa.building[0].daysLeft;
+    t.ok("both bases hold a fresh job", fresh > 1 && china.building[0].daysLeft === fresh);
+
+    const hurt = { status: "roster", wounds: 3, record: { missions: 0, kills: 0 } };
+    china.roster.push({ id: "hurt", name: "Hurt", ...hurt });
+
+    // Brazil, who built nothing and hired nobody, turns the day.
+    s.command("brazil", { type: "advanceDay" });
+    t.eq(
+      "every base's fabrication ticks on a day a third player asked for",
+      [usa.building[0].daysLeft, china.building[0].daysLeft],
+      [fresh - 1, fresh - 1]
+    );
+    t.ok("...and the wounded mend at a base that did nothing", china.roster[0].wounds < 3);
+
+    // What a player is TOLD is still only their own — a base is invisible.
+    for (let i = 0; i < fresh; i++) s.command("brazil", { type: "advanceDay" });
+    const quiet = s.command("brazil", { type: "advanceDay" });
+    t.eq("an advanceDay result names only the asking player's jobs", quiet.finished, []);
+    t.ok("...even though other bases finished theirs", usa.building.length === 0 && usa.armory.length > 1);
+  }
+
+  // ---- a mission result belongs to one base, its day to all of them -------
+  {
+    const world = createWorld();
+    const s = createSession({ world, playerIds: ["usa", "china"] });
+    const usa = s.view("usa"), china = s.view("china");
+    s.command("china", { type: "commission", blueprintId: "bp_railgun" });
+    const before = china.building[0].daysLeft;
+
+    const lead = fakeLead("lead_mp");
+    world.leads.push(lead);
+    const day = usa.day;
+    s.command("usa", {
+      type: "missionResult",
+      result: { success: true, missionId: "lead_mp", casualties: [], survivors: [], loot: [{ name: "Alloy", value: 40 }], killsBySoldier: [] },
+    });
+
+    t.eq("the loot went to one base", [usa.stores.length, china.stores.length], [1, 0]);
+    t.eq("the record went to one base", [usa.completedMissions.length, china.completedMissions.length], [1, 0]);
+    t.ok("the spent lead left the shared board", !usa.leads.includes(lead) && usa.leads === china.leads);
+
+    // config.dayPerDeploy charges a day from INSIDE applyMissionResult, so the
+    // session cannot predict it — it observes the world clock and rests the
+    // other bases if it moved. Without that, china pays the doom tick and keeps
+    // the build timer.
+    t.eq("a deploy's day moved the shared clock once", china.day, day + 1);
+    t.eq("...and every other base lived through it", china.building[0].daysLeft, before - 1);
+  }
+
+  // ---- board pressure is a task-force total ------------------------------
+  {
+    const world = createWorld();
+    const s = createSession({ world, playerIds: ["usa", "china"] });
+    const win = (id, leadId) => {
+      world.leads.push(fakeLead(leadId));
+      s.command(id, {
+        type: "missionResult",
+        result: { success: true, missionId: leadId, casualties: [], survivors: [], loot: [], killsBySoldier: [] },
+      });
+    };
+    win("usa", "a1");
+    win("china", "b1");
+    t.eq("clears by different commanders both raise world pressure", world.cleared, 2);
+    t.eq("...while each keeps its own record", s.view("usa").completedMissions.length, 1);
   }
 
   // ---- missionResult does not leak the campaign back out ------------------

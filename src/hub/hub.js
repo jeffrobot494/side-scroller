@@ -10,10 +10,10 @@
 //
 // `this.game` is a session VIEW, not the campaign: read-through getters over
 // whichever player this hub belongs to. It keeps its old name because every
-// screen builder reads it and none of them care (see tech/multiplayer-state.md
-// S1); S2 renames it when swapping views makes the distinction load-bearing.
-// What stays here is UI state only — mode, location, flash, deploy, result,
-// sold, and _lastSquad.
+// screen builder opens with `const g = this.game` and none of them care which
+// commander it belongs to — which is exactly what makes `setView` a one-field
+// swap rather than a rewrite. What stays here is UI state only — mode,
+// location, flash, deploy, result, sold, and _lastSquad.
 // ---------------------------------------------------------------------------
 
 import { livingRoster } from "../game/state.js";
@@ -48,6 +48,28 @@ export class Hub {
 
   setFlash(kind, text) {
     this.flash = { kind, text };
+  }
+
+  // Point this hub at another player (tech/multiplayer-state.md, S2). Every
+  // screen builder re-reads `this.game`, so the swap is one assignment plus a
+  // render.
+  //
+  // The transient UI is DROPPED, not parked per seat: it belongs to the
+  // commander who made it, and half of it is dangerous to inherit. A deploy
+  // picked by one player must not be launchable by the next, and `_lastSquad`
+  // especially — `_nameFor` falls back to it, and until the recruit pool is
+  // dealt (S3) the same soldier id exists in every roster, so a surviving
+  // `_lastSquad` resolves to the OTHER commander's soldier under a name that
+  // looks correct. `location` survives, so you arrive in the same room.
+  setView(view) {
+    this.game = view;
+    this.mode = "hub";
+    this.flash = null;
+    this.deploy = null;
+    this.result = null;
+    this.sold = false;
+    this._lastSquad = null;
+    this.render();
   }
 
   showResults(result) {

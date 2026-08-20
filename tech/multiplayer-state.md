@@ -111,7 +111,7 @@ no build step.
 | `test/hubambient.test.mjs` | `createHubAmbient` against a state object, which S2 re-points |
 | `test/session.test.mjs` | The suite S2 is most likely to break, because it asserts against S1's one-campaign construction: the exact key list on a view, the exact method list on a session, and four blocks that hand `createSession` a whole campaign through `opts.state`. Each of those is a decision S2 revisits, so a change there must be argued rather than absorbed |
 | `test/docs.test.mjs` | This document's citations |
-| `node test/run.mjs` | 31 suites, 1336 assertions green before S1 begins; 32 suites, 1379 after it |
+| `node test/run.mjs` | 31 suites, 1336 assertions green before S1 begins; 32 suites, 1379 after it; 32 suites, 1404 after S2 |
 | **`index.html` with no query string is unchanged** | Every visible thing S2 adds is behind `?players=2`. The single-player game is what ships, and six suites construct a `createState()`, so a regression in it is not a multiplayer bug — it is the game |
 | **A single-player campaign played end to end, every slice** | No suite imports `src/hub/hub.js` or `src/main.js` — the only `src/hub/` imports in `test/` are `ambient.js` and `fpsmeter.js`. S1's entire diff lands in files the bar cannot see, so this manual check is the primary guard for that slice, not a supplement |
 | **A DOM check in `test/session.test.mjs`** (new) | `test/run.mjs` calls `installDom()` once for the whole run and `test/harness.mjs` puts `document`, `window` and `requestAnimationFrame` on `globalThis`, so a DOM reference inside the session would pass every suite silently. The seam rule above needs its own assertion or it is unenforced |
@@ -170,6 +170,7 @@ The split is a change of where a field lives, not of what an action is handed.
 | Reassignment, not just mutation | `advanceDay` and `applyMissionResult` **replace** `state.leads` rather than splicing it (`src/game/state.js`, lead rot and the spent-lead filter). A world field that is only aliased by reference would silently detach the moment either ran, leaving each player on a private copy of the board. Whatever carries a world field through has to survive being written to, not only read. Verified against the real actions before this was written |
 | The board generates once | Not for cost — a whole `createState()` is under a millisecond — but because decision 1 is one world set. Seeding per player produces two boards, and the second is not a wasted board, it is a wrong one. The world is constructed and seeded first; players are built over it |
 | The world is not a player | Nothing may hold the world as a player-shaped object with an empty roster. A player count of one has to produce exactly today's game |
+| **As built:** a campaign knows its world | A player's campaign carries a non-enumerable `world` link back to the object its accessors read. The plan did not call for one and the accessors do not need it — the session does, to seat a second player over a campaign it was handed rather than built. Non-enumerable so it stays out of `Object.keys`, JSON, and anything walking the campaign's fields, which is what keeps `createState()`'s shape unchanged |
 
 ## Why the split falls here
 

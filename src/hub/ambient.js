@@ -314,6 +314,13 @@ export function createHubAmbient(game) {
     el: canvas,
     people: () => people,
     step,
+    // Point the crowd at another player's base (tech/multiplayer-state.md, S2).
+    // `game` is only read by targetCount(), and step() rebuilds when the target
+    // moves — so two commanders with equally sized rosters correctly share a
+    // scene rather than reshuffling it for no reason.
+    setView(v) {
+      game = v;
+    },
     setVisible(v) {
       visible = v;
       canvas.style.display = v ? "block" : "none";
