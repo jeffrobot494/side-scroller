@@ -46,7 +46,9 @@ lockstep, once all players are ready". The constraint below still holds and
 gained a caveat: gating the control to room screens protected your own deploy
 screen when only you could turn the day, and under the gate somebody else's
 click can rot the lead your screen is holding. Nothing reaches it today because
-a seat swap drops the deploy screen; S5 is where that stops being true.
+a seat swap drops the deploy screen, and S5 does not change that: the screen
+stays UI state while the commitment moves into the session, so dropping the
+screen goes on being harmless.
 
 Two constraints the move carries:
 
