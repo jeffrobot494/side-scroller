@@ -43,6 +43,22 @@ function chaser(x, y, speed = 210) {
   return r;
 }
 
+// The same body under a looping moveTo ORDER instead of a motion controller —
+// the escort shape (companionspecs.js), and the only path in the runtime that
+// ends a route on a schedule rather than on arrival.
+function orderer(x, y, tx, ty, timeout = 0.6, speed = 210) {
+  const r = instantiate(normalizeSpec({
+    id: "orderer",
+    root: { health: { max: 50 }, visual: { size: [30, 26] }, motion: { type: "static" } },
+    brain: { start: "go", states: { go: { tracks: [{ id: "t", loop: true, steps: [
+      { moveTo: { at: [tx, ty], speed, timeout } },
+      { wait: 0.12 },
+    ] }] } } },
+  }), x, y);
+  r.rng = () => 0.5;
+  return r;
+}
+
 function sim(root, sc, seconds) {
   for (let i = 0; i < Math.round(seconds * 60); i++) updateSpecEnemy(root, STEP, sc, ctx);
   return root;
@@ -179,6 +195,32 @@ export default async function run(t) {
     }
     t.ok("N4: a moving destination does not wipe the ban ledger", c.nav.banned.size >= 1);
     t.ok(`N4: so the chaser still gets round (x ${c.x.toFixed(0)})`, c.x < 440);
+  }
+  {
+    // ...and it must survive the ORDER that was carrying it ending. Every N4
+    // case above drives the `chase` motion CONTROLLER, which never touches
+    // ent.nav — so none of them could see that the moveOrder branch used to
+    // clear it outright on completion. That is the escort loop's only shape
+    // (companionspecs.js: moveTo timeout 0.6, wait 0.12), and re-ordering twice
+    // a second means the three strikes that retire an edge are never reached.
+    // Same pillar, same impossible hop, driven the way a squadmate is.
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const o = orderer(600, 474, 100, 474);
+    sim(o, sc, 12);
+    t.ok("N4: a completed moveOrder keeps the ban ledger", o.nav.banned.size >= 1);
+    t.ok(`N4: so an ordered agent gets past the pillar too (x ${o.x.toFixed(0)})`, o.x < 440);
+  }
+  {
+    // The other half: an order must not END mid-jump. `stop` runs the soldier's
+    // 3000px/s² friction with no grounded gate, so a handover in the air brakes
+    // the body to nothing and it lands back on its takeoff — turning legal edges
+    // into failures the cap would eventually ban. A 0.05s timeout guarantees
+    // expiry lands inside every jump this agent makes.
+    const sc = scene(CLIMB, [soldierAt(1000, 300 - 46)]);
+    const o = orderer(150, 474, 1000, 300, 0.05);
+    sim(o, sc, 12);
+    t.ok(`N4: an order expiring mid-jump does not strand the climb (feet ${feet(o)})`, feet(o) < 500);
+    t.eq("N4: and no legal edge was banned for it", o.nav.banned.size, 0);
   }
   {
     // bans belong to the agent, not the shared graph — two bodies with the same

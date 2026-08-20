@@ -295,11 +295,25 @@ function motionRequest(root, ent, dt, scene) {
     // for the same reason an unrouted one is.
     req = routeRequest(ent, { x: o.x, y: o.y }, o.speed, scene, dt)
       || { kind: "steer", point: { x: o.x, y: o.y }, speed: o.speed };
-    o.timeout -= dt;
-    if (o.timeout <= 0 || Math.hypot(o.x - cx(ent), o.y - cy(ent)) < 12) {
-      ent.moveOrder = null;
-      ent.nav = null;
-      req = { kind: "stop" };
+    // An order does not end with a routed jump in the air. Whatever takes over
+    // is a controller that did not plan this arc — and for a soldier body the
+    // handover is actively destructive, because `stop` runs SOLDIER_TUNING's
+    // 3000px/s² friction and it is not gated on being grounded: 0.12s of it
+    // erases a full 320px/s of run speed and the body lands where it took off.
+    // The dropped `leg` costs the other half, the failed attempt the cap counts.
+    // Same rule as the reposition window below, for the same reason: every
+    // window ends somewhere a decision can actually be made.
+    if (ent.onGround || !ent.nav || !ent.nav.leg) {
+      o.timeout -= dt;
+      if (o.timeout <= 0 || Math.hypot(o.x - cx(ent), o.y - cy(ent)) < 12) {
+        ent.moveOrder = null;
+        // NOT `ent.nav = null`. The manoeuvre is over; what the body has learned
+        // about which edges it cannot fly is not, and an escort loop re-orders
+        // every ~0.7s — often enough that a wiped ledger can never reach the
+        // three strikes that retire an edge (tech/agent-navigation.md, N4).
+        abortRoute(ent);
+        req = { kind: "stop" };
+      }
     }
   } else if (ent.motion) {
     req = controllerRequest(root, ent, ent.motion, dt, scene, target);

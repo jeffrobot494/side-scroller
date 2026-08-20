@@ -226,7 +226,7 @@ cannot be verified headlessly and is an eyeball check in the Lab.
 |---|---|---|
 | Takeoff is assumed to be at full horizontal speed | `LEGGED` sets `vx = req.v` instantly, so this holds for spec enemies; the player `Soldier` accelerates at 2600 px/s² toward `config.runSpeed` and under-reaches `flatReach` from a standstill | The 3-attempt cap. `levelgen` already ships this assumption for the soldier, so the graph inherits it rather than introducing it |
 | Drop edges get a flat-hop reachability *budget* | The link test gives a drop of any depth exactly `flatReach` of horizontal budget and ignores fall time. Conservative — it under-promises how far a fall carries — and unchanged by N1, because changing it would change what the audit accepts | Nothing. A drop the graph refuses is a drop an agent could actually have made, which costs a route, never a fall |
-| Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead — or a pillar between two spans of the same slab — can clip a jump the graph believes in | The stuck detector, then the attempt cap, which **retires the edge and reroutes** (N4). Before N4 it retired the destination, which is the bug N4 fixes |
+| Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead — or a pillar between two spans of the same slab — can clip a jump the graph believes in | The stuck detector, then the attempt cap, which **retires the edge and reroutes** (N4). Before N4 it retired the destination, which is the bug N4 fixes. **The cap only counts while the caller keeps the ledger** — under a `moveOrder` it did not, and the whole mechanism was dead for companions until the escort-order note above |
 | N4: three failures ban an edge permanently, with no decay | An edge that cannot be flown is a fact about geometry and a body, not about the moment — which is also why bans survive a destination change. Without that, a chaser following a moving target resets its count every tick and jumps into the same pillar forever | Nothing, deliberately. A transient failure — knocked back mid-air, landed on a corpse — can retire a legal edge for that agent's lifetime. Accepted because a body that can make an edge makes it on the first attempt, and the alternative is a decay constant with no evidence behind it. Graph invalidation clears the ledger |
 | An up-edge is not charged for its takeoff clearance | `gapBetween` reports 0 for overlapping spans, but a body cannot take off from *underneath* the destination — platforms are solid from below. The real takeoff is a body width outside the destination's footprint, and that width was never charged against `maxRunTo(dh)` | The attempt cap. Confirmed reachable in generated terrain: the N0 fixture is unchanged, and generation's own audit uses the same uncharged measure, so nothing gets *promised* that was not promised before |
 | Nodes are built for a standing body | Crouching drops the hitbox 46→22, changing headroom but not the envelope | None needed. A crouched agent has strictly more clearance, so the graph errs safe |
@@ -348,6 +348,44 @@ chargers before, 0 after**, and in the 120-level sweep the number making no
 progress went 5 → 0 while reached rose 21 → 25. Nothing in the suite covered a
 drop being *taken* — `test/navigation.test.mjs` asserted one-way edges existed in
 the graph and never that an agent used one. It does now.
+
+**As built, after playtest: the attempt cap could not count under an escort
+order.** Found by Bo — a squadmate stuck beside an inverted L (a pillar with a
+slab across its top), alternating between the flat hop *through* it and a climb
+the overhang blocks, indefinitely, on geometry the Behavior Lab routes correctly.
+The Lab drives the `moveTo` motion **controller**; a squadmate is driven by the
+`moveTo` **action**, and only the second one ends on a schedule.
+
+`motionRequest`'s `moveOrder` branch cleared `ent.nav` outright on completion —
+ban ledger included — and the escort track re-orders every ~0.72s (`moveTo`
+timeout 0.6 + `wait` 0.12). `attempts` was therefore wiped long before it could
+reach three, so the cap that N4 exists to run **never fired once**. Every N4 case
+above drives the `chase` controller, which never touches `ent.nav`; the ordered
+path had no coverage at all, which is why the suite was green through all of it.
+
+| Defect | As built | Why it mattered |
+|---|---|---|
+| Order completion cleared `ent.nav` | It calls `abortRoute` instead: the manoeuvre is dropped, the ledger survives | The ledger is a fact about geometry and this body — the same reasoning that already keeps it across a destination change. A caller's own lifecycle is not a reason to forget it, and an escort loop's lifecycle is twice a second |
+| An order could end mid-jump | The timeout and arrival tests are skipped while a routed jump is in flight (`!ent.onGround && ent.nav.leg`) | Two costs, and the second is the larger. The dropped `leg` is the failed attempt the cap needed. But `stop` also **brakes in the air** (below), so the handover deleted the jump it interrupted — and once counting worked, legal edges would have banned themselves that way |
+
+**The air-control claim below is only half true, and the other half is this
+bug.** `Soldier.applyMovement` is ungated on `onGround` in both directions: with
+`move === 0` it runs `SOLDIER_TUNING.friction` at 3000px/s², so 0.12s of `stop`
+erases a full 320px/s of run speed mid-flight. A soldier's jump is 0.72s of
+airtime against an escort order's 0.6s timeout, so *every* companion jump was
+being chopped and landed back on its takeoff. Full air control means a handover
+in the air is not neutral — it is destructive, and the rule that follows is that
+a window over a routed body ends on the ground or not at all (`repositionRequest`
+already had it; the order branch did not).
+
+Measured on the reported geometry — a 60px pillar at x=700 roofed by a 340px slab,
+leader 500px past it: **57 jumps in 15s and never off the lip** before; after, the
+hop is banned on the third try at t≈2s, the route goes over the slab, and the
+squadmate is in formation at t≈6s having jumped 5 times.
+
+This does not make the graph honest — the hop across a pillar is still offered and
+still has to be discovered by failing at it three times. That is
+`tech/nav-clearance.md`.
 
 **Correction to the slice table: the fixture never covered `backHop`.** N2's row
 predicted `locomotion.golden.json` would move on both the traversal hop and
