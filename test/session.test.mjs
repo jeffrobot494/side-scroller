@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { createSession } from "../src/game/session.js";
 import { createState, createWorld, livingRoster } from "../src/game/state.js";
+import { RECRUIT_POOL, dealRecruits } from "../src/game/soldiers.js";
+import { makeRng } from "../src/game/gen/rng.js";
 import { WEAPONS } from "../src/game/content.js";
 import { config, resetConfig } from "../src/game/config.js";
 
@@ -325,6 +327,65 @@ export default async function run(t) {
     win("china", "b1");
     t.eq("clears by different commanders both raise world pressure", world.cleared, 2);
     t.eq("...while each keeps its own record", s.view("usa").completedMissions.length, 1);
+  }
+
+  // ---- the recruit pool is dealt, not copied (S3) -------------------------
+  {
+    const poolIds = RECRUIT_POOL.map((r) => r.id);
+
+    // A one-player deal is the whole pool in AUTHORED order. Shuffling at n=1
+    // would give the plain single-player URL a randomised Barracks while
+    // createState() kept the authored one — two construction paths, different
+    // output, which is the thing this spec exists to refuse.
+    const solo = dealRecruits(1);
+    t.eq("a solo deal is one hand", solo.length, 1);
+    t.eq("...holding the whole pool, in authored order", solo[0].map((r) => r.id), poolIds);
+    t.eq(
+      "...so a solo session's Barracks still matches createState()",
+      createSession().view("p1").recruits.map((r) => r.id),
+      poolIds,
+    );
+
+    // Three bases. The S2 block above hires and compares the two players who
+    // did NOT hire, so a lopsided deal passes it; this is the assertion that
+    // actually carries dealing.
+    const s = createSession({ world: createWorld(), playerIds: ["usa", "china", "brazil"] });
+    const hands = ["usa", "china", "brazil"].map((id) => s.view(id).recruits.map((r) => r.id));
+    const dealt = hands.flat();
+    t.eq("every authored recruit is dealt to somebody", [...dealt].sort(), [...poolIds].sort());
+    t.eq("...exactly once — no soldier id exists in two Barracks", new Set(dealt).size, dealt.length);
+    t.eq("...and three bases split six evenly", hands.map((h) => h.length), [2, 2, 2]);
+
+    // Round-robin, not chunk-and-drop: six recruits over four bases is 2/2/1/1
+    // and never 2/2/2/0. Seed-independent — the sizes fall out of the walk.
+    t.eq("an uneven deal leaves nobody empty-handed", dealRecruits(4).map((h) => h.length), [2, 2, 1, 1]);
+    t.eq("more bases than recruits is legal, and the surplus deal empty", dealRecruits(8).map((h) => h.length), [1, 1, 1, 1, 1, 1, 0, 0]);
+
+    // The hand differs per campaign rather than being fixed by seat order.
+    // Fixed seeds, because over Math.random two deals collide 1 time in 20.
+    t.ok(
+      "two campaigns deal different hands",
+      dealRecruits(2, makeRng(1))[0].map((r) => r.id).join() !== dealRecruits(2, makeRng(9))[0].map((r) => r.id).join(),
+    );
+
+    // Deep clones. `hire` writes status/weaponId/wounds into the recruit object
+    // IN PLACE, so a dealt reference would corrupt the module-level pool for the
+    // life of the process — under `node test/run.mjs`, for every suite after it.
+    const hand = s.view("usa").recruits;
+    t.ok("a dealt recruit is not the authored object", hand.every((r) => !RECRUIT_POOL.includes(r)));
+    const cheapest = hand.reduce((a, b) => (a.cost <= b.cost ? a : b)); // any single hire clears startMoney
+    t.ok("hire succeeds", s.command("usa", { type: "hire", recruitId: cheapest.id }).ok);
+    t.eq(
+      "...and leaves the authored pool untouched",
+      RECRUIT_POOL.find((r) => r.id === cheapest.id).status,
+      "recruit",
+    );
+
+    // The escape hatch is stated, not defended: a session handed a whole
+    // campaign is NOT dealt, because that seat already holds the entire pool.
+    const seated = createSession({ state: createState(), playerIds: ["p1", "p2"] });
+    t.eq("an opts.state session is not dealt", seated.view("p1").recruits.length, poolIds.length);
+    t.eq("...and its later seats fall back to a full copy each", seated.view("p2").recruits.length, poolIds.length);
   }
 
   // ---- missionResult does not leak the campaign back out ------------------

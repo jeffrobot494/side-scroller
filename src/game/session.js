@@ -36,6 +36,7 @@ import {
   applyMissionResult,
   livingRoster,
 } from "./state.js";
+import { dealRecruits } from "./soldiers.js";
 import { WEAPONS } from "./content.js";
 
 // The campaign fields a player can see. `highWins` is deliberately absent —
@@ -128,14 +129,30 @@ export function createSession(opts = {}) {
   const seatOne = opts.state || null;
   const world = opts.world || (seatOne && seatOne.world) || createWorld();
 
+  const ids = opts.playerIds || ["p1"];
+
+  // The recruit pool is DEALT here (S3), because this is the only thing that
+  // knows how many bases there are. One share per seat, each authored recruit
+  // to exactly one of them; at one seat the share is the whole pool in authored
+  // order, so the plain single-player URL is untouched.
+  //
+  // `opts.state` is the exception, and it is stated rather than defended: that
+  // seat holds a campaign somebody else already built, with the entire pool in
+  // it, so a session opened that way is NOT dealt and the later seats fall back
+  // to their own full copies. The hatch exists for tests; the game never passes
+  // it. A test that wants a deal builds the session without it.
+  const hands = seatOne ? [] : dealRecruits(ids.length);
+
   // A Map, iterated everywhere. No players[0], no .a/.b, no "the other player"
   // that returns exactly one. S4's readiness and S5's pending choice become
   // fields on these records, so those slices add a field, not a structure.
   const players = new Map();
-  for (const id of opts.playerIds || ["p1"]) {
-    const campaign = players.size === 0 && seatOne ? seatOne : createPlayerState(world);
+  // Indexed off the id list, not off players.size — a duplicate id in the list
+  // does not grow the Map, and that would deal one hand to two seats.
+  ids.forEach((id, i) => {
+    const campaign = i === 0 && seatOne ? seatOne : createPlayerState(world, hands[i]);
     players.set(id, { id, campaign, view: null });
-  }
+  });
 
   // A day is spent by everybody, whoever asked for it: the world half runs once
   // inside advanceDay, and every OTHER player's half runs here. Without this the

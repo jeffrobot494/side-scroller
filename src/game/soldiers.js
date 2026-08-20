@@ -29,6 +29,7 @@
 // Stats are placeholder-tuned; they'll get wired to run-and-gun combat later.
 
 import { config } from "./config.js";
+import { shuffle } from "./gen/rng.js";
 
 // Max HP a soldier can have, derived from their Health stat and the config knobs
 // (defaults: 10 + 2×stat → 12–30 hp for a 1–10 stat). Kept here so the mission
@@ -117,3 +118,34 @@ export const RECRUIT_POOL = [
     record: { missions: 0, kills: 0 },
   },
 ];
+
+// ---- dealing the pool (multiplayer-state S3) -------------------------------
+// Every authored recruit goes to exactly ONE base, so hiring is scarce and
+// uncontested and no soldier id exists twice in a campaign. Dealing lives here
+// because the pool does, and it is PURE — it takes the number of shares and
+// returns them, and knows nothing about a session, a world or a player id.
+//
+// Two properties the callers depend on:
+//
+//   - **A one-player deal is the whole pool in authored order.** Nothing to
+//     divide is nothing to shuffle, and shuffling at n=1 would give the plain
+//     single-player URL a randomised Barracks while `createState()` kept the
+//     authored one — two construction paths with different output, which is
+//     the thing this spec exists to refuse.
+//   - **Shares are deep clones.** `hire` writes `status`, `weaponId` and
+//     `wounds` into the recruit object in place, so dealing the authored
+//     objects would corrupt the module-level pool for the life of the page —
+//     and, under `node test/run.mjs`, for every suite that ran after.
+//
+// The deal is round-robin off a shuffled pool, so at six recruits and four
+// bases the shares are 2/2/1/1 rather than 2/2/2/0. More bases than recruits
+// is legal and yields empty shares; see tech/multiplayer-state.md.
+export function dealRecruits(shares, rng = Math.random) {
+  const n = Math.max(1, Math.floor(shares) || 1);
+  const clone = (s) => structuredClone(s);
+  if (n === 1) return [RECRUIT_POOL.map(clone)];
+
+  const hands = Array.from({ length: n }, () => []);
+  shuffle(rng, RECRUIT_POOL).forEach((s, i) => hands[i % n].push(clone(s)));
+  return hands;
+}

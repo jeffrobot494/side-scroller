@@ -62,7 +62,12 @@ export function createWorld() {
 // One base, over a world it shares with the other players. Flat and
 // state-shaped: the world fields are accessors, so nothing downstream can tell
 // which half a field came from.
-export function createPlayerState(world) {
+//
+// `recruits` is RECEIVED, not helped itself to (S3). A base cannot deal itself
+// a share, because the size of a share depends on how many other bases exist,
+// and only the session knows that. Handed nothing, it clones the whole pool —
+// which is single-player and what every suite calling `createState()` gets.
+export function createPlayerState(world, recruits = null) {
   // Editor edits to BUILT-IN weapons are patches applied over arsenal.js, in
   // place, so BLUEPRINTS (which hold direct references) see them too. Must run
   // before the armory line below, which clones out of WEAPONS.
@@ -71,7 +76,7 @@ export function createPlayerState(world) {
   const state = {
     money: TUNING.startMoney,
 
-    recruits: RECRUIT_POOL.map((s) => structuredClone(s)),
+    recruits: recruits || RECRUIT_POOL.map((s) => structuredClone(s)),
     roster: [],
 
     // Weapons the player owns and can assign to soldiers. The rifle is standard

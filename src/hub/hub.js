@@ -57,10 +57,12 @@ export class Hub {
   // The transient UI is DROPPED, not parked per seat: it belongs to the
   // commander who made it, and half of it is dangerous to inherit. A deploy
   // picked by one player must not be launchable by the next, and `_lastSquad`
-  // especially — `_nameFor` falls back to it, and until the recruit pool is
-  // dealt (S3) the same soldier id exists in every roster, so a surviving
-  // `_lastSquad` resolves to the OTHER commander's soldier under a name that
-  // looks correct. `location` survives, so you arrive in the same room.
+  // is on that list too — `_nameFor` falls back to it, so a surviving one would
+  // print the other commander's dead. Since S3 dealt the recruit pool no
+  // soldier id exists in two rosters, which makes that a stale name rather than
+  // a plausible wrong one; dropping it is still the answer, because the squad
+  // it holds is not this commander's to see. `location` survives, so you arrive
+  // in the same room.
   setView(view) {
     this.game = view;
     this.mode = "hub";
