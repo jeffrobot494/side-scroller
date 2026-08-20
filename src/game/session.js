@@ -82,13 +82,41 @@ const VIEW_FIELDS = [
 // exactly until somebody readied. A fresh array each read, because nothing
 // downstream needs its identity and handing out the records themselves would
 // hand out the campaigns hanging off them.
-function makeView(campaign, player, players) {
+function makeView(campaign, player, players, round) {
   const v = { playerId: player.id };
   for (const key of VIEW_FIELDS) {
     Object.defineProperty(v, key, { get: () => campaign[key], enumerable: true });
   }
   Object.defineProperty(v, "taskForce", {
     get: () => [...players.values()].map((p) => ({ id: p.id, name: p.name, ready: p.ready })),
+    enumerable: true,
+  });
+
+  // THIS commander's pending deployments and nobody else's (S5). Projected,
+  // not handed over: the deploy screen needs the lead, the squad ids and the
+  // weapon map it re-renders its selects from, and handing over the choice
+  // itself would hand over live soldier references the hub has no business
+  // writing through. `weapons` is copied for the same reason — the hub mutates
+  // its own copy on every select change.
+  Object.defineProperty(v, "pending", {
+    get: () =>
+      player.pending.map((c) => ({
+        leadId: c.mission.id,
+        leadName: c.mission.name,
+        soldierIds: c.squad.map((x) => x.data.id),
+        weapons: { ...c.weapons },
+        disclose: c.disclose,
+      })),
+    enumerable: true,
+  });
+
+  // Mockup §4's "Elsewhere today": which lead every OTHER commander took this
+  // round, or that they held at base. The one thing about another commander
+  // the design lets you learn after a round — never whether they won, who
+  // died, or what they carried out. Self is filtered out because the screen
+  // reading this is already the commander's own.
+  Object.defineProperty(v, "elsewhere", {
+    get: () => round.last.filter((e) => e.id !== player.id),
     enumerable: true,
   });
   return Object.freeze(v);
@@ -107,17 +135,40 @@ function resolveWeapon(campaign, soldier, weapons) {
   return campaign.armory.find((w) => w.id === wId) || WEAPONS.carbine;
 }
 
+// Give back everything committing a choice charged. `record.missions` is the
+// only thing a commit writes into the campaign, and it is written per soldier —
+// so releasing has to walk the same squad. The deploy COUNT is not refunded
+// here because it is not stored: the cap reads `player.pending.length`, so the
+// list and the count are one fact and cannot drift apart.
+function releaseChoice(choice) {
+  for (const x of choice.squad) x.data.record.missions -= 1;
+}
+
 // Validate the whole deploy BEFORE writing any of it. The hub's old loop
 // incremented record.missions as it walked the squad, so a rejection halfway
 // through would have left some soldiers charged for a mission that never ran.
+//
+// Since S5 this does not START a mission — it HOLDS one. The assembled
+// `{ mission, level, squad }` goes onto the player record as a pending choice
+// and is handed out only when the round locks. Two things fall out of holding
+// the lead OBJECT rather than its id: a board filter cannot strip it out from
+// under the mission, and it is already the payload the mission scene takes.
 function deployCommand(campaign, cmd, player) {
+  // Re-committing to the SAME lead replaces the choice rather than stacking
+  // beside it, which is what lets the deploy screen be reopened and edited.
+  // Done as one command on purpose: release-then-deploy from the hub would
+  // leave a window where a rejected second half loses a commitment that was
+  // valid.
+  const replacing = player.pending.findIndex((c) => c.mission.id === cmd.leadId);
+
   // "A squad deploys to one mission per day" (design/campaign-pacing.md,
   // decision 1). The cap is enforced HERE and not at the ready gate, which
   // never sees a deploy — and with config.dayPerDeploy off there is no cap at
-  // all, which is what that setting has always restored. Without this the knob
-  // does nothing: deploy, resolve, deploy, resolve, ready is one day and any
-  // number of missions.
-  if (config.dayPerDeploy && player.deploys >= 1) {
+  // all, which is what that setting has always restored. A commander therefore
+  // holds a LIST, not a slot: with a slot both settings would yield a
+  // one-mission round and the knob would be inert.
+  const held = player.pending.length - (replacing >= 0 ? 1 : 0);
+  if (config.dayPerDeploy && held >= 1) {
     return fail("This squad has already deployed today. The day turns when every commander is ready.");
   }
 
@@ -136,15 +187,36 @@ function deployCommand(campaign, cmd, player) {
     picked.push(s);
   }
 
-  // Validated — now write.
+  // Validated — now write. The replaced choice is refunded first, so a soldier
+  // who is on both squads is charged once rather than twice.
+  if (replacing >= 0) {
+    releaseChoice(player.pending[replacing]);
+    player.pending.splice(replacing, 1);
+  }
+
   const weapons = cmd.weapons || {};
   const squad = picked.map((s) => {
     s.record.missions += 1;
     return { data: s, weapon: resolveWeapon(campaign, s, weapons) };
   });
 
-  player.deploys += 1;
-  return { ok: true, mission: lead, level: lead.level, squad };
+  // `weapons` is KEPT, which deployCommand used to consume and discard: the
+  // deploy screen re-renders its selects off exactly this map, so a commander
+  // who comes back to change their mind has to see what they picked.
+  //
+  // `disclose` is mockup §3's checkbox — optional and unverified. It is
+  // written here and read by nothing until S6 gives leads per-player
+  // visibility; carrying it now is what stops the pending choice being
+  // reshaped one slice later.
+  player.pending.push({
+    mission: lead,
+    level: lead.level,
+    squad,
+    weapons: { ...weapons },
+    disclose: !!cmd.disclose,
+  });
+
+  return { ok: true, committed: true, leadId: lead.id, leadName: lead.name, pending: player.pending.length };
 }
 
 export function createSession(opts = {}) {
@@ -174,18 +246,30 @@ export function createSession(opts = {}) {
   const hands = seatOne ? [] : dealRecruits(ids.length);
 
   // A Map, iterated everywhere. No players[0], no .a/.b, no "the other player"
-  // that returns exactly one. S4's readiness and S5's pending choice become
-  // fields on these records, so those slices add a field, not a structure.
+  // that returns exactly one. Readiness (S4) and the pending choices (S5) are
+  // fields on these records — both slices added a field, not a structure.
   const players = new Map();
   // Indexed off the id list, not off players.size — a duplicate id in the list
   // does not grow the Map, and that would deal one hand to two seats.
   seats.forEach((seat, i) => {
     const campaign = i === 0 && seatOne ? seatOne : createPlayerState(world, hands[i]);
-    // `ready` and `deploys` are the round's state. Both are cleared by the gate
-    // and by nothing else — a flag that outlives its turn strands the task
-    // force, and a count that does caps a commander out of the next day.
-    players.set(seat.id, { id: seat.id, name: seat.name, campaign, view: null, ready: false, deploys: 0 });
+    // `ready` and `pending` are the round's state. Both are cleared when the
+    // round ends and by nothing else — a flag that outlives its turn strands
+    // the task force, and a pending choice that does caps a commander out of
+    // the next day, since the cap counts the list.
+    players.set(seat.id, { id: seat.id, name: seat.name, campaign, view: null, ready: false, pending: [] });
   });
+
+  // THE ROUND (S5). One object, never reassigned, because the views close over
+  // it: `flight` is the round currently running its missions (null between
+  // rounds) and `last` is what every commander is allowed to learn afterwards.
+  //
+  // `flight.outstanding` is a Set of DISPATCH ids, not a count. A bare integer
+  // goes wrong three ways that nothing would catch — a result routed to the
+  // wrong commander, a choice released without decrementing, a second report
+  // for the same dispatch — and a set makes all three either impossible or a
+  // no-op.
+  const round = { flight: null, last: [], seq: 0 };
 
   // A day is spent by everybody, whoever asked for it: the world half runs once
   // inside advanceDay, and every OTHER player's half runs here. Without this the
@@ -197,26 +281,78 @@ export function createSession(opts = {}) {
     }
   }
 
-  // THE READY GATE (S4). The only thing in the game that spends a day.
+  // THE END OF A ROUND (S4's gate, S5's ordering). The only thing in the game
+  // that spends a day.
   //
-  // Everything about a round ends here: the world half runs once inside
-  // advanceDay, every other player's half runs beside it, and both pieces of
-  // round state — the ready flags and the deploy counts — are cleared on the
-  // way out. One day, whether nobody, one or every commander deployed.
+  // The world half runs once inside advanceDay, every other player's half runs
+  // beside it, and the round's state is cleared on the way out.
   //
-  // The refusal is advanceDay's own, passed back unreshaped: a finished
-  // campaign answers "The campaign is over." and the flags are deliberately
-  // left as they are, because nothing can turn another day anyway and clearing
-  // them would only invite another attempt.
-  function turnTheDay(actor) {
+  // `actor` is whoever the day is charged against, and it decides exactly one
+  // thing: whose fabrication the returned summary names. Everything else
+  // advanceDay does is the world's. At the gate that is the commander who
+  // readied last; at the end of a round with missions in it, it is the
+  // commander whose mission reported last — because their results screen is
+  // the one about to render, and printing another commander's finished jobs
+  // there is precisely what "a base is invisible" forbids.
+  //
+  // The clear is UNCONDITIONAL, and that is a change from S4. It returned
+  // advanceDay's refusal before clearing anything, so the first result of a
+  // round that ends the campaign left every flag set and every choice
+  // unreleased. Harmless — the campaign really was over — but a half-cleared
+  // round is not a state anything else here is written against. The refusal
+  // itself is still passed back unreshaped, in advanceDay's own words.
+  //
+  // Pending choices are empty by construction whenever this runs: closeRound
+  // empties every list before either of its branches, and no deploy is
+  // accepted while a round is in flight.
+  function endRound(actor) {
     const res = advanceDay(actor.campaign);
-    if (!res.ok) return res;
-    restEveryoneElse(actor);
+    if (res.ok) restEveryoneElse(actor);
+    for (const p of players.values()) p.ready = false;
+    round.flight = null;
+    return res.ok ? { ...res, dayTurned: true } : res;
+  }
+
+  // The last commander readied. Choices LOCK — there is no withdrawal from
+  // here — and the round either runs its missions or, with nobody deployed, is
+  // over the moment it began.
+  //
+  // What every commander learns afterwards is copied out HERE, before the
+  // choices are released, because this is the only moment they all exist.
+  function closeRound(actor) {
+    const dispatches = [];
+    const elsewhere = [];
     for (const p of players.values()) {
-      p.ready = false;
-      p.deploys = 0;
+      elsewhere.push({ id: p.id, name: p.name, leads: p.pending.map((c) => c.mission.name) });
+      for (const c of p.pending) {
+        // The dispatch id is what the round's bookkeeping is keyed to, and it
+        // is per-dispatch rather than per-player because dayPerDeploy off lets
+        // one commander hold several.
+        dispatches.push({
+          dispatchId: `d${++round.seq}`,
+          playerId: p.id,
+          mission: c.mission,
+          level: c.level,
+          squad: c.squad,
+        });
+      }
+      p.pending = [];
     }
-    return { ...res, dayTurned: true };
+    round.last = elsewhere;
+
+    // Nobody deployed: there is nothing to wait for and the day turns on this
+    // click, which is every case S4 could produce and why S4 needed no
+    // separate arm.
+    if (!dispatches.length) {
+      const res = endRound(actor);
+      return res.ok ? { ...res, ready: true } : res;
+    }
+
+    round.flight = { dispatches, outstanding: new Set(dispatches.map((d) => d.dispatchId)), taken: false };
+    // The FOURTH answer `ready` can give: locked, no day yet. Without it this
+    // falls into the readied-not-last arm and the hub prints "Waiting on 0
+    // more."
+    return { ok: true, ready: true, dayTurned: false, roundClosed: true, missions: dispatches.length };
   }
 
   function command(playerId, cmd) {
@@ -238,23 +374,32 @@ export function createSession(opts = {}) {
       case "sellLoot":
         return sellAllLoot(campaign);
       case "ready": {
+        if (round.flight) return fail("The round is under way.");
+
         // A toggle by default; an explicit value is for a caller that knows
-        // which way it wants (S5's stand-down has one).
+        // which way it wants.
         const want = cmd.ready === undefined ? !player.ready : !!cmd.ready;
 
         // Standing down, or readying while somebody is still deciding: no day,
         // and the answer carries no day summary. The hub has to branch on that
         // — reading `finished` off this result is a crash, not an empty list.
         if (!want || [...players.values()].some((p) => p !== player && !p.ready)) {
+          // Standing down releases whatever was pending, which is the clause
+          // S4 could not build because nothing was pending yet. The refund
+          // matters more than it looks: the cap counts the list, so a
+          // commander who stood down to change their mind and kept the charge
+          // could never commit again this round — which is exactly what
+          // standing down is FOR.
+          if (!want) for (const c of player.pending.splice(0)) releaseChoice(c);
           player.ready = want;
           const waiting = [...players.values()].filter((p) => !p.ready).length;
           return { ok: true, ready: want, dayTurned: false, waitingOn: waiting };
         }
 
-        // Last one in. The day turns on this click and there is no window to
-        // stand down again — design/multiplayer.md is explicit about that.
+        // Last one in. There is no window to stand down again —
+        // design/multiplayer.md is explicit about that.
         player.ready = true;
-        const res = turnTheDay(player);
+        const res = closeRound(player);
         if (!res.ok) {
           player.ready = false; // nothing turned, so nothing is committed
           return res;
@@ -262,20 +407,48 @@ export function createSession(opts = {}) {
         // The summary names only THIS player's finished jobs. What the others
         // built is their own business — the design says a base is invisible —
         // and the shared campaign log is where they read their own.
-        return { ...res, ready: true };
+        return res;
       }
       case "deploy":
+        if (round.flight) return fail("The round is under way.");
         return deployCommand(campaign, cmd, player);
+      case "release": {
+        // The deploy screen's own control. Standing down releases everything;
+        // this releases ONE, because with dayPerDeploy off a commander can
+        // hold several and changing your mind about one is not changing your
+        // mind about all of them.
+        if (round.flight) return fail("The round is under way.");
+        const i = cmd.leadId
+          ? player.pending.findIndex((c) => c.mission.id === cmd.leadId)
+          : player.pending.length - 1;
+        if (i < 0) return fail("Nothing is pending on that lead.");
+        releaseChoice(player.pending[i]);
+        player.pending.splice(i, 1);
+        return { ok: true, released: true, pending: player.pending.length };
+      }
       case "missionResult": {
-        // No day is spent here any more. Until S4 this had to watch world.day
-        // across the call to work out whether applyMissionResult had charged
-        // one; the charge is gone, so the watcher is gone with it. A mission
-        // resolving is not a day — the ready gate is.
-        //
         // applyMissionResult returns the state object itself; returning that
         // would hand the campaign back through the seam we just built.
         applyMissionResult(campaign, cmd.result);
-        return { ok: true };
+
+        // ...and this is where the day comes from since S5. A round owes one
+        // day, and it is spent when the LAST of that round's missions has
+        // reported — not when the choices locked. Turning it first inverts the
+        // game's oldest ordering (a win's reward has always been banked before
+        // the doom tick that followed it) and lets a locked lead rot before its
+        // own mission runs.
+        //
+        // An unknown or missing dispatch id is applied and otherwise ignored:
+        // a second report for the same dispatch cannot drive the count past
+        // zero, and a bare result outside a round is what several suites send.
+        const flight = round.flight;
+        if (!flight || !flight.outstanding.delete(cmd.dispatchId)) return { ok: true };
+        if (flight.outstanding.size) return { ok: true };
+
+        const turn = endRound(player);
+        return turn.ok
+          ? { ok: true, dayTurned: true, finished: turn.finished, expired: turn.expired, arrived: turn.arrived }
+          : { ok: true, dayTurned: false, dayHeld: turn.reason };
       }
       default:
         return fail("Unknown command.");
@@ -289,8 +462,24 @@ export function createSession(opts = {}) {
   function view(playerId) {
     const player = players.get(playerId);
     if (!player) throw new Error(`No such player: ${playerId}`);
-    if (!player.view) player.view = makeView(player.campaign, player, players);
+    if (!player.view) player.view = makeView(player.campaign, player, players, round);
     return player.view;
+  }
+
+  // The round's dispatches go to the PAGE, not to a player and not through a
+  // view. The only value that escapes a Ready click is the command's return,
+  // read inside one commander's hub — and routing a round that way would put
+  // every commander's locked lead and squad inside one commander's screen,
+  // which is the exact thing the view is forbidden to carry. The page is not a
+  // player: online, the server dispatches to each client, and src/main.js is
+  // that dispatcher's stand-in.
+  //
+  // Taken once. A second call is an empty list rather than a replayed round.
+  function takeRound() {
+    const flight = round.flight;
+    if (!flight || flight.taken) return [];
+    flight.taken = true;
+    return flight.dispatches.map((d) => ({ ...d }));
   }
 
   return {
@@ -299,5 +488,6 @@ export function createSession(opts = {}) {
     hasPlayer: (id) => players.has(id),
     command,
     view,
+    takeRound,
   };
 }

@@ -85,6 +85,62 @@ rendered hub at `index.html` with no query string was diffed against the same
 render at the previous commit: zero bytes different. The claim in
 `Must not regress` is not an argument, it is a diff.
 
+**As built, S5: `player.deploys` was DELETED, not kept beside the list.** The
+seam says the count and the list length "are the same fact and must not become
+two", and the way to guarantee that turned out to be to remove the number.
+`deployCommand` reads `player.pending.length`, so releasing a choice lifts the
+cap by construction and there is no second thing to forget to refund. What
+`releaseChoice` refunds is therefore only `record.missions`, per soldier.
+
+**As built, S5: `deploy` REPLACES a choice on the same lead, in one command.**
+The plan had the deploy screen release and then re-commit. That leaves a window
+where a rejected second half loses a commitment that was valid, so the
+replacement happens inside `deployCommand`: it refunds and drops the old choice
+after validation passes and before the new one is written. The cap is computed
+against the list minus the choice being replaced, which is what lets a commander
+reopen a committed lead and change their squad at the default setting.
+
+**As built, S5: the round's clear is UNCONDITIONAL, which fixes S4's stranding
+in passing.** `endRound` runs `advanceDay`, rests everyone else only if it
+succeeded, and then clears every ready flag and drops the flight **whether or
+not the clock moved**. S4 returned the refusal before clearing anything — the
+bug this document already recorded as ordinary rather than exotic. The refusal
+itself still reaches the caller in `advanceDay`'s own words, now as
+`{ ok: true, dayTurned: false, dayHeld: "The campaign is over." }` on a mission
+report, because a mission report is not a failed command.
+
+**As built, S5: nothing is committed, released or readied while a round is in
+flight.** `ready`, `deploy` and `release` all refuse with "The round is under
+way." Unreachable through the UI — the day control is disabled outside the room
+screens and the hub is showing a results screen or nothing at all — but it is
+what makes "pending choices are empty whenever `endRound` runs" true by
+construction rather than by inspection.
+
+**As built, S5: "Elsewhere today" is published when the round LOCKS, not when it
+ends.** It is the only moment every choice exists, and it is the moment before
+they are released into dispatches. The cost is that every results screen in the
+round shows it, so every commander but the last learns it one mission early. In
+hot-seat that is not a leak — the same person picked all the choices — and a
+transport publishes the same list at the round's end. Named rather than fixed
+because fixing it means holding the list back through a queue the session
+deliberately cannot see.
+
+**As built, S5: single-player commits too, and the day button is what runs the
+mission.** There is no second path — a solo commander picks a squad, presses
+Commit, and the mission starts when they advance the day, because a one-player
+gate closes on their own click. The day control keeps the name it has always
+had; only its tooltip changes when something is held. This is the second visible
+single-player change in the spec, after S4's "time stops being automatic", and
+the same reasoning covers both: the alternative is a solo path through the seam,
+which is the thing S1 existed to remove.
+
+**As built, S5: the round stalls at an end screen, and that is correct.** If a
+mission ends the campaign, `Hub.render` promotes every screen to the end screen
+and the results screen's button becomes "View final report", which does not
+resume the queue. The round's remaining missions never run. Nothing crashes, no
+day turns (none can), and the round's state is fully cleared — which is what
+"a coherent end state" means here.
+
 **There is no reward split.** The first draft carried a slice for one, because
 an earlier design divided "the mission's credit reward". No such reward exists —
 `state.money` moves only in `hire`, `commission` and `sellAllLoot`, a mission
@@ -98,8 +154,8 @@ anything and `sellAllLoot` stays a private, per-player action.
 | What | Why it matters |
 |---|---|
 | `src/game/state.js` action functions — `hire`, `commission`, `sellAllLoot`, `advanceDay`, `applyMissionResult` | Almost every mutation already goes through one of the five, so S1 is mostly redirection. They already return `{ ok, reason }` or a summary, which is the shape a command result wants |
-| `src/hub/hub.js` `_onClick` | A single `switch` over `data-action`. Since S1 every case that changes anything sends a command through `this.api` and does nothing else, so a slice that changes what a command means costs the hub nothing |
-| `src/main.js` | The only module wiring hub, mission and session together. Since S1 it imports no action function at all — the only call site of `applyMissionResult` in `src/` is `src/game/session.js`. It is where the session is constructed, where the player count is decided, and where the seat swap re-binds |
+| `src/hub/hub.js` `_onClick` | A single `switch` over `data-action`. Since S1 every case that changes anything sends a command through `this.api` and does nothing else, so a slice that changes what a command means costs the hub nothing. S5 is the proof: `launch` went from starting a mission to committing one without the case around it changing shape |
+| `src/main.js` | The only module wiring hub, mission and session together. Since S1 it imports no action function at all — the only call site of `applyMissionResult` in `src/` is `src/game/session.js`. It is where the session is constructed, where the player count is decided, and where the seat swap re-binds. Since S5 it is also the round's DISPATCHER: it takes the locked choices, decides which mission plays first, follows the seat to whoever owns it, and reports each result back against its dispatch id. All of that dies with hot-seat, which is why none of it is in the session |
 | `src/game/state.js` `createState()` | Builds a whole campaign from `src/game/soldiers.js` and `src/game/content.js` in one place, so the world/player split is a partition of existing construction |
 | `src/game/state.js` `livingRoster()` | The accessor the hub and `src/hub/ambient.js` mostly use, and the model a view-side accessor should follow |
 | The DOM-free import chain under `src/game/state.js` | Every `localStorage` access in `src/game/config.js`, `src/game/customcontent.js` and `src/game/weaponoverrides.js` is guarded, which is why six suites import state headless. The session must preserve this, because it is the property that lets a later spec move it to a server |
@@ -114,7 +170,7 @@ anything and `sellAllLoot` stays a private, per-player action.
 
 | Path | |
 |---|---|
-| `src/game/session.js` | Owns the campaign, holds the players, validates and dispatches commands, projects per-player views, and holds the ready gate and pending deploy choices. Must stay DOM-free and `localStorage`-guarded like the rest of `src/game/`. S1 built it around **one** campaign shared by every player — `makeView` hands them all the same object, and the `opts.state` escape hatch four blocks of `test/session.test.mjs` use takes a whole campaign. S2 replaces both: one world, one campaign per player, and an escape hatch shaped to match. S4 adds three things to the player record beside the campaign — a ready flag, a deploy count for the round, and the commander's name — and one thing to the session: the gate that reads every flag and turns the day when the last one is set |
+| `src/game/session.js` | Owns the campaign, holds the players, validates and dispatches commands, projects per-player views, and holds the ready gate and pending deploy choices. Must stay DOM-free and `localStorage`-guarded like the rest of `src/game/`. S1 built it around **one** campaign shared by every player — `makeView` hands them all the same object, and the `opts.state` escape hatch four blocks of `test/session.test.mjs` use takes a whole campaign. S2 replaces both: one world, one campaign per player, and an escape hatch shaped to match. S4 added three things to the player record beside the campaign — a ready flag, a deploy count for the round, and the commander's name — and one thing to the session: the gate that reads every flag and turns the day when the last one is set. S5 replaced the count with the list of held choices it was counting, and added the round itself: the dispatches, the outstanding set they are keyed by, and what every commander learns afterwards |
 | `src/game/soldiers.js` | Owns `RECRUIT_POOL` and, since S3, the deal: `dealRecruits(shares, rng = Math.random)`, a pure split of the pool into one share per base that knows nothing about a session, a world or a player id. Two readers, not one — `createSession` calls the deal, and `createPlayerState` clones the whole pool when it is handed no share |
 | `src/game/state.js` | The world/player field split, and the two constructors it implies — one for the shared world, one for a player's campaign over it. `createState()` stays exactly what it is today and becomes the one-player case of the second. `advanceDay`'s player half separates in S2; `applyMissionResult` loses the day charge in S4 |
 | `src/hub/hub.js` (S5) | Three shipped strings stop being true and are listed here so they are not discovered in play: the day button's tooltip and the strip's note both say the day turns when every commander is ready, and `deployCommand`'s refusal in `src/game/session.js` says "this squad has already deployed today" when nothing has deployed and a choice is merely held. `_launch` stops calling `api.startMission` and sends a commit instead; `_deployScreen` gains the notice and the disclosure control; the `predeploy` case has to open onto an EXISTING pending choice rather than always a blank one, because a commander who committed and came back must see what they committed to. `this.deploy` stays UI state — the committed thing lives in the session, and the two must not be confused |
@@ -186,7 +242,7 @@ no build step.
 | **A campaign that ends mid-round does not stop the round** (S5) | The design forbids withdrawal, so the remaining locked missions still run. They bank loot, `cleared` and `highWins` into a campaign that is already over, and because `outcome` is shared until S7 one commander's win ends it for commanders whose missions have not been played yet. Accepted, not fixed — S7 is what forks `outcome`, and building a guard here would be building it twice. The regression to hold is that nothing CRASHES on that path |
 | **`_lastSquad` loses its writer, and needs a new one** (S5) | It is assigned in `_launch` from the deploy result — the exact call S5 converts from "start a mission" to "hold a choice" — and `_nameFor` needs it because `applyMissionResult` drops the dead from the roster before the results screen renders. It must now be written when a mission is DISPATCHED, not when a choice is made. Two things make this sharper: `setView` nulls it on every seat swap, and the seat follows the mission between each of the round's missions, so a naive port names the dead of the round's first mission and nobody after. The pending squad is NOT the substitute — it holds the living, and the results screen exists to name the dead |
 | **The gate must not deadlock** | A campaign whose `outcome` is set, a seat that readied and then swapped away, a flag that survives the turn — any of these leaves a task force that can never turn another day, and no assertion in the suite would notice. The gate needs a case that says every flag clears on the turn, and one that says a finished campaign refuses without stranding anyone |
-| `node test/run.mjs` | 31 suites, 1336 assertions green before S1 begins; 32 suites, 1379 after it; 32 suites, 1405 after S2 and its fix; 32 suites, 1419 after S3; 32 suites, 1448 after S4. **Run it more than once** — the ambient suite is randomised, and the case S2 first shipped failed about two runs in five while reporting green on the others |
+| `node test/run.mjs` | 31 suites, 1336 assertions green before S1 begins; 32 suites, 1379 after it; 32 suites, 1405 after S2 and its fix; 32 suites, 1419 after S3; 32 suites, 1448 after S4; 32 suites, 1505 after S5. **Run it more than once** — the ambient suite is randomised, and the case S2 first shipped failed about two runs in five while reporting green on the others |
 | **`index.html` with no query string is unchanged** | Every visible thing S2 adds is behind `?players=2`. The single-player game is what ships, and six suites construct a `createState()`, so a regression in it is not a multiplayer bug — it is the game |
 | **A single-player campaign played end to end, every slice** | No suite imports `src/hub/hub.js` or `src/main.js` — the only `src/hub/` imports in `test/` are `ambient.js` and `fpsmeter.js`. S1's entire diff lands in files the bar cannot see, so this manual check is the primary guard for that slice, not a supplement |
 | **A DOM check in `test/session.test.mjs`** (new) | `test/run.mjs` calls `installDom()` once for the whole run and `test/harness.mjs` puts `document`, `window` and `requestAnimationFrame` on `globalThis`, so a DOM reference inside the session would pass every suite silently. The seam rule above needs its own assertion or it is unenforced |
@@ -215,9 +271,9 @@ no build step.
 | **Time stops being automatic in single-player.** Today a mission resolves and the day turns itself. After S4 the player presses the day button afterwards, because the gate is the only spender and a one-commander gate turns on the press. The campaign spends the same number of days; it just asks | The manual end-to-end pass. This is the one visible single-player change in the whole spec, and "index.html with no query string is unchanged" stops being literally true at S4 — it stays true in day count and in every number, and stops being true in one click |
 | **Where the day sits relative to a mission is the player's choice at S4.** The gate spends the day whenever it is pressed, so a commander may deploy before or after turning it. `design/multiplayer.md` fixes the order — ready, then the missions begin — but there is nothing to lock until S5 holds a pending choice, so S4 cannot enforce it | S5, which locks the choices and holds the day until the last of them has reported. The ordering S4 shipped is not wrong, only unenforced: at S4 a round can hold at most one mission per commander and the day is one click either side of it |
 | **Readiness has no timeout, no persistence and no way to nudge.** A commander who never readies stalls the task force forever | Deliberate at hot-seat: one browser, one person, and the strip already says who is outstanding. A real transport needs an answer and this spec does not give it one |
-| **Readying commits nothing yet.** Mockup §1 says standing down "also releases whatever deployment you had pending", and §3 says a deployment is final once everyone readies. Neither is true at S4, because no deployment is pending | S5, which is the whole of that clause. S4 ships the toggle and the turn; the commitment it is supposed to carry arrives one slice later |
+| ~~**Readying commits nothing yet.**~~ **Built in S5.** Standing down releases every pending deployment and refunds the `record.missions` each charged; a deployment is final once every commander has readied | `test/session.test.mjs`, the stand-down block. The refund is the half that would fail silently: without it the cap — which counts the held choices — locks a commander out of the round they just changed their mind about |
 | **The task-force strip shows readiness and nothing else.** No count of anyone's leads, credits, roster or fabrication, and no hint of what a ready commander readied FOR | Matches `design/multiplayer.md` exactly — readiness is the one thing visible before a mission resolves. Listed so the strip is not later grown into a scoreboard by accident |
-| **You cannot stand down from the deploy or results screen.** The strip rides the top bar so readiness is *readable* on both, but the control is disabled there by the same rule that disables the day button today — the deploy screen holds a lead by id and dereferences it unguarded, and results is mid-resolution. A commander who readied and then opened a deploy screen has to leave it to change their mind | Deliberate, and it costs nothing at S4 because readying commits nothing. It starts costing something at S5, where standing down is what releases a pending deployment — that slice has to decide whether the deploy screen gets a live control or whether opening one stands you down |
+| **You cannot stand down from the deploy or results screen** — but since S5 the deploy screen has its own control. The strip rides the top bar so readiness is *readable* on both, and the ready toggle is still disabled there by the rule that disables the day button. What S5 added instead is a **Release this deployment** button on the deploy screen and a `release` command behind it, which drops ONE held choice rather than all of them — standing down is the all-of-them version. Opening a deploy screen does not stand you down; nothing implicit destroys a commitment | Deliberate. A commander holding several choices with `dayPerDeploy` off should not lose all of them because they changed their mind about one, and navigation that silently withdraws a commitment is the opposite of what "locked on ready" promises |
 | **Two commanders can take the same lead, and phase 1 cannot honour what that means.** Decision 5 says they play it together on one level; joint missions are `tech/multiplayer.md` phase 3. So at S5 they play it separately, and the second one to resolve finds the lead already filtered off the shared board by the first: they keep their loot and their clear credit, and lose the threat reward, the High-threat credit toward the finale, and their log line | **Accepted as-is — Bo's call, 2026-08-20: "it doesn't matter, this is a temporary problem that will be resolved in phase 3, we shouldn't write any code to handle this situation."** So S5 writes NO code for it: no refusal, no warning, no reconciliation. The degraded outcome above is the specified behaviour, not a bug to be found later, and phase 3 is what removes the case by putting both squads on one level. Recorded here so the next reader knows it was decided rather than missed |
 | **A commander who stayed at base is told nothing about the round.** "Which lead the others took" is delivered on the results screen, and that screen only exists for a commander whose mission ran — mockup §4 draws a row for a commander who "held at base", and there is no surface to draw it on. So the design's "After a mission | Which lead they took" reaches deployers only | Named rather than solved. The cheap fix is available whenever it is wanted — the campaign log is already shared and universal, so a line per lead taken would reach everybody — and it is not taken here because the log's universality is itself an approximation this spec is carrying, not a foundation to build on |
 | **The §3 disclosure checkbox is written and not read.** S5 adds "tell the task force I'm taking this lead" and there is nowhere to display the claim: the only multi-commander surface is the task-force strip, and this document's own S4 approximation rules it out — "no hint of what a ready commander readied FOR" — which is the whole content of a disclosure | So S5 ships the input and stores the flag, and nothing consumes it until there is a surface that may carry it. Worth knowing that this spec uses "disclosure" for two different mechanisms: S5's is a claim about where you are going, unverified and possibly false; S6's is making a lead visible and deployable for someone else. They share a word and nothing else |
@@ -277,12 +333,12 @@ The round S4 named, with the commit in it. Read alongside "What a round is".
 | The last mission reports | — | **The day turns.** Ready flags, deploy counts, pending choices and the outstanding count all clear together |
 | Everyone learns which lead the others took | — | Something that OUTLIVES the clear above. The pending choices are gone by then, so the round's leads-taken are copied somewhere before they are released — and it is per-round, not per-player, because it is the same short list for everybody |
 
-Two things that table does not settle, and a builder must:
+Two things that table did not settle, and the build did:
 
-| | |
+| | As built |
 |---|---|
-| **Whose campaign does the last-report turn run `advanceDay` against?** | S4's gate ran it against the commander who readied last. At the last report there is no readying commander. It is not cosmetic: `advanceDay` runs that campaign's `restDay` and returns *its* finished jobs, so the choice decides whose fabrication summary the turn reports — and at S7, when `outcome` forks, it decides whether the day turns for the task force at all |
-| **What the round's outstanding count is keyed to** | Not a bare integer if it can be avoided. A result routed to the wrong commander, a choice released without decrementing, or a second `missionResult` for the same dispatch all drive a bare count wrong, and none of them fails an assertion the suite has today |
+| **Whose campaign does the last-report turn run `advanceDay` against?** | **The commander whose mission reported last.** It decides exactly one thing — whose fabrication the summary names; everything else `advanceDay` does is the world's — and that one thing has a privacy answer. The summary has to land on a screen, the only screen rendering at that moment is the last reporter's results screen, and printing another commander's finished jobs there is precisely what "a base is invisible" forbids. Running it against the last commander to READY, which is what S4 did and what continuity would suggest, would have needed a per-player summary mailbox to deliver it anywhere legal. At the gate — a round nobody deployed in — there is no reporter and it stays the readying commander, unchanged from S4 |
+| **What the round's outstanding count is keyed to** | **A Set of dispatch ids.** Each locked choice gets one at lock; `src/main.js` carries it back on the `missionResult` command. All three ways a bare integer goes wrong become a no-op rather than a miscount, and the one that is not hypothetical — a second report for the same dispatch — has its own assertion |
 
 The day sits at the END of that table on purpose. Putting it at the lock instead
 inverts the game's oldest ordering — a win's reward has always been banked

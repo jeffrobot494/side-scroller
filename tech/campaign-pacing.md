@@ -84,6 +84,15 @@ turns; off, as often as they like, which is the free deploy it always restored.
 Resolving a mission now advances nothing. `design/campaign-pacing.md` decision 1
 was reworded to match — "A squad deploys to one mission per day".
 
+**Amended again by S5: the gate closes the round, and the day turns when the
+last of that round's missions has reported.** Still exactly one day per round,
+still spent by the gate's rules — but at the END of the round rather than the
+start, which is what keeps C3's oldest ordering intact: a win's `threatReward`
+is banked before the doom tick that follows it, as it always was. Turning the
+day at the gate instead would also let a lead a commander had just locked expire
+in the gap before its own mission ran. With nobody deployed there is nothing to
+wait for and the day still turns on the click.
+
 **C4 — The finale gate is two High wins.** A cleared mission whose lead
 advertised High is counted; at `bossHighWins` the boss lead is placed
 immediately, bypassing the board ceiling — "immediate and guaranteed" outranks

@@ -5,15 +5,16 @@
 // Operations, Robotics, War Room), the deploy screen that carries a squad into a
 // mission, the post-mission results, and the campaign win/lose report. It owns
 // no game rules and performs no campaign writes — every mutation is a COMMAND
-// sent through the `api` handed in by main.js, which is also how it launches
-// missions.
+// sent through the `api` handed in by main.js. Since S5 it does not launch
+// missions either: Launch COMMITS a squad, and the page runs the round once
+// every commander has readied.
 //
 // `this.game` is a session VIEW, not the campaign: read-through getters over
 // whichever player this hub belongs to. It keeps its old name because every
 // screen builder opens with `const g = this.game` and none of them care which
 // commander it belongs to — which is exactly what makes `setView` a one-field
 // swap rather than a rewrite. What stays here is UI state only — mode,
-// location, flash, deploy, result, sold, and _lastSquad.
+// location, flash, deploy, result, turn, sold, and _lastSquad.
 // ---------------------------------------------------------------------------
 
 import { livingRoster } from "../game/state.js";
@@ -35,12 +36,13 @@ export class Hub {
   constructor(root, game, api) {
     this.root = root;
     this.game = game;
-    this.api = api; // { command(cmd), startMission(mission, level, squad) }
+    this.api = api; // { command(cmd), roundNext() }
     this.location = "barracks";
     this.mode = "hub"; // hub | deploy | results | end
     this.flash = null;
-    this.deploy = null; // { missionId, selected:Set, weapons:{soldierId:weaponId} }
+    this.deploy = null; // { missionId, selected:Set, weapons:{soldierId:weaponId}, disclose }
     this.result = null;
+    this.turn = null; // the day summary a round's last mission report carried
 
     this.root.addEventListener("click", (e) => this._onClick(e));
     this.root.addEventListener("change", (e) => this._onChange(e));
@@ -69,13 +71,28 @@ export class Hub {
     this.flash = null;
     this.deploy = null;
     this.result = null;
+    this.turn = null;
     this.sold = false;
     this._lastSquad = null;
     this.render();
   }
 
-  showResults(result) {
+  // Called by the page when a mission is DISPATCHED, which since S5 is not the
+  // same moment as the commit. `_nameFor` needs it because applyMissionResult
+  // drops the dead from the roster before this screen renders, and the seat
+  // follows the mission between each of a round's missions — so writing it at
+  // commit would name the dead of the round's first mission and nobody after.
+  noteDispatch(squad) {
+    this._lastSquad = squad.map((x) => x.data);
+  }
+
+  // `turn` is the missionResult command's answer. Since S5 the round's day is
+  // spent inside the LAST of its missions reporting, so this screen is the
+  // only place the day summary can land — the route it used, the ready click's
+  // flash, no longer carries one in any round where somebody deployed.
+  showResults(result, turn) {
     this.result = result;
+    this.turn = turn && turn.dayTurned ? turn : null;
     this.sold = false;
     this.mode = "results";
     this.render();
@@ -127,9 +144,17 @@ export class Hub {
     const me = force.find((p) => p.id === g.playerId);
     const lit = !solo && me && me.ready;
     const label = solo ? "Advance the day ▸" : lit ? "Ready" : "Ready ▸";
+    // Since S5 the day control is also what RUNS a committed squad — nothing
+    // reaches a canvas until the round closes — so the tip says so when there
+    // is something held. The label is deliberately unchanged: passing time is
+    // still the thing being asked for, and a button that renames itself under
+    // the cursor is worse than one that explains itself.
+    const held = (g.pending || []).length;
     const tip = solo
-      ? canAdvance ? "Advance the day — the invasion advances too." : "Finish here first."
-      : lit ? "Click again to stand down." : "The day turns when every commander is ready.";
+      ? !canAdvance ? "Finish here first."
+        : held ? "Advance the day — your committed squad deploys." : "Advance the day — the invasion advances too."
+      : lit ? "Click again to stand down — it releases any deployment you have pending."
+        : held ? "The round runs when every commander is ready." : "The day turns when every commander is ready.";
     return `
       <header class="topbar">
         <div class="brand">XCOM&nbsp;TASK&nbsp;FORCE</div>
@@ -359,6 +384,7 @@ export class Hub {
   _operations() {
     const g = this.game;
     const canDeploy = livingRoster(g).length > 0;
+    const pending = g.pending || [];
     const rows = g.leads.length
       ? g.leads
           .map((m) => {
@@ -370,13 +396,20 @@ export class Hub {
                     m.daysLeft === 1 ? "expires tomorrow" : `${m.daysLeft} days left`
                   }</span>`
                 : "";
-            const action = `<button class="btn" data-action="predeploy" data-id="${m.id}" ${
-              canDeploy ? "" : "disabled"
-            }>${canDeploy ? "Deploy squad" : "No soldiers"}</button>`;
+            // Committed, not launched (S5). The squad is held until every
+            // commander has readied, so Operations has to say so — otherwise
+            // the only evidence a deploy happened is a flash that is gone by
+            // the next render.
+            const held = pending.find((c) => c.leadId === m.id);
+            const action = `<button class="btn${held ? " btn-alt" : ""}" data-action="predeploy" data-id="${m.id}" ${
+              canDeploy || held ? "" : "disabled"
+            }>${held ? "Review squad" : canDeploy ? "Deploy squad" : "No soldiers"}</button>`;
             return `
-        <article class="mission-row ${m.winsCampaign ? "is-boss" : ""}">
+        <article class="mission-row ${m.winsCampaign ? "is-boss" : ""}${held ? " committed" : ""}">
           <div class="mission-main">
-            <div class="mission-title">${m.name} ${status} ${life}</div>
+            <div class="mission-title">${m.name} ${status} ${life} ${
+              held ? `<span class="tag tag-committed">squad committed</span>` : ""
+            }</div>
             <p class="mission-brief">${m.brief}</p>
             ${m.winsCampaign ? `<div class="win-flag">★ Destroying this ends the invasion in the sector.</div>` : ""}
           </div>
@@ -480,6 +513,27 @@ export class Hub {
       })
       .join("");
 
+    // Mockup §3. The screen has to say out loud what the design already
+    // decided: the choice locks when the last commander readies, and there is
+    // no withdrawing after that. Hidden at one commander, where there is
+    // nobody to wait for and the sentence would be a lie.
+    const solo = (g.taskForce || []).length < 2;
+    const committed = (g.pending || []).some((c) => c.leadId === this.deploy.missionId);
+    const notice = solo
+      ? ""
+      : `<div class="commit-note">
+          <b>Locked on ready.</b> When every commander has readied, this deployment is final —
+          there is no withdrawing, and you will not know where anyone else went until it is over.
+        </div>`;
+    // Optional and unverified — you can tick it and go somewhere else. Nothing
+    // reads it until S6 gives leads per-player visibility.
+    const disclose = solo
+      ? ""
+      : `<label class="discl">
+          <input type="checkbox" data-action="disclose" ${this.deploy.disclose ? "checked" : ""}>
+          Tell the task force I'm taking this lead
+        </label>`;
+
     return `
       <div class="location-header">
         <h1>🛰️ Deploy — ${mission.name}</h1>
@@ -489,11 +543,14 @@ export class Hub {
         <h2>Choose up to 3 <span class="count">${sel.size}/3</span></h2>
         <p class="muted">You control one soldier; the rest fight as AI companions and control swaps on death. <strong>Anyone who dies is gone for good.</strong></p>
         <div class="soldier-grid">${cards}</div>
+        ${notice}
+        ${disclose}
       </section>
       <div class="deploy-bar">
         <button class="btn btn-ghost" data-action="cancel-deploy">Cancel</button>
+        ${committed ? `<button class="btn btn-ghost" data-action="release-deploy">Release this deployment</button>` : ""}
         <button class="btn btn-go" data-action="launch" ${sel.size ? "" : "disabled"}>
-          Launch mission (${sel.size}) ▸
+          ${committed ? `Update commitment (${sel.size}) ▸` : `Commit squad (${sel.size}) ▸`}
         </button>
       </div>`;
   }
@@ -527,8 +584,40 @@ export class Hub {
         ? `<button class="btn btn-go" data-action="view-end">View final report ▸</button>`
         : `<button class="btn btn-go" data-action="return">Return to base ▸</button>`;
 
+    // Mockup §4. One line per other commander: which lead they took, or that
+    // they held at base. Deliberately absent — whether they won, who died, and
+    // what they carried out.
+    const others = g.elsewhere || [];
+    const elsewhere = others.length
+      ? `<div class="elsewhere">
+          <h4>Elsewhere today</h4>
+          ${others
+            .map(
+              (e) => `<div class="ewrow"><span class="who">${e.name}</span><span>${
+                e.leads.length ? `deployed to <b>${e.leads.join("</b>, <b>")}</b>` : "held at base"
+              }</span></div>`
+            )
+            .join("")}
+        </div>`
+      : "";
+
+    // The round's day turned inside the report that opened this screen, so its
+    // summary has nowhere else to go. Same parts the ready click prints when
+    // nobody deployed.
+    const t = this.turn;
+    const parts = [];
+    if (t) {
+      if (t.finished.length) parts.push(`Finished: ${t.finished.join(", ")}.`);
+      if (t.expired.length) parts.push(`Lead lost: ${t.expired.join(", ")}.`);
+      if (t.arrived.length) parts.push(`Ops has ${t.arrived.length} new lead(s).`);
+    }
+    const dayline = t
+      ? `<div class="dayturn">A new day — day ${g.day}. ${parts.join(" ")}</div>`
+      : "";
+
     return `
       ${ribbon}
+      ${dayline}
       <div class="results-body">
         <div class="result-col">
           <h2>Casualties</h2>
@@ -549,6 +638,7 @@ export class Hub {
           </div>
         </div>
       </div>
+      ${elsewhere}
       <div class="deploy-bar">${next}</div>`;
   }
 
@@ -585,6 +675,11 @@ export class Hub {
   // ---- interaction --------------------------------------------------------
 
   _onChange(e) {
+    const box = e.target.closest("[data-action='disclose']");
+    if (box) {
+      this.deploy.disclose = box.checked;
+      return;
+    }
     const el = e.target.closest("[data-action='weapon']");
     if (!el) return;
     this.deploy.weapons[el.dataset.id] = el.value;
@@ -639,12 +734,18 @@ export class Hub {
         // Ready clicks in a two-commander campaign, which is exactly the shape
         // this branch had before S4.
         if (!res.ok) this.setFlash("bad", res.reason);
-        else if (!res.dayTurned) {
+        else if (res.roundClosed) {
+          // The FOURTH answer (S5): everyone readied, the choices locked, and
+          // the round's missions are about to run. No day yet — it turns when
+          // the last of them reports. Without this arm it falls below and
+          // prints "Waiting on 0 more."
+          this.setFlash("good", `The task force is committed. ${res.missions} mission(s) to run.`);
+        } else if (!res.dayTurned) {
           this.setFlash(
             "good",
             res.ready
               ? `Ready. Waiting on ${res.waitingOn} more.`
-              : "Stood down. The day is held."
+              : "Stood down. Any pending deployment is released."
           );
         } else {
           const parts = [];
@@ -660,11 +761,31 @@ export class Hub {
         break;
       }
 
-      case "predeploy":
-        this.deploy = { missionId: btn.dataset.id, selected: new Set(), weapons: {} };
+      case "predeploy": {
+        // Reopening a lead you already committed to restores the squad and the
+        // weapons you picked — the session kept the weapon map for exactly
+        // this, because the selects re-render off it.
+        const id = btn.dataset.id;
+        const held = (this.game.pending || []).find((c) => c.leadId === id);
+        this.deploy = {
+          missionId: id,
+          selected: new Set(held ? held.soldierIds : []),
+          weapons: held ? { ...held.weapons } : {},
+          disclose: held ? held.disclose : false,
+        };
         this.mode = "deploy";
         this.render();
         break;
+      }
+
+      case "release-deploy": {
+        const res = this.api.command({ type: "release", leadId: this.deploy.missionId });
+        this.setFlash(res.ok ? "good" : "bad", res.ok ? "Deployment released. The squad stands down." : res.reason);
+        this.mode = "hub";
+        this.location = "operations";
+        this.render();
+        break;
+      }
 
       case "toggle": {
         const id = btn.dataset.id;
@@ -688,9 +809,15 @@ export class Hub {
 
       case "return":
         this.result = null;
+        this.turn = null;
         this.mode = "hub";
         this.location = "operations";
         this.render();
+        // The queue's only pacing signal. The page decides whether there is
+        // anything left in the round; this click is just "I have finished
+        // reading". Starting the next mission from the completion callback
+        // would destroy this screen before it was read.
+        if (this.api.roundNext) this.api.roundNext();
         break;
 
       case "view-end":
@@ -704,28 +831,34 @@ export class Hub {
     }
   }
 
+  // Launch stopped starting a mission at S5 and started HOLDING one. The
+  // session assembles and keeps the squad; nothing reaches a canvas until every
+  // commander has readied, and the page — not this hub — is what takes the
+  // round out. Re-committing to the same lead replaces the held choice, so this
+  // is one command whether or not something was pending.
   _launch() {
-    // The session assembles the squad: it owns the roster, the armory and the
-    // board, so it is the only thing that can validate the choice — and this is
-    // the payload S5 holds as a pending deployment rather than acting on.
     const res = this.api.command({
       type: "deploy",
       leadId: this.deploy.missionId,
       soldierIds: [...this.deploy.selected],
       weapons: this.deploy.weapons,
+      disclose: !!this.deploy.disclose,
     });
-    // Unreachable through the UI today (Launch is disabled with an empty
-    // squad), so behaviour is unchanged; it exists so a future rejection is a
-    // flash rather than a crash.
     if (!res.ok) {
       this.setFlash("bad", res.reason);
       this.render();
       return;
     }
-    // Remember who deployed so the results screen can still name the fallen
-    // after they've been removed from the roster.
-    this._lastSquad = res.squad.map((x) => x.data);
-    this.api.startMission(res.mission, res.level, res.squad);
+    const solo = (this.game.taskForce || []).length < 2;
+    this.setFlash(
+      "good",
+      solo
+        ? `${res.leadName} — squad committed. Advance the day to run it.`
+        : `${res.leadName} — squad committed. It runs when every commander is ready.`
+    );
+    this.mode = "hub";
+    this.location = "operations";
+    this.render();
   }
 }
 

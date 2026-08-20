@@ -60,9 +60,12 @@ export default async function run(t) {
   {
     const s = createSession();
     t.eq(
-      "the session exposes exactly five methods and no campaign",
+      "the session exposes exactly six methods and no campaign",
       Object.keys(s).sort(),
-      ["command", "hasPlayer", "playerCount", "playerIds", "view"]
+      // takeRound is S5's, and it is the PAGE's, not a player's: the round's
+      // locked choices cannot travel through a view without putting every
+      // commander's squad inside one commander's hub.
+      ["command", "hasPlayer", "playerCount", "playerIds", "takeRound", "view"]
     );
     t.ok("unknown player is rejected, not thrown", s.command("nobody", { type: "ready" }).ok === false);
 
@@ -91,12 +94,14 @@ export default async function run(t) {
       Object.keys(v).sort(),
       [
         "armory", "building", "campaignHealth", "completedMissions", "day",
-        "leads", "log", "money", "outcome", "playerId", "recruits", "roster", "stores",
-        // The only field that is not a projection of this player's campaign:
-        // who else is in the task force and whether they have readied. S4.
-        "taskForce",
+        "elsewhere", "leads", "log", "money", "outcome", "pending", "playerId",
+        "recruits", "roster", "stores", "taskForce",
       ]
     );
+    /* Three fields that are not a projection of this player's campaign:
+       are not a projection of this player's campaign: who else is in the
+       task force and whether they have readied (S4), this commander's own held
+       deployments, and which lead every OTHER commander took last round (S5). */
     t.ok("highWins is not on the view", !("highWins" in v));
 
     // Grabbed BEFORE the command: a snapshot would still read day 1, and the
@@ -166,53 +171,52 @@ export default async function run(t) {
     );
   }
 
-  // ---- deploy: the assembly moved out of the hub --------------------------
+  // ---- deploy: the assembly moved out of the hub, and now HOLDS -----------
   {
-    // This block deploys three times to walk the weapon fallback chain, which
-    // the S4 one-per-day cap would refuse. The cap has its own block below;
-    // here it is off, so what is under test is weapon resolution and nothing
-    // else. Restored by the resetConfig() at the end of the suite.
+    // Three leads, not one lead three times: since S5 a second commit to the
+    // same lead REPLACES the first, so the weapon fallback chain needs three
+    // choices held at once — which is what dayPerDeploy off is for. The cap
+    // has its own block below. Restored by the resetConfig() at the end.
     config.dayPerDeploy = false;
     const campaign = createState();
     const s = createSession({ state: campaign });
     const v = s.view("p1");
     s.command("p1", { type: "hire", recruitId: v.recruits[0].id });
     const soldier = v.roster[0];
-    const lead = fakeLead("lead_1");
-    campaign.leads.push(lead);
+    for (const id of ["lead_1", "lead_2", "lead_3"]) campaign.leads.push(fakeLead(id));
+    const leadOf = (id) => campaign.leads.find((l) => l.id === id);
+    campaign.armory.push({ id: "zapper", name: "Zapper" });
 
     const res = s.command("p1", { type: "deploy", leadId: "lead_1", soldierIds: [soldier.id], weapons: {} });
-    t.ok("deploy succeeds", res.ok);
-    t.ok("deploy hands back the lead and its level", res.mission === lead && res.level === lead.level);
-    t.eq("deploy builds one squad entry per soldier", res.squad.length, 1);
+    t.ok("a deploy succeeds", res.ok);
+    t.eq("...and answers with the lead it committed to", [res.committed, res.leadId], [true, "lead_1"]);
+    // The whole of S5 in one assertion: Launch stopped starting a mission.
+    t.ok("...and hands back no squad to launch", res.squad === undefined && res.level === undefined);
+    t.eq("committing charges the mission to the soldier's record", soldier.record.missions, 1);
+    t.eq("the commander's own view holds the choice", v.pending.map((c) => c.leadId), ["lead_1"]);
+    // The map deployCommand used to consume and discard. The deploy screen
+    // re-renders its selects off exactly this, so a commander who comes back
+    // has to see what they picked.
+    t.eq("...with the weapon map that built it", v.pending[0].weapons, {});
 
-    // The assertion a playthrough cannot make: a clone would still print the
-    // right name on the results screen and still match by id, and only diverge
-    // later, where entities.js reads data.wounds off the live soldier.
-    t.ok("the squad holds the LIVE roster soldier", res.squad[0].data === campaign.roster[0]);
-    t.eq("deploy charges the mission to the soldier's record", soldier.record.missions, 1);
-
-    // weaponId defaults to "carbine" at hire, so the fallback chain is only
-    // visible when a pick is actually made.
-    t.ok("no pick falls back to the soldier's own weapon", res.squad[0].weapon === campaign.armory[0]);
-
-    campaign.armory.push({ id: "zapper", name: "Zapper" });
-    const picked = s.command("p1", {
-      type: "deploy",
-      leadId: "lead_1",
-      soldierIds: [soldier.id],
-      weapons: { [soldier.id]: "zapper" },
+    s.command("p1", {
+      type: "deploy", leadId: "lead_2", soldierIds: [soldier.id], weapons: { [soldier.id]: "zapper" },
     });
-    t.ok("an explicit pick resolves to the live armory entry", picked.squad[0].weapon === campaign.armory[1]);
-    t.eq("...and charges the record again", soldier.record.missions, 2);
-
-    const junk = s.command("p1", {
-      type: "deploy",
-      leadId: "lead_1",
-      soldierIds: [soldier.id],
-      weapons: { [soldier.id]: "nonexistent" },
+    s.command("p1", {
+      type: "deploy", leadId: "lead_3", soldierIds: [soldier.id], weapons: { [soldier.id]: "nonexistent" },
     });
-    t.ok("an unresolvable weapon falls back to the carbine", junk.squad[0].weapon === WEAPONS.carbine);
+    t.eq("dayPerDeploy off holds several choices at once", v.pending.length, 3);
+    t.eq("...and charges each of them", soldier.record.missions, 3);
+    t.eq("a held choice remembers its pick", v.pending[1].weapons, { [soldier.id]: "zapper" });
+
+    // Re-committing the SAME lead replaces rather than stacks, which is what
+    // lets the deploy screen be reopened and edited. Done in one command on
+    // purpose: a release-then-deploy from the hub would leave a window where a
+    // rejected second half loses a commitment that was valid.
+    const again = s.command("p1", { type: "deploy", leadId: "lead_1", soldierIds: [soldier.id], weapons: {} });
+    t.ok("re-committing the same lead is accepted", again.ok);
+    t.eq("...and replaces rather than stacks", v.pending.length, 3);
+    t.eq("...refunding the charge it is replacing", soldier.record.missions, 3);
 
     // Every rejection must leave record.missions where it was — the old hub
     // loop incremented as it walked and could charge a partial squad.
@@ -227,8 +231,42 @@ export default async function run(t) {
     for (const cmd of bad) if (s.command("p1", { type: "deploy", ...cmd }).ok) allRejected = false;
     t.ok("every malformed deploy is rejected", allRejected);
     t.eq("...and none of them charged a mission", soldier.record.missions, charged);
-  }
+    t.eq("...nor dropped the choice it was replacing", v.pending.length, 3);
 
+    // The squad becomes visible only when the round locks, and it goes to the
+    // PAGE. Nothing about it ever reaches a view.
+    t.eq("nothing is dispatched before the round closes", s.takeRound().length, 0);
+    s.command("p1", { type: "ready" });
+    const round = s.takeRound();
+    t.eq("the round hands out one dispatch per held choice", round.length, 3);
+    t.ok("every dispatch names the commander it belongs to", round.every((d) => d.playerId === "p1"));
+    t.ok("...and carries a dispatch id to report against", new Set(round.map((d) => d.dispatchId)).size, 3);
+    // The lead OBJECT, not its id: a board filter cannot strip it out from
+    // under a mission that is already running.
+    // Re-committing moved lead_1 to the back of the list, so the dispatches
+    // are indexed by lead rather than by the order they were made.
+    const disp = (id) => round.find((d) => d.mission.id === id);
+    t.ok("a dispatch carries the lead object", disp("lead_1").mission === leadOf("lead_1"));
+    t.ok("...and its level", disp("lead_1").level === leadOf("lead_1").level);
+
+    // The assertion a playthrough cannot make: a clone would still print the
+    // right name on the results screen and still match by id, and only diverge
+    // later, where entities.js reads data.wounds off the live soldier.
+    t.ok("the squad holds the LIVE roster soldier", disp("lead_1").squad[0].data === campaign.roster[0]);
+    // weaponId defaults to "carbine" at hire, so the fallback chain is only
+    // visible when a pick is actually made.
+    t.ok("no pick falls back to the soldier's own weapon", disp("lead_1").squad[0].weapon === campaign.armory[0]);
+    t.ok("an explicit pick resolves to the live armory entry", disp("lead_2").squad[0].weapon === campaign.armory[1]);
+    t.ok("an unresolvable weapon falls back to the carbine", disp("lead_3").squad[0].weapon === WEAPONS.carbine);
+    t.eq("a round is taken once, not replayed", s.takeRound().length, 0);
+    t.eq("...and the choices left the player record when they locked", v.pending.length, 0);
+
+    // Nothing may be committed or withdrawn while the round is running.
+    t.ok("a deploy is refused mid-round", !s.command("p1", { type: "deploy", leadId: "lead_1", soldierIds: [soldier.id] }).ok);
+    t.ok("...and so is readying", !s.command("p1", { type: "ready" }).ok);
+    t.ok("...and so is releasing", !s.command("p1", { type: "release", leadId: "lead_1" }).ok);
+    resetConfig();
+  }
 
   // ---- two bases, one world (S2) -----------------------------------------
   // Three players, not two, throughout: the design is written for two and
@@ -457,6 +495,120 @@ export default async function run(t) {
     t.ok("and only then turns", s.command("brazil", { type: "ready" }).dayTurned === true);
   }
 
+  // ---- the deploy commit: standing down, privacy, elsewhere (S5) ----------
+  {
+    const world = createWorld();
+    const ids = ["usa", "china", "brazil"];
+    const s = createSession({ world, players: ids });
+    const [usa, china, brazil] = ids.map((id) => s.view(id));
+    for (const id of ids) {
+      const v = s.view(id);
+      s.command(id, { type: "hire", recruitId: v.recruits[0].id });
+    }
+    for (const id of ["alpha", "bravo"]) world.leads.push(fakeLead(id));
+    const squadOf = (v) => [v.roster[0].id];
+
+    s.command("usa", { type: "deploy", leadId: "alpha", soldierIds: squadOf(usa), disclose: true });
+    t.eq("a commander sees their own held deployment", usa.pending.map((c) => c.leadName), ["alpha"]);
+    t.ok("...including the disclosure flag they ticked", usa.pending[0].disclose === true);
+    // The rule the whole seam exists for: nothing about another commander's
+    // choice is on your view, and readiness stays the only thing that is.
+    t.eq("...and nobody else's is on their view", china.pending, []);
+    t.ok("readiness is still all the strip shows", china.taskForce.every((p) => p.leads === undefined));
+
+    // Standing down releases what was pending AND refunds it. Missing the
+    // refund is a live lockout at the default: the cap counts the held
+    // choices, so a commander who stood down to change their mind could never
+    // commit again this round — which is exactly what standing down is for.
+    const soldier = usa.roster[0];
+    t.eq("committing charged the soldier a mission", soldier.record.missions, 1);
+    s.command("usa", { type: "ready" });
+    const stood = s.command("usa", { type: "ready" });
+    t.ok("standing down is reported as such", stood.ok && stood.ready === false);
+    t.eq("...and releases the deployment", usa.pending.length, 0);
+    t.eq("...and refunds the mission it charged", soldier.record.missions, 0);
+    t.ok("...so the same commander can commit again", s.command("usa", { type: "deploy", leadId: "bravo", soldierIds: squadOf(usa) }).ok);
+
+    // The round: two commanders deploy, one holds at base.
+    s.command("china", { type: "deploy", leadId: "alpha", soldierIds: squadOf(china) });
+    s.command("usa", { type: "ready" });
+    s.command("china", { type: "ready" });
+    const closed = s.command("brazil", { type: "ready" });
+    t.eq("the round locks with one dispatch per deploying commander", [closed.roundClosed, closed.missions], [true, 2]);
+
+    // Mockup §4. One line per OTHER commander — which lead they took, or that
+    // they held at base. Never whether they won, who died, or what they
+    // carried out.
+    t.eq("what a commander learns is one line per other commander", usa.elsewhere.map((e) => e.name), ["china", "brazil"]);
+    t.eq("...naming the lead they took", usa.elsewhere[0].leads, ["alpha"]);
+    t.eq("...and saying so when they held at base", usa.elsewhere[1].leads, []);
+    t.ok("...and never yourself", usa.elsewhere.every((e) => e.id !== "usa"));
+    t.ok("...nor anything else about them", brazil.elsewhere.every((e) => Object.keys(e).sort().join() === "id,leads,name"));
+
+    // The count is keyed to the DISPATCH, so a second report for the same one
+    // cannot drive it past zero and buy a second day.
+    const round = s.takeRound();
+    const report = (d, ok = true) =>
+      s.command(d.playerId, {
+        type: "missionResult",
+        dispatchId: d.dispatchId,
+        result: { success: ok, missionId: d.mission.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] },
+      });
+    const first = report(round[0]);
+    t.ok("the first report of a round turns no day", !first.dayTurned && usa.day === 1);
+    t.ok("...and reporting it twice still turns none", !report(round[0]).dayTurned && usa.day === 1);
+    const last = report(round[1]);
+    t.ok("the last report turns the day", last.dayTurned === true);
+    t.eq("...once, for everyone", [usa.day, china.day, brazil.day], [2, 2, 2]);
+    t.ok("...and a stray report after the round turns nothing", !report(round[1]).dayTurned && usa.day === 2);
+
+    // Everything the round held clears together, or the next gate deadlocks.
+    t.ok("every ready flag clears with the round", usa.taskForce.every((p) => !p.ready));
+    t.eq("...and every held choice with it", [usa.pending.length, china.pending.length], [0, 0]);
+    t.eq("...and the round is not handed out again", s.takeRound().length, 0);
+    t.ok("...so the task force can commit and ready again", s.command("usa", { type: "ready" }).ok);
+  }
+
+  // ---- a campaign that ends mid-round still closes the round (S5) ---------
+  // The design forbids withdrawal, so the remaining locked missions run into a
+  // campaign that is already over. What must hold is that the round does not
+  // strand: an earlier draft returned advanceDay's refusal BEFORE clearing
+  // anything, leaving every flag set and every choice unreleased.
+  {
+    const world = createWorld();
+    const s = createSession({ world, players: ["usa", "china"] });
+    const usa = s.view("usa"), china = s.view("china");
+    for (const id of ["usa", "china"]) {
+      const v = s.view(id);
+      s.command(id, { type: "hire", recruitId: v.recruits[0].id });
+      world.leads.push(fakeLead(id === "usa" ? "one" : "two"));
+      s.command(id, { type: "deploy", leadId: id === "usa" ? "one" : "two", soldierIds: [v.roster[0].id] });
+    }
+    s.command("usa", { type: "ready" });
+    s.command("china", { type: "ready" });
+    const round = s.takeRound();
+    t.eq("both commanders' missions are in flight", round.length, 2);
+
+    // The first result ends the campaign. The second still lands.
+    world.outcome = "lost";
+    const res = s.command(round[1].playerId, {
+      type: "missionResult",
+      dispatchId: round[1].dispatchId,
+      result: { success: false, missionId: round[1].mission.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] },
+    });
+    const done = s.command(round[0].playerId, {
+      type: "missionResult",
+      dispatchId: round[0].dispatchId,
+      result: { success: false, missionId: round[0].mission.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] },
+    });
+    t.ok("neither report throws", res.ok && done.ok);
+    t.ok("the day is held, in advanceDay's own words", done.dayTurned === false && done.dayHeld === "The campaign is over.");
+    t.eq("...and the clock did not move", usa.day, 1);
+    // The coherent end state: half-cleared is not a shape anything else here
+    // is written against.
+    t.ok("the round still closed", usa.taskForce.every((p) => !p.ready) && china.pending.length === 0);
+  }
+
   // ---- a finished campaign cannot turn another day ------------------------
   // The rule that REPLACED "the mission that ends the campaign is never charged
   // a day" — that was a fact about a charge S4 deleted. This is the gate's own.
@@ -488,10 +640,31 @@ export default async function run(t) {
     t.ok("...in words that say where the day comes from", /already deployed today/.test(second.reason));
     t.eq("...and charges the soldier nothing", soldier.record.missions, 1);
 
-    // The count is round state, cleared by the gate and by nothing else.
+    // The cap counts the HELD CHOICES — there is no second copy of the number
+    // to drift out of step with them. Releasing one therefore lifts the cap,
+    // which is what makes changing your mind possible at all.
+    t.ok("releasing the held choice is accepted", s.command("usa", { type: "release", leadId: "a" }).ok);
+    t.eq("...and refunds the mission it charged", soldier.record.missions, 0);
+    t.ok("...so the cap is lifted again", go("b").ok);
+    t.ok("releasing nothing is a refusal, not a silent no-op", !s.command("usa", { type: "release", leadId: "a" }).ok);
+
+    // ...and so does a whole round, which is the ordinary way it clears.
     s.command("usa", { type: "ready" });
-    s.command("china", { type: "ready" });
-    t.ok("a turned day lifts the cap again", go("b").ok);
+    const closed = s.command("china", { type: "ready" });
+    t.eq("the last commander to ready locks the round", [closed.roundClosed, closed.missions], [true, 1]);
+    t.ok("...and turns no day yet", !closed.dayTurned && usa.day === 1);
+    const [dispatch] = s.takeRound();
+    const turn = s.command("usa", {
+      type: "missionResult",
+      dispatchId: dispatch.dispatchId,
+      // The dispatch that is actually outstanding is lead "b" — the choice on
+      // "a" was released above — and resolving it spends that lead.
+      result: { success: false, missionId: "b", casualties: [], survivors: [soldier.id], loot: [], killsBySoldier: [] },
+    });
+    t.ok("the round's last mission report turns the day", turn.dayTurned === true);
+    t.eq("...once", usa.day, 2);
+    t.ok("...and carries the summary the results screen prints", Array.isArray(turn.finished));
+    t.ok("a turned day lifts the cap again", go("a").ok);
 
     // dayPerDeploy off is what it always was: time is free unless you idle.
     config.dayPerDeploy = false;

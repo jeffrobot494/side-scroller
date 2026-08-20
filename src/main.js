@@ -65,10 +65,6 @@ const session = createSession({ players: roster });
 // commander's clicks to another's campaign, and no test imports this file.
 let you = roster[0].id;
 
-// Which player a mission was launched for, captured at deploy rather than read
-// at completion — the seat can change while a mission is up.
-let deployedBy = you;
-
 // Ambient crew walking behind the hub DOM (paused + hidden during missions).
 const ambient = createHubAmbient(session.view(you));
 document.body.insertBefore(ambient.el, hubRoot);
@@ -86,28 +82,71 @@ const mission = new Mission(canvas, onMissionComplete);
 const hub = new Hub(hubRoot, session.view(you), {
   // Bound to whichever seat is on screen, so the hub never holds a session
   // reference and never learns a player id.
-  command: (cmd) => session.command(you, cmd),
-  startMission(missionDef, level, squad) {
-    deployedBy = you;
-    showScene("mission");
-    mission.start(missionDef, level, squad);
+  //
+  // The round is picked up HERE rather than inside the hub, because the hub
+  // must never see another commander's locked lead or squad. Deferred by a
+  // microtask so the hub finishes the render it is in the middle of before the
+  // canvas takes the screen from it.
+  command(cmd) {
+    const res = session.command(you, cmd);
+    if (res && res.roundClosed) queueMicrotask(runRound);
+    return res;
   },
+  // Called by the results screen's "Return to base". That click is the only
+  // signal the page has that a commander has finished reading — starting the
+  // next mission from onMissionComplete would destroy the screen where they
+  // learn where everyone else went.
+  roundNext: playNext,
 });
 
 // The hot-seat strip, above the top bar and outside #hub-root (Hub.render()
 // replaces that element's innerHTML on every navigation). Hidden at one player.
-const hotSeat = createHotSeat(roster, (id) => {
+function swapTo(id) {
   you = id;
   const view = session.view(you);
   hub.setView(view); // renders
   ambient.setView(view);
-});
+}
+
+const hotSeat = createHotSeat(roster, swapTo);
 document.body.insertBefore(hotSeat.el, ambient.el);
 
+// The round's missions, in the order the session handed them over. WHICH plays
+// first, whether anything is drawn between them, and whose base the hub shows
+// meanwhile are all decided here — the session never learns what a canvas is,
+// and all of this dies with hot-seat.
+let queue = [];
+let current = null;
+
+function runRound() {
+  queue = session.takeRound();
+  playNext();
+}
+
+function playNext() {
+  current = queue.shift() || null;
+  if (!current) return;
+  // Hot-seat: the seat follows the mission, so the commander who committed it
+  // is the one whose base the results land on. Swap FIRST — setView nulls
+  // _lastSquad, so noting the squad before it would throw the names away.
+  if (current.playerId !== you) swapTo(current.playerId);
+  hub.noteDispatch(current.squad);
+  showScene("mission");
+  mission.start(current.mission, current.level, current.squad);
+}
+
 function onMissionComplete(result) {
-  session.command(deployedBy, { type: "missionResult", result });
+  const done = current;
+  current = null;
+  // Routed by the DISPATCH, not by the seat on screen: the commander who owns
+  // the mission is on it, and the seat can be swapped while a mission is up.
+  const res = session.command(done.playerId, {
+    type: "missionResult",
+    result,
+    dispatchId: done.dispatchId,
+  });
   showScene("hub");
-  hub.showResults(result);
+  hub.showResults(result, res);
 }
 
 // Toggle which surface is visible. The DOM hub and the canvas never render at

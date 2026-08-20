@@ -639,3 +639,60 @@ body::after {
   font-weight: 600;
 }
 .btn-ready-on::after { content: " ✔"; }
+
+/* ---- the deploy commit (multiplayer-state S5, mockup §3 and §4) -----------
+   Everything here is emitted only at two or more commanders except the day
+   line on the results screen, which is where a round's turned day lands now
+   that the ready click no longer carries one. */
+.mission-row.committed { border-left-color: var(--accent); }
+.tag-committed { background: #1f2b3a; color: var(--accent); }
+
+.commit-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.commit-note b { color: var(--text); }
+.discl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* "Elsewhere today" — one row per other commander, so it does not care how
+   many there are. Which lead they took, and nothing else. */
+.elsewhere {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.elsewhere h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ewrow { display: flex; gap: 10px; font-size: 12.5px; padding: 2px 0; color: var(--muted); }
+.ewrow .who { min-width: 90px; color: var(--text); }
+.ewrow b { color: var(--text); font-weight: 600; }
+
+.dayturn {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--accent);
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+  color: var(--muted);
+}
