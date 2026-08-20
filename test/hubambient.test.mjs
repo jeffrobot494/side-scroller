@@ -2,7 +2,7 @@
 // figures animate over time, and toggling the config off empties the scene.
 
 import { createHubAmbient } from "../src/hub/ambient.js";
-import { createState, hire } from "../src/game/state.js";
+import { createState, hire, livingRoster } from "../src/game/state.js";
 import { config, resetConfig } from "../src/game/config.js";
 
 export default async function run(t) {
@@ -41,16 +41,28 @@ export default async function run(t) {
 
   // The hot-seat swap re-points this at another commander's base (S2). The crew
   // scales with the living roster, so a base with more soldiers has more of it.
+  //
+  // Assert the DIRECTION, never an exact count: rebuild() fills stations until
+  // the target is used up and `talk` seats two, so the last slot can reject a
+  // pair and stop the fill one short. The realised crowd is a draw at or just
+  // below the target, and two rebuilds at the SAME target legitimately differ.
+  // An earlier version of this case asserted exact equality and failed ~40% of
+  // runs. The gap here is wide on purpose — an empty base targets 3, a base of
+  // five targets 8 — so no draw can cross it.
   {
     const busy = createState();
+    busy.money = 99999; // credit limits are a different test, and would cap the roster at 2
     for (let i = 0; i < 5; i++) hire(busy, busy.recruits[0].id);
+    t.eq("the busy base really has five soldiers", livingRoster(busy).length, 5);
+
     const quiet = amb.people().length;
     amb.setView(busy);
     amb.step(1 / 30);
-    t.ok("setView re-points the crowd at another base", amb.people().length > quiet);
+    const crowded = amb.people().length;
+    t.ok("setView re-points the crowd at another base", crowded > quiet);
     amb.setView(game);
     amb.step(1 / 30);
-    t.eq("...and swapping back restores it", amb.people().length, quiet);
+    t.ok("...and swapping back thins it out again", amb.people().length < crowded);
   }
 
   amb.setVisible(false);
