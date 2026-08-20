@@ -4,18 +4,20 @@
 // Renders every non-action screen: the five bunker rooms (Barracks, Engineering,
 // Operations, Robotics, War Room), the deploy screen that carries a squad into a
 // mission, the post-mission results, and the campaign win/lose report. It owns
-// no game rules — every mutation goes through the state actions — and it launches
-// missions through the `api` handed in by main.js.
+// no game rules and performs no campaign writes — every mutation is a COMMAND
+// sent through the `api` handed in by main.js, which is also how it launches
+// missions.
+//
+// `this.game` is a session VIEW, not the campaign: read-through getters over
+// whichever player this hub belongs to. It keeps its old name because every
+// screen builder reads it and none of them care (see tech/multiplayer-state.md
+// S1); S2 renames it when swapping views makes the distinction load-bearing.
+// What stays here is UI state only — mode, location, flash, deploy, result,
+// sold, and _lastSquad.
 // ---------------------------------------------------------------------------
 
-import {
-  hire,
-  commission,
-  sellAllLoot,
-  advanceDay,
-  livingRoster,
-} from "../game/state.js";
-import { BLUEPRINTS, WEAPONS } from "../game/content.js";
+import { livingRoster } from "../game/state.js";
+import { BLUEPRINTS } from "../game/content.js";
 import { config } from "../game/config.js";
 import { soldierMaxHp } from "../game/soldiers.js";
 
@@ -33,7 +35,7 @@ export class Hub {
   constructor(root, game, api) {
     this.root = root;
     this.game = game;
-    this.api = api; // { startMission(mission, level, squad) }
+    this.api = api; // { command(cmd), startMission(mission, level, squad) }
     this.location = "barracks";
     this.mode = "hub"; // hub | deploy | results | end
     this.flash = null;
@@ -527,7 +529,6 @@ export class Hub {
     const btn = e.target.closest("[data-action]");
     if (!btn || btn.disabled) return;
     const a = btn.dataset.action;
-    const g = this.game;
 
     switch (a) {
       case "nav":
@@ -537,7 +538,7 @@ export class Hub {
         break;
 
       case "hire": {
-        const res = hire(g, btn.dataset.id);
+        const res = this.api.command({ type: "hire", recruitId: btn.dataset.id });
         this.setFlash(
           res.ok ? "good" : "bad",
           res.ok ? "Recruit enlisted — already suited up and asking when we deploy." : res.reason
@@ -547,14 +548,14 @@ export class Hub {
       }
 
       case "commission": {
-        const res = commission(g, btn.dataset.id);
+        const res = this.api.command({ type: "commission", blueprintId: btn.dataset.id });
         this.setFlash(res.ok ? "good" : "bad", res.ok ? "Fabrication started. Advance the day to finish it." : res.reason);
         this.render();
         break;
       }
 
       case "sell": {
-        const res = sellAllLoot(g);
+        const res = this.api.command({ type: "sellLoot" });
         if (res.ok) {
           this.setFlash("good", `Sold ${res.count} item(s) for §${res.total}.`);
           if (this.mode === "results") this.sold = true;
@@ -566,7 +567,7 @@ export class Hub {
       }
 
       case "advance": {
-        const res = advanceDay(g);
+        const res = this.api.command({ type: "advanceDay" });
         if (res.ok) {
           const parts = [];
           if (res.finished.length) parts.push(`Finished: ${res.finished.join(", ")}.`);
@@ -626,21 +627,27 @@ export class Hub {
   }
 
   _launch() {
-    const g = this.game;
-    const mission = g.leads.find((l) => l.id === this.deploy.missionId);
-    const level = mission.level;
-    const squad = [];
-    for (const s of livingRoster(g)) {
-      if (!this.deploy.selected.has(s.id)) continue;
-      const wId = this.deploy.weapons[s.id] || s.weaponId || "carbine";
-      const weapon = g.armory.find((w) => w.id === wId) || WEAPONS.carbine;
-      s.record.missions += 1;
-      squad.push({ data: s, weapon });
+    // The session assembles the squad: it owns the roster, the armory and the
+    // board, so it is the only thing that can validate the choice — and this is
+    // the payload S5 holds as a pending deployment rather than acting on.
+    const res = this.api.command({
+      type: "deploy",
+      leadId: this.deploy.missionId,
+      soldierIds: [...this.deploy.selected],
+      weapons: this.deploy.weapons,
+    });
+    // Unreachable through the UI today (Launch is disabled with an empty
+    // squad), so behaviour is unchanged; it exists so a future rejection is a
+    // flash rather than a crash.
+    if (!res.ok) {
+      this.setFlash("bad", res.reason);
+      this.render();
+      return;
     }
     // Remember who deployed so the results screen can still name the fallen
     // after they've been removed from the roster.
-    this._lastSquad = squad.map((x) => x.data);
-    this.api.startMission(mission, level, squad);
+    this._lastSquad = res.squad.map((x) => x.data);
+    this.api.startMission(res.mission, res.level, res.squad);
   }
 }
 

@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: unbuilt
+status: building
 resolution: sharp
 needs: []
 related: [multiplayer, campaign-pacing, game-balance]
@@ -30,6 +30,20 @@ S1 lands alone as a refactor with no visible change. S2 is the first slice a
 player can see, and everything after it depends on it. Beyond that only two
 orderings are forced: S5 depends on S4, and S7 depends on S6. S3, S4 and S6 are
 independent of each other and can land in any order.
+
+**As built, S1: `deploy` is a whole command, not just the `record.missions`
+write.** The plan above says `_launch`'s direct write "becomes one too", which
+reads as a narrow "charge these soldiers a mission". What shipped is
+`{leadId, soldierIds, weapons}` → `{ok, mission, level, squad}`, with the squad
+assembly and the weapon fallback chain moved out of the hub as well. Two
+reasons: the session owns the roster, the armory and the board, so it is the
+only thing that can validate a deploy at all; and this payload is exactly the
+pending choice S5 has to hold, so the narrow version would have been rewritten
+one slice later. The hub keeps the three-soldier cap, which is UI state and was
+never a campaign rule — the session validates only that the lead is on the
+board and the soldiers are alive and distinct. A rejected deploy charges
+nobody: the old hub loop incremented as it walked the squad, so validation now
+completes before any write.
 
 **There is no reward split.** The first draft carried a slice for one, because
 an earlier design divided "the mission's credit reward". No such reward exists —

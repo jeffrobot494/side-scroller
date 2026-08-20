@@ -7,7 +7,7 @@
 // back here, is applied to state, and is shown on the results screen.
 // ---------------------------------------------------------------------------
 
-import { createState, applyMissionResult } from "./game/state.js";
+import { createSession } from "./game/session.js";
 import { Hub } from "./hub/hub.js";
 import { Mission } from "./mission/mission.js";
 import { createHubAmbient } from "./hub/ambient.js";
@@ -30,7 +30,17 @@ hubRoot.addEventListener("click", (e) => {
   audio.play(back ? "ui.back" : "ui.click");
 });
 
-const game = createState();
+// One authoritative session owns the campaign; the page renders one player's
+// view of it. Single-player is a session with one player — there is no second
+// path through which state changes. Plan: tech/multiplayer-state.md.
+const session = createSession();
+const you = session.playerIds()[0]; // S2 turns this into the hot-seat swap
+const game = session.view(you);
+
+// Which player a mission was launched for, captured at deploy rather than read
+// at completion — the player on screen and the player who deployed are the same
+// today, and stop being the same in S2.
+let deployedBy = you;
 
 // Ambient crew walking behind the hub DOM (paused + hidden during missions).
 const ambient = createHubAmbient(game);
@@ -47,14 +57,18 @@ const mission = new Mission(canvas, onMissionComplete);
 
 // The hub launches missions through this small API.
 const hub = new Hub(hubRoot, game, {
+  // Pre-bound to this hub's player, so the hub never holds a session reference
+  // and never learns a player id. S2's swap re-binds this one closure.
+  command: (cmd) => session.command(you, cmd),
   startMission(missionDef, level, squad) {
+    deployedBy = you;
     showScene("mission");
     mission.start(missionDef, level, squad);
   },
 });
 
 function onMissionComplete(result) {
-  applyMissionResult(game, result);
+  session.command(deployedBy, { type: "missionResult", result });
   showScene("hub");
   hub.showResults(result);
 }
