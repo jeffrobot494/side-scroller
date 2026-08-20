@@ -112,9 +112,7 @@ player, at whatever strength it has left.
 
 | | |
 |---|---|
-| Credits | A mission's base reward, divided by a split the players agree on |
-| The split | One rule for the whole campaign, set at base. Not renegotiated per mission |
-| What the split covers | The mission's credit reward only. Recovered items sold at base afterwards are not split |
+| Nothing is split | A mission pays in what each squad carries out of the level. There is no shared purse and no agreed division |
 | On the ground | Items recovered inside the level go to whoever reaches them first |
 | Contested by default | Every pickup in a joint mission is a race |
 | Indivisible rewards | Some missions pay in a single object that cannot be split |
@@ -163,3 +161,4 @@ Named so they read as absent rather than overlooked.
 | A mission-length constraint | Generated missions vary in length, so one player routinely finishes well before the other |
 | Anything for the player who finishes first | They return to base and wait |
 | Trading, lending, or gifting between bases | Disclosure of a lead is the only thing one player can give another |
+| A split of mission credits | Missions do not pay credits. What a squad carries out of the level is what that player keeps, and selling it at base is a private transaction |

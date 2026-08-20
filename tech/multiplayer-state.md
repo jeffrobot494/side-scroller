@@ -20,22 +20,24 @@ end of this one is two players sharing a campaign in one browser.
 |---|---|---|
 | S1 | **The session seam.** A session owns the state and exposes a command entry point and a per-player view. The four write cases in `src/hub/hub.js` `_onClick` send commands; `_launch`'s direct write to `s.record.missions` becomes one too; `src/main.js` constructs the session and routes `applyMissionResult` through it. Single-player becomes a session with one player | No — the game plays identically |
 | S2 | **Two players in one session.** Every field in `createState()` is assigned to the world or to a player (table below). The page renders one view at a time with a control to swap, which means `Hub` and `createHubAmbient` must both accept a new view rather than capturing one at construction. Hot-seat playable | Yes |
-| S3 | **The ready gate.** Each player declares ready; the day advances exactly once when both have. Requires lifting the `config.dayPerDeploy` charge out of `applyMissionResult` so two results cannot buy two days — see the seam note below | Yes |
-| S4 | **The deploy commit.** A pending choice is held per player and is not in the other player's view. Both choices lock when both are ready and resolve against S3's single day. Afterwards each player learns which lead the other took, and nothing else | Yes |
-| S5 | **Lead visibility and disclosure.** The world lead set gains per-player visibility, plus a command to disclose a lead | Yes |
-| S6 | **The finale.** `highWins` and the boss placement become per-player; the boss lead is disclosable through S5; `outcome` forks so victory is individual while defeat stays collective | Yes |
+| S3 | **Recruit pools.** `RECRUIT_POOL` is dealt at campaign start — each authored recruit goes to exactly one player. No soldier id exists twice, and hiring is scarce without being contested | Yes |
+| S4 | **The ready gate.** Readiness is a toggle each player sets and can clear again; the day advances exactly once, the moment the last player readies. Standing down also releases that player's pending deployment, since the design only locks choices once everyone is ready. Requires lifting the `config.dayPerDeploy` charge out of `applyMissionResult` so several results cannot buy several days — see the seam note below | Yes |
+| S5 | **The deploy commit.** A pending choice is held per player and appears in nobody else's view. Choices lock when the last player readies and resolve against S4's single day; there is no window to withdraw after that, because the same click that locks them turns the day. Afterwards each player learns which lead the others took, and nothing else | Yes |
+| S6 | **Lead visibility and disclosure.** The world lead set gains per-player visibility, plus a command to disclose a lead | Yes |
+| S7 | **The finale.** `highWins` and the boss placement become per-player; the boss lead is disclosable through S6; `outcome` forks so victory is individual while defeat stays collective | Yes |
 
 S1 lands alone as a refactor with no visible change. S2 is the first slice a
-player can see. S4 depends on S3, and S6 depends on S5; S3 and S5 are independent
-of each other.
+player can see, and everything after it depends on it. Beyond that only two
+orderings are forced: S5 depends on S4, and S7 depends on S6. S3, S4 and S6 are
+independent of each other and can land in any order.
 
-**The credit split is not in this spec.** `design/multiplayer.md` splits "the
-mission's credit reward", and no such reward exists — `state.money` moves only in
-`hire`, `commission` and `sellAllLoot`, a mission pays in loot into `stores` plus
-`threatReward` into `campaignHealth`, and generated missions carry no credit
-field (`src/game/gen/levelgen.js`). The design also excludes the one payout that
-does exist. Splitting requires inventing the thing being split, which is a design
-question, not a build one.
+**There is no reward split.** The first draft carried a slice for one, because
+an earlier design divided "the mission's credit reward". No such reward exists —
+`state.money` moves only in `hire`, `commission` and `sellAllLoot`, a mission
+pays loot into `stores` plus `threatReward` into `campaignHealth`, and generated
+missions carry no credit field (`src/game/gen/levelgen.js`). The design now says
+each player keeps what their squad carried out, so nothing here divides
+anything and `sellAllLoot` stays a private, per-player action.
 
 ## Reuses
 
@@ -55,7 +57,7 @@ question, not a build one.
 | Path | |
 |---|---|
 | `src/game/session.js` (new) | Owns the campaign, holds the players, validates and dispatches commands, projects per-player views, and holds the ready gate and pending deploy choices. Must stay DOM-free and `localStorage`-guarded like the rest of `src/game/` |
-| `src/game/state.js` | The world/player field split. `applyMissionResult` loses the day charge in S3 |
+| `src/game/state.js` | The world/player field split. `applyMissionResult` loses the day charge in S4 |
 | `src/hub/hub.js` | The four write cases and `_launch`'s `s.record.missions` write send commands. `this.game` is captured in the constructor and must become re-pointable for S2. `_nameFor` and `_endScreen` read `roster` directly and read a view instead |
 | `src/hub/ambient.js` | `createHubAmbient(game)` closes over the state object and reads `livingRoster(game)` every frame; its returned API has no way to re-point it. S2 needs one |
 | `src/main.js` | Constructs the session, holds which view is rendered, routes `onMissionComplete` through a command |
@@ -76,8 +78,9 @@ no build step.
 | `_lastSquad` stays in the hub | It deliberately holds references to soldiers `applyMissionResult` has already dropped from the roster, so the results screen can still name the dead. A view cannot supply that and must not be made to |
 | The view must not carry | Anything `design/multiplayer.md` says a player cannot see: the other player's base, board, pending choice, mission outcome, casualties or loot |
 | The view must carry | The two things the design says a player *can* see — the other player's readiness, and after resolution, which lead they took |
+| The session holds players as a collection | Never a pair. No command, view, field split or screen may assume exactly two — the design is written for two, but nothing built here may make a third impossible. Every "the other player" is "the other players" |
 | The session must not import | Anything requiring a DOM |
-| `state.js` keeps its action signatures — **with one exception** | S3 must remove the `config.dayPerDeploy` call to `advanceDay` from the end of `applyMissionResult`, because two results resolving against one day cannot work while each result buys its own. The day charge moves to the session, which is the only thing that knows both results have landed. This is the one place the split cuts across an existing function, and it is deliberate rather than a sign the seam is wrong |
+| `state.js` keeps its action signatures — **with one exception** | S4 must remove the `config.dayPerDeploy` call to `advanceDay` from the end of `applyMissionResult`, because two results resolving against one day cannot work while each result buys its own. The day charge moves to the session, which is the only thing that knows both results have landed. This is the one place the split cuts across an existing function, and it is deliberate rather than a sign the seam is wrong |
 
 ## Must not regress
 
@@ -102,24 +105,24 @@ no build step.
 | **The client waits.** Commands are not applied optimistically. In-process this is imperceptible | Becomes visible only once the session is remote, which is the transport spec's problem |
 | **Hot-seat cannot desync.** Both players share one browser and one module instance, so agreement is free and untested | Deliberate. Determinism is out of scope until joint missions need it. Note that campaign-layer lead generation is still unseeded `Math.random()` in `src/game/state.js`, which a transport spec has to deal with and this one does not |
 | **Lead visibility is assigned, not modelled.** Which player sees which lead is a property set at generation; nothing represents why | Matches the design, which specifies partial visibility and no mechanism for it |
+| **Dealing the recruit pool does not scale.** `RECRUIT_POOL` holds six authored soldiers, so dealing gives three each at two players, two each at three, and one each at six. It is the only piece of this spec that does not stretch to more players | Known and accepted at two. Revisit when a third player is real — the ways out are a larger authored pool, recruits arriving over time, per-player copies with namespaced ids, or a generator, and all four are design questions |
 | **No transport, no server, no lobby** | The next spec |
 
 ## The field split
 
-Every field `createState()` builds, and which side it lands on. The three marked
-undecided are the ones a builder must not guess at.
+Every field `createState()` builds, and which side it lands on.
 
 | Field | Side | |
 |---|---|---|
 | `day` | World | One clock, per decision 3 |
 | `campaignHealth` | World | One doom clock, per decision 2 |
-| `leads` | World, per-player visibility | S5 |
+| `leads` | World, per-player visibility | S6 |
 | `money`, `roster`, `armory`, `stores`, `building` | Player | Each base is its own |
 | `log` | World | Shared and unfiltered — see Approximations |
 | `outcome` | **Both** | Forks for a win, shared for a loss: "victory is individual and defeat is collective". A single field cannot express this |
-| `highWins` | Player | The finale gate is earned by a player, per decision in `design/multiplayer.md`. S6 |
+| `highWins` | Player | The finale gate is earned by a player, per decision in `design/multiplayer.md`. S7 |
 | `completedMissions` | Player | Read by the end screen as that player's record, and the source of `highWins` |
-| `recruits` | **Undecided** | `RECRUIT_POOL` in `src/game/soldiers.js` carries fixed string ids and `hire` splices out of it. Forked, both rosters can hold soldiers with identical ids, which `applyMissionResult` matches on. Shared, hiring becomes a contested race the design never mentions |
+| `recruits` | Player | Dealt from `RECRUIT_POOL` in `src/game/soldiers.js` at campaign start, each recruit to exactly one player. The pool carries fixed string ids and `applyMissionResult` matches soldiers by id, so dealing is what keeps ids unique — cloning the pool per player would put the same id in both rosters. The cost is half the pool each. S3 |
 
 `placeBossIfEarned` reads `highWins` and refuses to place a second boss lead if
 one is already on the board — with a per-player gate that check becomes

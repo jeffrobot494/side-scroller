@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Multiplayer — mockup</title>
+<style>
+  :root{
+    --earth:#0b0908; --concrete:#171b21; --concrete-hi:#212832; --line:#333d4a;
+    --steel:#2a3644; --text:#d8dee9; --muted:#808b99; --accent:#e94560;
+    --light:#ffca7a; --credits:#f2c14e; --good:#4caf72; --bad:#e05a5a; --track:#0a0e13;
+    --me:#6f9ceb; --them:#b48ae0; --them2:#5fb8a8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(#10120f 0%,var(--earth) 45%,#060504 100%);
+       color:var(--text);font:13px/1.55 system-ui,"Segoe UI",Roboto,sans-serif;padding:18px 20px 60px}
+  h2.sec{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+         margin:34px 0 4px;border-top:1px solid var(--line);padding-top:14px}
+  h2.sec:first-of-type{margin-top:0;border-top:0;padding-top:0}
+  .cap{color:var(--muted);font-size:12px;margin:0 0 12px;max-width:80ch}
+  .cap b{color:var(--text);font-weight:600}
+  .frame{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--concrete);
+         box-shadow:0 8px 26px rgba(0,0,0,.45)}
+  .note{font-size:11.5px;color:var(--muted);margin:8px 0 0;padding-left:14px;border-left:2px solid var(--steel)}
+  .new{outline:1px dashed var(--accent);outline-offset:2px}
+  .newtag{display:inline-block;font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+          color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:0 4px;margin-left:6px;vertical-align:2px}
+
+  /* top bar */
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;
+          background:linear-gradient(180deg,#1c222b,#12161c);border-bottom:1px solid #05070a;position:relative}
+  .topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;
+          background:linear-gradient(90deg,transparent,var(--light) 20%,var(--light) 80%,transparent);opacity:.5}
+  .brand{font-weight:700;letter-spacing:.12em;font-size:12px}
+  .resources{display:flex;align-items:center;gap:14px;font-size:12px}
+  .health-track{display:inline-block;width:64px;height:6px;background:var(--track);border-radius:3px;overflow:hidden;vertical-align:middle;margin:0 5px}
+  .health-fill{display:block;height:100%;background:var(--good)}
+  .credits{color:var(--credits)}
+  .btn{background:var(--steel);border:1px solid var(--line);color:var(--text);border-radius:5px;
+       padding:6px 12px;font:inherit;font-size:12px;cursor:pointer}
+  .btn-go{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn[disabled]{opacity:.45}
+  .btn-sm{padding:3px 9px;font-size:11px}
+  .btn-ready-on{background:rgba(76,175,114,.16);border-color:#3a7a55;color:var(--good);font-weight:600}
+  .btn-ready-on::after{content:" ✔"}
+
+  /* task force strip */
+  .tfstrip{display:flex;align-items:center;gap:10px;padding:8px 18px;background:#10141a;border-bottom:1px solid var(--line)}
+  .tflabel{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-right:2px}
+  .pchip{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:20px;padding:3px 11px 3px 8px;font-size:11.5px;background:#161b22}
+  .pchip .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .pchip.me{border-color:var(--me)} .pchip.me .dot{background:var(--me)}
+  .pchip.p2 .dot{background:var(--them)} .pchip.p3 .dot{background:var(--them2)}
+  .pchip .st{color:var(--muted);font-size:10.5px}
+  .pchip.ready .st{color:var(--good)}
+  .pchip.away{opacity:.5}
+  .tfspacer{flex:1}
+
+  /* generic panel */
+  .pad{padding:16px 18px}
+  .rowhead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+  .rowhead h3{margin:0;font-size:14px}
+  .staff{color:var(--muted);font-size:11.5px}
+
+  /* mission rows */
+  .mrow{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;
+        padding:12px 14px;border:1px solid var(--line);border-radius:7px;background:var(--concrete-hi);margin-bottom:9px}
+  .mtitle{font-weight:600;font-size:13.5px;margin-bottom:3px}
+  .mbrief{color:var(--muted);font-size:12px;margin:0;max-width:62ch}
+  .tag{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+       border:1px solid var(--line);border-radius:3px;padding:1px 6px;margin-left:6px;color:var(--muted);vertical-align:1px}
+  .tag-high{color:var(--bad);border-color:#5a2f33}
+  .tag-med{color:var(--credits);border-color:#5a4a2a}
+  .tag-life.urgent{color:var(--accent);border-color:#5a2b36}
+  .tag-shared{color:var(--them);border-color:#4a3a63;background:rgba(180,138,224,.09)}
+  .tag-boss{color:var(--light);border-color:#5c4a2c}
+  .macts{display:flex;flex-direction:column;gap:6px;align-items:stretch;flex:none;min-width:132px}
+
+  /* deploy */
+  .commit{margin-top:12px;padding:10px 12px;border:1px solid #5a2b36;border-radius:6px;
+          background:rgba(233,69,96,.07);font-size:12px}
+  .commit b{color:var(--accent)}
+  .discl{display:flex;align-items:center;gap:7px;margin-top:9px;color:var(--muted);font-size:12px}
+
+  /* results */
+  .ribbon{padding:11px 18px;font-weight:700;letter-spacing:.16em;font-size:12px;text-align:center}
+  .ribbon.win{background:rgba(76,175,114,.14);color:var(--good);border-bottom:1px solid #27503a}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .cols h4{margin:0 0 7px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  ul.plain{list-style:none;margin:0;padding:0;font-size:12.5px}
+  ul.plain li{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #222831}
+  .kia{color:var(--bad)}
+  .elsewhere{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+  .ewrow{display:flex;align-items:center;gap:9px;padding:4px 0;font-size:12.5px}
+  .ewrow .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .ewrow .who{min-width:74px;color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+
+  /* mission HUD */
+  .hud{background:#0d1014;padding:14px 16px;display:flex;gap:26px;align-items:flex-start}
+  .squadcol{min-width:186px}
+  .squadcol h5{margin:0 0 6px;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);
+               display:flex;align-items:center;gap:6px}
+  .squadcol h5 .dot{width:8px;height:8px;border-radius:50%}
+  .sold{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px}
+  .sold .nm{width:78px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hbar{flex:1;height:6px;background:var(--track);border-radius:3px;overflow:hidden}
+  .hbar i{display:block;height:100%}
+  .sold.dead .nm{color:#5b636e;text-decoration:line-through}
+  .viewport{flex:1;min-height:118px;border:1px dashed var(--line);border-radius:6px;
+            display:flex;align-items:center;justify-content:center;color:#4a525d;font-size:11.5px}
+
+  /* end screen */
+  .endgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  .end{border:1px solid var(--line);border-radius:8px;padding:20px 16px;text-align:center;background:var(--concrete-hi)}
+  .end .badge{font-size:26px;line-height:1}
+  .end h3{margin:8px 0 6px;font-size:14px;letter-spacing:.08em}
+  .end p{margin:0;color:var(--muted);font-size:12px}
+  .end.win h3{color:var(--good)} .end.lose h3{color:var(--bad)} .end.null h3{color:var(--muted)}
+
+  /* hotseat */
+  .hotseat{display:flex;align-items:center;gap:10px;padding:7px 18px;background:#0f1319;
+           border-bottom:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+  .hotseat select{background:var(--steel);color:var(--text);border:1px solid var(--line);
+                  border-radius:4px;padding:3px 7px;font:inherit;font-size:11.5px}
+</style>
+</head>
+<body>
+
+<h2 class="sec">1 · Top bar — readiness across the task force</h2>
+<p class="cap">Everything mocked at <b>three players</b> on purpose: a layout that works for three works for two,
+and one built for two does not grow. Nothing anywhere says "the other player" — it says who, by name.</p>
+<div class="frame">
+  <header class="topbar">
+    <div class="brand">XCOM&nbsp;TASK&nbsp;FORCE</div>
+    <div class="resources">
+      <span>Day 14</span>
+      <span>Sector <span class="health-track"><span class="health-fill" style="width:62%"></span></span> 62</span>
+      <span class="credits">§ 1,840</span>
+      <span style="color:var(--muted)">5 on roster</span>
+      <button class="btn btn-ready-on new" title="Click again to stand down">Ready</button>
+    </div>
+  </header>
+  <div class="tfstrip new">
+    <span class="tflabel">Task force</span>
+    <span class="pchip me ready"><span class="dot"></span>USA <span class="st">ready</span></span>
+    <span class="pchip p2"><span class="dot"></span>CHINA <span class="st">still deciding</span></span>
+    <span class="pchip p3 ready"><span class="dot"></span>BRAZIL <span class="st">ready</span></span>
+    <span class="tfspacer"></span>
+    <span style="color:var(--muted);font-size:11.5px">Waiting on 1 · the day turns when everyone is ready</span>
+  </div>
+</div>
+<p class="note">The shared doom clock stays exactly where it is — one number in the bar, same as single player.
+The button changes from "Advance the day" to "Ready", because a day is no longer something you buy alone.
+Ready is a <b>toggle</b> — the button stays lit while you are ready and clicking it again stands you down, which also releases whatever deployment you had pending so you can change it. There is no window to stand down once you are the last to ready: the day turns on that click.</p>
+
+<h2 class="sec">2 · Operations — sharing a lead, and being given one</h2>
+<div class="frame"><div class="pad">
+  <div class="rowhead"><h3>Operations</h3><span class="staff">Cmdr. Voss</span></div>
+
+  <article class="mrow">
+    <div>
+      <div class="mtitle">Karachi Foundry, 1971 <span class="tag tag-med">Medium threat</span><span class="tag tag-life">3 days left</span></div>
+      <p class="mbrief">A shipment of something the lizards did not want catalogued. Contested on arrival.</p>
+    </div>
+    <div class="macts">
+      <button class="btn">Deploy squad</button>
+      <button class="btn btn-sm new">Share with ▾</button>
+    </div>
+  </article>
+
+  <article class="mrow">
+    <div>
+      <div class="mtitle">Rostov Rail Yard, 1943 <span class="tag tag-high">High threat</span><span class="tag tag-life urgent">expires tomorrow</span><span class="tag tag-shared new">shared by CHINA</span></div>
+      <p class="mbrief">Too much for one squad. Voss thinks whoever sent this knows that.</p>
+    </div>
+    <div class="macts">
+      <button class="btn">Deploy squad</button>
+      <button class="btn btn-sm new">Share with ▾</button>
+    </div>
+  </article>
+
+  <article class="mrow" style="border-color:#5c4a2c">
+    <div>
+      <div class="mtitle">The Long Meridian <span class="tag tag-boss">★ Finale</span></div>
+      <p class="mbrief">Destroying this ends the lizards' hold. It does not expire.</p>
+    </div>
+    <div class="macts">
+      <button class="btn btn-go">Deploy squad</button>
+      <button class="btn btn-sm new">Share with ▾</button>
+    </div>
+  </article>
+</div></div>
+<p class="note">"Share with ▾" is a menu rather than a button because at three players you have to pick who —
+the two-player version would have been a single toggle that stops working the moment a third joins.
+A lead someone gave you is tagged with their name and is otherwise an ordinary lead: you can deploy to it,
+and you can pass it on. The finale shares the same control, which is what "the finale is disclosable like any lead" means.
+<b>Not shown, deliberately:</b> any count of the leads you cannot see.</p>
+
+<h2 class="sec">3 · Deploy — the commitment</h2>
+<div class="frame"><div class="pad">
+  <div class="rowhead"><h3>Rostov Rail Yard, 1943</h3><span class="staff">3 of 3 selected</span></div>
+  <p class="mbrief">Pick your squad and their weapons. Same screen as today.</p>
+  <div class="commit new">
+    <b>Locked on ready.</b> When every commander has readied, this deployment is final —
+    there is no withdrawing, and you will not know where anyone else went until it is over.
+  </div>
+  <label class="discl new"><input type="checkbox" checked> Tell the task force I'm taking this lead</label>
+</div></div>
+<p class="note">Two things the design already decided and the screen has to say out loud: choices lock and cannot be withdrawn,
+and disclosure is a choice you make here. The checkbox is optional and unverified — you can tick it and go somewhere else.
+If two commanders happen to pick the same lead, they play it together; nothing on this screen promises they won't.</p>
+
+<h2 class="sec">4 · Results — what you learn about everyone else</h2>
+<div class="frame">
+  <div class="ribbon win">MISSION SUCCESS</div>
+  <div class="pad">
+    <div class="cols">
+      <div>
+        <h4>Casualties</h4>
+        <ul class="plain"><li class="kia"><span>✝ Kwame Osei — killed in action</span></li></ul>
+      </div>
+      <div>
+        <h4>Recovered</h4>
+        <ul class="plain">
+          <li><span>Chrono-ballast core</span><span class="credits">§420</span></li>
+          <li><span>Lizard field manual</span><span class="credits">§95</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="elsewhere new">
+      <h4 style="margin:0 0 6px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Elsewhere today</h4>
+      <div class="ewrow"><span class="dot" style="background:var(--them)"></span><span class="who">China</span><span>deployed to <b>Karachi Foundry, 1971</b></span></div>
+      <div class="ewrow"><span class="dot" style="background:var(--them2)"></span><span class="who">Brazil</span><span>held at base</span></div>
+    </div>
+    <div style="margin-top:16px;text-align:right"><button class="btn btn-go">Return to base ▸</button></div>
+  </div>
+</div>
+<p class="note">"Elsewhere today" is the <b>only</b> thing you learn about anyone else, and it is one line per commander —
+which lead they took, or that they stayed home. Deliberately absent: whether they won, who died, and what they carried out.
+The sector number in the top bar will have moved whether or not they tell you why.
+This list grows a row per player, so it does not care how many there are.</p>
+
+<h2 class="sec">5 · Mission — the other squads on your level</h2>
+<div class="frame">
+  <div class="hud">
+    <div class="squadcol">
+      <h5><span class="dot" style="background:var(--me)"></span>USA — you</h5>
+      <div class="sold"><span class="nm">Vance</span><span class="hbar"><i style="width:78%;background:var(--good)"></i></span></div>
+      <div class="sold"><span class="nm">Osei</span><span class="hbar"><i style="width:34%;background:var(--credits)"></i></span></div>
+      <div class="sold dead"><span class="nm">Tanaka</span><span class="hbar"><i style="width:0"></i></span></div>
+    </div>
+    <div class="squadcol new">
+      <h5><span class="dot" style="background:var(--them)"></span>China</h5>
+      <div class="sold"><span class="nm">Rui Feng</span><span class="hbar"><i style="width:91%;background:var(--them)"></i></span></div>
+      <div class="sold"><span class="nm">Bao</span><span class="hbar"><i style="width:12%;background:var(--bad)"></i></span></div>
+    </div>
+    <div class="viewport">level renders here — squads colour-coded to match</div>
+  </div>
+</div>
+<p class="note">Your squad keeps the position and treatment it has today; other squads stack beside it, one block per commander,
+each in that commander's colour so a soldier on screen reads as theirs at a glance.
+Only commanders <b>on this level</b> appear — Brazil went elsewhere and is not here.
+At four squads of three this is twelve bars, which is the practical ceiling this layout should be tested against.</p>
+
+<h2 class="sec">6 · End of campaign — three outcomes, not two</h2>
+<div class="endgrid">
+  <div class="end win"><div class="badge">★</div><h3>SECTOR SECURED</h3><p>You cleared the finale. The campaign ends.</p></div>
+  <div class="end lose"><div class="badge">☠</div><h3>SECTOR LOST</h3><p>The doom clock ran out. Everyone loses, together.</p></div>
+  <div class="end null new"><div class="badge">—</div><h3>THE WAR ENDED WITHOUT YOU</h3><p>Another commander finished it. You did not fail, and you did not win.</p></div>
+</div>
+<p class="note">The third panel is new and has no equivalent today. It is what "victory is individual and defeat is collective" produces:
+one commander can end the campaign for everyone by winning it, and the rest get an ending that is neither of the two the game currently knows how to show.</p>
+
+<h2 class="sec">7 · Hot-seat only — whose base am I looking at</h2>
+<div class="frame">
+  <div class="hotseat new">
+    <span>Hot-seat</span>
+    <select><option>Viewing: USA</option><option>Viewing: China</option><option>Viewing: Brazil</option></select>
+    <span>— one browser, one session, three commanders. Deleted once there is a network.</span>
+  </div>
+  <header class="topbar"><div class="brand">XCOM&nbsp;TASK&nbsp;FORCE</div>
+    <div class="resources"><span>Day 14</span><span class="credits">§ 1,840</span><button class="btn" disabled>Ready ▸</button></div>
+  </header>
+</div>
+<p class="note">Development scaffolding, not a feature. It exists so the whole campaign can be played and tuned before any
+server exists, and it comes out when the session moves off the page.</p>
+
+</body>
+</html>
