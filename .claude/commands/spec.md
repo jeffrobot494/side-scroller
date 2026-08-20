@@ -11,7 +11,7 @@ than a description of whatever got built is two things, and both are enforced
 below: it is **committed before any implementation commit**, and it is **attacked
 by a subagent that did not write it**.
 
-Bo does not review architecture. He reviews four things, listed in step 5. Every
+Bo does not review architecture. He reviews design — the three asks in step 5. Every
 other judgement in this document is yours, and the point of the procedure is that
 it is made **from the repo**, not from memory.
 
@@ -73,16 +73,32 @@ mode that separation used to catch.
 Fix what it finds. If it disagrees with a deliberate choice, say so in
 `Approximations` rather than silently overruling it.
 
-## 5. Hand back only what Bo can answer
+## 5. Hand back three asks and two reports
 
-Do not summarise the architecture. Ask these four, and nothing else:
+Do not summarise the architecture. Bo reviews **design**, not structure — every
+other judgement in this document is yours.
 
-1. Does slice 1 put something in front of you? (If not, the slicing is wrong.)
-2. Is the approximation in `Approximations` acceptable to you as a player?
-3. Are we rebuilding something the game already has? — with your `Reuses` list.
-4. What would you be upset to see break?
+**Ask three things.**
 
-Answer 4 goes into `Must not regress`.
+1. **The design gaps this spec hit.** Anything the design references that does
+   not exist, and anything it leaves unanswered that a builder would otherwise
+   have to invent. This is the only category nobody but Bo can settle, and it is
+   what step 2's "no design" rule produces when it fires.
+2. **The reuse list** — "are we rebuilding something the game already has?",
+   with the list, so he can recognise what he built.
+3. **Each deliberate deviation from the design, one plain sentence each.** Never
+   ask whether "the approximations" are acceptable; that is schema jargon and
+   the answer is meaningless. Name the thing the build will do and the thing the
+   design promised, in words a player would use, and ask whether he minds.
+
+**Report two things, and do not turn them into questions.**
+
+| | |
+|---|---|
+| Where the bar cannot see the work | Which slices land in modules no test imports, so the only guard is playing it. Bo cannot generate this list from memory and should not be asked to — "what would you be upset to see break?" answers itself, and the honest answer is "nothing, ever" |
+| When it first becomes playable | The slice a player can act on. A slice that changes nothing visible is often the correct first commit — a pure refactor with a green suite is the safest thing you can land — so the question is never whether slice 1 shows something. It is whether the ordering leaves him unable to play it for a week |
+
+Then stop.
 
 ## 6. Commit the spec on its own
 
