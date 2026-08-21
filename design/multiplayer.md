@@ -18,7 +18,7 @@ and what they compete over.
 | 1 | The world holds one set of leads; each player sees a portion of it |
 | 2 | The doom clock is shared, and its expiry loses the campaign for both |
 | 3 | The day advances only when both players declare ready |
-| 4 | A player's mission choice is private unless they disclose it |
+| 4 | A player's mission choice is private |
 | 5 | Two players who deploy to the same lead play it together, on one level |
 | 6 | Nothing makes a mission require two squads except its difficulty |
 | 7 | Rewards inside a mission go to whoever reaches them first |
@@ -70,8 +70,7 @@ deploys every day is spending the same campaign time as one who never does.
 
 | | |
 |---|---|
-| Privacy | Neither player sees the other's choice |
-| Disclosure | A player may tell the other what they are taking. This is optional and not verified |
+| Privacy | Neither player sees the other's choice, and there is no way to tell them |
 | Commitment | Once both are ready, choices are locked. There is no withdrawal |
 | Start | Both missions begin at the same moment |
 | Coincidence counts | Two players who arrive at the same lead play it together whether or not they planned to |
@@ -160,5 +159,7 @@ Named so they read as absent rather than overlooked.
 | Rewards that are not first-to-reach | Every pickup is contested. A later design makes most rewards non-pickup and leaves pickups uncommon |
 | A mission-length constraint | Generated missions vary in length, so one player routinely finishes well before the other |
 | Anything for the player who finishes first | They return to base and wait |
-| Trading, lending, or gifting between bases | Disclosure of a lead is the only thing one player can give another |
+| Trading, lending, or gifting between bases | Sharing a lead is the only thing one player can give another |
+| Telling the other player where you are going | A mission choice is private, full stop. There is no control for announcing one and no place one would appear |
+| A communication channel | Players talk outside the game. A later design gives them one inside it, and at that point they share whatever information they like — including their mission choice, in words the game does not model |
 | A split of mission credits | Missions do not pay credits. What a squad carries out of the level is what that player keeps, and selling it at base is a private transaction |

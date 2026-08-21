@@ -93,9 +93,12 @@ for S6 showed it would not: `design/multiplayer.md` describes sharing only as
 a claim about where you are going is a different mechanism that the design gives
 no surface. **Bo cut it rather than settle what it meant.** Removed from
 `src/hub/hub.js`, `src/game/session.js`, `src/hub/hub.css`, the suite, and
-mockup §3. What this leaves open is design, not engineering: decision 4 ("a
-player's mission choice is private unless they disclose it") and the Deploying
-table's "Disclosure" row now name a thing the game does not do.
+mockup §3. **`design/multiplayer.md` was then settled to match**: decision 4
+reads "a player's mission choice is private", full stop; the Deploying table's
+"Disclosure" row is gone; and two absences are named — announcing where you are
+going, and the communication channel a later design gives players, through which
+they may say whatever they like in words the game does not model. Sharing a LEAD
+is untouched and is what S6 builds.
 
 **As built, S5: `player.deploys` was DELETED, not kept beside the list.** The
 seam says the count and the list length "are the same fact and must not become
