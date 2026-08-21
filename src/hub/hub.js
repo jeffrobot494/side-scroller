@@ -40,7 +40,7 @@ export class Hub {
     this.location = "barracks";
     this.mode = "hub"; // hub | deploy | results | end
     this.flash = null;
-    this.deploy = null; // { missionId, selected:Set, weapons:{soldierId:weaponId}, disclose }
+    this.deploy = null; // { missionId, selected:Set, weapons:{soldierId:weaponId} }
     this.result = null;
     this.turn = null; // the day summary a round's last mission report carried
 
@@ -525,15 +525,6 @@ export class Hub {
           <b>Locked on ready.</b> When every commander has readied, this deployment is final —
           there is no withdrawing, and you will not know where anyone else went until it is over.
         </div>`;
-    // Optional and unverified — you can tick it and go somewhere else. Nothing
-    // reads it until S6 gives leads per-player visibility.
-    const disclose = solo
-      ? ""
-      : `<label class="discl">
-          <input type="checkbox" data-action="disclose" ${this.deploy.disclose ? "checked" : ""}>
-          Tell the task force I'm taking this lead
-        </label>`;
-
     return `
       <div class="location-header">
         <h1>🛰️ Deploy — ${mission.name}</h1>
@@ -544,7 +535,6 @@ export class Hub {
         <p class="muted">You control one soldier; the rest fight as AI companions and control swaps on death. <strong>Anyone who dies is gone for good.</strong></p>
         <div class="soldier-grid">${cards}</div>
         ${notice}
-        ${disclose}
       </section>
       <div class="deploy-bar">
         <button class="btn btn-ghost" data-action="cancel-deploy">Cancel</button>
@@ -675,11 +665,6 @@ export class Hub {
   // ---- interaction --------------------------------------------------------
 
   _onChange(e) {
-    const box = e.target.closest("[data-action='disclose']");
-    if (box) {
-      this.deploy.disclose = box.checked;
-      return;
-    }
     const el = e.target.closest("[data-action='weapon']");
     if (!el) return;
     this.deploy.weapons[el.dataset.id] = el.value;
@@ -771,7 +756,6 @@ export class Hub {
           missionId: id,
           selected: new Set(held ? held.soldierIds : []),
           weapons: held ? { ...held.weapons } : {},
-          disclose: held ? held.disclose : false,
         };
         this.mode = "deploy";
         this.render();
@@ -842,7 +826,6 @@ export class Hub {
       leadId: this.deploy.missionId,
       soldierIds: [...this.deploy.selected],
       weapons: this.deploy.weapons,
-      disclose: !!this.deploy.disclose,
     });
     if (!res.ok) {
       this.setFlash("bad", res.reason);

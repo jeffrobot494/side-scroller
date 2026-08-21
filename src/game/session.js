@@ -105,7 +105,6 @@ function makeView(campaign, player, players, round) {
         leadName: c.mission.name,
         soldierIds: c.squad.map((x) => x.data.id),
         weapons: { ...c.weapons },
-        disclose: c.disclose,
       })),
     enumerable: true,
   });
@@ -203,17 +202,11 @@ function deployCommand(campaign, cmd, player) {
   // `weapons` is KEPT, which deployCommand used to consume and discard: the
   // deploy screen re-renders its selects off exactly this map, so a commander
   // who comes back to change their mind has to see what they picked.
-  //
-  // `disclose` is mockup §3's checkbox — optional and unverified. It is
-  // written here and read by nothing until S6 gives leads per-player
-  // visibility; carrying it now is what stops the pending choice being
-  // reshaped one slice later.
   player.pending.push({
     mission: lead,
     level: lead.level,
     squad,
     weapons: { ...weapons },
-    disclose: !!cmd.disclose,
   });
 
   return { ok: true, committed: true, leadId: lead.id, leadName: lead.name, pending: player.pending.length };

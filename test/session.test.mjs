@@ -508,9 +508,13 @@ export default async function run(t) {
     for (const id of ["alpha", "bravo"]) world.leads.push(fakeLead(id));
     const squadOf = (v) => [v.roster[0].id];
 
-    s.command("usa", { type: "deploy", leadId: "alpha", soldierIds: squadOf(usa), disclose: true });
+    s.command("usa", { type: "deploy", leadId: "alpha", soldierIds: squadOf(usa) });
     t.eq("a commander sees their own held deployment", usa.pending.map((c) => c.leadName), ["alpha"]);
-    t.ok("...including the disclosure flag they ticked", usa.pending[0].disclose === true);
+    // Exactly what the deploy screen needs to redraw itself, and nothing else.
+    // Pinned because a held choice is the natural place to park a flag nobody
+    // reads — the §3 disclosure checkbox was one, and Bo cut it.
+    t.eq("...carrying exactly what redraws that screen", Object.keys(usa.pending[0]).sort(),
+      ["leadId", "leadName", "soldierIds", "weapons"]);
     // The rule the whole seam exists for: nothing about another commander's
     // choice is on your view, and readiness stays the only thing that is.
     t.eq("...and nobody else's is on their view", china.pending, []);

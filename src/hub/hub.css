@@ -658,15 +658,6 @@ body::after {
   color: var(--muted);
 }
 .commit-note b { color: var(--text); }
-.discl {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  font-size: 12.5px;
-  color: var(--muted);
-  cursor: pointer;
-}
 
 /* "Elsewhere today" — one row per other commander, so it does not care how
    many there are. Which lead they took, and nothing else. */
