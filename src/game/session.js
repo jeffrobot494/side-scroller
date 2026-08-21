@@ -35,6 +35,10 @@ import {
   restDay,
   applyMissionResult,
   livingRoster,
+  canSee,
+  sharerFor,
+  grantLead,
+  registerCommanders,
 } from "./state.js";
 import { dealRecruits } from "./soldiers.js";
 import { WEAPONS } from "./content.js";
@@ -52,7 +56,8 @@ const VIEW_FIELDS = [
   "armory",
   "stores",
   "building",
-  "leads",
+  // `leads` is NOT here since S6 — it is defined separately below, because it
+  // is filtered and mapped rather than read through. It is still on the view.
   "completedMissions",
   "outcome",
   "log",
@@ -82,11 +87,40 @@ const VIEW_FIELDS = [
 // exactly until somebody readied. A fresh array each read, because nothing
 // downstream needs its identity and handing out the records themselves would
 // hand out the campaigns hanging off them.
+// The fields of a lead a commander is allowed to hold. Exact, and pinned by the
+// suite: `level` and `report` are deliberately absent (the hub renders neither,
+// and `level` is the whole generated map), and so is `seenBy`.
+function projectLead(lead, playerId) {
+  return {
+    id: lead.id,
+    name: lead.name,
+    brief: lead.brief,
+    difficulty: lead.difficulty,
+    daysLeft: lead.daysLeft,
+    winsCampaign: !!lead.winsCampaign,
+    // Who handed it to you, or null. Never who ELSE holds it.
+    sharedBy: sharerFor(lead, playerId),
+  };
+}
+
 function makeView(campaign, player, players, round) {
   const v = { playerId: player.id };
   for (const key of VIEW_FIELDS) {
     Object.defineProperty(v, key, { get: () => campaign[key], enumerable: true });
   }
+
+  // `leads` is the second field that is MAPPED rather than passed through (S6),
+  // and for the same reason `pending` is: handing over the live object hands
+  // over more than the reader may have. A lead carries `seenBy`, which states
+  // exactly who else is looking at it — the other commander's board, the one
+  // thing design/multiplayer.md says is invisible. So this filters AND maps.
+  //
+  // The cost is lead identity through the view. Nothing needs it: the hub reads
+  // names and ids, and deployCommand resolves the real lead off the campaign.
+  Object.defineProperty(v, "leads", {
+    get: () => campaign.leads.filter((l) => canSee(l, player.id)).map((l) => projectLead(l, player.id)),
+    enumerable: true,
+  });
   Object.defineProperty(v, "taskForce", {
     get: () => [...players.values()].map((p) => ({ id: p.id, name: p.name, ready: p.ready })),
     enumerable: true,
@@ -171,8 +205,13 @@ function deployCommand(campaign, cmd, player) {
     return fail("This squad has already deployed today. The day turns when every commander is ready.");
   }
 
+  // The view filters and the command validates — two call sites of ONE
+  // predicate, never two conditions written separately, or "visible" and
+  // "deployable" drift apart. The refusal for a lead you cannot see is the
+  // refusal for a lead that is gone, WORD FOR WORD: a distinct message would
+  // confirm the lead exists, which is the one thing board privacy forbids.
   const lead = campaign.leads.find((l) => l.id === cmd.leadId);
-  if (!lead) return fail("That lead is no longer on the board.");
+  if (!lead || !canSee(lead, player.id)) return fail("That lead is no longer on the board.");
 
   const ids = cmd.soldierIds || [];
   if (!ids.length) return fail("A squad needs at least one soldier.");
@@ -217,14 +256,25 @@ export function createSession(opts = {}) {
   // world; `opts.world` supplies the world directly. Both exist for tests — the
   // game passes neither.
   const seatOne = opts.state || null;
-  const world = opts.world || (seatOne && seatOne.world) || createWorld();
 
   // A seat is an id or an { id, name }. Names are cosmetic — the design rules
   // out any mechanical difference between nations — but the task-force strip
   // has to print WHO, by name, so the name travels with the seat rather than
   // living in src/main.js where the session cannot reach it.
+  //
+  // Read BEFORE the world is built (S6). A lead is stamped with who can see it
+  // at the moment it is generated, and createWorld seeds the board on its way
+  // out — so the world has to know its commanders before it exists.
   const seats = (opts.players || ["p1"]).map((p) => (typeof p === "string" ? { id: p, name: p } : p));
   const ids = seats.map((p) => p.id);
+
+  const handed = opts.world || (seatOne && seatOne.world) || null;
+  const world = handed || createWorld(ids);
+  // A world we were handed already has a board, seeded before these seats
+  // existed. Each of them is registered and given what is already there —
+  // otherwise a seat opens on a permanently empty Operations. The game never
+  // reaches this: it builds its world from the line above.
+  if (handed) registerCommanders(world, ids);
 
   // The recruit pool is DEALT here (S3), because this is the only thing that
   // knows how many bases there are. One share per seat, each authored recruit
@@ -298,8 +348,23 @@ export function createSession(opts = {}) {
   // Pending choices are empty by construction whenever this runs: closeRound
   // empties every list before either of its branches, and no deploy is
   // accepted while a round is in flight.
+  // advanceDay names the leads that expired and arrived across the WHOLE world
+  // board, and both lists reach a commander — through the day flash and through
+  // the results screen's day line. After S6 that would name and count leads the
+  // reader was never shown, which is the board leaking through the clock.
+  // advanceDay cannot filter (it is handed a campaign and does not know whose
+  // day it is); this does, because it already picked an actor.
+  function ownSummary(res, actor) {
+    if (!res.ok) return res;
+    const mine = (leads) => (leads || []).filter((l) => canSee(l, actor.id)).map((l) => l.name);
+    const out = { ...res, expired: mine(res.expiredLeads), arrived: mine(res.arrivedLeads) };
+    delete out.expiredLeads;
+    delete out.arrivedLeads;
+    return out;
+  }
+
   function endRound(actor) {
-    const res = advanceDay(actor.campaign);
+    const res = ownSummary(advanceDay(actor.campaign), actor);
     if (res.ok) restEveryoneElse(actor);
     for (const p of players.values()) p.ready = false;
     round.flight = null;
@@ -405,6 +470,25 @@ export function createSession(opts = {}) {
       case "deploy":
         if (round.flight) return fail("The round is under way.");
         return deployCommand(campaign, cmd, player);
+      // Mockup §2's "Share with ▾". Disclosure is one-way, one-shot and
+      // unverified in only one sense — you really do give the lead — but there
+      // is no revocation and nothing tells you what they do with it.
+      case "share": {
+        if (round.flight) return fail("The round is under way.");
+        const target = players.get(cmd.to);
+        if (!target) return fail("No such commander.");
+        if (target === player) return fail("You already have that lead.");
+        // Resolved off the WORLD board, then checked — same two-step and same
+        // deliberately identical refusal as a deploy. You cannot give away a
+        // lead you were never shown, and the error must not admit it exists.
+        const lead = campaign.leads.find((l) => l.id === cmd.leadId);
+        if (!lead || !canSee(lead, player.id)) return fail("That lead is no longer on the board.");
+        if (canSee(lead, target.id)) return fail(`${target.name} already has that lead.`);
+        // Tagged with whoever handed it to YOU, not where it started: the tag
+        // records the favour received, and there is no chain.
+        grantLead(lead, target.id, player.name);
+        return { ok: true, shared: true, leadName: lead.name, to: target.id, toName: target.name };
+      }
       case "release": {
         // The deploy screen's own control. Standing down releases everything;
         // this releases ONE, because with dayPerDeploy off a commander can

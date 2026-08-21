@@ -265,6 +265,11 @@ export default async function run(t) {
     t.ok("a deploy is refused mid-round", !s.command("p1", { type: "deploy", leadId: "lead_1", soldierIds: [soldier.id] }).ok);
     t.ok("...and so is readying", !s.command("p1", { type: "ready" }).ok);
     t.ok("...and so is releasing", !s.command("p1", { type: "release", leadId: "lead_1" }).ok);
+    // The REASON, not just the refusal: this is a one-player session, so an
+    // unknown-commander rejection would pass this for the wrong reason. The
+    // round guard has to be what fires, and it fires before the target lookup.
+    t.eq("...and so is sharing", s.command("p1", { type: "share", leadId: "lead_1", to: "p2" }).reason,
+      "The round is under way.");
     resetConfig();
   }
 
@@ -278,7 +283,22 @@ export default async function run(t) {
 
     t.ok("every player reads the same day", usa.day === china.day && china.day === brazil.day);
     t.ok("...the same doom clock", usa.campaignHealth === brazil.campaignHealth);
-    t.ok("...the same board, by identity", usa.leads === china.leads && china.leads === brazil.leads);
+    // S6 MOVED THIS. Until S6 a view handed over world.leads itself, so board
+    // identity was assertable through two views. It is now filtered and mapped
+    // per commander, so `usa.leads === china.leads` can never be true again and
+    // asserting it would only be re-testing that the mapper runs. What it was
+    // really guarding — that the world's lead set does not detach into a board
+    // per player — is asserted where the identity is still real: the campaigns.
+    // Asserted through the WORLD, not between two views. A view hands out
+    // filtered projections since S6, so `usa.leads === china.leads` can never
+    // be true again and asserting it would only re-test that the mapper ran.
+    // The claim worth keeping is the original one — that the world's lead set
+    // does not detach into a board per player — and its observable form is
+    // that every commander's board is the world's, id for id.
+    const ids = (v) => v.leads.map((l) => l.id).sort();
+    const worldIds = world.leads.map((l) => l.id).sort();
+    t.eq("...the same board as the world", ids(usa), worldIds);
+    t.eq("...and so does everyone else", [ids(china), ids(brazil)], [worldIds, worldIds]);
     t.ok("...and the same log", usa.log === brazil.log);
 
     t.ok("bases are separate objects", usa.roster !== china.roster && usa.armory !== china.armory);
@@ -290,16 +310,29 @@ export default async function run(t) {
     // The failure a plain reference would produce: advanceDay REPLACES
     // state.leads rather than splicing it, so a world field that was merely
     // aliased detaches here and hands each player a private board.
-    const board = usa.leads;
+    const board = world.leads;
     // Rot is the only thing that REASSIGNS the array (arrivals push into it), so
     // the leads have to be made to expire on this tick. Their lifespans were
     // rolled at generation, which is why this sets daysLeft rather than config.
+    //
+    // Written through the WORLD since S6, not through usa.leads. A view now
+    // hands out fresh projections, so this loop used to land on throwaway
+    // objects: nothing expired, and the two assertions below stopped testing
+    // reassignment without going red. That is the failure mode worth a comment.
     for (const l of board) l.daysLeft = 1;
     t.ok("two of three readying does not move the day", s.command("usa", { type: "ready" }).dayTurned === false);
     t.eq("...and the day is still where it was", usa.day, 1);
     turnDay(s, ["china", "brazil"]);
-    t.ok("the board survives being reassigned", usa.leads === china.leads);
-    t.ok("...and it really was reassigned", usa.leads !== board);
+    // The failure a plain reference produces is a commander still reading the
+    // OLD array after advanceDay swapped it — visible here as a board that did
+    // not empty. Identity is gone from the view; the consequence is not.
+    t.ok("...and it really was reassigned", world.leads !== board);
+    // NOT "both see the world's board" — the day that reassigned it also brought
+    // an arrival, and an arrival IS rolled for visibility even in a handed-over
+    // world (registration grants the board so far, not the board forever). The
+    // detach test that survives that is: nobody is still reading the old array.
+    t.ok("the board survives being reassigned",
+      [usa, china, brazil].every((v) => !v.leads.some((l) => board.some((b) => b.id === l.id))));
     t.eq("the last commander to ready moves the day once, for everyone", [usa.day, china.day, brazil.day], [2, 2, 2]);
     resetConfig();
   }
@@ -356,7 +389,14 @@ export default async function run(t) {
 
     t.eq("the loot went to one base", [usa.stores.length, china.stores.length], [1, 0]);
     t.eq("the record went to one base", [usa.completedMissions.length, china.completedMissions.length], [1, 0]);
-    t.ok("the spent lead left the shared board", !usa.leads.includes(lead) && usa.leads === china.leads);
+    // Compared by ID, not by identity: `usa.leads` holds projections since S6,
+    // so `.includes(lead)` would be false whether or not the lead left — an
+    // assertion that passes for the wrong reason is worse than one that fails.
+    // Compared by ID, not by identity: `usa.leads` holds projections since S6,
+    // so `.includes(lead)` would be false whether or not the lead ever left —
+    // an assertion that passes for the wrong reason is worse than one that fails.
+    t.ok("the spent lead left the shared board",
+      !world.leads.includes(lead) && !china.leads.some((l) => l.id === lead.id));
 
     // S4 INVERTED THIS. Until S4 config.dayPerDeploy charged a day from inside
     // applyMissionResult and the session had to OBSERVE the world clock to
@@ -698,6 +738,158 @@ export default async function run(t) {
   // ---- the DOM-free rule needs its own assertion --------------------------
   // test/run.mjs calls installDom() once for the WHOLE run, so document/window
   // are on globalThis by the time this suite loads and a DOM reference inside
+  // ---- lead visibility and disclosure (S6) --------------------------------
+  // The ONLY construction that rolls visibility is createSession({ players }):
+  // it builds its world from the seat list, so seedBoard stamps against a known
+  // roster. Every block above hands over a pre-built world, where registration
+  // grants the board-so-far and everybody sees everything — which is why this
+  // assertion cannot live in one of them.
+  {
+    config.leadVisibility = 0.5;
+    config.leadCount = 4;
+    config.seedLeads = 4;
+    const s = createSession({ players: ["usa", "china"] });
+    const usa = s.view("usa"), china = s.view("china");
+
+    // The world board scales with the commander count (the S6 stopgap), so the
+    // two boards are drawn from more leads than a solo campaign would hold.
+    const everyone = new Set([...usa.leads, ...china.leads].map((l) => l.id));
+    t.ok("the world board scales past one commander's ceiling", everyone.size > config.leadCount);
+    t.ok("...and nobody sees more than the ceiling's worth of it",
+      usa.leads.length <= config.leadCount * 2 && usa.leads.length > 0);
+    // The floor, asserted against the WORLD rather than against the union of
+    // the boards — which would be comparing a set to itself. A lead nobody can
+    // see is invisible AND still holds a slot under the ceiling.
+    const w = createWorld(["a", "b"]);
+    const s2 = createSession({ world: w, players: ["a", "b"] });
+    const union = new Set([...s2.view("a").leads, ...s2.view("b").leads].map((l) => l.id));
+    t.eq("every lead is visible to somebody — the floor", union.size, w.leads.length);
+
+    t.eq("a projected lead carries exactly what Operations draws",
+      Object.keys(usa.leads[0]).sort(),
+      ["brief", "daysLeft", "difficulty", "id", "name", "sharedBy", "winsCampaign"]);
+    t.ok("...and not the generated level, which is the session's alone",
+      usa.leads.every((l) => l.level === undefined && l.report === undefined));
+    t.ok("...nor who ELSE can see it", usa.leads.every((l) => l.seenBy === undefined));
+    t.ok("a lead you rolled yourself is tagged with nobody", usa.leads.every((l) => l.sharedBy === null));
+    resetConfig();
+  }
+
+  // Sharing: the whole point of a partial board, and the one channel the design
+  // opens between two commanders before a mission resolves.
+  {
+    config.leadVisibility = 0; // every lead to exactly one commander
+    config.leadCount = 3;
+    config.seedLeads = 3;
+    const s = createSession({ players: [{ id: "usa", name: "USA" }, { id: "china", name: "China" }] });
+    const usa = s.view("usa"), china = s.view("china");
+
+    t.ok("at zero visibility no lead is on two boards",
+      !usa.leads.some((a) => china.leads.some((b) => b.id === a.id)));
+
+    const mine = usa.leads[0];
+    const theirs = china.leads[0];
+
+    // The refusal for a lead you cannot see is the refusal for one that is
+    // gone, word for word — a distinct message confirms it exists.
+    const gone = s.command("usa", { type: "deploy", leadId: "no_such_lead", soldierIds: ["x"] });
+    const hidden = s.command("usa", { type: "deploy", leadId: theirs.id, soldierIds: ["x"] });
+    t.ok("deploying to a lead you cannot see is refused", !hidden.ok);
+    t.eq("...in the same words as a lead that does not exist", hidden.reason, gone.reason);
+    t.eq("...and sharing it back is refused the same way",
+      s.command("usa", { type: "share", leadId: theirs.id, to: "china" }).reason, gone.reason);
+
+    t.ok("sharing yourself a lead is refused", !s.command("usa", { type: "share", leadId: mine.id, to: "usa" }).ok);
+    t.ok("sharing to nobody is refused", !s.command("usa", { type: "share", leadId: mine.id, to: "ghost" }).ok);
+
+    const res = s.command("usa", { type: "share", leadId: mine.id, to: "china" });
+    t.ok("sharing a lead you hold succeeds", res.ok && res.shared);
+    t.eq("...and names the lead for the flash", res.leadName, mine.name);
+
+    const got = china.leads.find((l) => l.id === mine.id);
+    t.ok("the lead is now on their board", !!got);
+    t.eq("...tagged with who gave it to them", got.sharedBy, "USA");
+    t.ok("...and it is an ordinary lead otherwise",
+      got.daysLeft === mine.daysLeft && got.difficulty === mine.difficulty);
+    t.ok("the giver still has it", usa.leads.some((l) => l.id === mine.id));
+    t.ok("...and is not told anything about it changing hands",
+      usa.leads.find((l) => l.id === mine.id).sharedBy === null);
+    t.ok("sharing it twice is refused", !s.command("usa", { type: "share", leadId: mine.id, to: "china" }).ok);
+
+    // Passed on again: the tag records whoever handed it to YOU, not the origin.
+    const s3 = createSession({ players: [{ id: "a", name: "A" }, { id: "b", name: "B" }, { id: "c", name: "C" }] });
+    const lead = s3.view("a").leads[0];
+    s3.command("a", { type: "share", leadId: lead.id, to: "b" });
+    s3.command("b", { type: "share", leadId: lead.id, to: "c" });
+    t.eq("a lead passed on is tagged with the last giver, not the first",
+      s3.view("c").leads.find((l) => l.id === lead.id).sharedBy, "B");
+
+    resetConfig();
+  }
+
+  // A lead carrying no visibility at all is visible to EVERYONE, not to nobody.
+  // Load-bearing far beyond single-player: five blocks in this suite push a
+  // hand-built fakeLead onto a board and then deploy to it.
+  {
+    const world = createWorld();
+    const s = createSession({ world, players: ["usa", "china"] });
+    const bare = fakeLead("bare_lead");
+    world.leads.push(bare); // pushed AFTER registration, so nothing granted it
+    t.ok("a lead with no visibility recorded is on every board",
+      s.view("usa").leads.some((l) => l.id === "bare_lead") &&
+      s.view("china").leads.some((l) => l.id === "bare_lead"));
+    t.ok("...and is deployable", s.command("usa", { type: "deploy", leadId: "bare_lead", soldierIds: [] }).reason
+      === "A squad needs at least one soldier.");
+  }
+
+  // Single-player is unchanged, and it is the ABSENT rule that does it, not the
+  // floor: a createState() world has NO registered commanders, so there is
+  // nobody for a floor to hand a lead to.
+  {
+    const solo = createState();
+    t.ok("a solo campaign stamps no visibility at all", solo.leads.every((l) => l.seenBy === undefined));
+    t.eq("...and its board is the unscaled ceiling", solo.leads.length, config.seedLeads);
+    const s = createSession();
+    t.eq("...and one commander sees all of it", s.view("p1").leads.length, solo.leads.length);
+  }
+
+  // The day summary names only leads the commander who turned it could see.
+  // advanceDay reports the whole world's expiries and arrivals; endRound filters.
+  {
+    config.leadVisibility = 0; // every lead to exactly one commander
+    config.leadCount = 3;
+    config.seedLeads = 3;
+    config.leadArrivalRate = 0; // arrivals would add names nobody can predict
+    // Built through createWorld so the test can reach the board. The ids are
+    // registered by createWorld itself, so createSession's own registration is
+    // a no-op here and visibility is really rolled — unlike every other
+    // handed-a-world block in this suite.
+    const world = createWorld(["usa", "china"]);
+    const s = createSession({ world, players: ["usa", "china"] });
+    const usa = s.view("usa"), china = s.view("china");
+    const theirs = china.leads.map((l) => l.name);
+    // Disjointness by ID, not by name: generated lead names come from a small
+    // pool and two different leads routinely share one, which made the
+    // name-based version of this fail about one run in four.
+    const mineIds = usa.leads.map((l) => l.id);
+    t.ok("the two boards really are disjoint", mineIds.length > 0 && theirs.length > 0
+      && !mineIds.some((id) => china.leads.some((l) => l.id === id)));
+
+    // EVERY lead expires on this turn, so `expired` is non-empty and the
+    // assertion below cannot pass by having nothing to check.
+    for (const l of world.leads) l.daysLeft = 1;
+    s.command("usa", { type: "ready" });
+    const turn = s.command("china", { type: "ready" });
+
+    t.ok("the day turned", turn.dayTurned === true);
+    t.ok("the summary carries no raw lead objects", turn.expiredLeads === undefined);
+    t.ok("...and it really did report expiries", turn.expired.length > 0);
+    // China readied last, so the summary is HERS. advanceDay reported every
+    // lead on the world board; nothing usa-only may survive the filter.
+    t.eq("...naming only the leads the reader could see", turn.expired.slice().sort(), theirs.slice().sort());
+    resetConfig();
+  }
+
   // the session would pass every other suite silently.
   {
     const src = readFileSync(join(ROOT, "src/game/session.js"), "utf8")

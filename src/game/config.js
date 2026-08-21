@@ -442,7 +442,7 @@ export const SCHEMA = [
         min: 1,
         max: 5,
         step: 1,
-        help: "How many operations Ops surfaces at once. Applies as the board refills.",
+        help: "How many operations Ops surfaces at once, PER COMMANDER — the world board is this times the number of bases. Applies as the board refills.",
       },
       {
         key: "leadArrivalRate",
@@ -462,7 +462,18 @@ export const SCHEMA = [
         min: 0,
         max: 5,
         step: 1,
-        help: "How many leads a new campaign opens with. Capped by the board ceiling above.",
+        help: "How many leads a new campaign opens with, per commander. Capped by the board ceiling above.",
+      },
+      {
+        key: "leadVisibility",
+        label: "Lead visibility",
+        type: "range",
+        default: 0.5,
+        min: 0,
+        max: 1,
+        step: 0.05,
+        help:
+          "Multiplayer only. The chance a new lead is ROLLED onto one commander's board — not the share they end up seeing, since a lead no one rolls is given to someone at random. At 1 every board is identical and sharing does nothing; at 0 every lead belongs to exactly one commander and sharing is the only overlap there is. Single-player ignores this.",
       },
       {
         key: "leadLifeMin",

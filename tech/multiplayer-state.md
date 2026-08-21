@@ -159,6 +159,61 @@ resume the queue. The round's remaining missions never run. Nothing crashes, no
 day turns (none can), and the round's state is fully cleared — which is what
 "a coherent end state" means here.
 
+**As built, S6: `commanders` is reached through a helper, not a `WORLD_FIELDS`
+accessor.** The plan said "one world field holding the commander roster", which
+reads as an entry in `WORLD_FIELDS` and therefore an enumerable accessor on
+every campaign. It is a plain field on the world plus `worldOf(state)` —
+`state.world || state` — because `makeLead` is handed a WORLD by `seedBoard` and
+a CAMPAIGN by everything else, and one helper covers both. The roster stays off
+campaigns entirely, which is the narrower seam: nothing in `state.js` outside
+lead generation can see that players exist.
+
+**As built, S6: `advanceDay` gained two fields and `endRound` strips them.** The
+spec named the requirement (a commander's day summary must not name leads they
+were never shown) and left the shape open. The shape is `expiredLeads` and
+`arrivedLeads` — the same two lists as OBJECTS — added beside the existing name
+arrays, filtered by `ownSummary` in `src/game/session.js`, and deleted from the
+result before it leaves. Additive because `test/wiring.test.mjs` asserts the
+name arrays directly, and those calls have no player to filter against.
+
+**As built, S6: `leads` left `VIEW_FIELDS`.** It is defined on its own below the
+loop, because the loop's `defineProperty` is non-configurable and redefining it
+throws. Still on the view, still in the exact-field-list assertion — the only
+thing that changed is which half of `makeView` builds it.
+
+**As built, S6: the self-share guard is redundant, and is kept for the message.**
+`share` refuses `to: yourself` explicitly, but removing that line changes
+nothing — `canSee(lead, target.id)` is true for a lead you are holding, so the
+next check refuses it anyway. Mutation testing is what established this: deleting
+the guard failed no assertion. It stays because "You already have that lead."
+reads better than the same sentence with your own name in it, and it is recorded
+as belt-and-braces so nobody later mistakes it for the rule.
+
+**As built, S6: registration grants the board SO FAR, not the board forever.**
+`registerCommanders` gives a late seat every lead already on the world, and
+nothing after that — arrivals are rolled for visibility normally, even in a
+handed-over world. The spec said the first half; the second half is what a test
+discovered when a day advance in a `createSession({ world })` block produced a
+lead only one commander could see. That is correct behaviour, and the assertion
+that broke was re-written to test detachment rather than sameness.
+
+**As built, S6: board identity is asserted through the WORLD, not "the campaign
+side of the seam".** The spec said the moved assertions would live on the
+campaign side. They cannot: the session hands out no campaign — the exact-method
+assertion exists to guarantee that — so a test has no campaign to compare. They
+are asserted through the `world` object the test already builds, by lead id.
+Three of the four rewritten assertions also had to change what they claim,
+because "both commanders see the world's board" stops being true the moment an
+arrival is rolled.
+
+**Three of S6's own new assertions were wrong when first written**, and all three
+were caught by mutating the code rather than by reading them. One compared a set
+to itself (the floor), one asserted over an empty list because nothing expired
+on the turn it watched (the day-summary filter), and one compared leads by NAME,
+which fails about one run in four because generated names repeat across leads.
+Recorded because the suite's value is entirely in whether its assertions can
+fail, and a green run does not establish that.
+
 **There is no reward split.** The first draft carried a slice for one, because
 an earlier design divided "the mission's credit reward". No such reward exists —
 `state.money` moves only in `hire`, `commission` and `sellAllLoot`, a mission
@@ -283,7 +338,7 @@ no build step.
 | **A campaign that ends mid-round does not stop the round** (S5) | The design forbids withdrawal, so the remaining locked missions still run. They bank loot, `cleared` and `highWins` into a campaign that is already over, and because `outcome` is shared until S7 one commander's win ends it for commanders whose missions have not been played yet. Accepted, not fixed — S7 is what forks `outcome`, and building a guard here would be building it twice. The regression to hold is that nothing CRASHES on that path |
 | **`_lastSquad` loses its writer, and needs a new one** (S5) | It is assigned in `_launch` from the deploy result — the exact call S5 converts from "start a mission" to "hold a choice" — and `_nameFor` needs it because `applyMissionResult` drops the dead from the roster before the results screen renders. It must now be written when a mission is DISPATCHED, not when a choice is made. Two things make this sharper: `setView` nulls it on every seat swap, and the seat follows the mission between each of the round's missions, so a naive port names the dead of the round's first mission and nobody after. The pending squad is NOT the substitute — it holds the living, and the results screen exists to name the dead |
 | **The gate must not deadlock** | A campaign whose `outcome` is set, a seat that readied and then swapped away, a flag that survives the turn — any of these leaves a task force that can never turn another day, and no assertion in the suite would notice. The gate needs a case that says every flag clears on the turn, and one that says a finished campaign refuses without stranding anyone |
-| `node test/run.mjs` | 31 suites, 1336 assertions green before S1 begins; 32 suites, 1379 after it; 32 suites, 1405 after S2 and its fix; 32 suites, 1419 after S3; 32 suites, 1448 after S4; 32 suites, 1505 after S5. **Run it more than once** — the ambient suite is randomised, and the case S2 first shipped failed about two runs in five while reporting green on the others |
+| `node test/run.mjs` | 31 suites, 1336 assertions green before S1 begins; 32 suites, 1379 after it; 32 suites, 1405 after S2 and its fix; 32 suites, 1419 after S3; 32 suites, 1448 after S4; 32 suites, 1505 after S5; 32 suites, 1539 after S6. **Run it more than once** — the ambient suite is randomised, and the case S2 first shipped failed about two runs in five while reporting green on the others |
 | **`index.html` with no query string is unchanged** | Every visible thing S2 adds is behind `?players=2`. The single-player game is what ships, and six suites construct a `createState()`, so a regression in it is not a multiplayer bug — it is the game |
 | **A single-player campaign played end to end, every slice** | No suite imports `src/hub/hub.js` or `src/main.js` — the only `src/hub/` imports in `test/` are `ambient.js` and `fpsmeter.js`. S1's entire diff lands in files the bar cannot see, so this manual check is the primary guard for that slice, not a supplement |
 | `test/session.test.mjs` — **four board-identity assertions, and the fourth fails quietly** (S6) | "the same board, by identity", "the board survives being reassigned" and "...and it really was reassigned" compare `view.leads` between two views by `===` and go red. The fourth — "the spent lead left the shared board" — reads `usa.leads.includes(lead)`, which against projections is **always** false, so its first half passes vacuously and stops testing anything. A red assertion is found; this one is not. What all four were guarding is that the world's lead set does not detach per player, which is still true and still worth asserting — on the campaign side of the seam, where the identity is real |

@@ -43,6 +43,7 @@ export class Hub {
     this.deploy = null; // { missionId, selected:Set, weapons:{soldierId:weaponId} }
     this.result = null;
     this.turn = null; // the day summary a round's last mission report carried
+    this.shareOpen = null; // lead id whose "Share with" list is open (S6)
 
     this.root.addEventListener("click", (e) => this._onClick(e));
     this.root.addEventListener("change", (e) => this._onChange(e));
@@ -73,6 +74,7 @@ export class Hub {
     this.result = null;
     this.turn = null;
     this.sold = false;
+    this.shareOpen = null;
     this._lastSquad = null;
     this.render();
   }
@@ -400,6 +402,30 @@ export class Hub {
             // commander has readied, so Operations has to say so — otherwise
             // the only evidence a deploy happened is a flash that is gone by
             // the next render.
+            // Mockup §2. A MENU rather than a toggle at every commander count:
+            // the two-player version is one button, and that button stops
+            // working the moment a third joins. Hidden entirely at one
+            // commander, the same rule that hides the switcher and the strip.
+            // Commanders who already hold the lead are not offered — the
+            // session refuses them anyway, but offering a no-op is a worse UI
+            // than not offering it.
+            const others = (g.taskForce || []).filter((p) => p.id !== g.playerId);
+            const open = this.shareOpen === m.id;
+            const share = others.length
+              ? `<button class="btn btn-sm${open ? " btn-alt" : ""}" data-action="share-open" data-id="${m.id}">Share with ▾</button>` +
+                (open
+                  ? `<div class="sharemenu">${
+                      others
+                        .map((p) => `<button class="btn btn-sm" data-action="share" data-id="${m.id}" data-to="${p.id}">${p.name}</button>`)
+                        .join("")
+                    }</div>`
+                  : "")
+              : "";
+            // Given to you by another commander, and by whom. Never who else
+            // holds it — the view does not carry that and must not.
+            const shared = m.sharedBy
+              ? `<span class="tag tag-shared">shared by ${m.sharedBy.toUpperCase()}</span>`
+              : "";
             const held = pending.find((c) => c.leadId === m.id);
             const action = `<button class="btn${held ? " btn-alt" : ""}" data-action="predeploy" data-id="${m.id}" ${
               canDeploy || held ? "" : "disabled"
@@ -407,13 +433,13 @@ export class Hub {
             return `
         <article class="mission-row ${m.winsCampaign ? "is-boss" : ""}${held ? " committed" : ""}">
           <div class="mission-main">
-            <div class="mission-title">${m.name} ${status} ${life} ${
+            <div class="mission-title">${m.name} ${status} ${life} ${shared} ${
               held ? `<span class="tag tag-committed">squad committed</span>` : ""
             }</div>
             <p class="mission-brief">${m.brief}</p>
             ${m.winsCampaign ? `<div class="win-flag">★ Destroying this ends the invasion in the sector.</div>` : ""}
           </div>
-          <div class="mission-action">${action}</div>
+          <div class="mission-action">${action}${share}</div>
         </article>`;
           })
           .join("")
@@ -742,6 +768,24 @@ export class Hub {
             parts.length ? `A new day. ${parts.join(" ")}` : "A day passes. The clock ticks on."
           );
         }
+        this.render();
+        break;
+      }
+
+      // Opening one menu closes any other: two open lists on one screen read
+      // as two pending shares.
+      case "share-open":
+        this.shareOpen = this.shareOpen === btn.dataset.id ? null : btn.dataset.id;
+        this.render();
+        break;
+
+      case "share": {
+        const res = this.api.command({ type: "share", leadId: btn.dataset.id, to: btn.dataset.to });
+        this.shareOpen = null;
+        this.setFlash(
+          res.ok ? "good" : "bad",
+          res.ok ? `${res.leadName} shared with ${res.toName}. They can deploy to it now.` : res.reason
+        );
         this.render();
         break;
       }

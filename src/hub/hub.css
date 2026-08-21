@@ -687,3 +687,25 @@ body::after {
   font-size: 12.5px;
   color: var(--muted);
 }
+
+/* Lead sharing (S6, mockup §2). The menu sits under the deploy button on the
+   lead's own row; it is absent entirely at one commander. */
+.tag-shared {
+  background: #23303f;
+  border-color: #3d5a7a;
+  color: #9ec5ee;
+}
+.sharemenu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid #2f3947;
+  border-radius: 6px;
+  background: #171c24;
+}
+.sharemenu .btn {
+  width: 100%;
+  text-align: center;
+}
