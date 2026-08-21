@@ -900,5 +900,26 @@ export default async function run(t) {
     t.ok("session.js does not reach localStorage directly", !/\blocalStorage\b/.test(src));
   }
 
+  // ---- the seat swap moves every binding ----------------------------------
+  // A SOURCE check, and only because there is no other kind available: no suite
+  // imports src/main.js, so the alternative is no guard at all. It caught
+  // nothing — the bug it exists for was found by playing — but the failure mode
+  // is worth pinning, because it is silent. `swapTo` re-points FOUR things and
+  // the fourth was missing for the whole of S5: the hot-seat dropdown kept its
+  // own idea of the current seat, so a swap driven by the round dispatcher
+  // (which follows the mission's owner, not the dropdown) left the control
+  // naming a base that was not on screen.
+  //
+  // This asserts the shape, not the behaviour. It cannot tell you the swap
+  // WORKS; it can tell you somebody deleted a binding.
+  {
+    const main = readFileSync(join(ROOT, "src/main.js"), "utf8");
+    const body = (main.match(/function swapTo\(id\) \{[\s\S]*?\n\}/) || [""])[0];
+    t.ok("swapTo re-points the hub", /hub\.setView\(/.test(body));
+    t.ok("...the ambient layer", /ambient\.setView\(/.test(body));
+    t.ok("...the command closure's player id", /\byou\s*=\s*id\b/.test(body));
+    t.ok("...and the hot-seat control, which holds its own", /hotSeat\.setPlayer\(/.test(body));
+  }
+
   resetConfig();
 }

@@ -101,11 +101,21 @@ const hub = new Hub(hubRoot, session.view(you), {
 
 // The hot-seat strip, above the top bar and outside #hub-root (Hub.render()
 // replaces that element's innerHTML on every navigation). Hidden at one player.
+// FOUR bindings move on a swap, not three. The round dispatcher calls this
+// directly (playNext follows the mission's owner), and the switcher is a
+// control with its own idea of the current seat — so a programmatic swap that
+// does not tell it leaves the dropdown naming a base that is not on screen.
+// It was three for the whole of S5: the swap only ever came FROM the dropdown
+// until the round dispatcher started driving it.
+//
+// No loop: setPlayer assigns select.value, which does not fire `change`, and a
+// swap arriving from the dropdown sets the id it already holds.
 function swapTo(id) {
   you = id;
   const view = session.view(you);
   hub.setView(view); // renders
   ambient.setView(view);
+  hotSeat.setPlayer(id);
 }
 
 const hotSeat = createHotSeat(roster, swapTo);
