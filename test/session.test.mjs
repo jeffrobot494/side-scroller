@@ -745,14 +745,19 @@ export default async function run(t) {
   // grants the board-so-far and everybody sees everything — which is why this
   // assertion cannot live in one of them.
   {
+    // Boards big enough that "this commander rolled nothing" is negligible
+    // rather than merely unlikely — the roll makes every block below
+    // probabilistic, and a suite that fails one run in twenty-five is worse
+    // than one that fails every time.
     config.leadVisibility = 0.5;
-    config.leadCount = 4;
-    config.seedLeads = 4;
+    config.leadCount = 6;
+    config.seedLeads = 6;
     const s = createSession({ players: ["usa", "china"] });
     const usa = s.view("usa"), china = s.view("china");
 
     // The world board scales with the commander count (the S6 stopgap), so the
     // two boards are drawn from more leads than a solo campaign would hold.
+    t.ok("both boards are non-empty", usa.leads.length > 0 && china.leads.length > 0);
     const everyone = new Set([...usa.leads, ...china.leads].map((l) => l.id));
     t.ok("the world board scales past one commander's ceiling", everyone.size > config.leadCount);
     t.ok("...and nobody sees more than the ceiling's worth of it",
@@ -779,14 +784,15 @@ export default async function run(t) {
   // opens between two commanders before a mission resolves.
   {
     config.leadVisibility = 0; // every lead to exactly one commander
-    config.leadCount = 3;
-    config.seedLeads = 3;
+    config.leadCount = 6;
+    config.seedLeads = 6;
     const s = createSession({ players: [{ id: "usa", name: "USA" }, { id: "china", name: "China" }] });
     const usa = s.view("usa"), china = s.view("china");
 
     t.ok("at zero visibility no lead is on two boards",
       !usa.leads.some((a) => china.leads.some((b) => b.id === a.id)));
 
+    t.ok("both commanders drew something", usa.leads.length > 0 && china.leads.length > 0);
     const mine = usa.leads[0];
     const theirs = china.leads[0];
 
@@ -818,6 +824,7 @@ export default async function run(t) {
 
     // Passed on again: the tag records whoever handed it to YOU, not the origin.
     const s3 = createSession({ players: [{ id: "a", name: "A" }, { id: "b", name: "B" }, { id: "c", name: "C" }] });
+    t.ok("the first commander drew something to pass on", s3.view("a").leads.length > 0);
     const lead = s3.view("a").leads[0];
     s3.command("a", { type: "share", leadId: lead.id, to: "b" });
     s3.command("b", { type: "share", leadId: lead.id, to: "c" });
@@ -857,8 +864,8 @@ export default async function run(t) {
   // advanceDay reports the whole world's expiries and arrivals; endRound filters.
   {
     config.leadVisibility = 0; // every lead to exactly one commander
-    config.leadCount = 3;
-    config.seedLeads = 3;
+    config.leadCount = 6;
+    config.seedLeads = 6;
     config.leadArrivalRate = 0; // arrivals would add names nobody can predict
     // Built through createWorld so the test can reach the board. The ids are
     // registered by createWorld itself, so createSession's own registration is

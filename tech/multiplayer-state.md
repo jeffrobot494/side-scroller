@@ -206,6 +206,17 @@ Three of the four rewritten assertions also had to change what they claim,
 because "both commanders see the world's board" stops being true the moment an
 arrival is rolled.
 
+**As built, S6: every assertion over a rolled board is probabilistic, and the
+first draft of the suite was.** Visibility is a die roll, so "this commander
+drew at least one lead" is a probability, not a fact — and three S6 blocks
+index `leads[0]`. At the boards they were first written against, one run in
+roughly twenty-five threw `Cannot read properties of undefined`, which is the
+worst possible failure: it aborts the suite at a line that is not the problem.
+Fixed twice over — the boards were made large enough that an empty one is
+negligible, and each block asserts non-empty first so a rare one fails **by
+name** instead of throwing. Anything later added over a rolled board owes the
+same two things.
+
 **Three of S6's own new assertions were wrong when first written**, and all three
 were caught by mutating the code rather than by reading them. One compared a set
 to itself (the floor), one asserted over an empty list because nothing expired
