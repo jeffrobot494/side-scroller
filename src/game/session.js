@@ -45,8 +45,14 @@ import { WEAPONS } from "./content.js";
 import { config } from "./config.js";
 
 // The campaign fields a player can see. `highWins` is deliberately absent —
-// nothing in the hub reads it (only state.js's own finale gate does), so it
-// stays off the view until S7 gives the finale screen a reason to want it.
+// nothing in the hub reads it (only state.js's own finale gate does), and S7
+// did not change that: mockup §6 counts days, missions and soldiers, and
+// nothing in the design shows a commander how close they are to the gate. The
+// field stays off the view until something is drawn that wants it.
+//
+// `outcome` is still here and still read through, but since S7 it is COMPUTED
+// on the campaign rather than aliased off the world — three values now, not
+// two. The view neither knows nor cares. See src/game/state.js.
 const VIEW_FIELDS = [
   "day",
   "money",
@@ -295,7 +301,10 @@ export function createSession(opts = {}) {
   // Indexed off the id list, not off players.size — a duplicate id in the list
   // does not grow the Map, and that would deal one hand to two seats.
   seats.forEach((seat, i) => {
-    const campaign = i === 0 && seatOne ? seatOne : createPlayerState(world, hands[i]);
+    // The seat's id goes to the CONSTRUCTOR (S7), which is how a campaign knows
+    // whose finale it is placing. `seatOne` is a campaign somebody else built,
+    // so that seat has no owner and falls back to single-player behaviour.
+    const campaign = i === 0 && seatOne ? seatOne : createPlayerState(world, hands[i], seat.id);
     // `ready` and `pending` are the round's state. Both are cleared when the
     // round ends and by nothing else — a flag that outlives its turn strands
     // the task force, and a pending choice that does caps a commander out of

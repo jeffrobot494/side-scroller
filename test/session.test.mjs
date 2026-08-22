@@ -163,7 +163,10 @@ export default async function run(t) {
       day.ok && Array.isArray(day.finished) && Array.isArray(day.expired) && Array.isArray(day.arrived)
     );
 
-    campaign.outcome = "lost";
+    // The WORLD's field. Since S7 a campaign's `outcome` is computed and has no
+    // setter, so this line throws if it is written straight through — which is
+    // the good failure, and how this suite found the move.
+    campaign.world.outcome = "lost";
     t.eq(
       "advanceDay's refusal reaches the hub verbatim",
       s.command("p1", { type: "ready" }),
@@ -895,6 +898,139 @@ export default async function run(t) {
     // lead on the world board; nothing usa-only may survive the filter.
     t.eq("...naming only the leads the reader could see", turn.expired.slice().sort(), theirs.slice().sort());
     resetConfig();
+  }
+
+  // ---- the finale, and the fork (S7) --------------------------------------
+  // "Victory is individual and defeat is collective." Both halves, plus the
+  // thing that makes the first half a RACE rather than two private wars: the
+  // world holds one hive, and a second earner is granted it rather than given
+  // one of their own.
+  //
+  // dayPerDeploy off throughout — the gate wants two cleared High leads per
+  // commander and the cap is one deploy a day. Restored at the end.
+  {
+    config.dayPerDeploy = false;
+    const world = createWorld();
+    const s = createSession({ world, players: ["usa", "china"] });
+    const usa = s.view("usa"), china = s.view("china");
+    for (const id of ["usa", "china"]) s.command(id, { type: "hire", recruitId: s.view(id).recruits[0].id });
+
+    // One whole round. `plan` is [playerId, leadId] pairs; a lead named on the
+    // plan is hand-pushed with no `seenBy`, which reads as visible to all — so
+    // a deploy in this block is never refused for a lead the commander cannot
+    // see. Both seats ready because the gate wants the whole task force.
+    const fight = (plan, success = true) => {
+      for (const [id, leadId, extra] of plan) {
+        if (!world.leads.some((l) => l.id === leadId))
+          world.leads.push({ ...fakeLead(leadId), difficulty: "High", ...extra });
+        s.command(id, { type: "deploy", leadId, soldierIds: [s.view(id).roster[0].id] });
+      }
+      s.command("usa", { type: "ready" });
+      s.command("china", { type: "ready" });
+      for (const d of s.takeRound()) {
+        s.command(d.playerId, {
+          type: "missionResult",
+          dispatchId: d.dispatchId,
+          result: { success, missionId: d.mission.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] },
+        });
+      }
+    };
+
+    // usa earns the gate first. config.bossHighWins is 2, and the counter has
+    // been per-commander since S2 — china clears High leads alongside and is
+    // deliberately left one short.
+    fight([["usa", "u1"], ["china", "c1"]]);
+    fight([["usa", "u2"]]);
+
+    const hives = () => world.leads.filter((l) => l.winsCampaign);
+    t.eq("the gate places one hive", hives().length, 1);
+    t.ok("...visible to the commander who earned it", usa.leads.some((l) => l.winsCampaign));
+    t.ok("...and to nobody else", !china.leads.some((l) => l.winsCampaign));
+    // The failure this slice can produce that makes a campaign unwinnable, and
+    // it is silent: the board simply never shows a hive.
+    t.ok("a placed hive is visible to SOMEBODY", hives()[0].seenBy.size > 0);
+
+    // china earns it too. One hive per world: the second earner is granted the
+    // lead that is already there, not handed a second one.
+    fight([["china", "c2"]]);
+    t.eq("a second earner does not place a second hive", hives().length, 1);
+    t.ok("...they are granted the one that exists", china.leads.some((l) => l.winsCampaign));
+    t.ok("...and it stays on the first earner's board", usa.leads.some((l) => l.winsCampaign));
+
+    // The race. usa clears it; china never gets there.
+    const hive = hives()[0];
+    fight([["usa", hive.id]]);
+    t.eq("the commander who cleared the hive won", usa.outcome, "won");
+    t.eq("...the other one neither won nor lost", china.outcome, "ended");
+    t.ok("...and no collective defeat was recorded", world.outcome === null);
+    // Mockup §6's third panel names nobody, and the view is what would leak it.
+    t.ok("who ended it never reaches a view", !("wonBy" in usa) && !("wonBy" in china));
+    t.ok("...nor the shared log", world.log.every((e) => !/usa|china/i.test(e.text)));
+    // The third value is an END, not "keep playing with no finale left" — so
+    // the clock refuses for the commander who did not win it, in the same words
+    // it refuses a defeat with. The whole task force readies, because it is the
+    // LAST ready that reaches advanceDay: an earlier one is not guarded by the
+    // outcome at all, which is a standing approximation and not S7's to close.
+    s.command("usa", { type: "ready" });
+    t.eq(
+      "a commander the war ended without cannot turn another day",
+      s.command("china", { type: "ready" }),
+      { ok: false, reason: "The campaign is over." }
+    );
+    resetConfig();
+  }
+
+  // ---- a win outranks a defeat, whatever order they arrive in (S7) --------
+  // A round can record both — one commander clears the hive while another's
+  // squad is wiped and the doom clock hits zero — and the sector is SECURED
+  // either way. Two separate world fields and an accessor that asks for a
+  // winner first, so neither write needs a guard and neither ordering loses.
+  {
+    for (const defeatFirst of [true, false]) {
+      const world = createWorld();
+      const s = createSession({ world, players: ["usa", "china"] });
+      if (defeatFirst) world.outcome = "lost";
+      world.wonBy = "usa";
+      if (!defeatFirst) world.outcome = "lost";
+      const order = defeatFirst ? "defeat first" : "win first";
+      t.eq(`the winner is told they won (${order})`, s.view("usa").outcome, "won");
+      t.eq(`...and nobody is told they lost (${order})`, s.view("china").outcome, "ended");
+    }
+  }
+
+  // ---- a campaign with no owner owns any win that was recorded (S7) -------
+  // The single-player rule, and the same shape as S6's "absent means visible to
+  // all". createState() records its win as `true` and reads it back as a win —
+  // test/wiring.test.mjs C4 is what pins that. Pinned HERE is the other half:
+  // seat one of the `state` hatch holds a campaign somebody else built, so it
+  // has no owner, and an owner-less campaign never renders the third outcome.
+  {
+    const campaign = createState();
+    const s = createSession({ state: campaign, players: ["p1", "p2", "p3"] });
+    campaign.world.wonBy = "p2";
+    t.eq("the recorded winner won", s.view("p2").outcome, "won");
+    t.eq("a commander who did not win it ends without one", s.view("p3").outcome, "ended");
+    t.eq("...but an owner-less campaign owns the win", s.view("p1").outcome, "won");
+  }
+
+  // ---- registration does not hand a late seat a finale (S7) ---------------
+  // registerCommanders gives a new seat the whole board so its Operations is
+  // not permanently empty. The hive is the exception: the design says it
+  // spreads only by earning it or being given it, and registration is neither.
+  // Only the test hatches reach this path, which is what makes it easy to miss.
+  {
+    const world = createWorld();
+    const first = createSession({ world, players: ["usa"] });
+    const ordinary = { ...fakeLead("ordinary"), seenBy: new Map([["usa", null]]) };
+    const hive = { ...fakeLead("hive"), winsCampaign: true, seenBy: new Map([["usa", null]]) };
+    world.leads.push(ordinary, hive);
+    void first;
+
+    const s = createSession({ world, players: ["usa", "china"] });
+    const china = s.view("china");
+    t.ok("a late seat is given the board so far", china.leads.some((l) => l.id === "ordinary"));
+    t.ok("...but not somebody else's finale", !china.leads.some((l) => l.winsCampaign));
+    t.ok("...which its earner still holds", s.view("usa").leads.some((l) => l.winsCampaign));
   }
 
   // the session would pass every other suite silently.

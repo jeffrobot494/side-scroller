@@ -595,8 +595,12 @@ export class Hub {
       ? `<div class="result-ribbon win">MISSION SUCCESS</div>`
       : `<div class="result-ribbon loss">MISSION FAILED</div>`;
 
+    // Two of the three outcomes are an END for this commander and send them to
+    // the final report; only a shared defeat does not. That is not a rule about
+    // defeat, it is shipped single-player behaviour left alone — "Return to
+    // base ▸" lands on the end screen one render later anyway.
     const next =
-      g.outcome === "won"
+      g.outcome === "won" || g.outcome === "ended"
         ? `<button class="btn btn-go" data-action="view-end">View final report ▸</button>`
         : `<button class="btn btn-go" data-action="return">Return to base ▸</button>`;
 
@@ -665,20 +669,41 @@ export class Hub {
     return s ? s.name : null;
   }
 
-  // ---- End (win/lose) screen ----------------------------------------------
+  // ---- End of campaign screen ---------------------------------------------
 
+  // THREE outcomes, not two (S7, mockup §6). "Victory is individual and defeat
+  // is collective" produces a third ending that is neither: another commander
+  // won, so the campaign is over for you without a win or a failure. It names
+  // nobody — who ended it never reaches a view, and the shared log's own line
+  // ("The hive command node is destroyed") names nobody either.
   _endScreen() {
     const g = this.game;
-    const won = g.outcome === "won";
+    const END = {
+      won: {
+        badge: "★",
+        title: "SECTOR SECURED",
+        text: "The hive command node is destroyed. The aliens are driven out of the sector — for now. Your surviving soldiers will be remembered for it.",
+      },
+      ended: {
+        badge: "—",
+        title: "THE WAR ENDED WITHOUT YOU",
+        text: "Another commander reached the hive command node first and destroyed it. The sector is saved. You did not fail, and you did not win.",
+      },
+      lost: {
+        badge: "☠",
+        title: "SECTOR LOST",
+        text: "The invasion overwhelmed the sector before the hive could be reached. The task force is disbanded. This is what the doom clock buys.",
+      },
+    };
+    // Anything unrecognised reads as the defeat, which is what the binary
+    // ternary this replaced did with every value that was not "won".
+    const kind = END[g.outcome] ? g.outcome : "lost";
+    const end = END[kind];
     return `
-      <div class="end-screen ${won ? "won" : "lost"}">
-        <div class="end-badge">${won ? "★" : "☠"}</div>
-        <h1>${won ? "SECTOR SECURED" : "SECTOR LOST"}</h1>
-        <p class="end-text">${
-          won
-            ? "The hive command node is destroyed. The aliens are driven out of the sector — for now. Your surviving soldiers will be remembered for it."
-            : "The invasion overwhelmed the sector before the hive could be reached. The task force is disbanded. This is what the doom clock buys."
-        }</p>
+      <div class="end-screen ${kind}">
+        <div class="end-badge">${end.badge}</div>
+        <h1>${end.title}</h1>
+        <p class="end-text">${end.text}</p>
         <div class="end-stats">
           <div><span>${g.day}</span>days survived</div>
           <div><span>${g.completedMissions.length}</span>missions won</div>

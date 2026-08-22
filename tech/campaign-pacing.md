@@ -103,6 +103,17 @@ the flat total-win gate are deleted, not kept as a floor.
 into mission resolution. That is why it precedes C5: the top-up is the only site
 that places a boss lead today, and C5 deletes it.
 
+**As built, amended by `tech/multiplayer-state.md` S7: the gate fires once per
+EARNER, not once per world.** Everything above stays literally true — the
+counter was always per-commander, and two High wins still place the boss
+immediately over the ceiling. What C4 assumed without saying is that there is
+one commander to fire for. With several, the first to meet the gate places the
+one hive the world holds and every earner after that is GRANTED that same lead
+rather than given a second: "a player who clears the finale alone wins" is a
+sentence about a race, and a race needs one thing to race for. The finale is
+also no longer on a board everyone reads — it is visible to its earner, and
+spreads only by being earned again or disclosed.
+
 **C5 — Arrivals replace the top-up.** A new campaign opens with `seedLeads` leads
 instead of a full board. Each day advance rolls `leadArrivalRate` new leads.
 `leadCount` stops being a target and becomes a ceiling arrivals never cross.

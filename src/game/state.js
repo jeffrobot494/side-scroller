@@ -34,7 +34,11 @@ const uid = (p) => `${p}_${nextId++}`;
 // advanceDay and applyMissionResult REPLACE `leads` rather than splicing it, so
 // a world field carried by plain reference would detach the first time either
 // ran and quietly hand each player a private board.
-const WORLD_FIELDS = ["day", "campaignHealth", "leads", "outcome", "log", "cleared"];
+const WORLD_FIELDS = ["day", "campaignHealth", "leads", "log", "cleared"];
+
+// `outcome` is NOT one of them since S7. It is still two world facts, but a
+// campaign no longer aliases either: it computes its own answer from both, in
+// the accessor built beside these. See createPlayerState.
 
 // `commanders` is the roster of BASES over this world, and it has to exist
 // before the first lead does — seedBoard runs below, and a lead is stamped with
@@ -55,7 +59,15 @@ export function createWorld(commanders = []) {
     // ONE set for the world, not one per player.
     leads: [],
 
-    outcome: null, // null | "won" | "lost"
+    // The two ends of a campaign, and they are separate fields on purpose
+    // (S7). `outcome` is the COLLECTIVE defeat and keeps the name it has always
+    // had; `wonBy` is the commander whose win ended it. A campaign reads a
+    // winner first, so a win outranks a defeat whatever order they arrive in
+    // and neither write needs a guard or an ordering.
+    outcome: null, // null | "lost" — a defeat, shared by everyone
+    // A commander id, or `true` when the campaign that won it has no owner
+    // (every createState()). Truthy either way, which is all the accessor asks.
+    wonBy: null,
     log: [], // short human-readable campaign log (newest first)
 
     // Cleared leads, by anybody. Board difficulty scales off how much of the war
@@ -76,7 +88,12 @@ export function createWorld(commanders = []) {
 // a share, because the size of a share depends on how many other bases exist,
 // and only the session knows that. Handed nothing, it clones the whole pool —
 // which is single-player and what every suite calling `createState()` gets.
-export function createPlayerState(world, recruits = null) {
+// `ownerId` is which commander this base belongs to (S7). It is what lets the
+// finale be placed for its earner from inside applyMissionResult, which is
+// handed a campaign and has never known whose. Written HERE, where the campaign
+// is built, rather than stamped on afterwards — so createSession's `state`
+// hatch seats a campaign with no owner, and that is a live path, not dead code.
+export function createPlayerState(world, recruits = null, ownerId = null) {
   // Editor edits to BUILT-IN weapons are patches applied over arsenal.js, in
   // place, so BLUEPRINTS (which hold direct references) see them too. Must run
   // before the armory line below, which clones out of WEAPONS.
@@ -112,10 +129,30 @@ export function createPlayerState(world, recruits = null) {
       configurable: true,
     });
   }
-  // Which world this base belongs to. Non-enumerable so it stays out of
-  // Object.keys, JSON and anything walking the campaign's fields; the session
-  // needs it to seat a second player over the same world.
+  // A campaign's own answer to how the campaign ended (S7), computed from the
+  // world's two facts rather than aliasing either. Read-only — the one entry in
+  // the field split that is — and the writers stay in this module, one per
+  // world field.
+  //
+  // NO OWNER MEANS THE OLD BEHAVIOUR. A createState() campaign records its win
+  // as `wonBy: true` and reads it back as "won", because with no owner there is
+  // only one base and a recorded win is yours. Anything else would leave
+  // single-player unable to see the win screen it has always had.
+  Object.defineProperty(state, "outcome", {
+    get: () => {
+      if (world.wonBy) return !ownerId || world.wonBy === ownerId ? "won" : "ended";
+      return world.outcome;
+    },
+    enumerable: true,
+    configurable: true,
+  });
+
+  // Which world this base belongs to, and which commander holds it. Both
+  // non-enumerable so they stay out of Object.keys, JSON and anything walking
+  // the campaign's fields; the session needs the world to seat a second player
+  // over it, and state.js needs the owner to know whose finale it is placing.
   Object.defineProperty(state, "world", { value: world, enumerable: false });
+  Object.defineProperty(state, "owner", { value: ownerId, enumerable: false });
 
   return state;
 }
@@ -167,7 +204,10 @@ export function registerCommanders(world, ids) {
   for (const id of ids) {
     if (world.commanders.includes(id)) continue;
     world.commanders.push(id);
-    for (const lead of world.leads) grantLead(lead, id);
+    // Every lead already on the board EXCEPT the finale (S7). The hive is the
+    // one lead the design says spreads only by earning it or being handed it,
+    // and registration is neither.
+    for (const lead of world.leads) if (!lead.winsCampaign) grantLead(lead, id);
   }
 }
 
@@ -176,13 +216,16 @@ export function registerCommanders(world, ids) {
 // a lead visible to nobody is a lead that does not exist and still holds a slot
 // under the ceiling.
 //
-// The BOSS bypasses the roll and goes to everybody — which is exactly today's
-// behaviour, and deliberately so: an earned finale invisible to the commander
-// who earned it is a campaign that cannot be won. S7 narrows it to its earner.
-function rollVisibility(commanders, boss) {
+// The BOSS bypasses the roll and goes to its EARNER alone (S7) — "the finale
+// appears for the player who earns it and spreads only by disclosure". The
+// fallback when we do not know who earned it is everybody, never nobody: an
+// earned finale invisible to the commander who earned it is a campaign that
+// cannot be won, and that is the one failure this branch can produce.
+function rollVisibility(commanders, boss, owner) {
   const seen = new Map();
   if (boss) {
-    for (const id of commanders) seen.set(id, null);
+    if (owner && commanders.includes(owner)) seen.set(owner, null);
+    else for (const id of commanders) seen.set(id, null);
     return seen;
   }
   const p = Math.min(1, Math.max(0, config.leadVisibility));
@@ -259,7 +302,7 @@ function makeLead(state, opts = {}) {
   // arrivals and the finale all get it without any of them knowing it exists.
   // No registered commanders (every createState()) leaves `seenBy` absent.
   const { commanders } = worldOf(state);
-  if (commanders.length) lead.seenBy = rollVisibility(commanders, !!opts.boss);
+  if (commanders.length) lead.seenBy = rollVisibility(commanders, !!opts.boss, state.owner);
   return lead;
 }
 
@@ -278,10 +321,25 @@ function addUniqueLead(state, opts) {
 // place the boss immediately, bypassing the board ceiling — "immediate and
 // guaranteed" outranks the cap, so a full board can never defer the finale.
 // Called from mission resolution, which is the only place a High win happens.
+//
+// ONE HIVE PER WORLD (S7), not one per earner. The world-wide "is one already
+// there" query below is the BRANCH, not a guard: the first commander to meet
+// the gate places the hive, and every earner after that is GRANTED the same
+// lead. Reading it per-commander instead would fall through to placement and
+// put a second hive in the sector, which is the race the design describes
+// ("a player who clears the finale ALONE wins") turned into two separate wars.
 function placeBossIfEarned(state) {
   if (state.outcome) return;
   if (state.highWins < config.bossHighWins) return;
-  if (state.leads.some((l) => l.winsCampaign)) return;
+  const hive = state.leads.find((l) => l.winsCampaign);
+  if (hive) {
+    // Absent visibility means visible to all, so there is nothing to grant on a
+    // finale that carries none — writing one would black it out for everyone
+    // else. grantLead is idempotent, so an earner who was GIVEN the hive first
+    // keeps the `shared by NAME` tag that records how it reached them.
+    if (state.owner && hive.seenBy) grantLead(hive, state.owner);
+    return;
+  }
   addUniqueLead(state, { boss: true });
 }
 
@@ -447,7 +505,10 @@ export function advanceDay(state) {
   // Doom clock: the invasion advances whether or not you acted.
   state.campaignHealth = Math.max(0, state.campaignHealth - config.doomPerDay);
   if (state.campaignHealth <= TUNING.loseAt) {
-    state.outcome = "lost";
+    // The world's field, not the campaign's — a campaign's `outcome` is
+    // computed since S7. Defeat is collective, so this is the right place for
+    // it, and a win already recorded outranks it without any guard here.
+    worldOf(state).outcome = "lost";
     note(state, "The invasion overran the sector. Campaign lost.");
   }
 
@@ -517,7 +578,10 @@ export function applyMissionResult(state, result) {
         `${mission.name} — success. Recovered ${result.loot.length} item(s).`
       );
       if (mission.winsCampaign) {
-        state.outcome = "won";
+        // Victory is individual: the world records WHO ended it, and every
+        // other commander's campaign computes the third outcome from that. No
+        // owner (single-player) records `true` and reads it back as a win.
+        worldOf(state).wonBy = state.owner || true;
         note(state, "The hive command node is destroyed. The sector is saved.");
       }
     }
@@ -525,7 +589,7 @@ export function applyMissionResult(state, result) {
     // A failed insertion emboldens the enemy.
     state.campaignHealth = Math.max(0, state.campaignHealth - 10);
     note(state, `${mission.name} — failed. The squad was wiped.`);
-    if (state.campaignHealth <= TUNING.loseAt) state.outcome = "lost";
+    if (state.campaignHealth <= TUNING.loseAt) worldOf(state).outcome = "lost";
   }
 
   // The lead is spent whether or not the squad survived. Nothing refills the

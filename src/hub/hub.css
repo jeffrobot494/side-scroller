@@ -425,6 +425,10 @@ body::after {
 .end-screen { max-width: 640px; margin: 60px auto; text-align: center; padding: 40px; border-radius: 10px; border: 1px solid var(--line); background: linear-gradient(180deg, var(--concrete-hi), #0d1014); }
 .end-screen.won { border-color: #2f9d63; box-shadow: 0 0 60px rgba(47,157,99,0.15); }
 .end-screen.lost { border-color: #a34141; box-shadow: 0 0 60px rgba(163,65,65,0.15); }
+/* The third outcome (S7, mockup §6): neither a win nor a defeat, so it takes
+   neither colour — the default border and no glow at all. */
+.end-screen.ended { border-color: var(--line); }
+.end-screen.ended h1 { color: var(--muted); }
 .end-badge { font-size: 56px; }
 .end-screen h1 { letter-spacing: 6px; margin: 10px 0 16px; }
 .end-text { color: #b3bcc8; line-height: 1.6; }
@@ -566,6 +570,8 @@ body::after {
 /* end-screen badge breathes */
 .end-screen.won .end-badge { color: #57c98a; animation: badge-pulse 2.4s ease-in-out infinite; }
 .end-screen.lost .end-badge { color: #c0504e; animation: badge-pulse 2.8s ease-in-out infinite; }
+/* No pulse on the third: nothing happened to you. */
+.end-screen.ended .end-badge { color: var(--muted); }
 
 /* KIA entries get a faint danger edge-glow */
 .kia-list li { box-shadow: -6px 0 14px -10px rgba(224,90,90,0.6); }

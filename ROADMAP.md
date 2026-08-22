@@ -84,6 +84,7 @@ description of what the game does today; this is only the index.
 | Behavior Lab v2 B1–B3 — one agent on a generated level, click to set a goal, 1:1 panned view, graph + path overlays, draggable platforms (v1 deleted) | `design/behavior-lab.md` · `tech/behavior-lab.md` |
 | Campaign pacing C1–C5 — the day is the only currency, leads expire and arrive on the clock, the finale is gated on High wins | `design/campaign-pacing.md` · `tech/campaign-pacing.md` |
 | Soldier ducking D1–D2 — squadmates kneel under a round a knee would dodge, and the Speed stat decides whether and how fast | `design/soldier-behavior.md` · `tech/soldier-ducking.md` |
+| Multiplayer campaign state, Phase 1 S1–S7 — one authoritative session, per-commander views, a shared world with a base each, a dealt recruit pool, one round per day, per-lead visibility and disclosure, and a finale that forks a win from a defeat. Hot-seat only: no transport, no joint missions | `tech/multiplayer-state.md` · `tech/multiplayer.md` |
 | Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `design/design-map.md` · `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 
