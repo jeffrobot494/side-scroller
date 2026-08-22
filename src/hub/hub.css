@@ -373,7 +373,14 @@ body::after {
 .mission-row.is-boss { border-left-color: var(--credits); box-shadow: 0 0 16px -4px rgba(242,193,78,0.35); }
 .mission-title { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mission-brief { margin: 6px 0 0; font-size: 13px; color: #b3bcc8; max-width: 620px; line-height: 1.5; }
-.mission-action { flex-shrink: 0; }
+/* Stacked, per mockup §2's .macts: Deploy squad and Share with ▾ sit one above
+   the other, share a width, and the menu drops under both. As a bare block
+   these were two inline-blocks with no whitespace between them, so they
+   touched. */
+.mission-action {
+  flex-shrink: 0; display: flex; flex-direction: column;
+  gap: 6px; align-items: stretch; min-width: 132px;
+}
 .win-flag { margin-top: 8px; font-size: 12px; color: var(--credits); }
 .tag { font-size: 11px; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.5px; font-weight: 600; }
 .tag-done { background: #1c3a2a; color: #7fdca6; }
@@ -699,7 +706,6 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-top: 6px;
   padding: 6px;
   border: 1px solid #2f3947;
   border-radius: 6px;
