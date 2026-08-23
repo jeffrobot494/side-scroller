@@ -375,6 +375,39 @@
 .es-errors li.ok { color: var(--good); }
 .es-errors li.ok::before { content: ""; }
 
+/* ---- the playable preview (E1) ---- */
+/* The stage is the only element on the page that owns the keyboard, and it owns
+   it only while the canvas inside has DOM focus — so the ring is load-bearing
+   UI, not decoration: it is the answer to "is WASD driving the soldier or my
+   name field?". */
+.es-stage { position: relative; line-height: 0; border-radius: 6px; }
+.es-canvas { display: block; outline: none; }
+.es-stage.focused .es-canvas { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,215,255,0.35) inset; }
+.es-stagectl { position: absolute; right: 7px; top: 7px; display: flex; gap: 6px; line-height: 1; }
+.es-sm { padding: 3px 9px; font-size: 12px; }
+.es-keys {
+  position: absolute; left: 0; right: 0; bottom: 0; text-align: center;
+  padding: 3px 0; font-size: 10.5px; line-height: 1.5;
+  background: rgba(7,11,19,0.78); color: rgba(200,210,224,0.85);
+  border-radius: 0 0 6px 6px; pointer-events: none;
+}
+.es-playbar { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+.es-playbar .lg-field { flex: 1; min-width: 120px; }
+.es-playbar select, .es-playbar input[type="range"] { width: 100%; min-width: 0; }
+/* five tiles in a 400px rail: the numbers still need to be readable */
+.es-readout .wd-stat { padding: 7px 4px; gap: 1px; }
+.es-readout .wd-stat span { font-size: 9.5px; letter-spacing: 0.5px; }
+.es-readout .wd-stat b { font-size: 14px; }
+
+/* Expanded: the stage breaks out of the editor's 900px column so the 960-wide
+   world can be drawn 1:1, and the form steps aside. Narrower windows scale it
+   down rather than scrolling sideways. */
+.wd.es-expanded { width: 96vw; max-width: 1100px; margin-left: 50%; transform: translateX(-50%); }
+.wd.es-expanded .wd-grid { grid-template-columns: 1fr; }
+.wd.es-expanded .wd-form { display: none; }
+.wd.es-expanded .wd-side { position: static; }
+.wd.es-expanded .es-canvas { width: 960px; max-width: 100%; margin: 0 auto; }
+
 /* ---- Sound page (mixer + cue bank) ---- */
 .snd-bank { margin-top: 28px; }
 .snd-h {

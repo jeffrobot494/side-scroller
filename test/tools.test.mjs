@@ -1,6 +1,6 @@
 // Editor tools boot headlessly (mount → no throw → dispose), plus a real-AI
 // behavior check that the Enemy Designer preview relies on (a shooter fires).
-import { installDom, makeEl } from "./harness.mjs";
+import { installDom, makeEl, windowListenerCount } from "./harness.mjs";
 import { createWeaponDesigner } from "../src/editor/tools/weapon-designer.js";
 import { createEnemyDesigner } from "../src/editor/tools/enemy-designer.js";
 import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
@@ -62,6 +62,41 @@ export default async function run(t) {
     }
     t.ok("weapon-designer: load re-renders without throwing", !threw);
     if (threw) console.log("   ", threw && threw.stack);
+  }
+
+  // ---- Enemy Designer: the preview is a fight you drive (E1) -------------
+  // Driven through the tool's own `drive()` hook, the way the Weapon Designer
+  // is driven through `load()`. The load-bearing part is the keyboard handover:
+  // MissionInput binds WINDOW keydown and preventDefaults every bound key, so a
+  // stage that takes the keys and never releases them would drive the soldier
+  // while you type in the name field or the JSON panel.
+  {
+    installDom();
+    const ed = createEnemyDesigner(makeEl(), () => {});
+    t.eq("enemy-designer: mounting takes no window keys", windowListenerCount("keydown"), 0);
+
+    const start = ed.drive({}, 1);
+    const idle = ed.drive({ right: true }, 20);
+    t.ok("enemy-designer: unfocused, holding D does not move the soldier", idle.x === start.x);
+    t.ok("enemy-designer: and fires nothing", ed.drive({ fire: true }, 6).shots === 0);
+
+    t.ok("enemy-designer: focusing the stage takes the keyboard", ed.takeKeys(true) === true);
+    t.eq("enemy-designer: which is one window keydown handler", windowListenerCount("keydown"), 1);
+
+    const ran = ed.drive({ right: true }, 20);
+    t.ok("enemy-designer: focused, D runs the soldier right", ran.x > start.x);
+    const ducked = ed.drive({ crouch: true }, 2);
+    t.ok("enemy-designer: S drops the hitbox to a knee", ducked.h < start.h);
+    const shot = ed.drive({ fire: true }, 4);
+    t.ok("enemy-designer: fire spawns a real projectile", shot.shots > 0);
+    t.ok("enemy-designer: and it costs a round", shot.ammo < start.ammo);
+
+    ed.takeKeys(false);
+    t.eq("enemy-designer: blurring gives the keyboard back", windowListenerCount("keydown"), 0);
+
+    ed.takeKeys(true);
+    ed.dispose();
+    t.eq("enemy-designer: dispose releases the keyboard too", windowListenerCount("keydown"), 0);
   }
 
   // With a saved EnemySpec in the library, both tools still mount (the Firing

@@ -6,8 +6,20 @@
 // panel (full power — the JSON is authoritative; the form maps only what it
 // understands). Every change re-validates; a valid spec re-instantiates the
 // live preview, which runs the REAL runtime (instantiate/updateSpecEnemy —
-// same code a mission host would run). Click a part in the preview to damage
-// it and watch links/signals/phases fire.
+// same code a mission host would run).
+//
+// The preview is a FIGHT (tech/enemy-designer.md, E1): the target is the
+// mission's own Soldier driven by MissionInput — move, jump, crouch, aim, fire,
+// reload — so a spec is judged by playing it rather than by reading it. Weapon
+// and Aim pickers sit under the stage; ⛶ expands it to a 1:1 arena and ↻ puts
+// both fighters back on their marks.
+//
+// KEYBOARD OWNERSHIP: MissionInput binds window keydown and preventDefaults
+// every bound key (A/D/W/S/Space/J/R/…), and this page is full of text fields.
+// So the soldier is driven ONLY while the canvas itself holds DOM focus — click
+// the stage to take the keyboard, Esc or clicking any field to give it back.
+// src/mission/input.js is unmodified; the tabindex and the focus/blur handlers
+// below are the whole mechanism.
 //
 // Generate: player2 chat completions via generateEnemySpec() — needs the
 // Player2 app running (Connect) + a game client id (config.player2GameClientId,
@@ -33,7 +45,11 @@ import { validateSpec } from "../../game/enemyspec/validate.js";
 import { normalizeSpec } from "../../game/enemyspec/normalize.js";
 import { TEMPLATES, TEMPLATE_BY_ID } from "../../game/enemyspec/templates.js";
 import { generateEnemySpec, accept } from "../../game/enemyspec/generate.js";
-import { listEnemySpecs, saveEnemySpec, deleteEnemySpec } from "../../game/customcontent.js";
+import { listEnemySpecs, saveEnemySpec, deleteEnemySpec, listCustomWeapons } from "../../game/customcontent.js";
+import { ARSENAL } from "../../game/arsenal.js";
+import { Soldier, stepActor, startReload, tickReload } from "../../mission/entities.js";
+import { fire, aimAccuracy } from "../../mission/ai.js";
+import { MissionInput } from "../../mission/input.js";
 import { instantiate, updateSpecEnemy, applyDamage, collidables } from "../../mission/enemyspec/runtime.js";
 import { drawSpecEnemy } from "../../mission/enemyspec/render.js";
 import { cuePickerRowHTML, auditionCue, fmtGain } from "../sound-picker.js";
@@ -54,6 +70,22 @@ export function createEnemyDesigner(container, onBack) {
   let jsonTimer = null;
   let p2 = null; // Player2Client once connected
   let generating = false;
+
+  // ---- the fight ----------------------------------------------------------
+  const customWeapons = listCustomWeapons();
+  const weaponById = {};
+  for (const w of [...ARSENAL, ...customWeapons]) weaponById[w.id] = w;
+  const play = { weapon: weaponById.carbine || ARSENAL[0], aim: 8, expanded: false };
+  const input = new MissionInput();
+  let focused = false; // does the stage own the keyboard?
+
+  // Tier-grouped, exactly as the Firing Room lists them.
+  function weaponOptionsHTML() {
+    const opt = (w) => `<option value="${w.id}"${w.id === play.weapon.id ? " selected" : ""}>${escapeHtml(w.name)}</option>`;
+    const tier = (n) => `<optgroup label="Tier ${["I", "II", "III"][n - 1]}">${ARSENAL.filter((w) => w.tier === n).map(opt).join("")}</optgroup>`;
+    return tier(1) + tier(2) + tier(3) +
+      (customWeapons.length ? `<optgroup label="Custom">${customWeapons.map(opt).join("")}</optgroup>` : "");
+  }
 
   container.innerHTML = `
     <div class="wd">
@@ -83,19 +115,34 @@ export function createEnemyDesigner(container, onBack) {
         <div class="wd-form" id="es-form"></div>
 
         <div class="wd-side">
-          <canvas class="wd-canvas" id="es-canvas" width="380" height="240"></canvas>
-          <p class="wd-saved-note">Live preview — the real runtime. Click a part to damage it.</p>
-          <div class="wd-readout">
+          <div class="es-stage" id="es-stage">
+            <canvas class="wd-canvas es-canvas" id="es-canvas" width="480" height="270" tabindex="0"></canvas>
+            <div class="es-stagectl">
+              <button class="btn btn-ghost es-sm" data-es="expand" id="es-expand" title="Expand to a 1:1 arena">⛶</button>
+              <button class="btn btn-ghost es-sm" data-es="reset" title="Both fighters back on their marks">↻</button>
+            </div>
+            <div class="es-keys" id="es-keys"></div>
+          </div>
+          <div class="es-playbar">
+            <label class="lg-field">Weapon
+              <select data-es="weapon">${weaponOptionsHTML()}</select>
+            </label>
+            <label class="lg-field">Aim <output id="es-aimval">${play.aim}</output>
+              <input type="range" data-es="aim" min="1" max="10" step="1" value="${play.aim}" />
+            </label>
+          </div>
+          <div class="wd-readout es-readout">
             <div class="wd-stat"><span>State</span><b id="es-state">—</b></div>
-            <div class="wd-stat"><span>HP</span><b id="es-hp">—</b></div>
+            <div class="wd-stat"><span>Enemy</span><b id="es-hp">—</b></div>
             <div class="wd-stat"><span>Parts</span><b id="es-parts">—</b></div>
+            <div class="wd-stat"><span>You</span><b id="es-you">—</b></div>
+            <div class="wd-stat"><span>Ammo</span><b id="es-ammo">—</b></div>
           </div>
           <div class="wd-verdict" id="es-verdict"></div>
           <div class="wd-export">
             <div class="wd-export-btns">
               <button class="btn" data-es="save">Save to library</button>
               <button class="btn btn-alt" data-es="copy">Copy JSON</button>
-              <button class="btn btn-alt" data-es="reset">↻ Preview</button>
             </div>
             <span class="ed-msg" id="es-msg"></span>
           </div>
@@ -111,29 +158,43 @@ export function createEnemyDesigner(container, onBack) {
   const $ = (sel) => container.querySelector(sel);
   const canvas = $("#es-canvas");
   const ctx = canvas.getContext("2d");
+  const stage = $("#es-stage"); // carries the focus ring
+  const shell = container.querySelector(".wd"); // carries the expanded layout
 
-  // ---- preview arena (world drawn at 0.5× onto the canvas) ---------------
-  const SCALE = 0.5;
-  const WORLD_W = canvas.width / SCALE;
-  const WORLD_H = canvas.height / SCALE;
+  // ---- preview arena ------------------------------------------------------
+  // ONE fixed world — the mission's own 960×540 — drawn at 0.5× in the rail and
+  // 1:1 when expanded, so expanding changes the view and never the fight.
+  const WORLD_W = 960, WORLD_H = 540;
   const GROUND_Y = WORLD_H - 60;
+  const SPAWN_X = 60;   // the player's start mark
+  const ENEMY_X = 640;  // the enemy's, far enough away to watch it approach
+  let scale = 0.5;
   const preview = { root: null, respawn: 0 };
 
-  const dummy = {
-    kind: "soldier", x: 600, y: GROUND_Y - 46, w: 30, h: 46, vx: 0, vy: 0,
-    onGround: true, alive: true, health: 1e9, maxHealth: 1e9, hitFlash: 0, facing: -1,
-    burn: null, slow: null, crouched: false,
-  };
+  const world = { width: WORLD_W, height: WORLD_H, gravity: 2000 };
+
+  // The player body is the mission's Soldier, not a stand-in: same physics,
+  // same crouch box, same magazine, so what the enemy does to you here is what
+  // it does to a squad in a level.
+  const shooter = new Soldier(
+    { id: "you", name: "Test Pilot", callsign: "TST", stats: { health: 8, aim: play.aim, speed: 6 } },
+    play.weapon, SPAWN_X, GROUND_Y - 46
+  );
+  shooter.magsLeft = Infinity; // an authoring sandbox never runs out of spares
+  shooter.deadFor = 0;
+
   const scene = {
     // Same hook the mission and Firing Room install (tech/sound.md), so the
     // preview plays the enemy's authored voice as it moves and fires.
     sound: (cue, opts) => audio.play(cue, opts),
-    world: { width: WORLD_W, height: WORLD_H, gravity: 2000 },
+    world,
     platforms: [
       { x: 0, y: GROUND_Y, w: WORLD_W, h: 60 },
-      { x: WORLD_W * 0.42, y: GROUND_Y - 120, w: 150, h: 16 }, // a perch for LOS/elevation
+      { x: WORLD_W - 6, y: 0, w: 8, h: GROUND_Y },     // back wall — something to be cornered against
+      { x: 300, y: GROUND_Y - 120, w: 150, h: 16 },    // perches: LOS, elevation, a ledge to be chased onto
+      { x: 560, y: GROUND_Y - 190, w: 150, h: 16 },
     ],
-    soldiers: [dummy],
+    soldiers: [shooter],
     enemies: [],
     projectiles: [],
   };
@@ -144,28 +205,131 @@ export function createEnemyDesigner(container, onBack) {
     damage(t, amount, owner) {
       if (t.kind === "spec") {
         if (preview.root) applyDamage(preview.root, t, amount, owner, scene, previewCtx);
-      } else {
-        t.hitFlash = 0.12; // the dummy soaks everything
+        return;
       }
+      // The player. A fight you can lose — but an authoring tool, so losing
+      // costs a respawn, not a soldier.
+      t.health -= amount;
+      t.hitFlash = 0.12;
+      if (t.health <= 0 && t.alive) previewCtx.kill(t, owner);
     },
     kill(t, owner) {
-      if (t.kind === "spec" && preview.root) applyDamage(preview.root, t, 1e9, owner, scene, previewCtx);
+      if (t.kind === "spec") {
+        if (preview.root) applyDamage(preview.root, t, 1e9, owner, scene, previewCtx);
+        return;
+      }
+      if (!t.alive) return;
+      t.alive = false;
+      t.deadFor = 0;
     },
     spark() {},
     burst() {},
   };
 
+  // Re-instantiate the ENEMY only: every spec edit lands here, and a keystroke
+  // in the JSON panel must not teleport the player mid-fight.
   function resetPreview() {
     scene.projectiles = [];
     preview.respawn = 0;
     if (!validation.ok || !normalized) {
       preview.root = null;
+      scene.enemies = [];
       return;
     }
     const h = normalized.root.body.h;
     const flying = normalized.root.body.gravity === 0;
-    preview.root = instantiate(normalized, 130, flying ? GROUND_Y - h - 130 : GROUND_Y - h);
+    preview.root = instantiate(normalized, ENEMY_X, flying ? GROUND_Y - h - 140 : GROUND_Y - h);
     scene.enemies = collidables(preview.root);
+  }
+
+  function respawnShooter() {
+    shooter.setCrouch(false);
+    shooter.alive = true;
+    shooter.health = shooter.maxHealth;
+    shooter.x = SPAWN_X;
+    shooter.y = GROUND_Y - shooter.h;
+    shooter.vx = 0;
+    shooter.vy = 0;
+    shooter.burn = null;
+    shooter.slow = null;
+    shooter.hitFlash = 0;
+    shooter.reloading = 0;
+    shooter.deadFor = 0;
+    shooter.ammo = shooter.weapon && shooter.weapon.magazine ? shooter.weapon.magazine : Infinity;
+    shooter.magsLeft = Infinity;
+  }
+
+  // ↻ — both fighters back on their marks.
+  function resetFight() {
+    resetPreview();
+    respawnShooter();
+  }
+
+  function setWeapon(id) {
+    play.weapon = weaponById[id] || play.weapon;
+    shooter.weapon = play.weapon;
+    shooter.ammo = play.weapon.magazine ? play.weapon.magazine : Infinity;
+    shooter.reloading = 0;
+  }
+
+  // ---- keyboard ownership -------------------------------------------------
+  // The whole mechanism, and the reason input.js needs no change: the canvas is
+  // tabbable, and it drives the soldier only while it holds DOM focus. Clicking
+  // the name field, the JSON panel or (E3) the composer blurs it, which hands
+  // the keys straight back.
+  function takeKeys(on) {
+    on = !!on;
+    if (on !== focused) {
+      focused = on;
+      if (on) input.enable(canvas); // canvas → mouse aim + click to fire
+      else input.disable();
+      if (stage && stage.classList) stage.classList.toggle("focused", on);
+      renderKeys();
+    }
+    return focused;
+  }
+
+  function renderKeys() {
+    const el = $("#es-keys");
+    if (!el) return;
+    const aimHint = config.aimMode === "keyboard" ? "W aim up" : "MOUSE aim";
+    el.textContent = focused
+      ? `A / D move   ${aimHint}   S crouch   SPACE jump   J / CLICK fire   R reload   ·   ESC releases the keyboard`
+      : "Click the preview to take the keyboard";
+  }
+
+  // ⛶ — same world, twice the pixels: 1:1 where the window is wide enough.
+  function setExpanded(on) {
+    play.expanded = !!on;
+    scale = play.expanded ? 1 : 0.5;
+    canvas.width = Math.round(WORLD_W * scale);
+    canvas.height = Math.round(WORLD_H * scale);
+    if (shell && shell.classList) shell.classList.toggle("es-expanded", play.expanded);
+    const btn = $("#es-expand");
+    if (btn) btn.title = play.expanded ? "Back to the rail" : "Expand to a 1:1 arena";
+    draw();
+  }
+
+  // Resolve manual aim from config.aimMode (mouse/gamepad/auto); "keyboard"
+  // keeps the legacy aim-up scheme. Identical to the Firing Room's — the point
+  // is that the preview aims the way the game does.
+  function resolveAim() {
+    const mode = config.aimMode;
+    if (mode === "keyboard") {
+      shooter.aimVec = null;
+      shooter.aimUp = input.isDown("aimUp") && !shooter.crouched;
+      return;
+    }
+    shooter.aimUp = false;
+    const src = input.aimSource(mode);
+    if (!src) { shooter.aimVec = null; return; }
+    let dx, dy;
+    if (src.type === "stick") { dx = src.x; dy = src.y; }
+    else { dx = src.x / scale - (shooter.x + shooter.w / 2); dy = src.y / scale - (shooter.y + shooter.h * 0.42); }
+    const len = Math.hypot(dx, dy);
+    if (len < 0.001) { shooter.aimVec = null; return; }
+    shooter.aimVec = { x: dx / len, y: dy / len };
+    shooter.facing = shooter.aimVec.x >= 0 ? 1 : -1;
   }
 
   // ---- validation / refresh pipeline -------------------------------------
@@ -498,6 +662,13 @@ export function createEnemyDesigner(container, onBack) {
       refresh({ rebuildForm: false, rewriteJson: true });
       return;
     }
+    if (t.dataset.es === "aim") {
+      play.aim = +t.value;
+      shooter.data.stats.aim = play.aim; // spread comes off the stat, as in a mission
+      const out = $("#es-aimval");
+      if (out) out.textContent = t.value;
+      return;
+    }
     if (t.dataset.esf) {
       applyFormField(t.dataset.esf, t.value);
       const out = container.querySelector(`[data-val-for="${t.dataset.esf}"]`);
@@ -516,6 +687,8 @@ export function createEnemyDesigner(container, onBack) {
     if (t.dataset.esf) {
       applyFormField(t.dataset.esf, t.value);
       refresh({ rebuildForm: true, rewriteJson: true });
+    } else if (t.dataset.es === "weapon") {
+      setWeapon(t.value);
     } else if (t.dataset.es === "template" && t.value) {
       loadSpec(clone(TEMPLATE_BY_ID[t.value]));
       t.value = "";
@@ -535,7 +708,8 @@ export function createEnemyDesigner(container, onBack) {
       case "back": onBack(); break;
       case "save": saveCurrent(); break;
       case "copy": copyJSON(); break;
-      case "reset": resetPreview(); break;
+      case "reset": resetFight(); break;
+      case "expand": setExpanded(!play.expanded); break;
       case "addgun": addBasicGun(); break;
       case "connect": connectP2(); break;
       case "generate": generate(); break;
@@ -551,19 +725,15 @@ export function createEnemyDesigner(container, onBack) {
     }
   });
 
-  // click a preview part to damage it (guarded: headless canvas has no rects)
-  if (canvas.addEventListener && typeof canvas.getBoundingClientRect === "function") {
-    canvas.addEventListener("mousedown", (e) => {
-      if (!preview.root) return;
-      const r = canvas.getBoundingClientRect();
-      const wx = ((e.clientX - r.left) * (canvas.width / r.width)) / SCALE;
-      const wy = ((e.clientY - r.top) * (canvas.height / r.height)) / SCALE;
-      for (const part of collidables(preview.root)) {
-        if (wx >= part.x && wx <= part.x + part.w && wy >= part.y && wy <= part.y + part.h) {
-          applyDamage(preview.root, part, 15, null, scene, previewCtx);
-          break;
-        }
-      }
+  // Focus is the keyboard handover. Clicking the canvas focuses it (tabindex),
+  // which enables MissionInput; clicking any field on the page blurs it, which
+  // disables it again. Esc is the explicit way out without reaching for the
+  // mouse. (Esc is unbound in controlmap, so MissionInput ignores it.)
+  if (canvas.addEventListener) {
+    canvas.addEventListener("focus", () => takeKeys(true));
+    canvas.addEventListener("blur", () => takeKeys(false));
+    canvas.addEventListener("keydown", (e) => {
+      if (e.code === "Escape" && typeof canvas.blur === "function") canvas.blur();
     });
   }
 
@@ -614,17 +784,49 @@ export function createEnemyDesigner(container, onBack) {
 
   // ---- preview loop -------------------------------------------------------
   function step(dt) {
-    if (!preview.root) return;
-    if (!preview.root.alive) {
-      preview.respawn += dt;
-      if (preview.respawn > 1.2) resetPreview();
+    input.pollGamepad();
+
+    // ---- the player -------------------------------------------------------
+    if (shooter.fireCooldown > 0) shooter.fireCooldown -= dt;
+    if (shooter.muzzleFlash > 0) shooter.muzzleFlash -= dt;
+    if (shooter.hitFlash > 0) shooter.hitFlash -= dt;
+    tickReload(shooter, dt, scene);
+
+    if (!shooter.alive) {
+      shooter.deadFor += dt;
+      if (shooter.deadFor > 1.2) respawnShooter();
     } else {
-      updateSpecEnemy(preview.root, dt, scene, previewCtx);
-      scene.enemies = collidables(preview.root);
-      updateProjectiles(scene, dt, previewCtx);
-      updateStatuses(scene, dt, previewCtx);
-      if (scene.projectiles.length > 80) scene.projectiles.splice(0, scene.projectiles.length - 80);
+      if (focused) {
+        shooter.setCrouch(input.isDown("crouch"));
+        const move = (input.isDown("right") ? 1 : 0) - (input.isDown("left") ? 1 : 0);
+        resolveAim();
+        shooter.applyMovement(dt, move, input.isDown("jump"));
+        if (input.justPressed("reload")) startReload(shooter, scene);
+        const wantFire = shooter.weapon.auto ? input.isDown("fire") : input.justPressed("fire");
+        if (wantFire) fire(scene, shooter, shooter.fireDir(), "player", dt, aimAccuracy(play.aim));
+      } else {
+        // Keys released: no input is read at all, so a held key cannot be stuck
+        // driving the soldier while you type. Friction still runs.
+        shooter.applyMovement(dt, 0, false);
+      }
+      stepActor(shooter, dt, world, scene.platforms);
     }
+    audio.setListener(shooter.x + shooter.w / 2); // pan follows the player
+
+    // ---- the enemy --------------------------------------------------------
+    if (preview.root) {
+      if (!preview.root.alive) {
+        preview.respawn += dt;
+        if (preview.respawn > 1.2) resetPreview();
+      } else {
+        updateSpecEnemy(preview.root, dt, scene, previewCtx);
+        scene.enemies = collidables(preview.root);
+      }
+    }
+
+    updateProjectiles(scene, dt, previewCtx);
+    updateStatuses(scene, dt, previewCtx);
+    if (scene.projectiles.length > 80) scene.projectiles.splice(0, scene.projectiles.length - 80);
   }
 
   function draw() {
@@ -636,7 +838,7 @@ export function createEnemyDesigner(container, onBack) {
     ctx.fillRect(0, 0, W, H);
 
     ctx.save();
-    ctx.scale(SCALE, SCALE);
+    ctx.scale(scale, scale);
 
     // platforms
     for (const p of scene.platforms) {
@@ -646,13 +848,7 @@ export function createEnemyDesigner(container, onBack) {
       ctx.fillRect(p.x, p.y, p.w, 2);
     }
 
-    // dummy target
-    ctx.fillStyle = dummy.hitFlash > 0 ? "#8aa0bc" : "#3a4657";
-    ctx.fillRect(dummy.x, dummy.y, dummy.w, dummy.h);
-    ctx.fillStyle = "#26303d";
-    ctx.fillRect(dummy.x + 3, dummy.y + 6, dummy.w - 6, 4);
-    if (dummy.hitFlash > 0) dummy.hitFlash -= 1 / 60;
-
+    drawShooter();
     for (const p of scene.projectiles) drawProjectile(ctx, p);
     if (preview.root) drawSpecEnemy(ctx, preview.root, perfNow() / 1000);
 
@@ -662,13 +858,56 @@ export function createEnemyDesigner(container, onBack) {
     ctx.font = "10px system-ui, sans-serif";
     ctx.fillText("live preview — real runtime", 8, 14);
 
-    // readouts
+    readouts();
+  }
+
+  // The player body, drawn the way the Firing Room draws its shooter: barrel
+  // along the aim vector, muzzle flash at the tip, health bar once hurt.
+  function drawShooter() {
+    if (!shooter.alive) return;
+    ctx.fillStyle = shooter.hitFlash > 0 ? "#fff" : "#7ad7ff";
+    roundRect(ctx, shooter.x, shooter.y, shooter.w, shooter.h, 5);
+    ctx.fill();
+    const gd = shooter.fireDir();
+    const gl = Math.hypot(gd.x, gd.y) || 1;
+    const bx = shooter.x + shooter.w / 2, by = shooter.y + shooter.h * 0.42;
+    ctx.strokeStyle = "#0b0f18";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx + (gd.x / gl) * 18, by + (gd.y / gl) * 18);
+    ctx.stroke();
+    if (shooter.muzzleFlash > 0) {
+      ctx.fillStyle = shooter.muzzleColor || "#ffd36a";
+      ctx.beginPath();
+      ctx.arc(bx + (gd.x / gl) * 20, by + (gd.y / gl) * 20, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const hf = Math.max(0, shooter.health / shooter.maxHealth);
+    if (hf < 1) {
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(shooter.x, shooter.y - 7, shooter.w, 4);
+      ctx.fillStyle = "#7ad7ff";
+      ctx.fillRect(shooter.x, shooter.y - 7, shooter.w * hf, 4);
+    }
+  }
+
+  function readouts() {
+    const root = preview.root;
     const st = $("#es-state");
-    if (st && preview.root) st.textContent = preview.root.brainState.current;
+    if (st) st.textContent = root ? root.brainState.current : "—";
     const hp = $("#es-hp");
-    if (hp && preview.root) hp.textContent = `${Math.max(0, Math.round(preview.root.health))}/${preview.root.maxHealth}`;
+    if (hp) hp.textContent = root ? `${Math.max(0, Math.round(root.health))}/${root.maxHealth}` : "—";
     const parts = $("#es-parts");
-    if (parts && preview.root) parts.textContent = String(collidables(preview.root).length);
+    if (parts) parts.textContent = root ? String(collidables(root).length) : "—";
+    const you = $("#es-you");
+    if (you) you.textContent = shooter.alive ? `${Math.max(0, Math.round(shooter.health))}/${shooter.maxHealth}` : "down";
+    const ammo = $("#es-ammo");
+    if (ammo) {
+      ammo.textContent = shooter.reloading > 0
+        ? "reloading…"
+        : shooter.weapon.magazine ? `${Math.max(0, shooter.ammo)}/${shooter.weapon.magazine}` : "∞";
+    }
   }
 
   let running = true, raf = null, last = perfNow();
@@ -685,16 +924,41 @@ export function createEnemyDesigner(container, onBack) {
 
   renderForm();
   renderSaved();
+  renderKeys();
   refresh({ rebuildForm: false });
+  respawnShooter();
   draw(); // one synchronous frame (headless-mount verifiable)
   raf = req(loop);
 
   return {
     dispose() {
       running = false;
+      takeKeys(false); // the window key handlers must not outlive the tool
+      audio.stopAll(); // nor the fight's gunfire
       if (dryTimer) clearTimeout(dryTimer);
       if (jsonTimer) clearTimeout(jsonTimer);
       if (raf != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
+    },
+
+    // ---- driving hooks (headless tests) ----------------------------------
+    // The Weapon Designer exports `load` for the same reason: a tool whose
+    // interesting behaviour is behind a click is otherwise only assertable by
+    // mounting it. takeKeys() is exactly what a click on the stage does.
+    takeKeys,
+    // Hold a set of actions for `frames` steps, as the window key handler would
+    // fill them in, and report what happened to the fight.
+    drive(hold = {}, frames = 1, dt = 1 / 60) {
+      for (let i = 0; i < frames; i++) {
+        input.actions = { ...hold };
+        input.pressed = i === 0 ? { ...hold } : {};
+        step(dt);
+      }
+      return {
+        focused,
+        x: shooter.x, y: shooter.y, h: shooter.h,
+        alive: shooter.alive, health: shooter.health, ammo: shooter.ammo,
+        shots: scene.projectiles.length,
+      };
     },
   };
 }
@@ -722,6 +986,12 @@ function selectRow(key, label, options, value) {
     </div>`;
 }
 
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
 function clone(v) { return JSON.parse(JSON.stringify(v)); }
 function slug(s, fallback) { return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || fallback; }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }

@@ -1,7 +1,7 @@
 ---
 type: tech
 category: development-tools
-status: unbuilt
+status: building
 resolution: sharp
 needs: [enemyspec, enemyspec-llm, level-generation, sound]
 related: [weapon-designer, enemies]
@@ -21,7 +21,7 @@ Each lands alone, green, and is committed on its own.
 
 | # | Slice | Changes runtime behaviour |
 |---|---|---|
-| **E1** | **Playable preview.** The preview's dummy literal becomes a real soldier driven by the mission input layer: move, jump, crouch, aim, fire, reload. Weapon and Aim pickers. An expand control takes the preview to a 1:1 arena; Reset restarts it. **Keyboard ownership is the load-bearing part** — see below | No — editor only |
+| **E1** ✅ | **Playable preview.** The preview's dummy literal becomes a real soldier driven by the mission input layer: move, jump, crouch, aim, fire, reload. Weapon and Aim pickers. An expand control takes the preview to a 1:1 arena; Reset restarts it. **Keyboard ownership is the load-bearing part** — see below | No — editor only |
 | **E2** | **Tree + inspector rail.** The root-only form is replaced by a tree of the spec (spec node, entities, defs, brain states) with a property inspector for the selected node beneath it. Add / duplicate / delete / reorder. Identity, Sound and Limits on the spec node; components on entity nodes; an emitter's own sound on the emitter node. The Body, Movement and Attack sections are deleted; **the whole-spec JSON panel stays**. Validation errors mark their nodes | No — editor only |
 | **E3** | **Chat.** One transcript replaces the prompt box. First message with no enemy loaded generates; every message after revises; one acceptance gate decides whether anything lands. Turns that only answer a question change nothing. Every landing pushes a checkpoint; rewinding to one is the undo. A landed turn marks the tree nodes it touched (E2). The Player2 connect control and its `config.player2GameClientId` gate move to the composer unchanged | No — editor only |
 | **E4** | **Live roster.** A roster store merged into the generator's roster and the mission loader's spec map. A per-entry enable list covering built-ins and custom enemies. Ids pinned on load and refused on collision; admission requires a declared threat and re-runs the dry run longer than the save gate does | **Yes** — generated missions place custom enemies |
@@ -37,6 +37,15 @@ chat composer on the page, typing would drive the soldier. The Firing Room is no
 a precedent here: it enables input on *mode change* and has no text field at all.
 The canvas owns the keyboard only while focused, and `src/mission/input.js` is not
 modified to achieve it.
+
+**As built (E1).** Four things the slice settled that the plan left open:
+
+| | |
+|---|---|
+| **Focus is DOM focus** | The canvas carries `tabindex="0"`; its `focus`/`blur` handlers are the only callers of `input.enable/disable`, so clicking any field on the page releases the keys with no bookkeeping. `Escape` blurs the canvas (it is unbound in `controlmap.js`, so `MissionInput` ignores it). While unfocused the step reads **no** input at all — gamepad included — so a held key cannot drive a soldier you are not looking at |
+| **Clicking the preview no longer damages a part** | That affordance and click-to-fire are the same gesture. You break a part by shooting it now, which is the point of the slice |
+| **One world, two zooms** | The arena is a fixed 960×540 (the mission's own size) drawn at 0.5× in the rail and 1:1 expanded, so ⛶ changes the view and never the fight. Expanded, the panel breaks out of the editor's 900px column; below roughly a 1000px window it scales down rather than scrolling sideways, so "1:1" is exact only where the window allows |
+| **Spec edits reset the enemy, not the fight** | `resetPreview()` re-instantiates the enemy alone — a keystroke in the JSON panel must not teleport the player mid-fight. ↻ is the only thing that puts both fighters back on their marks |
 
 ## Reuses
 
@@ -78,6 +87,7 @@ modified to achieve it.
 | `src/game/customcontent.js` | `saveEnemySpec` gains the built-in spec ids as its reserved set. It currently passes an empty one, so a library entry named "Husk Charger" slugs to `husk_charger` and would shadow a built-in once E4 merges the maps |
 | `src/game/state.js`, `src/editor/editor.js` | One call each to apply the roster, mirroring the two `applyWeaponOverrides()` calls already there |
 | `src/editor/editor.css` | New classes only, `ed-*`/`es-*`. Existing `wd-*`/`cfg-*` reused |
+| `test/harness.mjs` | **As built (E1):** `windowListenerCount(type)`. The window listener stubs record instead of discarding, which is what lets a suite assert the tool released the keyboard. Cleared by each `installDom()` |
 
 Conventions from `CLAUDE.md` that bind: guarded `localStorage` everywhere;
 cross-page data read at load time; fallback discipline; no dependencies added.
