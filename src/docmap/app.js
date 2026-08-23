@@ -241,12 +241,19 @@ export function lint() {
 
   // ...and a spec being built cannot rest on a prerequisite that is not finished.
   // That is the one case where somebody else's incomplete spec blocks you.
+  //
+  // A prerequisite that is `built` is exempt: the code exists and is running, so
+  // there is nothing left for you to be blocked ON — its spec is a record, not a
+  // plan you are about to follow. Without this every spec written after the
+  // seven-part rule would be held hostage by the older ones it depends on, which
+  // punishes the new spec for the age of its dependencies.
   for (const spec of docs) {
     if (spec.type !== "tech" || !started(spec)) continue;
     const needs = Array.isArray(spec.needs) ? spec.needs : String(spec.needs || "").split(",").map((s) => s.trim()).filter(Boolean);
     for (const slug of needs) {
       const dep = specFor(slug.replace(/^tech\//, "").replace(/\.md$/, ""));
       if (!dep) { out.push([spec, `needs "${slug}", which has no tech spec`, true]); continue; }
+      if (dep.status === "built") continue;
       const gaps = missingParts(dep);
       if (gaps.length) out.push([spec, `needs "${slug}", whose spec is incomplete (${gaps.length} part(s) missing)`, true]);
     }
