@@ -224,6 +224,7 @@ lot, stop elaborating.
 Static site — serve the folder and open a page. No bundler, no transpile.
 
     python3 -m http.server 8000        # then open http://localhost:8000/
+    npm start                          # server.mjs — same site, honours $PORT
 
 - `index.html` → `src/main.js` — the game (single page + scene manager).
 - `editor.html` → `src/editor/editor.js` — the dev editor (settings + GUI tools).
@@ -237,8 +238,15 @@ Static site — serve the folder and open a page. No bundler, no transpile.
     npm test                     # same as run.mjs
 
 - **`package.json` exists only so node runs the ESM tests** (it sets
-  `"type":"module"` so the `.js` source parses as ESM under node). It introduces
-  no build step and the browser ignores it. Don't add dependencies.
+  `"type":"module"` so the `.js` source parses as ESM under node) **and so a
+  host can find `npm start`**. It introduces no build step, carries no
+  dependencies, and the browser ignores it. Don't add dependencies.
+- **`server.mjs` is not part of the game** and nothing in `src/` imports it. It
+  is the one file that lets the repo be *hosted*: a platform runs a process and
+  expects it to bind `$PORT`, not a folder to serve. Zero-dependency node. It
+  emits directory listings on purpose — `src/docmap/app.js` discovers docs by
+  scraping one — which also means the whole repo, `editor.html` included, is
+  readable at a deployed URL.
 - Write suites as `test/<name>.test.mjs` exporting `export default async
   function run(t) { … }` and assert with `t.ok(name, cond)` / `t.eq(name,
   actual, expected)`. Import the game via `../src/...`.
