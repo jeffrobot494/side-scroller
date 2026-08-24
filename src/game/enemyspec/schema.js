@@ -141,6 +141,106 @@ export const RANGES = {
   decisionInterval: [0.1, 2],
 };
 
+// ---- authoring metadata: one control per component field -------------------
+// ENTITY_FIELDS is what the Enemy Designer's inspector generates its controls
+// from — the same "one table entry, one control" trade EFFECT_SCHEMA makes for
+// weapons (tech/enemy-designer.md, E2). It introduces NO vocabulary: every key
+// here is already a component in ENTITY_KEYS, and every leaf is already
+// accepted by validate.js. What it adds is a label, a control type, a bound and
+// a default per field.
+//
+// Bounds are AUTHORING bounds, not validity rules — the same status
+// EFFECT_SCHEMA's ranges have. RANGES covers fifteen paths and none of the
+// MOTIONS params, contact.knockback or emitter offsets, so those sliders carry
+// numbers invented here; a hand-authored value outside one stays legal.
+//
+// Field shape: { key, label, type, default, min?, max?, step?, unit?, options?,
+// help? }. `key` may be dotted or indexed INSIDE the component ("size.0").
+// Types: number | enum | color | bool | text | tags | json.
+
+const F = (key, label, type, def, extra = {}) => ({ key, label, type, default: def, ...extra });
+
+export const ENTITY_FIELDS = {
+  id: [F("", "Id", "text", "", { help: "Referenced by fire/spawn/telegraph and by link.transformTo." })],
+  tags: [F("", "Tags", "tags", [], { help: "Free labels. countAlive('tag:wing') and hasTag() read these." })],
+  at: [
+    F("0", "Offset x", "number", 0, { min: -200, max: 200, step: 1, unit: "px" }),
+    F("1", "Offset y", "number", 0, { min: -200, max: 200, step: 1, unit: "px" }),
+  ],
+  visual: [
+    F("shape", "Shape", "enum", "box", { options: VISUAL_SHAPES }),
+    F("color", "Colour", "color", "#e05a5a"),
+    F("size.0", "Width", "number", 24, { min: RANGES["visual.size"][0], max: RANGES["visual.size"][1], step: 2, unit: "px" }),
+    F("size.1", "Height", "number", 24, { min: RANGES["visual.size"][0], max: RANGES["visual.size"][1], step: 2, unit: "px" }),
+  ],
+  body: [
+    F("gravity", "Gravity", "number", 1, { min: RANGES["body.gravity"][0], max: RANGES["body.gravity"][1], step: 0.05, help: "0 = flies and ignores platforms." }),
+    F("jump", "Jump", "number", 665, { min: RANGES["body.jump"][0], max: RANGES["body.jump"][1], step: 5, unit: "px/s", help: "How high it can get, so which ledges it can chase you onto. 665 clears a ~110px perch." }),
+    F("ghost", "Ghost", "bool", false, { help: "Passes through platforms." }),
+  ],
+  health: [F("max", "Health", "number", 30, { min: RANGES["health.max"][0], max: RANGES["health.max"][1], step: 1 })],
+  motion: [F("type", "Motion", "enum", "static", { options: Object.keys(MOTIONS) })], // params appended by motionFields()
+  contact: [
+    F("damage", "Touch damage", "number", 8, { min: RANGES["contact.damage"][0], max: RANGES["contact.damage"][1], step: 1 }),
+    F("knockback", "Knockback", "number", 0, { min: 0, max: 600, step: 10 }),
+    F("destroySelf", "Dies on contact", "bool", false, { help: "Missiles and other one-shot bodies." }),
+  ],
+  life: [F("ttl", "Lifetime", "number", 3, { min: RANGES["life.ttl"][0], max: RANGES["life.ttl"][1], step: 0.05, unit: "s" })],
+  link: [
+    F("onParentDeath", "On parent death", "enum", "destroy", { options: LINK_POLICIES }),
+    F("onOwnDeath", "On own death", "enum", "destroy", { options: LINK_POLICIES }),
+    F("transformTo", "Transform to", "text", "", { help: "A defs id. Only used by the 'transform' policy." }),
+  ],
+  vars: [F("", "Vars", "json", {}, { help: "Numbers this entity keeps. Read as self.vars.* in expressions." })],
+  on: [F("", "Event handlers", "json", {}, { help: `Steps per event: ${EVENTS.join(", ")}, or signal:<name>.` })],
+  // One EMITTER, not the emitters map: the tree gives each emitter its own node.
+  emitters: [
+    F("at.0", "Muzzle x", "number", 0, { min: -200, max: 200, step: 1, unit: "px" }),
+    F("at.1", "Muzzle y", "number", 0, { min: -200, max: 200, step: 1, unit: "px" }),
+    F("ref", "Fires def", "text", "", { help: "A defs id — fires that entity instead of a plain projectile." }),
+    F("projectile.speed", "Speed", "number", 420, { min: RANGES["projectile.speed"][0], max: RANGES["projectile.speed"][1], step: 10, unit: "px/s" }),
+    F("projectile.damage", "Damage", "number", 8, { min: 0, max: 200, step: 1 }),
+    F("projectile.life", "Lifetime", "number", 2.2, { min: RANGES["projectile.life"][0], max: RANGES["projectile.life"][1], step: 0.05, unit: "s" }),
+    F("projectile.w", "Width", "number", 10, { min: 2, max: 64, step: 1, unit: "px" }),
+    F("projectile.h", "Height", "number", 10, { min: 2, max: 64, step: 1, unit: "px" }),
+    F("projectile.gravity", "Arc", "number", 0, { min: 0, max: 2, step: 0.05, help: "Fraction of world gravity. 0 = flat." }),
+    F("projectile.color", "Colour", "color", "#8affc1"),
+    F("projectile.shape", "Shape", "enum", "orb", { options: ["bullet", "orb", "bolt", "pellet", "wave", "missile"] /* drawProjectile's six looks */ }),
+    F("projectile.effects", "Effects", "json", [], { help: "Weapon effects (burn, slow, explode, …) — same shapes the arsenal uses." }),
+  ],
+};
+
+// Motion params are per controller, so the inspector asks for them by type.
+// Bounds invented here (MOTIONS carries defaults, not ranges).
+const MOTION_PARAM = {
+  vx: { label: "Velocity x", min: -600, max: 600, step: 10, unit: "px/s" },
+  vy: { label: "Velocity y", min: -600, max: 600, step: 10, unit: "px/s" },
+  target: { label: "Target", type: "enum", options: MOTION_TARGETS },
+  speed: { label: "Speed", min: 0, max: 600, step: 10, unit: "px/s" },
+  range: { label: "Patrol range", min: 20, max: 600, step: 10, unit: "px" },
+  min: { label: "Hold at least", min: 0, max: 900, step: 10, unit: "px" },
+  max: { label: "Hold at most", min: 0, max: 1200, step: 10, unit: "px" },
+  turnRate: { label: "Turn rate", min: 0, max: 12, step: 0.1, unit: "rad/s" },
+  around: { label: "Orbit around", type: "enum", options: MOTION_TARGETS },
+  radius: { label: "Orbit radius", min: 10, max: 400, step: 5, unit: "px" },
+  degPerSec: { label: "Orbit speed", min: -720, max: 720, step: 10, unit: "°/s" },
+  amplitude: { label: "Bob height", min: 0, max: 120, step: 1, unit: "px" },
+  rate: { label: "Bob rate", min: 0, max: 10, step: 0.1, unit: "/s" },
+  driftSpeed: { label: "Drift speed", min: 0, max: 400, step: 5, unit: "px/s" },
+  altitude: { label: "Altitude", min: 0, max: 400, step: 5, unit: "px" },
+  climbSpeed: { label: "Climb speed", min: 0, max: 400, step: 5, unit: "px/s" },
+};
+
+// The controls for one motion type: the type picker plus its own params.
+export function motionFields(type) {
+  const motion = MOTIONS[type] || MOTIONS.static;
+  const params = Object.entries(motion.params).map(([key, def]) => {
+    const meta = MOTION_PARAM[key] || { label: key, min: 0, max: 600, step: 1 };
+    return { key, label: meta.label, type: meta.type || "number", default: def, ...meta };
+  });
+  return [...ENTITY_FIELDS.motion, ...params];
+}
+
 // Plain (non-entity) projectile spec an emitter may carry — resolved by the
 // shared combat pipeline (mission/combat.js effects, mission/render.js shapes).
 export const PROJECTILE_KEYS = ["speed", "w", "h", "color", "life", "shape", "gravity", "damage", "effects"];

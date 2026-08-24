@@ -3,6 +3,11 @@ import { parseExpr, evaluate } from "../src/game/enemyspec/expr.js";
 import { validateSpec } from "../src/game/enemyspec/validate.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { TEMPLATES } from "../src/game/enemyspec/templates.js";
+import { ENTITY_KEYS, ENTITY_FIELDS, motionFields, MOTIONS } from "../src/game/enemyspec/schema.js";
+import {
+  treeNodes, nodeAt, valueAt, setAt, availableAdds, errorCounts,
+  addNode, duplicateNode, deleteNode, moveNode, promoteToDef, takenIds,
+} from "../src/editor/tools/spec-tree.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const boss = () => clone(TEMPLATES.find((t) => t.id === "tpl_boss_moth"));
@@ -128,6 +133,142 @@ export default async function run(t) {
   duel2.brain.states.duel.actions = [];
   duel2.brain.states.duel.tracks = undefined;
   t.ok("validate: utility state needs actions", hasErr(validateSpec(duel2), "no actions"));
+
+  // ---- the spec tree (the Enemy Designer's rail, E2) -----------------------
+  // The tree is the manual editor, so the bar is: its paths are the validator's
+  // paths, and no structural op may produce a spec the validator rejects. The
+  // fixtures are the templates this suite already imports.
+  {
+    const paths = treeNodes(boss()).map((n) => n.path);
+    t.ok("tree: the spec node is the root of the rail", paths[0] === "");
+    t.ok("tree: the entity tree is walked", paths.includes("root") && paths.includes("root.children[1]"));
+    t.ok("tree: emitters hang off their entity", paths.includes("root.children[0].emitters.missiles"));
+    t.ok("tree: defs are nodes", paths.includes("defs.seeker"));
+    t.ok("tree: brain states, tracks and steps are nodes",
+      paths.includes("brain.states.phase1") &&
+      paths.includes("brain.states.phase1.tracks[0]") &&
+      paths.includes("brain.states.phase1.tracks[0].steps[0]"));
+    t.ok("tree: defs and brain are always offered, even when empty",
+      treeNodes({ root: { id: "root" } }).some((n) => n.kind === "defs") &&
+      treeNodes({ root: { id: "root" } }).some((n) => n.kind === "brain"));
+    t.ok("tree: utility actions are nodes too",
+      treeNodes(clone(TEMPLATES.find((x) => x.id === "tpl_duelist")))
+        .some((n) => n.kind === "uaction"));
+
+    // Paths resolve against the spec — the same strings validate.js reports at.
+    const b = boss();
+    t.eq("tree: valueAt walks indices and keys", valueAt(b, "root.children[0].id"), "leftWing");
+    t.eq("tree: valueAt reaches a step", valueAt(b, "brain.states.phase1.tracks[0].steps[2].wait"), 2.2);
+    setAt(b, "root.children[0].visual.size.1", 33);
+    t.eq("tree: setAt writes through indices", b.root.children[0].visual.size[1], 33);
+    setAt(b, "root.contact", undefined);
+    t.ok("tree: setAt(undefined) deletes the key", b.root.contact === undefined);
+    t.ok("tree: nodeAt knows what a path is", nodeAt(b, "defs.seeker").kind === "def");
+  }
+
+  // Every structural op leaves a spec the validator still accepts. That is the
+  // whole promise of the rail: you cannot break the enemy by rearranging it.
+  {
+    const ops = [
+      ["add a child part", (s2) => addNode(s2, "root", "child")],
+      ["add an emitter", (s2) => addNode(s2, "root", "emitter")],
+      ["add the gun preset", (s2) => addNode(s2, "root", "gun")],
+      ["add a def", (s2) => addNode(s2, "defs", "def")],
+      ["add a track", (s2) => addNode(s2, "brain.states.phase1", "track")],
+      ["add a step", (s2) => addNode(s2, "brain.states.phase1.tracks[0]", "step")],
+      ["duplicate a part", (s2) => duplicateNode(s2, "root.children[0]")],
+      ["duplicate a def", (s2) => duplicateNode(s2, "defs.seeker")],
+      ["duplicate a step", (s2) => duplicateNode(s2, "brain.states.phase1.tracks[0].steps[0]")],
+      ["reorder steps", (s2) => moveNode(s2, "brain.states.phase1.tracks[0].steps[0]", 1)],
+      // Only unreferenced things can be deleted without consequence — see the
+      // dangling-reference case below, which is the documented behaviour.
+      ["delete a step", (s2) => deleteNode(s2, "brain.states.fury.tracks[0].steps[1]")],
+    ];
+    for (const [label, op] of ops) {
+      const s2 = boss();
+      const res = op(s2);
+      const v = validateSpec(s2);
+      t.ok(`tree: ${label} → ok`, res.ok);
+      t.ok(`tree: ${label} keeps the spec valid${v.ok ? "" : ` (${v.errors[0].path} ${v.errors[0].msg})`}`, v.ok);
+      t.ok(`tree: ${label} selects a real node`, !res.ok || nodeAt(s2, res.path) !== null);
+    }
+
+    // A duplicate must not collide: two entities with one id is a validation
+    // error, and it is the failure a naive deep-clone would ship.
+    const dup = boss();
+    duplicateNode(dup, "root.children[0]");
+    t.ok("tree: duplicating a part re-ids it and its subtree", !hasErr(validateSpec(dup), "duplicate entity id"));
+    t.eq("tree: which means one more id", takenIds(dup).size, takenIds(boss()).size + 1);
+
+    // Deleting does NOT repair references to what was deleted — approximation 7
+    // in tech/enemy-designer.md. The contract is that the validator SAYS so, on
+    // the node holding the dangling reference, rather than the edit being
+    // refused or silently rewriting a brain the author did not ask it to touch.
+    const del = boss();
+    t.ok("tree: deleting a part works", deleteNode(del, "root.children[0]").ok);
+    const dv = validateSpec(del);
+    t.ok("tree: and leaves the reference to it dangling, flagged (approximation 7)",
+      hasErr(dv, "no entity with id 'leftWing'"));
+    t.ok("tree: on the node that holds it",
+      errorCounts(treeNodes(del), dv.errors)["brain.states.phase1.tracks[0].steps[0]"] >= 1);
+    t.ok("tree: an expression naming it stays silent — the known hole",
+      !dv.errors.some((e) => String(e.msg).includes("alive('leftWing')")));
+
+    // Promote is a MOVE: a def entry is collected as an entity too, so a copy
+    // would be a duplicate id.
+    const pro = boss();
+    const res = promoteToDef(pro, "root.children[0]");
+    t.ok("tree: promote lands the part in defs", res.ok && pro.defs.leftWing !== undefined);
+    t.eq("tree: and takes it out of children", pro.root.children.length, 1);
+    t.ok("tree: with no duplicate id left behind", !hasErr(validateSpec(pro), "duplicate entity id"));
+    t.ok("tree: a def is positioned by its spawner, so `at` does not travel", pro.defs.leftWing.at === undefined);
+
+    // Refusals, so the toolbar can say why rather than silently doing nothing.
+    t.ok("tree: the root cannot be deleted", !deleteNode(boss(), "root").ok);
+    t.ok("tree: the spec node cannot be deleted", !deleteNode(boss(), "").ok);
+    t.ok("tree: the root cannot be duplicated", !duplicateNode(boss(), "root").ok);
+    t.ok("tree: only list items reorder", !moveNode(boss(), "root", -1).ok);
+    t.ok("tree: only a part promotes to a def", !promoteToDef(boss(), "defs.seeker").ok);
+    t.ok("tree: a step cannot host a state", !addNode(boss(), "brain.states.phase1.tracks[0].steps[0]", "state").ok);
+    t.ok("tree: add menus are per node kind",
+      availableAdds(boss(), "root").some((a) => a.kind === "emitter") &&
+      availableAdds(boss(), "brain").some((a) => a.kind === "state") &&
+      availableAdds(boss(), "root.emitters.maw").length === 0);
+  }
+
+  // Validation marks: an error counts onto its own node AND every ancestor, so
+  // a bad step is findable from the spec node down without reading JSON.
+  {
+    const bad = boss();
+    bad.root.children[0].visual.size = [4000, 10]; // out of range
+    const v = validateSpec(bad);
+    const counts = errorCounts(treeNodes(bad), v.errors);
+    t.ok("tree: the offending node is marked", counts["root.children[0]"] >= 1);
+    t.ok("tree: and so is the spec node", counts[""] >= 1);
+    t.ok("tree: a clean sibling is not", counts["root.children[1]"] === undefined);
+  }
+
+  // ---- ENTITY_FIELDS: authoring metadata, not vocabulary ------------------
+  // The test can only assert that it keys off components that already exist —
+  // ENTITY_KEYS names components, not leaves (approximation 9).
+  {
+    const keys = Object.keys(ENTITY_FIELDS);
+    t.ok(`fields: every key is a component in ENTITY_KEYS (${keys.join(", ")})`,
+      keys.every((k) => ENTITY_KEYS.includes(k)));
+    const all = keys.flatMap((k) => ENTITY_FIELDS[k]);
+    t.ok("fields: every field has a label and a control type", all.every((f) => f.label && f.type));
+    t.ok("fields: every enum field carries its options", all.filter((f) => f.type === "enum").every((f) => Array.isArray(f.options) && f.options.length));
+    t.ok("fields: every number field carries bounds", all.filter((f) => f.type === "number").every((f) => Number.isFinite(f.min) && Number.isFinite(f.max) && f.step > 0));
+    t.ok("fields: every field declares a default", all.every((f) => f.default !== undefined));
+    // motionFields is the per-controller half: the type picker plus that
+    // controller's own params, which MOTIONS is the source of.
+    for (const type of Object.keys(MOTIONS)) {
+      const fields = motionFields(type);
+      const params = Object.keys(MOTIONS[type].params);
+      t.ok(`fields: motion '${type}' offers its type and all ${params.length} param(s)`,
+        fields[0].key === "type" && params.every((pk) => fields.some((f) => f.key === pk)));
+    }
+  }
 }
 
 function throws(fn) {

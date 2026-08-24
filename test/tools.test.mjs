@@ -99,6 +99,45 @@ export default async function run(t) {
     t.eq("enemy-designer: dispose releases the keyboard too", windowListenerCount("keydown"), 0);
   }
 
+  // ---- Enemy Designer: the tree rail drives the spec (E2) ----------------
+  // spec-tree.js is unit-tested in enemyspec.test.mjs; what belongs HERE is the
+  // tool holding it correctly — that selection survives a structural edit, that
+  // the toolbar reports a refusal instead of failing silently, and that an edit
+  // through the rail reaches the spec the preview and Save actually use.
+  {
+    installDom();
+    const { validateSpec } = await import("../src/game/enemyspec/validate.js");
+    const ed = createEnemyDesigner(makeEl(), () => {});
+
+    t.eq("enemy-designer: the rail opens on the spec node", ed.selected(), "");
+    ed.select("root");
+    const added = ed.op("add", "gun");
+    t.ok("enemy-designer: adding the gun preset selects the new emitter", added.ok && ed.selected() === added.path);
+    t.ok("enemy-designer: the preset seeds a brain that pulls the trigger",
+      ed.tree().some((n) => n.kind === "step" && n.label.startsWith("fire")));
+    t.ok("enemy-designer: and the spec still validates", validateSpec(ed.specNow()).ok);
+
+    const before = ed.tree().length;
+    ed.select("root");
+    ed.op("add", "child");
+    t.ok("enemy-designer: adding a part grows the tree", ed.tree().length > before);
+    const part = ed.selected();
+    ed.op("dup");
+    t.ok("enemy-designer: duplicating selects the copy, not the original", ed.selected() !== part);
+    ed.op("del");
+    t.ok("enemy-designer: deleting selects the container, never nothing",
+      ed.tree().some((n) => n.path === ed.selected()));
+
+    // A refusal must be visible: the toolbar acts on the selection, and the
+    // selection is often something that cannot host the op.
+    ed.select("");
+    const refused = ed.op("del");
+    t.ok("enemy-designer: deleting the spec node is refused, with a reason", !refused.ok && !!refused.error);
+    t.eq("enemy-designer: and changes nothing", ed.selected(), "");
+
+    ed.dispose();
+  }
+
   // With a saved EnemySpec in the library, both tools still mount (the Firing
   // Room renders the "Designed" optgroup; the Designer lists the library row).
   {
