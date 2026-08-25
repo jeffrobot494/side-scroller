@@ -12,6 +12,7 @@ import { soldierMaxHp } from "../game/soldiers.js";
 import { missionSpecById, specIsFlying } from "../game/enemyspecs.js";
 import { instantiate as instantiateSpec, collidables } from "./enemyspec/runtime.js";
 import { weaponSound } from "../audio/cues.js";
+import { makeRng } from "../game/gen/rng.js";
 
 const MAX_FALL = 1200;
 
@@ -307,7 +308,19 @@ export class Loot {
 // Firing Room). Grounded enemies spawn feet-on-surface at the placed y.
 const FLY_ALTITUDE = 140;
 
-export function loadMission(level, squad) {
+// `seed` is the mission's own seed (mission.seed, stamped by generateLevel).
+// Given one, this is where the mission's gameplay stream is born: ONE mulberry32
+// off that seed, installed on the scene for the tick-time draws and handed to
+// every root instantiated here (tech/mission-determinism.md, D2). Given none —
+// three suites, the editor tools, dryRunSpec — nothing is installed and every
+// draw site falls back to Math.random: playable, simply not reproducible.
+//
+// The stream is deliberately NOT derived from the level: the same level replayed
+// is the same mission, and the seed is recoverable from the level id (gen_<seed>)
+// if a bug report only carries that.
+export function loadMission(level, squad, seed) {
+  const rng = seed === undefined || seed === null ? null : makeRng(seed);
+
   const soldiers = squad.map((s, i) =>
     new Soldier(s.data, s.weapon, level.playerSpawn.x + i * 44, level.playerSpawn.y)
   );
@@ -320,7 +333,7 @@ export function loadMission(level, squad) {
   const specRoots = level.enemies.map((e) => {
     const nspec = missionSpecById[e.type] || missionSpecById.husk_charger;
     const y = specIsFlying(nspec) ? Math.max(24, e.y - FLY_ALTITUDE) : e.y;
-    const root = instantiateSpec(nspec, e.x, y);
+    const root = instantiateSpec(nspec, e.x, y, "enemy", rng);
     root.loot = {
       name: `${nspec.name} core`,
       value: Math.round((nspec.threat ?? 50) * config.lootPerThreat),
@@ -331,6 +344,10 @@ export function loadMission(level, squad) {
   return {
     // gravity comes from config (editable) rather than the level's own value
     world: { ...level.world, gravity: config.gravity },
+    // The gameplay stream, read by every `scene.rng` site (ai.js) and by the
+    // companion agents built lazily during the mission. null when unseeded.
+    rng,
+    seed: seed ?? null,
     platforms: level.platforms.map((p) => ({ ...p })),
     exit: { ...level.exit },
     artifact: level.artifact ? { ...level.artifact } : null,

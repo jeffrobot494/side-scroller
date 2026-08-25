@@ -42,7 +42,10 @@ export class Mission {
   // `squad` = [{ data, weapon }] chosen in the deploy screen.
   start(mission, level, squad) {
     this.mission = mission;
-    this.scene = loadMission(level, squad);
+    // The mission's seed is the mission's stream: every gameplay draw in the
+    // scene comes off it (tech/mission-determinism.md, D2). A mission without
+    // one still loads — it is simply not reproducible.
+    this.scene = loadMission(level, squad, mission ? mission.seed : null);
     this.squadIds = this.scene.soldiers.map((s) => s.id);
     this.controlled = 0;
     this.camera = { x: 0, y: 0 };
