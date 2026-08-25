@@ -24,21 +24,78 @@ export default async function run(t) {
   t.ok("enemies: delete works", cc.deleteCustomEnemy("drone_2").ok);
   t.ok("stores are independent", cc.listCustomWeapons().length >= 1 && cc.listCustomEnemies().length === 1);
 
-  // ---- enemy specs (EnemySpec library — separate store) ----
-  t.eq("specs: empty list initially", cc.listEnemySpecs(), []);
-  const spec = { v: 1, id: "mine_layer", name: "Mine Layer", threat: 90, role: "artillery", tier: 2, root: { health: { max: 40 } } };
-  t.ok("specs: save ok+id", cc.saveEnemySpec(spec).ok && cc.enemySpecMap().mine_layer.name === "Mine Layer");
-  cc.saveEnemySpec({ ...spec, name: "Mine Layer II" });
-  t.ok("specs: same id upserts", cc.enemySpecMap().mine_layer.name === "Mine Layer II");
-  t.eq("specs: one entry after upsert", cc.listEnemySpecs().length, 1);
-  t.ok("specs: store separate from legacy enemies", !cc.customEnemyMap().mine_layer);
-  t.ok("specs: delete works", cc.deleteEnemySpec("mine_layer").ok && cc.listEnemySpecs().length === 0);
-  // E4 merges the library's ids into the namespace missionSpecById resolves
-  // through, so a library entry must not be able to claim a built-in's id.
-  const shadow = cc.saveEnemySpec({ v: 1, name: "Husk Charger", threat: 50, root: { health: { max: 10 } } });
-  t.ok("specs: a library entry cannot shadow a built-in id", shadow.ok && shadow.id !== "husk_charger");
-  t.ok("specs: it is suffixed rather than refused", shadow.id.startsWith("husk_charger"));
-  cc.deleteEnemySpec(shadow.id);
+  // ---- the enemy delta store (tech/enemy-designer.md, E6) ----
+  // EnemySpec enemies are NOT in customcontent.js any more: there is one enemy
+  // list, and localStorage holds only what differs from the file. What belongs
+  // HERE is the store's own shape; the merge reaching generation is gen.test.
+  {
+    const store = await import("../src/game/enemystore.js");
+    store.clearEnemyDeltas();
+    t.eq("store: a clean store has no records", Object.keys(store.readDeltas().records).length, 0);
+
+    const spec = { v: 1, id: "mine_layer", name: "Mine Layer", threat: 90, role: "artillery", tier: 2, root: { health: { max: 40 } } };
+    const file = [{ spec: { v: 1, id: "husk_charger", name: "Husk Charger", threat: 50, role: "charger", root: { health: { max: 24 } } }, behavior: "charger", inMissions: true }];
+
+    t.ok("store: a clean merge is exactly the file",
+      store.mergeEnemies(file).length === 1 && store.mergeEnemies(file)[0].origin === "file");
+
+    // An id the file does not have is an ADDITION; one it does is an EDIT.
+    // Same verb, no category — which is the point of E6.
+    store.saveEnemy(store.makeRecord(spec, { inMissions: false }));
+    const merged = store.mergeEnemies(file);
+    t.eq("store: an unknown id appends", merged.length, 2);
+    t.eq("store: as an addition", merged[1].origin, "added");
+    t.ok("store: its hint is seeded from its role", merged[1].behavior === "shooter");
+
+    const edited = structuredClone(file[0]);
+    edited.spec.threat = 999;
+    store.saveEnemy(edited);
+    t.eq("store: a file id replaces in place", store.mergeEnemies(file)[0].spec.threat, 999);
+    t.eq("store: and is marked edited", store.mergeEnemies(file)[0].origin, "edited");
+    t.eq("store: without growing the list", store.mergeEnemies(file).length, 2);
+
+    // The flag is separate from the record, so flipping the switch on an
+    // untouched entry must not make it read as edited.
+    store.revertEnemy("husk_charger");
+    store.setInMissions("husk_charger", false);
+    t.eq("store: a flag alone leaves the entry unedited", store.mergeEnemies(file)[0].origin, "file");
+    t.eq("store: but overrides its in-missions default", store.mergeEnemies(file)[0].inMissions, false);
+
+    // A tombstone drops a file entry; revert takes it back.
+    store.removeEnemy("husk_charger");
+    t.ok("store: a tombstone drops the file entry",
+      !store.mergeEnemies(file).some((r) => r.spec.id === "husk_charger"));
+    store.revertEnemy("husk_charger");
+    t.ok("store: revert restores it", store.mergeEnemies(file)[0].origin === "file");
+
+    store.clearEnemyDeltas();
+    t.eq("store: cleared is the file again", store.mergeEnemies(file).length, 1);
+  }
+
+  // ---- E4's stores are migrated once (approximation 16) ----
+  {
+    const { stubLocalStorage } = await import("./harness.mjs");
+    const outer = globalThis.localStorage;
+    globalThis.localStorage = stubLocalStorage();
+    localStorage.setItem("sidescroller.enemyroster.v1", JSON.stringify({
+      specs: [{ v: 1, id: "scrap_hound", name: "Scrap Hound", threat: 45, role: "charger", root: {} }],
+      off: { husk_charger: true },
+    }));
+    localStorage.setItem("sidescroller.enemyspecs.v1", JSON.stringify([
+      { v: 1, id: "shelf_thing", name: "Shelf Thing", threat: 30, role: "fodder", root: {} },
+    ]));
+    const st = await import("../src/game/enemystore.js?migrate=1");
+    const d = st.readDeltas();
+    t.ok("migrate: an admitted roster enemy becomes a record", !!d.records.scrap_hound);
+    t.eq("migrate: carrying its enable flag", d.flags.scrap_hound, true);
+    t.ok("migrate: a library enemy becomes a record too", !!d.records.shelf_thing);
+    t.eq("migrate: switched OFF, because it was never placeable", d.flags.shelf_thing, false);
+    t.eq("migrate: a disabled built-in survives as a flag", d.flags.husk_charger, false);
+    // Migration runs ONCE: a deleted entry must not come back on the next read.
+    st.removeEnemy("scrap_hound");
+    t.ok("migrate: and does not run again", !st.readDeltas().records.scrap_hound);
+    globalThis.localStorage = outer;
+  }
 
   // ---- guarded without localStorage ----
   const saved = globalThis.localStorage;
@@ -71,22 +128,22 @@ export default async function run(t) {
   t.ok("loadMission: unknown type falls back to a built-in", m.specRoots[2].alive === true);
   t.ok("loadMission: kill loot derives from threat", !!m.specRoots[0].loot && m.specRoots[0].loot.value > 0);
 
-  // ---- loadMission resolves a ROSTER enemy too (E4) ----------------------
-  // The whole point of the roster: a placement carrying a custom id must build
-  // the custom enemy, not fall back to husk_charger.
+  // ---- loadMission resolves an ADDED enemy too (E6) -----------------------
+  // The whole point of the list reaching the game: a placement carrying an id
+  // this browser added must build that enemy, not fall back to the cheapest.
   {
-    const rs = await import("../src/game/rosterspecs.js");
     const es = await import("../src/game/enemyspecs.js");
-    rs.clearRoster();
+    es.resetEnemyList();
     const scrap = { v: 1, id: "scrap_hound", name: "Scrap Hound", threat: 45, role: "charger", tier: 1, intelligence: 1,
       root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [24, 22], color: "#909090" },
         health: { max: 33 }, motion: { type: "chase", speed: 200 }, contact: { damage: 7 } } };
-    t.ok("roster: admitted for the loader", rs.admitSpec(scrap, { reserved: es.BUILTIN_SPEC_IDS, seconds: 2 }).ok);
+    t.ok("loadMission: the enemy is saved", es.saveEnemyToList(scrap).ok);
+    t.ok("loadMission: and switched into missions", es.setEnemyEnabled("scrap_hound", true, { seconds: 2 }).ok);
     es.applyEnemyRoster();
     const rl = { ...level, enemies: [{ type: "scrap_hound", x: 500, y: 478 }] };
     const rm = loadMission(rl, []);
-    t.eq("loadMission: a roster placement builds the custom enemy", rm.specRoots[0].maxHealth, 33);
-    t.ok("loadMission: not the fallback built-in", rm.specRoots[0].maxHealth !== 24);
-    rs.clearRoster();
+    t.eq("loadMission: the placement builds the added enemy", rm.specRoots[0].maxHealth, 33);
+    t.ok("loadMission: not the fallback", rm.specRoots[0].maxHealth !== 24);
+    es.resetEnemyList();
   }
 }

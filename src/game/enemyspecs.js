@@ -1,9 +1,21 @@
 // ---------------------------------------------------------------------------
-// BUILT-IN MISSION ENEMIES (EnemySpec) — the production enemy roster that the
-// level generator places into missions. These replaced the legacy flat
-// charger/shooter/turret archetypes (src/mission/ai.js) once EnemySpec was wired
-// into gameplay: every mission enemy is now a spec-driven entity with a real
-// utility/tracks brain, perception, and (for fliers/bosses) composed parts.
+// THE ENEMY LIST — every enemy this build ships, as records the generator and
+// the loader both read. These replaced the legacy flat charger/shooter/turret
+// archetypes (src/mission/ai.js) once EnemySpec was wired into gameplay: every
+// mission enemy is a spec-driven entity with a real utility/tracks brain,
+// perception, and (for fliers/bosses) composed parts.
+//
+// There is NO built-in/custom split (tech/enemy-designer.md, E6). This file is
+// one end of one list; src/game/enemystore.js holds what a browser has changed
+// about it — edits by id, tombstones, additions and the in-missions switch —
+// and mergeEnemies() folds the two in one pass: file → drop tombstones →
+// replace edits → append additions → overlay flags. A clean browser merges to
+// exactly this file, which is what keeps the golden level file frozen.
+//
+// A RECORD is { spec, behavior, inMissions }. `behavior` is the generator's
+// placement hint and is NOT part of the EnemySpec schema — it sits beside the
+// spec so every entry can carry an authored one without the format growing a
+// key. `inMissions` is whether the generator may place it.
 //
 // Kept DELIBERATELY separate from src/game/enemyspec/templates.js — those are
 // authoring fixtures + LLM few-shots + test fixtures; these are balance-tuned
@@ -14,22 +26,19 @@
 // behavior/threat); loadMission resolves a placed `type` back to the normalized
 // spec via missionSpecById and instantiate()s the real runtime tree.
 //
-// THE MERGE (tech/enemy-designer.md, E4) lives here, and only here. This module
-// imports rosterspecs.js — the store of enemies admitted from the Enemy
-// Designer — and nothing imports back, so the store stays ignorant of what a
-// built-in is. missionRoster() filters the built-ins by their enable flag and
-// appends the enabled custom descriptors; applyEnemyRoster() installs their
-// normalized specs into missionSpecById so loadMission can resolve a placement.
-//
-// THE ROSTER IS NEVER EMPTY. Disabling the last enabled entry is refused, and a
-// store that somehow resolves to nothing falls back to the built-ins: with an
-// empty roster fillEnemies computes Math.min(...[]) → Infinity, its
+// THE ROSTER IS NEVER EMPTY. Switching off or deleting the last placeable entry
+// is refused, and a merge that resolves to nothing falls back to this file: with
+// an empty roster fillEnemies computes Math.min(...[]) → Infinity, its
 // guarantee-one-enemy fallback finds no descriptor, and the mission generates
 // with zero enemies. No throw, no error, just an empty level.
 // ---------------------------------------------------------------------------
 
 import { normalizeSpec } from "./enemyspec/normalize.js";
-import { listRosterSpecs, disabledIds, isRosterEnabled, setRosterEnabled } from "./rosterspecs.js";
+import { accept } from "./enemyspec/generate.js";
+import {
+  mergeEnemies, saveEnemy, removeEnemy, setInMissions, makeRecord,
+  revertEnemy as revert, clearEnemyDeltas,
+} from "./enemystore.js";
 
 // Authored (sparse) specs. normalizeSpec fills every default at load. `behavior`
 // is NOT part of the spec schema — it's a generator placement hint (below).
@@ -225,158 +234,271 @@ const IRON_MOTH = {
   },
 };
 
-// Placement hint per spec: "shooter" prefers perches + (if flying) spawns
-// airborne; "charger" prefers the ground and pressures with contact.
-const BEHAVIOR = {
-  husk_charger: "charger",
-  lurk_gunner: "shooter",
-  spore_wisp: "shooter",
-  strafe_raider: "shooter",
-  cowardly_duelist: "charger",
-  sky_duelist: "shooter",
-  iron_moth: "shooter",
-};
 
-// The normal (non-boss) generation roster and the boss, as raw authored specs.
-export const MISSION_ENEMY_SPECS = [
-  HUSK_CHARGER, LURK_GUNNER, SPORE_WISP, STRAFE_RAIDER, COWARD_DUELIST, SKY_DUELIST,
+// ---- the file's end of the list -------------------------------------------
+// `behavior` is the generator's placement hint: "shooter" prefers perches +
+// (if flying) spawns airborne; "charger" prefers the ground and pressures with
+// contact; "turret" is stationary. Authored per enemy — nothing derives it.
+const rec = (spec, behavior) => ({ spec, behavior, inMissions: true });
+
+export const ENEMY_FILE = [
+  rec(HUSK_CHARGER, "charger"),
+  rec(LURK_GUNNER, "shooter"),
+  rec(SPORE_WISP, "shooter"),
+  rec(STRAFE_RAIDER, "shooter"),
+  rec(COWARD_DUELIST, "charger"),
+  rec(SKY_DUELIST, "shooter"),
+  rec(IRON_MOTH, "shooter"),
 ];
+
+const FILE_NORMAL = ENEMY_FILE.filter((r) => r.spec.role !== "boss");
+const FILE_BOSSES = ENEMY_FILE.filter((r) => r.spec.role === "boss");
+
+// The file's specs, unwrapped. These are FIXTURES as much as content —
+// test/audio.test.mjs and test/locomotion-characterization.test.mjs read them
+// to assert that every shipped enemy validates, sounds and moves. They read the
+// FILE, never the merge: a fixture that changes when the browser does is not a
+// fixture.
+export const MISSION_ENEMY_SPECS = FILE_NORMAL.map((r) => r.spec);
 export const MISSION_BOSS_SPEC = IRON_MOTH;
 
-// The ids nothing else may claim. customcontent.js takes this as the library's
-// reserved set so a saved "Husk Charger" cannot slug to `husk_charger` and
-// shadow the built-in once the maps merge.
-export const BUILTIN_SPEC_IDS = [...MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC].map((s) => s.id);
-
-// Normalized-by-id, for the loader (loadMission) — includes the boss, and
-// (after applyEnemyRoster) every enabled custom enemy. Mutated in place, never
-// replaced: entities.js holds this exact reference.
+// Normalized-by-id, for the loader (loadMission). Mutated in place, never
+// replaced: entities.js holds this exact reference. Kept in step with the merge
+// eagerly by applyEnemyRoster() and lazily by missionRoster().
 export const missionSpecById = Object.fromEntries(
-  [...MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC].map((s) => [s.id, normalizeSpec(s)])
+  ENEMY_FILE.map((r) => [r.spec.id, normalizeSpec(r.spec)])
 );
+
+// Which spec object each entry in missionSpecById was normalized FROM, so a
+// merge that returns the same objects (the common case — a clean store) does
+// not re-normalize the whole list on every generateLevel call.
+const installedFrom = Object.fromEntries(ENEMY_FILE.map((r) => [r.spec.id, r.spec]));
+
+// The dry run an enemy must survive to be placed in missions (E6a). Longer than
+// the Designer's 4-second Save gate: a mission is a harsher place than the
+// editor, and a spec that only misbehaves after its first cooldown cycle should
+// not reach one. Longer, not more realistic — approximation 5.
+export const MISSION_DRYRUN_SECONDS = 12;
 
 // True when a normalized spec's body floats (spawned airborne, not feet-down).
 export function specIsFlying(nspec) {
   return nspec && nspec.root && nspec.root.body && nspec.root.body.gravity === 0;
 }
 
-// A custom enemy's placement hint, derived from its role (approximation 6 —
-// the derivation is lossy, and the built-ins prove role does not determine it:
-// cowardly_duelist and sky_duelist are both `elite` and get different hints).
-// BEHAVIOR stays the authority for the seven built-ins.
-const ROLE_BEHAVIOR = {
-  fodder: "charger", charger: "charger", tank: "charger", elite: "charger",
-  skirmisher: "shooter", artillery: "shooter", support: "shooter", boss: "shooter",
-};
+// ---- the merged list ------------------------------------------------------
 
-// A generator roster descriptor: the flat fields fillEnemies + enemyThreat read.
-function descriptorFor(spec) {
-  const n = missionSpecById[spec.id] || installSpec(spec);
-  const motion = (n.root && n.root.motion) || {};
-  const speed = motion.speed ?? motion.driftSpeed ?? 100;
-  return {
-    id: spec.id,
-    name: spec.name || spec.id,
-    w: n.root.body.w,
-    h: n.root.body.h,
-    speed,
-    behavior: BEHAVIOR[spec.id] || ROLE_BEHAVIOR[spec.role] || "shooter",
-    threat: spec.threat ?? 50,
-    isSpec: true,
-  };
+/**
+ * Every enemy this browser has, file and local alike, in list order.
+ * @returns {Array<{spec, behavior, inMissions, origin:"file"|"edited"|"added"}>}
+ */
+export function enemyList() {
+  return mergeEnemies(ENEMY_FILE);
 }
 
-// ---- the roster merge -----------------------------------------------------
+/** One row per enemy, flat, for the editor's lists. */
+export function enemyEntries() {
+  return enemyList().map((r) => ({
+    id: r.spec.id,
+    name: r.spec.name || r.spec.id,
+    role: r.spec.role || "?",
+    threat: r.spec.threat ?? 50,
+    behavior: r.behavior,
+    inMissions: r.inMissions,
+    origin: r.origin,
+    boss: r.spec.role === "boss",
+  }));
+}
 
-// Normalize a custom spec into missionSpecById. Called eagerly by
-// applyEnemyRoster() and lazily by descriptorFor(), so a roster read can never
-// outrun the map the loader resolves through.
+export function enemyRecord(id) {
+  return enemyList().find((r) => r.spec.id === id) || null;
+}
+
+// Normalize a spec into missionSpecById, reusing the last result when the spec
+// object has not changed. A spec that will NOT normalize (an older schema, a
+// hand-edited store) drops out of the roster instead of taking the generator
+// down with it — fallback discipline.
 function installSpec(spec) {
+  if (installedFrom[spec.id] === spec && missionSpecById[spec.id]) return missionSpecById[spec.id];
   try {
     missionSpecById[spec.id] = normalizeSpec(spec);
+    installedFrom[spec.id] = spec;
   } catch {
-    // Fallback discipline: a stored spec that will not normalize (an older
-    // schema, a hand-edited store) drops out of the roster instead of taking
-    // the generator down with it.
     return null;
   }
   return missionSpecById[spec.id];
 }
 
+// Drop anything the loader can no longer be asked for — a tombstoned file
+// entry, an enemy switched out of missions.
+function prune(records) {
+  const keep = new Set(records.map((r) => r.spec.id));
+  for (const id of Object.keys(missionSpecById)) {
+    if (keep.has(id)) continue;
+    delete missionSpecById[id];
+    delete installedFrom[id];
+  }
+  return keep;
+}
+
+// What the generator may place, split by slot, with both never-empty floors
+// applied. Installing here is what keeps missionSpecById in step with the merge
+// without a second pass over the list.
+function placeableRecords() {
+  const live = enemyList().filter((r) => r.inMissions && installSpec(r.spec));
+  let normal = live.filter((r) => r.spec.role !== "boss");
+  let bosses = live.filter((r) => r.spec.role === "boss");
+  if (!normal.length) normal = FILE_NORMAL.filter((r) => installSpec(r.spec));
+  if (!bosses.length) bosses = FILE_BOSSES.filter((r) => installSpec(r.spec));
+  prune([...normal, ...bosses]);
+  return { normal, bosses };
+}
+
+// A generator roster descriptor: the flat fields fillEnemies + enemyThreat read.
+function descriptorFor(r) {
+  const n = missionSpecById[r.spec.id];
+  const motion = (n.root && n.root.motion) || {};
+  return {
+    id: r.spec.id,
+    name: r.spec.name || r.spec.id,
+    w: n.root.body.w,
+    h: n.root.body.h,
+    speed: motion.speed ?? motion.driftSpeed ?? 100,
+    behavior: r.behavior,
+    threat: r.spec.threat ?? 50,
+    isSpec: true,
+  };
+}
+
 /**
- * Install every ENABLED custom enemy into missionSpecById.
+ * The roster the generator places against. `{ boss:true }` appends the boss
+ * slot so a boss lead's "toughest roster enemy" framing selects it — and
+ * `role:"boss"` is what keeps an entry OUT of an ordinary mission, whether the
+ * file ships it or this browser wrote it.
+ */
+export function missionRoster({ boss = false } = {}) {
+  const { normal, bosses } = placeableRecords();
+  return (boss ? [...normal, ...bosses] : normal).map(descriptorFor);
+}
+
+/**
+ * Bring missionSpecById in line with the merge.
  *
  * Called explicitly (not as an import side effect) from BOTH pages, mirroring
  * applyWeaponOverrides(): the game's createState() and the editor's boot. The
  * editor needs its own call because the Level Generator previews placements
  * without ever building a state. Idempotent.
  *
- * @returns {string[]} the ids installed
+ * @returns {string[]} the ids the loader can now resolve
  */
 export function applyEnemyRoster() {
-  const off = disabledIds();
-  const ids = [];
-  for (const spec of listRosterSpecs()) {
-    if (off.has(spec.id)) continue;
-    if (installSpec(spec)) ids.push(spec.id);
-  }
-  return ids;
-}
-
-/** Every custom enemy's spec that is currently switched on. */
-function enabledCustomSpecs() {
-  const off = disabledIds();
-  return listRosterSpecs().filter((s) => !off.has(s.id) && installSpec(s));
-}
-
-// Roster the generator places against. { boss:true } appends the boss so a boss
-// lead's "toughest roster enemy" framing selects it — and a custom enemy whose
-// role is `boss` is treated the same way, so a 320-threat monster cannot wander
-// into a recon mission.
-export function missionRoster({ boss = false } = {}) {
-  const off = disabledIds();
-  const builtins = MISSION_ENEMY_SPECS.filter((s) => !off.has(s.id));
-  const custom = enabledCustomSpecs();
-  const normal = [...builtins, ...custom.filter((s) => s.role !== "boss")];
-  const bosses = [MISSION_BOSS_SPEC, ...custom.filter((s) => s.role === "boss")]
-    .filter((s) => !off.has(s.id));
-
-  const specs = boss ? [...normal, ...(bosses.length ? bosses : [MISSION_BOSS_SPEC])] : normal;
-  // Never empty: an all-disabled store would generate missions with zero
-  // enemies rather than failing loudly, which is the exact failure fallback
-  // discipline exists to prevent.
-  if (!specs.length) return MISSION_ENEMY_SPECS.map(descriptorFor);
-  return specs.map(descriptorFor);
+  const { normal, bosses } = placeableRecords();
+  return [...normal, ...bosses].map((r) => r.spec.id);
 }
 
 /**
- * Every roster entry, built-in and custom, for the Designer's enable list.
- * @returns {Array<{id, name, role, threat, source:"built-in"|"custom", enabled, boss:boolean}>}
+ * The spec loadMission falls back to when a placement names something this
+ * browser no longer has. The cheapest placeable enemy, because a level that
+ * lost an enemy should not gain a harder one (approximation 5).
  */
-export function rosterEntries() {
-  const off = disabledIds();
-  const row = (s, source) => ({
-    id: s.id, name: s.name || s.id, role: s.role || "?", threat: s.threat ?? 50,
-    source, enabled: !off.has(s.id), boss: s.role === "boss",
-  });
-  return [
-    ...MISSION_ENEMY_SPECS.map((s) => row(s, "built-in")),
-    row(MISSION_BOSS_SPEC, "built-in"),
-    ...listRosterSpecs().map((s) => row(s, "custom")),
-  ];
+export function cheapestMissionSpec() {
+  const { normal } = placeableRecords();
+  let best = null;
+  for (const r of normal) {
+    const n = missionSpecById[r.spec.id];
+    if (n && (!best || (n.threat ?? 50) < (best.threat ?? 50))) best = n;
+  }
+  return best || normalizeSpec(ENEMY_FILE[0].spec);
+}
+
+// ---- writes ---------------------------------------------------------------
+// The list's rules live here, on the file's side of the one-way import: the
+// store takes raw writes and knows nothing about bosses or emptiness.
+
+// Why an entry cannot leave the mission roster, or "" if it can.
+function wouldStrand(list, rec) {
+  const others = list.filter((r) => r.inMissions && r.spec.id !== rec.spec.id);
+  if (rec.spec.role === "boss") {
+    if (!others.some((r) => r.spec.role === "boss")) {
+      return "this is the last boss — the finale needs one";
+    }
+    return "";
+  }
+  if (!others.some((r) => r.spec.role !== "boss")) {
+    return "the roster cannot be empty — put another enemy in missions first";
+  }
+  return "";
 }
 
 /**
- * Flip one entry on or off. Turning the LAST enabled non-boss entry off is
- * refused: the generator places against that list, and an empty one produces a
- * mission with no enemies in it.
- * @returns {{ok:true, id, enabled} | {ok:false, error:string}}
+ * Write an enemy into this browser's list — an edit if the file ships that id,
+ * an addition if it does not. A NEW enemy arrives out of missions: the switch,
+ * not Save, is the mission gate.
+ * @returns {{ok:true, id, added:boolean} | {ok:false, error:string}}
  */
-export function setEnemyEnabled(id, on) {
-  if (!on) {
-    const left = rosterEntries().filter((e) => e.enabled && !e.boss && e.id !== id);
-    if (!left.length) return { ok: false, error: "the roster cannot be empty — enable another enemy first" };
-  }
-  setRosterEnabled(id, !!on);
-  return { ok: true, id, enabled: isRosterEnabled(id) };
+export function saveEnemyToList(spec, { behavior, inMissions } = {}) {
+  if (!spec || typeof spec.id !== "string" || !spec.id) return { ok: false, error: "an enemy needs an id" };
+  const existing = enemyRecord(spec.id);
+  const res = saveEnemy(makeRecord(spec, {
+    behavior: behavior ?? (existing ? existing.behavior : undefined),
+    inMissions: inMissions ?? (existing ? existing.inMissions : false),
+  }));
+  if (!res.ok) return res;
+  applyEnemyRoster();
+  return { ok: true, id: res.id, added: !existing };
 }
+
+/** Drop an enemy from this browser's list. Refused if it would strand a slot. */
+export function deleteEnemy(id) {
+  const list = enemyList();
+  const rec = list.find((r) => r.spec.id === id);
+  if (!rec) return { ok: false, error: `no enemy called '${id}'` };
+  if (rec.inMissions) {
+    const err = wouldStrand(list, rec);
+    if (err) return { ok: false, error: err };
+  } else if (rec.spec.role === "boss" && !list.some((r) => r.spec.role === "boss" && r.spec.id !== id)) {
+    return { ok: false, error: "this is the last boss — the finale needs one" };
+  }
+  removeEnemy(id);
+  applyEnemyRoster();
+  return { ok: true, id };
+}
+
+/**
+ * Flip one enemy in or out of generated missions.
+ *
+ * Turning it ON re-runs the acceptance pipeline at mission length (E6a) — this
+ * is the only gate between an enemy and a real mission. Turning it OFF is
+ * refused when it would leave the generator nothing to place, or the finale no
+ * boss.
+ * @returns {{ok:true, id, enabled} | {ok:false, error:string, errors?:string[]}}
+ */
+export function setEnemyEnabled(id, on, { seconds = MISSION_DRYRUN_SECONDS } = {}) {
+  const list = enemyList();
+  const rec = list.find((r) => r.spec.id === id);
+  if (!rec) return { ok: false, error: `no enemy called '${id}'` };
+  if (on) {
+    const res = accept(rec.spec, { seconds });
+    if (!res.ok) return { ok: false, error: res.errors[0], errors: res.errors };
+  } else {
+    const err = wouldStrand(list, rec);
+    if (err) return { ok: false, error: err };
+  }
+  setInMissions(id, !!on);
+  applyEnemyRoster();
+  return { ok: true, id, enabled: !!on };
+}
+
+/** Drop this browser's edit or tombstone for one id — the file's version wins. */
+export function revertEnemy(id) {
+  const res = revert(id);
+  applyEnemyRoster();
+  return res;
+}
+
+/** Undo everything this browser did to the list. */
+export function resetEnemyList() {
+  clearEnemyDeltas();
+  applyEnemyRoster();
+}
+
+export { PLACEMENTS, seedBehavior } from "./enemystore.js";

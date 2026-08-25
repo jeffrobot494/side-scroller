@@ -9,7 +9,7 @@
 
 import { config } from "../game/config.js";
 import { soldierMaxHp } from "../game/soldiers.js";
-import { missionSpecById, specIsFlying } from "../game/enemyspecs.js";
+import { missionSpecById, specIsFlying, cheapestMissionSpec } from "../game/enemyspecs.js";
 import { instantiate as instantiateSpec, collidables } from "./enemyspec/runtime.js";
 import { weaponSound } from "../audio/cues.js";
 
@@ -313,12 +313,13 @@ export function loadMission(level, squad) {
   );
 
   // Every mission enemy is an EnemySpec instance. A placement { type, x, y }
-  // resolves to a built-in spec (missionSpecById); an unknown type falls back to
-  // the cheapest built-in so a bad level still spawns something (fallback
-  // discipline). Each root carries `loot` (value derived from its threat) for
+  // resolves through missionSpecById; a type this browser no longer has (an
+  // enemy deleted or switched out of missions since the level was generated)
+  // falls back to the cheapest placeable one so a bad level still spawns
+  // something (fallback discipline). Each root carries `loot` (value derived from its threat) for
   // the drop on death; the flat damageable parts feed scene.enemies.
   const specRoots = level.enemies.map((e) => {
-    const nspec = missionSpecById[e.type] || missionSpecById.husk_charger;
+    const nspec = missionSpecById[e.type] || cheapestMissionSpec();
     const y = specIsFlying(nspec) ? Math.max(24, e.y - FLY_ALTITUDE) : e.y;
     const root = instantiateSpec(nspec, e.x, y);
     root.loot = {

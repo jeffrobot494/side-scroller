@@ -72,9 +72,11 @@ import { normalizeSpec } from "../../game/enemyspec/normalize.js";
 import { TEMPLATES, TEMPLATE_BY_ID } from "../../game/enemyspec/templates.js";
 import { chatEnemySpec, composeChat, accept } from "../../game/enemyspec/generate.js";
 import { diffSpecs, summarize } from "../../game/enemyspec/specdiff.js";
-import { listEnemySpecs, saveEnemySpec, deleteEnemySpec, listCustomWeapons } from "../../game/customcontent.js";
-import { admitSpec, removeRosterSpec, rosterSpec, ROSTER_DRYRUN_SECONDS } from "../../game/rosterspecs.js";
-import { rosterEntries, setEnemyEnabled, applyEnemyRoster, BUILTIN_SPEC_IDS } from "../../game/enemyspecs.js";
+import { listCustomWeapons } from "../../game/customcontent.js";
+import {
+  enemyEntries, enemyRecord, saveEnemyToList, deleteEnemy, revertEnemy,
+  setEnemyEnabled, applyEnemyRoster, MISSION_DRYRUN_SECONDS,
+} from "../../game/enemyspecs.js";
 import { resolveId } from "./weapon-designer.js";
 import { ARSENAL } from "../../game/arsenal.js";
 import { Soldier, stepActor, startReload, tickReload } from "../../mission/entities.js";
@@ -192,23 +194,15 @@ export function createEnemyDesigner(container, onBack) {
           <div class="wd-verdict" id="es-verdict"></div>
           <div class="wd-export">
             <div class="wd-export-btns">
-              <button class="btn" data-es="save">Save to library</button>
+              <button class="btn" data-es="save">Save</button>
               <button class="btn btn-alt" data-es="copy">Copy JSON</button>
             </div>
             <span class="ed-msg" id="es-msg"></span>
           </div>
-          <div class="wd-saved">
-            <h3 class="wd-h">Enemy library</h3>
-            <p class="wd-saved-note">Saved to this browser. The Firing Room lists these under “Enemy” — fight them there. Export JSON to make one permanent.</p>
-            <div class="wd-saved-list" id="es-saved"></div>
-          </div>
           <div class="wd-saved es-roster">
-            <h3 class="wd-h">Mission roster</h3>
-            <p class="wd-saved-note">What the level generator is allowed to place. Admission is stricter than Save: a declared threat cost plus a ${ROSTER_DRYRUN_SECONDS}-second dry run. Built-ins can be switched off one at a time, but the roster can never be emptied. <strong>Reload the game page</strong> to see a change in missions.</p>
-            <div class="es-rosterbar">
-              <button class="btn" data-es="admit">＋ Put this enemy in missions</button>
-              <span class="ed-msg" id="es-rostermsg"></span>
-            </div>
+            <h3 class="wd-h">Enemies</h3>
+            <p class="wd-saved-note">One list — what this build ships plus whatever you have added. The switch is what puts an enemy in generated missions: flipping it on runs a ${MISSION_DRYRUN_SECONDS}-second dry run, and the roster can never be emptied. <strong>Reload the game page</strong> to see a change in missions.</p>
+            <span class="ed-msg" id="es-rostermsg"></span>
             <div class="wd-saved-list" id="es-rosterlist"></div>
           </div>
         </div>
@@ -864,33 +858,22 @@ export function createEnemyDesigner(container, onBack) {
     return typeof em.sound === "string" ? em.sound : (em.sound && em.sound.cue) || "";
   }
 
-  // ---- library ------------------------------------------------------------
-  function renderSaved() {
-    const saved = listEnemySpecs();
-    $("#es-saved").innerHTML = saved.length
-      ? saved.map((s) => `
-          <div class="wd-saved-row" data-id="${s.id}">
-            <span class="wd-saved-name">${escapeHtml(s.name || s.id)}</span>
-            <span class="wd-saved-budget">${escapeHtml(s.role || "?")} · t${s.tier ?? 1} · int ${s.intelligence ?? "—"} · ${s.threat ?? "—"}</span>
-            <button class="btn btn-ghost" data-es="load-saved" data-id="${s.id}">Load</button>
-            <button class="wd-fx-x" data-es="del-saved" data-id="${s.id}" title="Delete">×</button>
-          </div>`).join("")
-      : `<p class="wd-empty">No saved enemies yet — build one and Save.</p>`;
-  }
+  // ---- the enemy list (E6) ------------------------------------------------
+  // ONE list. `origin` is how an entry got here, not a category it belongs to:
+  // every row takes the same verbs.
+  const ORIGIN = { file: "", edited: " \u00b7 edited", added: " \u00b7 new" };
 
-  // ---- the mission roster (E4) -------------------------------------------
   function renderRoster() {
     const el = $("#es-rosterlist");
     if (!el) return;
-    el.innerHTML = rosterEntries().map((e) => `
-      <div class="wd-saved-row es-rrow${e.enabled ? "" : " off"}" data-id="${escapeHtml(e.id)}">
-        <button type="button" role="switch" class="toggle${e.enabled ? " on" : ""}" data-esrost="${escapeHtml(e.id)}" title="${e.enabled ? "Placed in generated missions" : "Never placed"}"><span class="knob"></span></button>
+    el.innerHTML = enemyEntries().map((e) => `
+      <div class="wd-saved-row es-rrow${e.inMissions ? "" : " off"}" data-id="${escapeHtml(e.id)}">
+        <button type="button" role="switch" class="toggle${e.inMissions ? " on" : ""}" data-esrost="${escapeHtml(e.id)}" title="${e.inMissions ? "Placed in generated missions" : "Never placed"}"><span class="knob"></span></button>
         <span class="wd-saved-name">${escapeHtml(e.name)}</span>
-        <span class="wd-saved-budget">${escapeHtml(e.source)} · ${escapeHtml(e.role)} · ${e.threat}${e.boss ? " · boss" : ""}</span>
-        ${e.source === "custom"
-          ? `<button class="btn btn-ghost" data-es="rost-load" data-id="${escapeHtml(e.id)}">Load</button>
-             <button class="wd-fx-x" data-es="rost-del" data-id="${escapeHtml(e.id)}" title="Remove from missions">×</button>`
-          : ""}
+        <span class="wd-saved-budget">${escapeHtml(e.role)} \u00b7 ${e.threat} \u00b7 ${escapeHtml(e.behavior)}${e.boss ? " \u00b7 boss" : ""}${ORIGIN[e.origin] || ""}</span>
+        <button class="btn btn-ghost" data-es="load-enemy" data-id="${escapeHtml(e.id)}">Load</button>
+        ${e.origin === "edited" ? `<button class="btn btn-ghost" data-es="revert-enemy" data-id="${escapeHtml(e.id)}" title="Drop my changes and take the shipped version">\u21ba</button>` : ""}
+        <button class="wd-fx-x" data-es="del-enemy" data-id="${escapeHtml(e.id)}" title="Delete">\u00d7</button>
       </div>`).join("");
   }
 
@@ -901,26 +884,12 @@ export function createEnemyDesigner(container, onBack) {
     el.className = "ed-msg" + (cls ? " " + cls : "");
   }
 
-  // Admission runs the SAME accept() gate as Save, only longer, plus the
-  // threat requirement the generator's budget depends on.
-  function admitCurrent() {
-    const res = admitSpec(spec, { reserved: BUILTIN_SPEC_IDS });
-    if (!res.ok) {
-      rosterMsg(`Not admitted — ${res.errors[0]}`, "bad");
-      return res;
-    }
-    applyEnemyRoster(); // this page's Level Generator resolves through the same map
-    rosterMsg(res.replaced
-      ? `Updated "${res.id}" in the roster. Reload the game to see it.`
-      : `"${res.id}" will now appear in generated missions. Reload the game to see it.`, "ok");
-    renderRoster();
-    return res;
-  }
-
-  function toggleRoster(id, on) {
-    const res = setEnemyEnabled(id, on);
+  // The mission gate (E6a). Turning an enemy ON re-runs the acceptance pipeline
+  // at mission length; turning one off can be refused for stranding a slot.
+  function toggleRoster(id, on, opts) {
+    const res = setEnemyEnabled(id, on, opts);
     rosterMsg(res.ok ? "" : res.error, res.ok ? "" : "bad");
-    if (res.ok) applyEnemyRoster();
+    if (res.ok) applyEnemyRoster(); // this page's Level Generator resolves through the same map
     renderRoster();
     return res;
   }
@@ -931,12 +900,18 @@ export function createEnemyDesigner(container, onBack) {
     if (!res.ok) {
       msg.textContent = `Not saved — ${res.errors[0]}`;
       msg.className = "ed-msg bad";
-      return;
+      return { ok: false, error: res.errors[0] };
     }
-    const saved = saveEnemySpec(spec);
-    msg.textContent = saved.ok ? `Saved as "${saved.id}" — spawn it in the Firing Room.` : "Save failed.";
+    const saved = saveEnemyToList(spec);
+    if (saved.ok) loadedId = saved.id; // saving pins the id, so the next Save overwrites
+    msg.textContent = !saved.ok
+      ? `Not saved — ${saved.error}`
+      : saved.added
+        ? `Saved as "${saved.id}". Switch it on to put it in missions.`
+        : `Saved "${saved.id}".`;
     msg.className = "ed-msg " + (saved.ok ? "ok" : "bad");
-    renderSaved();
+    renderRoster();
+    return saved;
   }
 
   // ---- Player2 / the conversation ----------------------------------------
@@ -1213,27 +1188,22 @@ export function createEnemyDesigner(container, onBack) {
       case "connect": connectP2(); break;
       case "send": say(($("#es-say") || {}).value); break;
       case "rewind": rewind(Number(el.dataset.v)); break;
-      case "load-saved": {
-        const s = listEnemySpecs().find((x) => x.id === el.dataset.id);
-        if (s) loadSpec(clone(s), `Loaded "${s.name || s.id}" from the library.`, { pin: true });
+      case "load-enemy": {
+        const r = enemyRecord(el.dataset.id);
+        if (r) loadSpec(clone(r.spec), `Loaded "${r.spec.name || r.spec.id}".`, { pin: true });
         break;
       }
-      case "admit": admitCurrent(); break;
-      case "rost-load": {
-        const r = rosterSpec(el.dataset.id);
-        if (r) loadSpec(clone(r), `Loaded "${r.name || r.id}" from the mission roster.`, { pin: true });
-        break;
-      }
-      case "rost-del":
-        removeRosterSpec(el.dataset.id);
-        applyEnemyRoster();
-        rosterMsg(`Removed from the roster. It is still in the library.`, "");
+      case "revert-enemy":
+        revertEnemy(el.dataset.id);
+        rosterMsg("Reverted to the version this build ships.", "");
         renderRoster();
         break;
-      case "del-saved":
-        deleteEnemySpec(el.dataset.id);
-        renderSaved();
+      case "del-enemy": {
+        const res = deleteEnemy(el.dataset.id);
+        rosterMsg(res.ok ? `Deleted "${res.id}".` : res.error, res.ok ? "" : "bad");
+        renderRoster();
         break;
+      }
     }
   });
 
@@ -1452,7 +1422,6 @@ export function createEnemyDesigner(container, onBack) {
 
   checkpoints = [{ version: 0, spec: clone(spec), label: "loaded" }];
   renderRail();
-  renderSaved();
   renderRoster();
   renderKeys();
   renderChat();
@@ -1494,10 +1463,10 @@ export function createEnemyDesigner(container, onBack) {
     version: () => version,
     rewind,
     touched: () => touched,
-    // E4's roster, driven the same way: admit whatever is loaded, flip an
-    // entry, read the list back.
-    admit: admitCurrent,
-    roster: rosterEntries,
+    // E6's one list, driven the same way: save whatever is loaded, flip an
+    // entry in or out of missions, read the list back.
+    save: saveCurrent,
+    roster: enemyEntries,
     toggleRoster,
     load: (next, opts) => loadSpec(next, null, opts),
     // Hold a set of actions for `frames` steps, as the window key handler would

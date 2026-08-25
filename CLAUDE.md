@@ -201,17 +201,27 @@ section + the tests are the source of truth for what currently exists):
   Companions already run it: `config.companionBrain` defaults to `"spec"`
   (`updateCompanionSpec` + `src/game/companionspecs.js`), with the old
   `updateCompanion` kept as the `"legacy"` fallback.
-  **A custom enemy can now reach missions** (`tech/enemy-designer.md` E4):
-  `src/game/rosterspecs.js` is a guarded-localStorage store of admitted specs +
-  per-entry enable flags, and `enemyspecs.js` merges it — `missionRoster()`
-  filters built-ins by flag and appends enabled customs, `applyEnemyRoster()`
-  (called from `createState()` and `editor.js`, like `applyWeaponOverrides()`)
-  installs them into `missionSpecById` for `loadMission`. Admission is stricter
-  than the library Save: a declared `threat`, a pinned id refused on collision
-  with a built-in, and a 12-second dry run. **The roster can never be emptied** —
-  disabling the last entry is refused and an all-off store falls back to the
-  built-ins, because an empty roster generates missions with zero enemies.
-  Admit / enable / disable live in the Enemy Designer's "Mission roster" panel.
+  **There is ONE enemy list, and no "built-in" enemies**
+  (`tech/enemy-designer.md` E4 + E6): `src/game/enemyspecs.js` is the list this
+  build ships, as records `{ spec, behavior, inMissions }` — `behavior` is the
+  generator's placement hint, beside the spec rather than in the EnemySpec
+  format. `src/game/enemystore.js` is a guarded-localStorage DELTA store (edits
+  by id, tombstones, additions, in-missions flags) and `mergeEnemies()` folds
+  the two in one pass: file → drop tombstones → replace edits → append additions
+  → overlay flags. A clean browser merges to exactly the file, which is what
+  `test/levelgen-golden.test.mjs` freezes. Every entry takes every verb — a
+  shipped enemy can be edited, reverted (`↺`), deleted or taken out of missions
+  exactly like one you wrote. `applyEnemyRoster()` (called from `createState()`
+  and `editor.js`, like `applyWeaponOverrides()`) keeps `missionSpecById` in
+  step for `loadMission`, and it now REMOVES ids as well as adding them — which
+  is why `entities.js`'s unknown-placement fallback asks
+  `cheapestMissionSpec()` instead of naming `husk_charger`. **The switch is the
+  mission gate:** Save gates on `accept()` at 4s and leaves a new enemy OUT of
+  missions; flipping it in re-runs the pipeline at 12s. **The roster can never
+  be emptied** — the last placeable entry and the last boss both refuse to
+  switch off or be deleted, and a store that resolves to nothing falls back to
+  the file, because an empty roster generates missions with zero enemies.
+  E4's two localStorage keys are migrated once, on first read.
   **Known issue:** `on.spawn` handlers run from `instantiate()`, which has no
   scene, so `fire`/`spawn`/`sound` there are silently skipped (they used to
   crash). Fix = defer the spawn event to the first update; see "Known issues" in
@@ -287,8 +297,16 @@ Static site — serve the folder and open a page. No bundler, no transpile.
 - `src/game/config.js` — schema-driven settings/tuning. Add a knob = one `SCHEMA`
   entry; the editor auto-generates its control. The live `config` object is read
   by the game; overrides persist to localStorage.
-- `src/game/customcontent.js` — editor-authored weapons/enemies, guarded
-  localStorage; merged into the armory (`createState`) and `loadMission`.
+- `src/game/customcontent.js` — editor-authored weapons + LEGACY flat enemies,
+  guarded localStorage; merged into the armory (`createState`). EnemySpec
+  enemies are NOT here — see the pair below.
+- `src/game/enemyspecs.js` + `src/game/enemystore.js` — the one enemy list: the
+  file's records in the first, this browser's deltas in the second, merged by
+  `mergeEnemies()`. `missionRoster()` feeds the generator, `missionSpecById`
+  feeds `loadMission`, and every policy (the mission dry run, never-empty, the
+  last boss) lives in `enemyspecs.js` because emptiness is a property of the
+  merged list. The import runs one way: the store is passed the file, never
+  imports it.
 - `src/game/controlmap.js` — remappable key bindings + fixed gamepad defaults,
   guarded-localStorage singleton (same pattern as `config.js`). `input.js` and
   the editor's Controls tool read/write it; keys are NOT hardcoded anymore.

@@ -1,6 +1,11 @@
 // ---------------------------------------------------------------------------
 // CUSTOM CONTENT — user-authored weapons and enemies, persisted to localStorage.
 //
+// EnemySpec enemies are NOT here: there is one enemy list (src/game/enemyspecs.js
+// + src/game/enemystore.js) and everything in it takes every verb, so a
+// second-class "library" of enemies the game could not place had nothing left
+// to hold (tech/enemy-designer.md, E6).
+//
 // The editor's GUI tools (Weapon Designer, Enemy Designer) live on a SEPARATE
 // page from the running game with separate module state, so they cannot push
 // into the game's in-memory `state`. Instead they save content-shaped JSON here;
@@ -15,7 +20,6 @@
 // ---------------------------------------------------------------------------
 
 import { WEAPONS, ENEMIES } from "./content.js";
-import { BUILTIN_SPEC_IDS } from "./enemyspecs.js";
 
 const WEAPON_KEY = "sidescroller.weapons.v1";
 const ENEMY_KEY = "sidescroller.enemies.v1";
@@ -108,36 +112,6 @@ export function deleteCustomWeapon(id) {
 
 export function customWeaponMap() {
   return mapOf(readStore(WEAPON_KEY));
-}
-
-// ---- enemy specs (the EnemySpec library) ----------------------------------
-// Composed EnemySpec enemies authored in the new Enemy Designer (manual or
-// LLM-generated). Deliberately a SEPARATE store from the legacy flat enemies
-// above: nothing in loadMission/the game pages reads this yet, so the creation
-// system can evolve without touching missions (tech/enemyspec.md).
-// Specs saved here are validated by the Designer before they land.
-
-const ENEMYSPEC_KEY = "sidescroller.enemyspecs.v1";
-
-export function listEnemySpecs() {
-  return readStore(ENEMYSPEC_KEY);
-}
-
-// Reserved against the BUILT-IN mission specs: E4 merges the library's ids into
-// the same namespace missionSpecById resolves through, so a library entry named
-// "Husk Charger" slugging to `husk_charger` would shadow the built-in. It gets
-// `husk_charger_2` instead. (The roster store pins ids and REFUSES a collision
-// rather than suffixing — a mission enemy must carry the name its author saw.)
-export function saveEnemySpec(spec) {
-  return saveInto(ENEMYSPEC_KEY, spec, BUILTIN_SPEC_IDS, "custom_spec");
-}
-
-export function deleteEnemySpec(id) {
-  return deleteFrom(ENEMYSPEC_KEY, id);
-}
-
-export function enemySpecMap() {
-  return mapOf(readStore(ENEMYSPEC_KEY));
 }
 
 // ---- enemies --------------------------------------------------------------

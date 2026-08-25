@@ -209,47 +209,53 @@ export default async function run(t) {
     ed.dispose();
   }
 
-  // ---- Enemy Designer: the mission roster (E4) ----------------------------
-  // The store and the merge are unit-tested in gen.test.mjs; what belongs HERE
-  // is the tool's half — that Admit gates on the same pipeline Save does, that
-  // a refusal is reported, that loading a roster entry PINS its id so re-admitting
-  // updates it instead of minting a second enemy, and that the enable list
-  // covers built-ins.
+  // ---- Enemy Designer: the one enemy list (E6) ----------------------------
+  // The store and the merge are unit-tested in content.test.mjs and
+  // gen.test.mjs; what belongs HERE is the tool's half — that Save gates on the
+  // acceptance pipeline, that the switch is what reaches missions and reports a
+  // refusal, that loading an entry PINS its id so re-saving updates it instead
+  // of minting a second enemy, and that the list covers what the build ships.
   {
     installDom();
-    const rs = await import("../src/game/rosterspecs.js");
     const es = await import("../src/game/enemyspecs.js");
-    rs.clearRoster();
+    es.resetEnemyList();
 
     const ed = createEnemyDesigner(makeEl(), () => {});
-    t.eq("enemy-designer: the roster list opens on the built-ins", ed.roster().length, 7);
-    t.ok("enemy-designer: all of them enabled", ed.roster().every((e) => e.enabled));
+    t.eq("enemy-designer: the list opens on what the build ships", ed.roster().length, 7);
+    t.ok("enemy-designer: all of them from the file", ed.roster().every((e) => e.origin === "file"));
+    t.ok("enemy-designer: and all of them in missions", ed.roster().every((e) => e.inMissions));
 
-    // The mounted template does not declare a threat cost the generator can
-    // budget on, so it cannot be admitted — the gate the roster adds over Save.
-    ed.load({ v: 1, id: "no_cost", name: "No Cost", role: "charger", tier: 1,
+    // Save gates on accept() — a spec the engine rejects never lands.
+    ed.load({ v: 1, id: "bad_thing", name: "Bad Thing", threat: 40, role: "charger", tier: 1,
       root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [20, 20], color: "#888" },
-        health: { max: 10 }, motion: { type: "chase", speed: 200 }, contact: { damage: 5 } } });
-    t.ok("enemy-designer: admitting a spec with no threat is refused",
-      !ed.admit().ok && ed.roster().length === 7);
+        health: { max: 10 }, motion: { type: "no_such_motion" }, contact: { damage: 5 } } });
+    t.ok("enemy-designer: saving a spec the engine rejects is refused",
+      !ed.save().ok && ed.roster().length === 7);
 
     const hound = { v: 1, id: "scrap_hound", name: "Scrap Hound", threat: 45, role: "charger", tier: 1, intelligence: 1,
       root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [24, 22], color: "#909090" },
         health: { max: 33 }, motion: { type: "chase", speed: 200 }, contact: { damage: 7 } } };
     ed.load(hound, { pin: true });
-    const admitted = ed.admit();
-    t.ok("enemy-designer: a complete enemy is admitted", admitted.ok && admitted.id === "scrap_hound");
-    t.eq("enemy-designer: and joins the list as custom", ed.roster().filter((e) => e.source === "custom").length, 1);
+    const saved = ed.save();
+    t.ok("enemy-designer: a complete enemy is saved", saved.ok && saved.id === "scrap_hound" && saved.added);
+    t.eq("enemy-designer: and joins the list", ed.roster().length, 8);
+    // E6a: Save is not the mission gate. The switch is.
+    t.ok("enemy-designer: but not in missions until it is switched on",
+      ed.roster().find((e) => e.id === "scrap_hound").inMissions === false);
+    t.ok("enemy-designer: switching it on passes the mission dry run",
+      ed.toggleRoster("scrap_hound", true, { seconds: 2 }).ok);
+    t.ok("enemy-designer: which the list reflects",
+      ed.roster().find((e) => e.id === "scrap_hound").inMissions === true);
 
-    // Id pinning: renaming a LOADED entry must not mint a second roster enemy.
+    // Id pinning: renaming a SAVED entry must not mint a second enemy.
     // The id is re-derived on every edit, so an op is what exercises it.
     ed.specNow().name = "Scrap Hound Mk II";
     ed.select("root");
     ed.op("add", "child");
-    t.eq("enemy-designer: a loaded entry keeps its id when renamed", ed.specNow().id, "scrap_hound");
-    const again = ed.admit();
-    t.ok("enemy-designer: re-admitting a renamed entry updates it", again.ok && again.replaced);
-    t.eq("enemy-designer: so there is still one custom enemy", ed.roster().filter((e) => e.source === "custom").length, 1);
+    t.eq("enemy-designer: a saved entry keeps its id when renamed", ed.specNow().id, "scrap_hound");
+    const again = ed.save();
+    t.ok("enemy-designer: re-saving a renamed entry updates it", again.ok && !again.added);
+    t.eq("enemy-designer: so there is still one added enemy", ed.roster().length, 8);
 
     // …but an UNPINNED spec (a template, a chat landing) still follows its name,
     // or a fresh design would be stuck with the template's id.
@@ -258,26 +264,28 @@ export default async function run(t) {
     ed.op("add", "child");
     t.eq("enemy-designer: an unloaded spec's id follows its name", ed.specNow().id, "fresh_thing");
 
-    // The enable list covers built-ins, and cannot be emptied.
-    t.ok("enemy-designer: a built-in can be switched off", ed.toggleRoster("husk_charger", false).ok);
-    t.ok("enemy-designer: which the list reflects", ed.roster().find((e) => e.id === "husk_charger").enabled === false);
-    for (const e of ed.roster()) if (e.enabled && !e.boss && e.id !== "scrap_hound") ed.toggleRoster(e.id, false);
+    // The switch covers what the build ships, and cannot empty the roster.
+    t.ok("enemy-designer: a shipped enemy can be switched off", ed.toggleRoster("husk_charger", false).ok);
+    t.ok("enemy-designer: which the list reflects", ed.roster().find((e) => e.id === "husk_charger").inMissions === false);
+    for (const e of ed.roster()) if (e.inMissions && !e.boss && e.id !== "scrap_hound") ed.toggleRoster(e.id, false);
     const refusedOff = ed.toggleRoster("scrap_hound", false);
     t.ok("enemy-designer: emptying the roster is refused, with a reason", !refusedOff.ok && !!refusedOff.error);
+    const refusedBoss = ed.toggleRoster("iron_moth", false);
+    t.ok("enemy-designer: and so is switching off the last boss", !refusedBoss.ok && !!refusedBoss.error);
 
     ed.dispose();
-    rs.clearRoster();
-    es.applyEnemyRoster();
+    es.resetEnemyList();
   }
 
-  // With a saved EnemySpec in the library, both tools still mount (the Firing
-  // Room renders the "Designed" optgroup; the Designer lists the library row).
+  // With a local enemy in the list, both tools still mount (the Firing Room
+  // lists it under "Enemy"; the Designer shows its row).
   {
-    const { saveEnemySpec } = await import("../src/game/customcontent.js");
+    const es = await import("../src/game/enemyspecs.js");
     const { TEMPLATE_BY_ID } = await import("../src/game/enemyspec/templates.js");
-    saveEnemySpec(JSON.parse(JSON.stringify(TEMPLATE_BY_ID.tpl_shooter)));
-    mountable(t, "enemy-designer (with library)", createEnemyDesigner);
-    mountable(t, "firing-room (with spec library)", createFiringRoom);
+    es.saveEnemyToList(JSON.parse(JSON.stringify(TEMPLATE_BY_ID.tpl_shooter)));
+    mountable(t, "enemy-designer (with a local enemy)", createEnemyDesigner);
+    mountable(t, "firing-room (with a local enemy)", createFiringRoom);
+    es.resetEnemyList();
   }
 
   // Real AI: an EnemySpec shooter telegraphs then fires (the preview's building

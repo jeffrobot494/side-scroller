@@ -14,8 +14,8 @@
 // ---------------------------------------------------------------------------
 
 import { ARSENAL } from "../../game/arsenal.js";
-import { listCustomWeapons, enemySpecMap } from "../../game/customcontent.js";
-import { MISSION_ENEMY_SPECS } from "../../game/enemyspecs.js";
+import { listCustomWeapons } from "../../game/customcontent.js";
+import { enemyList } from "../../game/enemyspecs.js";
 import { dps, weaponCost, tierFor } from "../../game/weaponcost.js";
 import { Soldier, stepActor, startReload, tickReload } from "../../mission/entities.js";
 import { fire, aimAccuracy } from "../../mission/ai.js";
@@ -35,13 +35,15 @@ export function createFiringRoom(container, onBack) {
   const customs = listCustomWeapons();
   const byId = {};
   for (const w of [...ARSENAL, ...customs]) byId[w.id] = w;
-  // Wave enemies are all EnemySpec now: the built-in mission roster plus the
-  // Enemy Designer's saved library. Every option is a "spec:<id>" value driven
-  // by the spec runtime. `specSource` resolves an id back to its raw spec.
-  const builtinSpecs = MISSION_ENEMY_SPECS;
-  const savedSpecs = Object.values(enemySpecMap());
+  // Wave enemies are all EnemySpec now, and there is ONE list of them (E6) —
+  // including the ones switched OUT of missions, which are exactly what a test
+  // range exists to try. Not missionRoster(): that returns generator
+  // descriptors, and this needs raw specs to normalizeSpec. Every option is a
+  // "spec:<id>" value driven by the spec runtime; `specSource` resolves an id
+  // back to its raw spec.
+  const waveSpecs = enemyList().map((r) => r.spec);
   const specSource = {};
-  for (const s of [...builtinSpecs, ...savedSpecs]) specSource[s.id] = s;
+  for (const s of waveSpecs) specSource[s.id] = s;
 
   const opt = (w) => `<option value="${w.id}">${escapeHtml(w.name)} — ${weaponCost(w)}</option>`;
   const tierGroup = (n) => `<optgroup label="Tier ${["I", "II", "III"][n - 1]}">${ARSENAL.filter((w) => w.tier === n).map(opt).join("")}</optgroup>`;
@@ -69,8 +71,7 @@ export function createFiringRoom(container, onBack) {
         </label>
         <label class="lg-field" id="fr-enemyfield" style="display:none">Enemy
           <select data-fr="enemytype">
-            <optgroup label="Mission enemies">${builtinSpecs.map((s) => `<option value="spec:${s.id}">${escapeHtml(s.name || s.id)}</option>`).join("")}</optgroup>
-            ${savedSpecs.length ? `<optgroup label="Designed (EnemySpec)">${savedSpecs.map((s) => `<option value="spec:${s.id}">${escapeHtml(s.name || s.id)}</option>`).join("")}</optgroup>` : ""}
+            ${waveSpecs.map((s) => `<option value="spec:${s.id}">${escapeHtml(s.name || s.id)}</option>`).join("")}
           </select>
         </label>
         <label class="lg-field">Count <output id="fr-countval">4</output>
@@ -104,7 +105,7 @@ export function createFiringRoom(container, onBack) {
   const canvas = $("#fr-canvas");
   const ctx = canvas.getContext("2d");
 
-  const state = { weapon: ARSENAL[0], count: 4, aim: 8, mode: "auto", moving: false, targets: "dummies", enemyType: builtinSpecs[0] && `spec:${builtinSpecs[0].id}` };
+  const state = { weapon: ARSENAL[0], count: 4, aim: 8, mode: "auto", moving: false, targets: "dummies", enemyType: waveSpecs[0] && `spec:${waveSpecs[0].id}` };
   const input = new MissionInput();
   const particles = [];
   const stats = { dealt: 0, elapsed: 0 };
