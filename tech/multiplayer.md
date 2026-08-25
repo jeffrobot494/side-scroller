@@ -69,19 +69,22 @@ Provisional, as above.
 
 | Slice | | Mockup |
 |---|---|---|
-| M1 | Determinism — specified on its own in `tech/mission-determinism.md`, which supersedes this row: five draw sites across three modules, and the seeding slice does change the stream the game draws from | — |
+| M1 | Determinism — **built**. Specified and recorded in `tech/mission-determinism.md`, which supersedes this row: a mission replays from its seed given the same input trace at a fixed step | — |
 | M2 | Squad ownership in the mission — an owner per soldier, and the methods in `src/mission/mission.js` that assume `scene.soldiers` is one squad partitioned by it | §5 the other squads' HUD |
 | M3 | Lockstep input — two input streams through `src/mission/input.js`, input delay, and a rolling checksum so divergence is caught rather than mysterious | — |
 | M4 | Joint mission resolution — independent squad exits, contested pickups, casualties attributed per owner | **none — see below** |
 
 M1 is independently valuable: a deterministic mission makes every combat bug
-reproducible, which is worth having whether or not multiplayer ships. It is the
-one slice on this page that can be built today.
+reproducible, which is worth having whether or not multiplayer ships. It was the
+one slice on this page that could be built without the other two phases, and it
+was — M3 inherits a seeded mission and a golden, and owes the two things
+determinism alone does not buy: input sampling decoupled from frame rate, and a
+rolling checksum for cross-machine divergence.
 
 ## Where this plan is weakest
 
 | | |
 |---|---|
-| The payoff is last | The thing that makes this feel like a game played *with* someone is phase 3, sitting behind a state refactor and a transport. Nothing can reorder that — ownership needs the session and lockstep needs determinism — but M1 can be pulled forward for a small win |
+| The payoff is last | The thing that makes this feel like a game played *with* someone is phase 3, sitting behind a state refactor and a transport. Nothing can reorder that — ownership needs the session and lockstep needs determinism — but M1 was pulled forward for a small win, and has landed |
 | M4 has no mockup | The moment another player takes a pickup you were running for is the entire competitive texture of this design, and nothing visualises it. Partly because it is feel rather than UI, which is also why it is the most likely thing to be wrong the first time it is played |
 | Two of three specs do not exist | Phases 2 and 3 are named here, not specified. Each needs `/spec` run by whoever is about to build it, and their slice tables above will move when that happens |

@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: unbuilt
+status: built
 resolution: sharp
 needs: []
 related: [multiplayer, multiplayer-state, level-generation]
@@ -74,6 +74,14 @@ Conventions from `CLAUDE.md` that bind: fallback discipline — a host with no
 stream keeps working, it is simply not reproducible; no dependencies added; the
 static, no-build-step property is untouched.
 
+**As built (D2), added to the table above.** `loadMission` stamps `scene.seed`
+next to `scene.rng` (null when unseeded). Nothing reads it — it is there so a
+scene in a debugger, a crash report or a future checksum can say *which* mission
+this is without anyone having to reach back through the level id. `src/mission/ai.js`
+resolves the stream through one local helper, `sceneRng(scene)`, rather than
+inlining `scene.rng || Math.random` at each of its sites; that is what keeps the
+"read at the draw" rule in one place instead of two.
+
 ## The seam
 
 **Owns:** the scene's stream, the stream parameter on the instantiate path, and
@@ -133,6 +141,22 @@ suite, before any slice commits. The table is which suite watches which seam.
 | 5 | **Seeding at `loadMission` is a single-client shape.** Each client calls it and would derive its own stream from the same seed, but consume it in an order that depends on how many soldiers, companions and spawns that client has | Nothing here. M1 exists to serve M3, and this is the part M2 or M3 will have to relocate — recorded so that relocation is expected rather than discovered |
 | 6 | **This does not make two machines agree.** Seeding fixes one client replaying itself. Two clients agreeing also needs identical floating-point results across browsers and CPUs, plus identical input ordering | Out of scope, and M3's. A rolling checksum is how that divergence gets caught and it is specified nowhere yet. Nothing here should be read as lockstep being closer than it is |
 
+**As built (D2), settling approximation 3.** The golden drives the **real
+`Mission`**, not the update functions: `test/harness.mjs` makes
+`requestAnimationFrame` a no-op, so `start()` builds the scene, arms a loop that
+never fires, and hands the test every frame after it — `m.running = false`, swap
+`m.input` for a scripted stand-in, then call `m.update(1/60)` in a loop. That
+buys the real per-frame ordering (control → soldiers → enemies → projectiles →
+statuses → loot → outcome), which is the only place the five draw sites interact,
+for about fifteen lines more than the narrow path would have cost. Three details
+that are not obvious and are load-bearing:
+
+| | As built | Why |
+|---|---|---|
+| The input trace is a **pure function of the frame index** | `scriptAt(f)` returns held actions, pressed edges and a stick aim | This is the "fixed input at a fixed step" the whole spec is qualified on. Nothing reads a clock, and the fake `aimSource` answers a stick whatever `config.aimMode` says, so the trace does not depend on the camera, the zoom or the aim mode |
+| The squad carries **weapon literals**, not `ARSENAL` entries | Two weapons defined in the suite — one shot per pull, one that draws per pellet | `applyWeaponOverrides()` mutates the shipped weapon objects in place from localStorage. A golden built on them would depend on which suite ran before it — module state outlives the runner's per-suite `localStorage` reset |
+| Numbers compare with a **tolerance** (2e-3), like `locomotion.golden.json`, not exact-after-rounding like `levelgen.golden.json` | `firstDiff` walks the samples and names the first field that moved | `Math.sin`/`cos`/`atan2` are implementation-defined; an exact compare would be a claim about the JS engine. A real change moves a mission trace by orders of magnitude more than the tolerance |
+
 ## Background
 
 ### The five draw sites
@@ -150,9 +174,9 @@ companion spec has no utility actions and only literal waits. `tech/behavior-lab
 is the plan to grow exactly that brain, so the site is latent rather than
 harmless.
 
-### Where the M1 row is wrong
+### Where the M1 row was wrong
 
-`tech/multiplayer.md` names two files and says "No behaviour change". Both are
+`tech/multiplayer.md` named two files and said "No behaviour change". Both were
 off: `src/mission/entities.js` and `src/mission/mission.js` are also touched, and
-D2 changes the stream the game draws from. That row should point here once this
-spec lands.
+D2 changes the stream the game draws from. **Corrected when this spec landed** —
+that row now points here and claims neither.

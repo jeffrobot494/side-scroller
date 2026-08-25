@@ -205,6 +205,27 @@ section + the tests are the source of truth for what currently exists):
   scene, so `fire`/`spawn`/`sound` there are silently skipped (they used to
   crash). Fix = defer the spawn event to the first update; see "Known issues" in
   `tech/sound.md`.
+- **A mission replays from its seed (`tech/mission-determinism.md` D1–D3 —
+  built).** Given the same seed and the same input trace **at a fixed step**, a
+  mission runs identically. Two-part seam, because one half cannot take a scene:
+  tick-time draws read `scene.rng` the way they read `scene.sound` (weapon spread
+  and the duck roll in `src/mission/ai.js`), and construction-time draws take a
+  defaulted trailing `rng` on `instantiate`, which runs before any host exists
+  AND mid-tick from the spawn path (`root.rng`, `hoverPhase`/`orbitAngle`, the
+  lazily-built companion agent). `loadMission(level, squad, seed)` makes ONE
+  mulberry32 (`makeRng`) and installs it; `Mission.start` passes `mission.seed`.
+  **Every fallback is `Math.random` read at the draw, never captured** — three
+  suites seed themselves by assigning the global. A host that installs no stream
+  (editor tools, `dryRunSpec`, most tests) is unchanged and simply not
+  reproducible. `test/mission-golden.test.mjs` drives the REAL `Mission` at a
+  fixed step off a frame-indexed input trace and freezes gameplay state in
+  `test/mission.golden.json`; it reddens when a NEW unseeded gameplay draw
+  appears, because an unseeded draw cannot survive its twice-run self-check.
+  Cosmetic randomness (motes, sparks, shake, trail jitter, loot bob) stays on
+  `Math.random` on purpose and is never sampled. **The game page itself is still
+  not reproducible**: `Mission` polls input once per *rendered* frame and steps a
+  variable number of times, so the same inputs at a different frame rate are a
+  different mission — decoupling that is M3's, not this.
 - **Player2 is partially wired:** the Enemy Designer's Generate button uses
   `src/player2/client.js` chat completions (needs the app + a client id in the
   config `player2GameClientId`). Image gen and the rest remain unused — still
