@@ -8,6 +8,7 @@ import {
   treeNodes, nodeAt, valueAt, setAt, availableAdds, errorCounts,
   addNode, duplicateNode, deleteNode, moveNode, promoteToDef, takenIds,
 } from "../src/editor/tools/spec-tree.js";
+import { diffSpecs, summarize } from "../src/game/enemyspec/specdiff.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const boss = () => clone(TEMPLATES.find((t) => t.id === "tpl_boss_moth"));
@@ -246,6 +247,75 @@ export default async function run(t) {
     t.ok("tree: the offending node is marked", counts["root.children[0]"] >= 1);
     t.ok("tree: and so is the spec node", counts[""] >= 1);
     t.ok("tree: a clean sibling is not", counts["root.children[1]"] === undefined);
+  }
+
+  // ---- the spec diff (what a chat turn touched, E3) ------------------------
+  // A chat reply carries the WHOLE spec (approximation 1), so the diff is the
+  // only thing that says what actually moved. Its paths must be the same
+  // addresses the tree and the validator use, or the marks land on nothing.
+  {
+    const a = boss();
+
+    t.eq("diff: a spec against itself is empty", diffSpecs(a, clone(a)).length, 0);
+
+    // A field change, addressed exactly where the tree addresses it.
+    const b = clone(a);
+    b.root.health.max = a.root.health.max + 50;
+    const one = diffSpecs(a, b);
+    t.eq("diff: one field, one change", one.length, 1);
+    t.eq("diff: at the path the validator would use", one[0].path, "root.health.max");
+    t.eq("diff: carrying both sides", `${one[0].from}→${one[0].to}`, `${a.root.health.max}→${b.root.health.max}`);
+
+    // Adds and deletes are distinguished, because the rail draws them the same
+    // but the checkpoint line counts them differently.
+    const c = clone(a);
+    c.root.children.push({ id: "podMount", health: { max: 25 } });
+    const added = diffSpecs(a, c);
+    t.eq("diff: a new part is one add", added.length, 1);
+    t.eq("diff: at its own tree path", added[0].path, `root.children[${a.root.children.length}]`);
+    t.eq("diff: and it reads as an add", added[0].kind, "add");
+    t.eq("diff: removing it again reads as a del", diffSpecs(c, a)[0].kind, "del");
+
+    // Flat arrays are one field, not one change per index: `at: [0,-20]` moving
+    // is one edit to a reader, and `at` is what the inspector shows.
+    const d = clone(a);
+    d.root.children[0].at = [99, -10];
+    const moved = diffSpecs(a, d);
+    t.eq("diff: a flat array is a single leaf", moved.length, 1);
+    t.eq("diff: named without an index", moved[0].path, "root.children[0].at");
+
+    // Every path the diff produces must resolve in the spec it describes.
+    const e = clone(a);
+    const stepCount = e.brain.states.phase1.tracks[0].steps.length;
+    e.brain.states.phase1.tracks[0].steps.push({ wait: 0.5 });
+    e.root.emitters = { ...(e.root.emitters || {}), extra: { projectile: { speed: 300, damage: 4 } } };
+    delete e.name;
+    for (const ch of diffSpecs(a, e)) {
+      const side = ch.kind === "del" ? a : e;
+      t.ok(`diff: '${ch.path}' resolves in the spec it belongs to`, valueAt(side, ch.path) !== undefined);
+    }
+
+    // The marks are the error roll-up with a different list — a change list and
+    // an error list are both just lists of tree paths, which is why the rail
+    // needed no new machinery for E3.
+    const nodes = treeNodes(e);
+    const marks = errorCounts(nodes, diffSpecs(a, e));
+    t.ok("diff: a changed step marks its own node", marks[`brain.states.phase1.tracks[0].steps[${stepCount}]`] > 0);
+    t.ok("diff: and its track above it", marks["brain.states.phase1.tracks[0]"] > 0);
+    t.ok("diff: the spec node counts every change", marks[""] === diffSpecs(a, e).length);
+
+    // The checkpoint line.
+    t.eq("summarize: nothing changed", summarize([]), "no change");
+    t.eq("summarize: a new part is counted as one", summarize(added), "+1 part");
+    t.eq("summarize: a removed part too", summarize(diffSpecs(c, a)), "−1 part");
+    t.eq("summarize: plain fields are counted as fields", summarize(one), "1 field");
+    // A whole-body swap — the first generation — is counted, not summarised
+    // away: the same numbers the marks in the rail show.
+    // A container changing as a unit counts its MEMBERS: one del of
+    // root.children is still every part gone.
+    const swapped = summarize(diffSpecs(a, { ...clone(a), root: { health: { max: 5 } } }));
+    t.ok("summarize: a whole-body swap counts the parts it removed", swapped.includes(`\u2212${a.root.children.length} parts`));
+    t.ok("summarize: and the fields it changed", /\d+ fields/.test(swapped));
   }
 
   // ---- ENTITY_FIELDS: authoring metadata, not vocabulary ------------------

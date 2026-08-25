@@ -31,9 +31,18 @@
 // Brain editing is structural only: a step picks its action kind and keeps its
 // arguments as raw JSON (approximation 8).
 //
-// Generate: player2 chat completions via generateEnemySpec() — needs the
-// Player2 app running (Connect) + a game client id (config.player2GameClientId,
-// Settings tab). Without it, manual authoring is fully functional.
+// THE CONVERSATION (tech/enemy-designer.md, E3): the right column is one
+// transcript. The first message with no enemy in hand generates; every message
+// after it revises; a message that only asks a question is answered and the
+// enemy is untouched. There is no accept/discard — a turn either LANDS (the
+// spec swaps, a checkpoint is pushed, the diff marks the tree nodes it moved,
+// the preview re-instantiates) or it does not, and a failure stays in the
+// transcript because it is the model's best context for the next turn.
+// Rewinding to a checkpoint is the undo, and the only version UI. All of it
+// goes through chatEnemySpec() — one prompt, one envelope, one acceptance gate
+// — which needs the Player2 app running (Connect) + a game client id
+// (config.player2GameClientId, Settings tab). Without it, manual authoring
+// through the rail and the JSON panel is fully functional.
 //
 // Save: gated on accept() (validate → normalize → dry-run) into the EnemySpec
 // library (localStorage) — the Firing Room can spawn saved specs.
@@ -61,7 +70,8 @@ const SOUND_ROWS = [
 import { validateSpec } from "../../game/enemyspec/validate.js";
 import { normalizeSpec } from "../../game/enemyspec/normalize.js";
 import { TEMPLATES, TEMPLATE_BY_ID } from "../../game/enemyspec/templates.js";
-import { generateEnemySpec, accept } from "../../game/enemyspec/generate.js";
+import { chatEnemySpec, composeChat, accept } from "../../game/enemyspec/generate.js";
+import { diffSpecs, summarize } from "../../game/enemyspec/specdiff.js";
 import { listEnemySpecs, saveEnemySpec, deleteEnemySpec, listCustomWeapons } from "../../game/customcontent.js";
 import { ARSENAL } from "../../game/arsenal.js";
 import { Soldier, stepActor, startReload, tickReload } from "../../mission/entities.js";
@@ -89,6 +99,16 @@ export function createEnemyDesigner(container, onBack) {
   let generating = false;
   let selected = ""; // the selected tree node's path ("" = the spec node)
 
+  // ---- the conversation ---------------------------------------------------
+  // The transcript is the tool's history AND the model's context: `turns` is
+  // prose only (approximation 2 — superseded specs are never re-sent), while
+  // `checkpoints` holds one whole spec per landing. Rewinding to a checkpoint
+  // is the undo; there is no other version UI.
+  let turns = [];         // { role: "you"|"model"|"sys", text, kind?, version?, what? }
+  let checkpoints = [];   // { version, spec, label }
+  let version = 0;
+  let touched = [];       // paths the LAST landed turn changed — the tree marks
+
   // ---- the fight ----------------------------------------------------------
   const customWeapons = listCustomWeapons();
   const weaponById = {};
@@ -106,27 +126,11 @@ export function createEnemyDesigner(container, onBack) {
   }
 
   container.innerHTML = `
-    <div class="wd">
+    <div class="wd es-wide">
       <div class="wd-head">
         <button class="btn btn-ghost" data-es="back">← Tools</button>
         <input class="wd-name" data-es="name" value="${escapeHtml(spec.name)}" spellcheck="false" />
         <span class="wd-id" id="es-id"></span>
-      </div>
-
-      <div class="es-createbar">
-        <textarea id="es-prompt" class="es-prompt" rows="2" spellcheck="false"
-          placeholder="Describe an enemy for the LLM — e.g. “a floating mine-layer with a shielded core and two destructible cannon pods”"></textarea>
-        <div class="es-createbtns">
-          <button class="btn" data-es="generate" id="es-generate" disabled title="Connect to Player2 first">✦ Generate</button>
-          <button class="btn btn-alt" data-es="connect" id="es-connect">Connect Player2</button>
-          <span class="ed-msg" id="es-p2status"></span>
-          <label class="lg-field es-tpl">Template
-            <select data-es="template">
-              <option value="">— load —</option>
-              ${TEMPLATES.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
-            </select>
-          </label>
-        </div>
       </div>
 
       <div class="wd-grid">
@@ -190,6 +194,29 @@ export function createEnemyDesigner(container, onBack) {
             <h3 class="wd-h">Enemy library</h3>
             <p class="wd-saved-note">Saved to this browser. The Firing Room lists these under “Enemy” — fight them there. Export JSON to make one permanent.</p>
             <div class="wd-saved-list" id="es-saved"></div>
+          </div>
+        </div>
+
+        <div class="es-chat" id="es-chat">
+          <h3 class="wd-h">Conversation <span class="es-ver" id="es-ver">v0</span></h3>
+          <div class="es-stream" id="es-stream"></div>
+          <div class="es-composer">
+            <textarea id="es-say" class="es-prompt" rows="2" spellcheck="false"
+              placeholder="Describe an enemy, ask why it does that, or say what to change…  ⏎ send · ⇧⏎ newline"></textarea>
+            <div class="es-createbtns">
+              <button class="btn" data-es="send" id="es-send" disabled title="Connect to Player2 first">✦ Send</button>
+              <button class="btn btn-alt" data-es="connect" id="es-connect">Connect</button>
+              <label class="lg-field es-tpl">Template
+                <select data-es="template">
+                  <option value="">— load —</option>
+                  ${TEMPLATES.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}
+                </select>
+              </label>
+            </div>
+            <div class="es-createbtns">
+              <span class="ed-msg" id="es-p2status"></span>
+              <span class="es-tok" id="es-tok"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -493,6 +520,10 @@ export function createEnemyDesigner(container, onBack) {
     const nodes = treeNodes(spec);
     if (!nodes.some((n) => n.path === selected)) selected = "";
     const counts = errorCounts(nodes, validation.errors);
+    // The last landed turn's diff, rolled onto nodes the same way errors are —
+    // a change list and an error list are both just lists of tree paths, so
+    // "what did that turn touch?" is answered without reading JSON.
+    const marks = errorCounts(nodes, touched);
     const el = $("#es-tree");
     if (el) {
       el.innerHTML = nodes.map((n) => `
@@ -500,6 +531,7 @@ export function createEnemyDesigner(container, onBack) {
           <span class="es-glyph es-k-${n.kind}">${KIND_GLYPH[n.kind] || "•"}</span>
           <span class="es-nlabel">${escapeHtml(n.label)}</span>
           ${n.note ? `<span class="es-note">${escapeHtml(n.note)}</span>` : ""}
+          ${marks[n.path] ? `<span class="es-nmark" title="${marks[n.path]} change(s) from the last landed turn">●</span>` : ""}
           ${counts[n.path] ? `<span class="es-nbad" title="${counts[n.path]} validation error(s) here or below">${counts[n.path]}</span>` : ""}
         </div>`).join("");
     }
@@ -844,7 +876,7 @@ export function createEnemyDesigner(container, onBack) {
     renderSaved();
   }
 
-  // ---- Player2 / generation ----------------------------------------------
+  // ---- Player2 / the conversation ----------------------------------------
   async function connectP2() {
     const status = $("#es-p2status");
     const id = config.player2GameClientId;
@@ -860,49 +892,144 @@ export function createEnemyDesigner(container, onBack) {
       await p2.authenticate();
       status.textContent = "Connected.";
       status.className = "ed-msg ok";
-      const btn = $("#es-generate");
-      if (btn) { btn.disabled = false; btn.title = ""; }
+      setSendable();
     } catch (e) {
       p2 = null;
       status.textContent = `Connect failed — is the Player2 app running? (${e.message})`;
       status.className = "ed-msg bad";
+      setSendable();
     }
   }
 
-  async function generate() {
-    if (!p2 || generating) return;
-    const promptText = ($("#es-prompt").value || "").trim();
+  function setSendable() {
+    const btn = $("#es-send");
+    if (!btn) return;
+    btn.disabled = !p2 || generating;
+    btn.title = p2 ? "" : "Connect to Player2 first";
+  }
+
+  // ---- transcript rendering ----------------------------------------------
+  const KIND_LABEL = { edited: "edited", answered: "answered", failed: "no change" };
+
+  function renderChat() {
+    const ver = $("#es-ver");
+    if (ver) ver.textContent = `v${version}`;
+    const el = $("#es-stream");
+    if (el) {
+      el.innerHTML = turns.length
+        ? turns.map(turnHTML).join("")
+        : `<p class="wd-empty">Describe an enemy to create one, or load a template and tell it what to change. Questions are answered without touching the enemy.</p>`;
+      if (typeof el.scrollTop === "number") el.scrollTop = 1e6;
+    }
+    renderTokens();
+  }
+
+  function turnHTML(t, i) {
+    if (t.role === "sys") return `<div class="es-turn sys"><div class="es-bub">${escapeHtml(t.text)}</div></div>`;
+    if (t.role === "you") return `<div class="es-turn you"><div class="es-who">You</div><div class="es-bub">${escapeHtml(t.text)}</div></div>`;
+    const kind = t.kind || "answered";
+    const ckpt = t.version !== undefined
+      ? `<div class="es-ckpt"><span class="es-tag">v${t.version}</span><span class="es-what">${escapeHtml(t.what || "")}</span>
+           <button class="btn btn-ghost es-sm" data-es="rewind" data-v="${t.version}">↩ rewind</button></div>`
+      : "";
+    return `<div class="es-turn ai">
+      <div class="es-who">Model <span class="es-kind ${kind}">${KIND_LABEL[kind] || kind}</span></div>
+      <div class="es-bub">${escapeHtml(t.text)}</div>
+      ${t.errors ? `<ul class="es-errors">${t.errors.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul>` : ""}
+      ${ckpt}
+    </div>`;
+  }
+
+  // Approximation 1's catch: whole specs are expensive, so the price of the
+  // NEXT turn is on screen before you send it. Priced off the real message
+  // list, not an estimate of it — ~4 chars per token.
+  function renderTokens() {
+    const el = $("#es-tok");
+    if (!el) return;
+    const say = $("#es-say");
+    const messages = composeChat({ history: turns, spec, message: (say && say.value) || "" });
+    const chars = messages.reduce((n, m) => n + m.content.length, 0);
+    el.textContent = `~${(Math.round(chars / 4 / 100) / 10).toFixed(1)}k tok`;
+  }
+
+  function pushTurn(t) {
+    turns.push(t);
+    renderChat();
+    return t;
+  }
+
+  // A landing: the spec swaps, a checkpoint is pushed, and the diff becomes
+  // the tree's marks. Nothing else in the tool knows a chat happened.
+  function land(next, reply) {
+    const before = spec;
+    const changes = diffSpecs(before, next);
+    spec = next;
+    touched = changes;
+    version = checkpoints.length; // checkpoints[0] is the spec as it was loaded
+    checkpoints.push({ version, spec: clone(next), label: summarize(changes) });
+    const nameEl = container.querySelector("[data-es='name']");
+    if (nameEl) nameEl.value = spec.name || spec.id || "";
+    pushTurn({ role: "model", text: reply || "Updated the enemy.", kind: "edited", version, what: summarize(changes) });
+    refresh({ rebuildRail: true });
+  }
+
+  // Rewind is the undo. The transcript is NOT truncated — the failures and the
+  // reasoning are the model's best context for the next turn — and later
+  // checkpoints survive, so a rewind can be rewound.
+  function rewind(v) {
+    const cp = checkpoints.find((c) => c.version === v);
+    if (!cp) return false;
+    spec = clone(cp.spec);
+    version = v;
+    touched = [];
+    const nameEl = container.querySelector("[data-es='name']");
+    if (nameEl) nameEl.value = spec.name || spec.id || "";
+    pushTurn({ role: "sys", text: `Rewound to v${v}. The enemy is back to what it was; the transcript is not.` });
+    refresh({ rebuildRail: true });
+    return true;
+  }
+
+  // One turn, end to end. The acceptance gate lives in chatEnemySpec, so this
+  // only decides what the transcript says and whether anything lands.
+  async function say(text) {
+    text = String(text || "").trim();
     const status = $("#es-p2status");
-    if (!promptText) {
-      status.textContent = "Describe the enemy first.";
-      status.className = "ed-msg bad";
-      return;
+    if (!text || generating) return null;
+    if (!p2) {
+      if (status) { status.textContent = "Connect to Player2 first."; status.className = "ed-msg bad"; }
+      return null;
     }
+    const say$ = $("#es-say");
+    if (say$) say$.value = "";
+    pushTurn({ role: "you", text });
     generating = true;
-    const btn = $("#es-generate");
-    if (btn) btn.disabled = true;
-    status.textContent = "Generating… (validates + dry-runs before it lands)";
-    status.className = "ed-msg";
+    setSendable();
+    if (status) { status.textContent = "Thinking… (a spec lands only if it validates and dry-runs)"; status.className = "ed-msg"; }
+
+    let turn;
     try {
-      const res = await generateEnemySpec(p2, promptText);
-      if (res.ok) {
-        spec = res.spec;
-        status.textContent = "Generated → loaded into the editor.";
-        status.className = "ed-msg ok";
-        const nameEl = container.querySelector("[data-es='name']");
-        if (nameEl) nameEl.value = spec.name || spec.id;
-        refresh({ rebuildRail: true });
-      } else {
-        status.textContent = `Rejected: ${res.errors.slice(0, 3).join(" · ")}`;
-        status.className = "ed-msg bad";
-      }
+      turn = await chatEnemySpec(p2, { history: turns.slice(0, -1), spec, message: text });
     } catch (e) {
-      status.textContent = `Generation error: ${e.message}`;
-      status.className = "ed-msg bad";
-    } finally {
-      generating = false;
-      if (btn) btn.disabled = !p2;
+      turn = { kind: "error", errors: [`turn failed: ${e.message}`] };
     }
+    generating = false;
+    setSendable();
+
+    if (turn.kind === "edit") {
+      land(turn.spec, turn.reply);
+      if (status) { status.textContent = turn.repaired ? "Landed after one repair round." : "Landed."; status.className = "ed-msg ok"; }
+    } else if (turn.kind === "answer") {
+      pushTurn({ role: "model", text: turn.reply || "(no reply)", kind: "answered" });
+      if (status) { status.textContent = "Answered — the enemy is unchanged."; status.className = "ed-msg"; }
+    } else {
+      pushTurn({
+        role: "model", kind: "failed",
+        text: turn.reply || "That did not produce a spec the engine would accept — the enemy is unchanged.",
+        errors: (turn.errors || []).slice(0, 4),
+      });
+      if (status) { status.textContent = "Rejected — the enemy is unchanged."; status.className = "ed-msg bad"; }
+    }
+    return turn;
   }
 
   // ---- events -------------------------------------------------------------
@@ -913,6 +1040,7 @@ export function createEnemyDesigner(container, onBack) {
       refresh({ rebuildRail: false });
       return;
     }
+    if (t.id === "es-say") { renderTokens(); return; }
     if (t.id === "es-json") {
       if (jsonTimer) clearTimeout(jsonTimer);
       jsonTimer = setTimeout(() => applyJson(t.value), 400);
@@ -966,7 +1094,7 @@ export function createEnemyDesigner(container, onBack) {
     if (t.dataset.es === "weapon") {
       setWeapon(t.value);
     } else if (t.dataset.es === "template" && t.value) {
-      loadSpec(clone(TEMPLATE_BY_ID[t.value]));
+      loadSpec(clone(TEMPLATE_BY_ID[t.value]), `Loaded the ${TEMPLATE_BY_ID[t.value].name} template.`);
       t.value = "";
     }
   });
@@ -1014,10 +1142,11 @@ export function createEnemyDesigner(container, onBack) {
         treeOp(el.dataset.es);
         break;
       case "connect": connectP2(); break;
-      case "generate": generate(); break;
+      case "send": say(($("#es-say") || {}).value); break;
+      case "rewind": rewind(Number(el.dataset.v)); break;
       case "load-saved": {
         const s = listEnemySpecs().find((x) => x.id === el.dataset.id);
-        if (s) loadSpec(clone(s));
+        if (s) loadSpec(clone(s), `Loaded "${s.name || s.id}" from the library.`);
         break;
       }
       case "del-saved":
@@ -1026,6 +1155,19 @@ export function createEnemyDesigner(container, onBack) {
         break;
     }
   });
+
+  // ⏎ sends, ⇧⏎ is a newline. The composer is a text field, so the canvas is
+  // already blurred and MissionInput is already off — typing here can never
+  // drive the soldier.
+  const sayEl = $("#es-say");
+  if (sayEl && sayEl.addEventListener) {
+    sayEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        if (typeof e.preventDefault === "function") e.preventDefault();
+        say(sayEl.value);
+      }
+    });
+  }
 
   // Focus is the keyboard handover. Clicking the canvas focuses it (tabindex),
   // which enables MissionInput; clicking any field on the page blurs it, which
@@ -1059,10 +1201,17 @@ export function createEnemyDesigner(container, onBack) {
     refresh({ rebuildRail: false, rewriteJson: false });
   }
 
-  function loadSpec(next) {
+  // Loading is a NEW enemy: the checkpoints belonged to the old one, so the
+  // stack restarts at v0. The transcript is kept and told what happened —
+  // hiding the switch would make an earlier "rewind" button lie.
+  function loadSpec(next, note) {
     spec = next;
+    checkpoints = [{ version: 0, spec: clone(next), label: "loaded" }];
+    version = 0;
+    touched = [];
     const nameEl = container.querySelector("[data-es='name']");
     if (nameEl) nameEl.value = spec.name || spec.id;
+    if (note) pushTurn({ role: "sys", text: note });
     refresh({ rebuildRail: true });
   }
 
@@ -1219,9 +1368,12 @@ export function createEnemyDesigner(container, onBack) {
     raf = req(loop);
   }
 
+  checkpoints = [{ version: 0, spec: clone(spec), label: "loaded" }];
   renderRail();
   renderSaved();
   renderKeys();
+  renderChat();
+  setSendable();
   refresh({ rebuildRail: false });
   respawnShooter();
   draw(); // one synchronous frame (headless-mount verifiable)
@@ -1249,6 +1401,16 @@ export function createEnemyDesigner(container, onBack) {
     select: selectNode,
     op: treeOp,
     specNow: () => spec,
+    // E3's conversation, driven the same way. `useClient` is how a headless
+    // suite injects a stub where the browser injects a connected Player2Client
+    // — the Connect button is the only other writer.
+    useClient(client) { p2 = client; setSendable(); return !!p2; },
+    say,
+    chat: () => turns,
+    versions: () => checkpoints.map((c) => c.version),
+    version: () => version,
+    rewind,
+    touched: () => touched,
     // Hold a set of actions for `frames` steps, as the window key handler would
     // fill them in, and report what happened to the fight.
     drive(hold = {}, frames = 1, dt = 1 / 60) {

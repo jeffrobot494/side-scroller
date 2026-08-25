@@ -138,6 +138,77 @@ export default async function run(t) {
     ed.dispose();
   }
 
+  // ---- Enemy Designer: the conversation drives the spec (E3) -------------
+  // The pipeline is unit-tested in enemyspec-generate.test.mjs; what belongs
+  // HERE is the tool's half of a turn — that an answer changes nothing, that a
+  // landing swaps the spec and pushes a checkpoint, that a rejection leaves the
+  // enemy alone, and that rewinding is a real undo.
+  {
+    installDom();
+    const { TEMPLATE_BY_ID } = await import("../src/game/enemyspec/templates.js");
+    const cl = (v) => JSON.parse(JSON.stringify(v));
+    // A stub client, envelope-shaped, queued reply by reply.
+    const queue = [];
+    const client = { chatJSON: async () => { const n = queue.shift(); if (n instanceof Error) throw n; return n; } };
+
+    const ed = createEnemyDesigner(makeEl(), () => {});
+    ed.useClient(client);
+    const started = JSON.stringify(ed.specNow());
+    t.eq("enemy-designer: the transcript starts empty", ed.chat().length, 0);
+    t.eq("enemy-designer: and the loaded spec is v0", ed.version(), 0);
+
+    // 1. A question: prose only, nothing lands.
+    queue.push({ reply: "It never closes because keepDistance holds it at 340.", spec: null });
+    await ed.say("Why does it never fire the mines?");
+    t.eq("enemy-designer: a question is answered", ed.chat().at(-1).kind, "answered");
+    t.eq("enemy-designer: and touches nothing", JSON.stringify(ed.specNow()), started);
+    t.eq("enemy-designer: so no checkpoint is pushed", ed.version(), 0);
+
+    // 2. An edit: the spec swaps, a checkpoint appears, the diff marks nodes.
+    const next = cl(TEMPLATE_BY_ID.tpl_shooter);
+    next.name = "Rebuilt Lurker";
+    queue.push({ reply: "Rebuilt it as a ranged lurker.", spec: next });
+    await ed.say("Rebuild it as a lurker.");
+    t.eq("enemy-designer: an edit lands", ed.chat().at(-1).kind, "edited");
+    t.eq("enemy-designer: the spec is the one that landed", ed.specNow().name, "Rebuilt Lurker");
+    t.eq("enemy-designer: a checkpoint is pushed", ed.version(), 1);
+    t.ok("enemy-designer: and the turn marks what it touched", ed.touched().length > 0);
+    t.ok("enemy-designer: the landed turn carries its version for rewind", ed.chat().at(-1).version === 1);
+
+    // 3. A reply the engine refuses: the transcript keeps it, the enemy does not
+    //    move. Two calls are consumed — the failure buys one repair round.
+    const bad = cl(next);
+    bad.brain.states.fight.tracks[0].steps[1].fire.emitter = "ghost_emitter";
+    queue.push({ reply: "Added a second gun.", spec: cl(bad) });
+    queue.push({ reply: "Fixed.", spec: cl(bad) });
+    await ed.say("Give it a second gun.");
+    t.eq("enemy-designer: a rejected turn says so", ed.chat().at(-1).kind, "failed");
+    t.ok("enemy-designer: with the engine's own error text", (ed.chat().at(-1).errors || []).some((e) => e.includes("ghost_emitter")));
+    t.eq("enemy-designer: and the enemy is untouched", ed.specNow().name, "Rebuilt Lurker");
+    t.eq("enemy-designer: no checkpoint for a failure", ed.version(), 1);
+    t.eq("enemy-designer: one repair round was spent on it", queue.length, 0);
+
+    // 4. Rewind is the undo — and the transcript is NOT truncated, because the
+    //    failures above are the model's context for the next turn.
+    const said = ed.chat().length;
+    t.ok("enemy-designer: rewind to v0 restores the loaded enemy", ed.rewind(0) === true);
+    t.eq("enemy-designer: exactly the spec that was there", JSON.stringify(ed.specNow()), started);
+    t.ok("enemy-designer: the transcript grows rather than shrinking", ed.chat().length > said);
+    t.eq("enemy-designer: v1 is still rewindable", ed.rewind(1), true);
+    t.eq("enemy-designer: back on the landed spec", ed.specNow().name, "Rebuilt Lurker");
+    t.ok("enemy-designer: rewinding to a version that never existed is refused", ed.rewind(99) === false);
+
+    // 5. A dead client cannot leave the tool stuck mid-turn.
+    queue.push(new Error("socket closed"));
+    await ed.say("anything");
+    t.eq("enemy-designer: a thrown client is a failed turn, not a crash", ed.chat().at(-1).kind, "failed");
+    queue.push({ reply: "ok", spec: null });
+    await ed.say("still there?");
+    t.eq("enemy-designer: and the composer still works after it", ed.chat().at(-1).kind, "answered");
+
+    ed.dispose();
+  }
+
   // With a saved EnemySpec in the library, both tools still mount (the Firing
   // Room renders the "Designed" optgroup; the Designer lists the library row).
   {

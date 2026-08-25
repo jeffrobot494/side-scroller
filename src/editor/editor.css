@@ -350,18 +350,13 @@
 /* ==========================================================================
    ENEMY DESIGNER (EnemySpec)
    ========================================================================== */
-.es-createbar {
-  border: 1px solid var(--line); border-radius: 6px; padding: 12px;
-  background: rgba(20,25,32,0.5); margin-bottom: 18px;
-  display: flex; flex-direction: column; gap: 10px;
-}
 .es-prompt {
   width: 100%; resize: vertical; min-height: 44px;
   background: var(--track); color: var(--text); border: 1px solid var(--line);
   border-radius: 5px; padding: 8px 10px; font-size: 13px; font-family: inherit;
 }
 .es-createbtns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.es-createbtns .ed-msg { flex: 1; min-width: 160px; }
+.es-createbtns .ed-msg { flex: 1; min-width: 120px; font-size: 11.5px; }
 .es-tpl { margin-left: auto; }
 .es-tpl select { min-width: 160px; }
 .es-json { min-height: 260px; font-size: 12px; }
@@ -450,12 +445,66 @@
 }
 .es-mini { min-height: 62px; font-size: 11.5px; padding: 7px 9px; }
 
+/* ---- E3: the conversation column ---- */
+/* The Designer is a three-column tool — rail, fight, conversation — so it
+   breaks out of the editor's 900px body permanently, the same trick the
+   expanded stage already uses. Under 1240px the chat drops beneath the other
+   two rather than squeezing them. */
+.wd.es-wide { width: 96vw; max-width: 1400px; margin-left: 50%; transform: translateX(-50%); }
+.wd.es-wide .wd-grid { grid-template-columns: minmax(0, 1fr) 400px 360px; }
+@media (max-width: 1240px) {
+  .wd.es-wide { width: 100%; max-width: 900px; margin-left: 0; transform: none; }
+  .wd.es-wide .wd-grid { grid-template-columns: minmax(0, 1fr) 400px; }
+  .wd.es-wide .es-chat { grid-column: 1 / -1; }
+}
+
+.es-chat { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 20px; }
+.es-chat .wd-h { display: flex; align-items: center; gap: 8px; }
+.es-ver {
+  margin-left: auto; font-size: 11px; letter-spacing: 1px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 9px; padding: 1px 8px;
+}
+.es-stream {
+  flex: 1; min-height: 300px; max-height: 52vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  border: 1px solid var(--line); border-radius: 6px; padding: 12px;
+  background: rgba(12,16,22,0.5);
+}
+.es-turn { display: flex; flex-direction: column; gap: 4px; }
+.es-who { font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); }
+.es-bub {
+  font-size: 12.5px; line-height: 1.5; border-radius: 6px; padding: 8px 10px;
+  border: 1px solid var(--line); background: rgba(20,25,32,0.7);
+}
+.es-turn.you .es-bub { background: rgba(40,52,66,0.7); }
+.es-turn.sys .es-bub {
+  background: none; border: none; border-left: 2px solid var(--line);
+  border-radius: 0; padding: 2px 0 2px 9px; color: var(--muted); font-size: 11.5px;
+}
+.es-kind {
+  font-size: 9.5px; letter-spacing: 1px; border-radius: 8px; padding: 1px 6px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.es-kind.edited { color: var(--accent); border-color: var(--accent); }
+.es-kind.failed { color: #ff9a8c; border-color: #7a3a33; }
+.es-ckpt { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.es-tag {
+  font-family: ui-monospace, Menlo, monospace; border: 1px solid var(--line);
+  border-radius: 8px; padding: 0 6px;
+}
+.es-what { flex: 1; }
+.es-composer { display: flex; flex-direction: column; gap: 8px; }
+.es-tok { margin-left: auto; font-size: 11px; font-family: ui-monospace, Menlo, monospace; color: var(--muted); }
+/* A changed node from the last landed turn. Deliberately quieter than the
+   error badge next to it — a mark is information, an error is a problem. */
+.es-nmark { color: var(--accent); font-size: 9px; opacity: 0.85; }
+
 /* Expanded: the stage breaks out of the editor's 900px column so the 960-wide
    world can be drawn 1:1, and the form steps aside. Narrower windows scale it
    down rather than scrolling sideways. */
 .wd.es-expanded { width: 96vw; max-width: 1100px; margin-left: 50%; transform: translateX(-50%); }
 .wd.es-expanded .wd-grid { grid-template-columns: 1fr; }
-.wd.es-expanded .wd-form { display: none; }
+.wd.es-expanded .wd-form, .wd.es-expanded .es-chat { display: none; }
 .wd.es-expanded .wd-side { position: static; }
 .wd.es-expanded .es-canvas { width: 960px; max-width: 100%; margin: 0 auto; }
 
