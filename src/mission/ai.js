@@ -23,6 +23,16 @@ export function aimAccuracy(aim) {
   return a < 0 ? 0 : a > 1 ? 1 : a;
 }
 
+// The scene's gameplay stream (tech/mission-determinism.md, D1) — the tick-time
+// half of the seam, an optional capability the host installs exactly the way it
+// installs `scene.sound`. Resolved AT the draw, never captured at module load:
+// three suites (crouch, companion-aim, reposition) seed themselves by assigning
+// Math.random, and a captured reference would leave all three unseeded without
+// failing anything.
+function sceneRng(scene) {
+  return (scene && scene.rng) || Math.random;
+}
+
 function center(e) {
   return { x: e.x + e.w / 2, y: e.y + e.h / 2 };
 }
@@ -80,7 +90,7 @@ export function fire(scene, shooter, dir, team, dt, accuracy = 1) {
     let ax = dx;
     let ay = dy;
     if (spread) {
-      const a = (Math.random() * 2 - 1) * spread;
+      const a = (sceneRng(scene)() * 2 - 1) * spread;
       const cos = Math.cos(a);
       const sin = Math.sin(a);
       ax = dx * cos - dy * sin;
@@ -169,9 +179,11 @@ export function updateCompanion(soldier, dt, scene, leader) {
 // Lazily attach a shared-brain agent to a companion Soldier. The agent is a spec
 // instance used ONLY for perception + decision; its soldier locomotor drives THIS
 // Soldier body. It is never drawn, collidable, or in scene.specRoots.
-function companionAgent(soldier) {
+function companionAgent(soldier, scene) {
   if (soldier.agent) return soldier.agent;
-  const a = instantiate(DEFAULT_COMPANION_SPEC, soldier.x, soldier.y, "player");
+  // Built lazily on this squadmate's first tick, which is mid-mission — so the
+  // stream has to come from the scene rather than from loadMission.
+  const a = instantiate(DEFAULT_COMPANION_SPEC, soldier.x, soldier.y, "player", scene && scene.rng);
   a.soldier = soldier;
   // brain `fire` → the Soldier's EQUIPPED weapon, down the SAME barrel the
   // renderer draws: fireDir() reads the aimVec set in updateCompanionSpec below,
@@ -231,7 +243,7 @@ function tickDuck(soldier, agent, dt, scene, ctx) {
       // retried, which is what makes a soldier who was not paying attention
       // indistinguishable from one who was too slow.
       const t = speedT(soldier);
-      if (Math.random() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) continue;
+      if (sceneRng(scene)() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) continue;
       const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
       if (latency > 0) d.wait = latency;
       else d.hold = config.duckHoldTime;
@@ -256,7 +268,7 @@ function lerp(a, b, t) {
 export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
   if (!soldier.alive) return;
   autoReload(soldier); // companions reload themselves when they run dry
-  const a = companionAgent(soldier);
+  const a = companionAgent(soldier, scene);
   // Stance is decided BEFORE the body is mirrored onto the agent below, and
   // actuated later by the locomotor, which mirrors the changed box back — so
   // perception never reasons about a standing box for a kneeling soldier.

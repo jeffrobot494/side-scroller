@@ -35,8 +35,18 @@ const WALL_EPS = 4;
 // (x, y) is the root's top-left, matching how missions place enemies. `team`
 // picks who this agent treats as hostile — "enemy" (the default) hunts the
 // squad; "player" makes a companion hunt the enemy roots (see nearestHostile).
-export function instantiate(nspec, x, y, team = "enemy") {
-  const root = makeInstance(nspec.root, null, null);
+//
+// `rng` is the construction-time half of the determinism seam (tech/mission-
+// determinism.md, D1): a defaulted trailing argument, the same shape `team`
+// already has, because this function takes no scene and never will — it runs
+// before any host exists (loadMission) AND mid-tick from the spawn path. It
+// becomes root.rng, so every downstream draw in this tree — the phase seeds
+// below, the aim jitter, randomChance, wait ranges, the brain's score noise —
+// comes off one stream. A caller that passes none gets Math.random, read at the
+// moment of each draw so a suite that assigns the global still seeds it.
+export function instantiate(nspec, x, y, team = "enemy", rng = null) {
+  const draw = rng || (() => Math.random());
+  const root = makeInstance(nspec.root, null, null, draw);
   root.isRoot = true;
   root.team = team;
   root.specTop = nspec;
@@ -50,7 +60,7 @@ export function instantiate(nspec, x, y, team = "enemy") {
   root.pendingSignals = [];
   root.sense = {};
   root.memory = { lastSeenX: 0, lastSeenY: 0, timeSinceSeen: 99, senseTimer: 0 };
-  root.rng = Math.random;
+  root.rng = draw;
   root.brainState = initBrain(nspec.brain);
   placeChildren(root);
   root.anchorX = root.x;
@@ -59,7 +69,10 @@ export function instantiate(nspec, x, y, team = "enemy") {
   return root;
 }
 
-function makeInstance(def, parent, root) {
+function makeInstance(def, parent, root, rng) {
+  // The root's stream when there is one; otherwise Math.random, resolved here
+  // rather than held at module load (see instantiate).
+  const draw = rng || Math.random;
   const inst = {
     kind: "spec",
     spec: def,
@@ -91,13 +104,13 @@ function makeInstance(def, parent, root) {
     hitFlash: 0,
     burn: null,
     slow: null,
-    hoverPhase: Math.random() * Math.PI * 2,
-    orbitAngle: Math.random() * 360,
+    hoverPhase: draw() * Math.PI * 2,
+    orbitAngle: draw() * 360,
     children: [],
   };
   if (!root) inst.root = inst;
   for (const c of def.children) {
-    inst.children.push(makeInstance(c, inst, inst.root));
+    inst.children.push(makeInstance(c, inst, inst.root, draw));
   }
   // motion "velocity" means: start at this velocity, then let physics carry it
   if (inst.motion && inst.motion.type === "velocity") {
@@ -962,7 +975,7 @@ export function spawnFromDef(root, defId, x, y, { vx = 0, vy = 0, depth = 1 } = 
   if (root.spawnStamps.length >= lim.maxSpawnsPerSecond) return null;
   root.spawnStamps.push(now);
 
-  const inst = makeInstance(def, null, root);
+  const inst = makeInstance(def, null, root, root.rng);
   inst.root = root;
   inst.depth = depth;
   inst.x = x - inst.w / 2;
