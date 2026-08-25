@@ -69,7 +69,7 @@ Provisional, as above.
 
 | Slice | | Mockup |
 |---|---|---|
-| M1 | Determinism — reseed the gameplay `Math.random()` sites in `src/mission/ai.js` and `src/mission/enemyspec/runtime.js` through `src/game/gen/rng.js`, plus a golden test. No behaviour change | — |
+| M1 | Determinism — specified on its own in `tech/mission-determinism.md`, which supersedes this row: five draw sites across three modules, and the seeding slice does change the stream the game draws from | — |
 | M2 | Squad ownership in the mission — an owner per soldier, and the methods in `src/mission/mission.js` that assume `scene.soldiers` is one squad partitioned by it | §5 the other squads' HUD |
 | M3 | Lockstep input — two input streams through `src/mission/input.js`, input delay, and a rolling checksum so divergence is caught rather than mysterious | — |
 | M4 | Joint mission resolution — independent squad exits, contested pickups, casualties attributed per owner | **none — see below** |
