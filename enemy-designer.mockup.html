@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Enemy Designer v2 — mockup</title>
+<style>
+  :root {
+    --earth:#0b0908; --concrete:#171b21; --concrete-hi:#212832; --line:#333d4a;
+    --steel:#2a3644; --text:#d8dee9; --muted:#808b99; --accent:#e94560;
+    --light:#ffca7a; --credits:#f2c14e; --good:#4caf72; --bad:#e05a5a;
+    --track:#0a0e13; --blue:#6fd3ff; --new:#7a9cf0;
+  }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; }
+  body {
+    background: linear-gradient(#10120f 0%, var(--earth) 45%, #060504 100%);
+    color: var(--text); font: 13px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  code, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  /* ---- mockup chrome (not part of the tool) ---- */
+  .mk-bar {
+    position: sticky; top:0; z-index:50; display:flex; align-items:center; gap:14px;
+    padding:10px 18px; background:#0d1117; border-bottom:1px solid var(--line);
+  }
+  .mk-bar h1 { font-size:13px; margin:0; letter-spacing:2px; font-weight:800; }
+  .mk-bar h1 span { color:var(--muted); font-weight:600; letter-spacing:1px; }
+  .mk-tabs { display:flex; gap:6px; margin-left:auto; }
+  .mk-tabs button {
+    padding:6px 13px; border:1px solid var(--line); border-radius:4px; cursor:pointer;
+    background:linear-gradient(180deg,var(--concrete-hi),var(--concrete));
+    color:var(--muted); font:inherit; font-weight:600;
+  }
+  .mk-tabs button.active { color:#fff; border-color:var(--light); box-shadow:inset 0 -2px 10px -4px rgba(255,202,122,.6); }
+  .mk-note {
+    max-width:1420px; margin:14px auto 0; padding:9px 15px; font-size:12.5px; color:var(--muted);
+    border-left:3px solid var(--steel); background:rgba(20,25,32,.5); border-radius:0 4px 4px 0; line-height:1.6;
+  }
+  .mk-note b { color:var(--text); font-weight:600; }
+  .mk-note code { color:var(--credits); font-size:11.5px; }
+  .view { display:none; }
+  .view.on { display:block; }
+
+  /* ---- shared tool chrome ---- */
+  .tool { max-width:1420px; margin:16px auto 60px; padding:0 18px; }
+  .head { display:flex; align-items:center; gap:13px; margin-bottom:14px; }
+  .btn {
+    padding:6px 13px; border:1px solid var(--line); border-radius:4px; cursor:pointer;
+    background:linear-gradient(180deg,var(--concrete-hi),var(--concrete)); color:var(--text);
+    font:inherit; font-weight:600;
+  }
+  .btn:hover { border-color:#4a5a70; }
+  .btn.ghost { background:none; color:var(--muted); }
+  .btn.alt { color:var(--muted); }
+  .btn.go { border-color:#2f6a48; background:linear-gradient(180deg,#2f7d52,#245f3f); color:#eaf7ef; }
+  .btn.hot { border-color:var(--light); color:var(--light); }
+  .btn.sm { padding:3px 8px; font-size:11.5px; font-weight:600; }
+  .btn[disabled] { opacity:.4; cursor:default; }
+  .name {
+    background:var(--track); border:1px solid var(--line); border-radius:4px; color:#fff;
+    padding:7px 11px; font:inherit; font-size:15px; font-weight:700; min-width:250px;
+  }
+  .id { color:var(--muted); font-size:11.5px; }
+  .pill {
+    font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--line);
+    color:var(--muted); white-space:nowrap;
+  }
+  .pill.ok { color:var(--good); border-color:#2c5c40; }
+  .pill.bad { color:var(--bad); border-color:#5c2c2c; }
+  .pill.on { color:var(--light); border-color:var(--light); }
+  .pill.live { color:var(--blue); border-color:#2b5566; }
+  .spacer { flex:1; }
+
+  /* ---- create / LLM bar ---- */
+  .create {
+    display:grid; grid-template-columns:1fr 260px; gap:14px; padding:12px 14px; margin-bottom:14px;
+    background:rgba(23,27,33,.75); border:1px solid var(--line); border-radius:6px;
+  }
+  .seg { display:flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; width:max-content; margin-bottom:8px; }
+  .seg button { padding:4px 12px; border:0; background:transparent; color:var(--muted); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
+  .seg button.on { background:var(--steel); color:#fff; }
+  textarea.prompt {
+    width:100%; min-height:52px; resize:vertical; background:var(--track); color:var(--text);
+    border:1px solid var(--line); border-radius:4px; padding:8px 10px; font:inherit; font-size:12.5px;
+  }
+  .create-side { display:flex; flex-direction:column; gap:8px; }
+  .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  select, input[type=text], input[type=number] {
+    background:var(--track); color:var(--text); border:1px solid var(--line);
+    border-radius:4px; padding:4px 7px; font:inherit; font-size:12px;
+  }
+  .msg { font-size:12px; color:var(--muted); }
+  .msg.ok { color:var(--good); } .msg.bad { color:var(--bad); }
+
+  /* ---- main grid ---- */
+  .grid { display:grid; grid-template-columns:246px 1fr 470px; gap:16px; align-items:start; }
+  .panel { background:rgba(23,27,33,.6); border:1px solid var(--line); border-radius:6px; }
+  .panel > h3 {
+    margin:0; padding:9px 12px; font-size:11px; letter-spacing:.11em; text-transform:uppercase;
+    color:var(--muted); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:8px;
+  }
+  .panel > h3 .spacer { flex:1; }
+  .pad { padding:11px 12px; }
+
+  /* ---- tree ---- */
+  .treebar { display:flex; gap:5px; padding:7px 8px; border-bottom:1px solid var(--line); }
+  .tree { padding:7px 4px 11px; font-size:12.5px; }
+  .tn { display:flex; align-items:center; gap:6px; padding:3px 8px; border-radius:3px; cursor:pointer; white-space:nowrap; }
+  .tn:hover { background:rgba(255,255,255,.035); }
+  .tn.sel { background:var(--steel); color:#fff; }
+  .tn .ic { width:13px; text-align:center; opacity:.85; font-size:11px; }
+  .tn .sub { color:var(--muted); font-size:11px; }
+  .tn.sel .sub { color:#b7c2d0; }
+  .tn.err::after { content:"!"; color:var(--bad); font-weight:800; margin-left:auto; padding-left:8px; }
+  .tn.added { outline:1px dashed var(--new); outline-offset:-1px; }
+  .d1 { padding-left:20px; } .d2 { padding-left:36px; } .d3 { padding-left:52px; }
+  .tgroup {
+    margin:9px 0 2px; padding:0 8px; font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:#5f6b7a;
+  }
+
+  /* ---- inspector ---- */
+  .comp { border:1px solid var(--line); border-radius:5px; margin-bottom:9px; background:rgba(14,18,24,.5); }
+  .comp > header {
+    display:flex; align-items:center; gap:9px; padding:7px 10px; cursor:pointer;
+  }
+  .comp > header b { font-size:12.5px; font-weight:700; }
+  .comp > header .hint { color:var(--muted); font-size:11.5px; font-weight:400; }
+  .comp.off > header b, .comp.off > header .hint { opacity:.45; }
+  .comp .body { padding:2px 11px 11px; border-top:1px solid rgba(51,61,74,.6); }
+  .sw { width:28px; height:15px; border-radius:9px; background:#2a3038; position:relative; flex:none; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px; width:11px; height:11px; border-radius:50%; background:#6d7784; transition:.15s; }
+  .sw.on { background:#2c4f3c; } .sw.on::after { left:15px; background:var(--good); }
+  .f { display:grid; grid-template-columns:118px 1fr 62px; align-items:center; gap:10px; padding:5px 0; }
+  .f label { color:var(--muted); font-size:12px; }
+  .f .val { text-align:right; font-size:12px; color:var(--text); font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  input[type=color] { width:38px; height:22px; padding:0; border:1px solid var(--line); background:var(--track); border-radius:3px; }
+  .f select { width:100%; }
+  .subhead { font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:#5f6b7a; margin:12px 0 4px; }
+
+  /* ---- preview ---- */
+  .stage { position:relative; background:#0c1424; border-bottom:1px solid var(--line); }
+  .stage svg { display:block; width:100%; }
+  .stage .hud {
+    position:absolute; left:9px; top:8px; font-size:10.5px; color:rgba(190,200,215,.6);
+  }
+  .stage .ctl {
+    position:absolute; right:8px; top:7px; display:flex; gap:6px;
+  }
+  .keys {
+    position:absolute; left:0; right:0; bottom:0; text-align:center; font-size:10.5px;
+    padding:3px 0; background:rgba(7,11,19,.78); color:rgba(200,210,224,.85); letter-spacing:.3px;
+  }
+  .readout { display:flex; gap:8px; padding:9px 11px; }
+  .stat { flex:1; background:var(--track); border:1px solid var(--line); border-radius:4px; padding:5px 8px; }
+  .stat span { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); }
+  .stat b { font-size:13px; }
+  .verdict { margin:0 11px 10px; padding:7px 10px; border-radius:4px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
+  .verdict.ok { color:var(--good); border-color:#2c5c40; background:rgba(44,92,64,.14); }
+  .verdict.bad { color:var(--bad); border-color:#5c2c2c; background:rgba(92,44,44,.14); }
+
+  /* ---- lists ---- */
+  .lrow {
+    display:flex; align-items:center; gap:9px; padding:7px 11px; border-top:1px solid rgba(51,61,74,.55); font-size:12.5px;
+  }
+  .lrow:first-of-type { border-top:0; }
+  .lrow .nm { font-weight:600; }
+  .lrow .meta { color:var(--muted); font-size:11px; }
+  .lrow .x { color:#8a5a5a; cursor:pointer; border:0; background:none; font-size:14px; padding:0 4px; }
+  .empty { color:var(--muted); font-style:italic; padding:11px; font-size:12.5px; }
+
+  /* ---- diff ---- */
+  .diff { font-size:12px; background:var(--track); border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+  .diff div { padding:1.5px 11px; white-space:pre; overflow-x:auto; }
+  .diff .add { background:rgba(44,92,64,.22); color:#a8e0bf; }
+  .diff .del { background:rgba(92,44,44,.22); color:#e8b0b0; }
+  .diff .ctxl { color:#6b7686; }
+  .hist { display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); }
+  .hist .step { padding:2px 8px; border:1px solid var(--line); border-radius:10px; }
+  .hist .step.now { border-color:var(--light); color:var(--light); }
+
+  .warn {
+    border:1px solid #5c4a2c; background:rgba(92,74,44,.16); color:#e0c48e;
+    border-radius:5px; padding:9px 11px; font-size:12px; margin-bottom:10px; line-height:1.55;
+  }
+  .warn b { color:var(--light); }
+  table.rost { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.rost th {
+    text-align:left; font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted);
+    padding:7px 10px; border-bottom:1px solid var(--line); font-weight:600;
+  }
+  table.rost td { padding:7px 10px; border-bottom:1px solid rgba(51,61,74,.45); }
+  table.rost tr.custom td { background:rgba(122,156,240,.07); }
+  .chk { width:15px; height:15px; border:1px solid var(--line); border-radius:3px; display:inline-block; position:relative; vertical-align:-3px; }
+  .chk.on { background:#2c4f3c; border-color:#3d7a58; }
+  .chk.on::after { content:"✓"; position:absolute; inset:0; text-align:center; line-height:14px; font-size:11px; color:#bff0d2; }
+  .bignum { font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+
+<div class="mk-bar">
+  <h1>ENEMY DESIGNER <span>v2 — mockup, not wired</span></h1>
+  <div class="mk-tabs">
+    <button class="active" data-v="editor">1 · Editor</button>
+    <button data-v="revise">2 · Revise with LLM</button>
+    <button data-v="playtest">3 · Playtest</button>
+    <button data-v="roster">4 · Roster</button>
+  </div>
+</div>
+
+<!-- ==================== VIEW 1 — EDITOR ==================== -->
+<div class="view on" id="v-editor">
+<p class="mk-note">
+  <b>What changed.</b> The single root-only form is replaced by <b>tree → inspector</b>. The tree is the spec's
+  entity graph (root, children, <code>defs</code>, emitters, brain states); the inspector edits whichever node is
+  selected. Components are toggles because the spec is sparse — off means the key is absent, not zeroed.
+  The JSON panel stays, one tab over, still authoritative.
+</p>
+<div class="tool">
+
+  <div class="head">
+    <button class="btn ghost">← Tools</button>
+    <input class="name" value="Bulwark Drone" spellcheck="false">
+    <span class="id mono">bulwark_drone</span>
+    <span class="pill on">id pinned</span>
+    <span class="spacer"></span>
+    <span class="pill ok">✓ valid · dry-run ok</span>
+    <button class="btn">Save to library</button>
+    <button class="btn go">▲ Add to roster</button>
+  </div>
+
+  <div class="create">
+    <div>
+      <div class="seg">
+        <button>Generate new</button>
+        <button class="on">Revise this enemy</button>
+      </div>
+      <textarea class="prompt" spellcheck="false">Give the shield pod its own destructible mount, and make it retreat when the core drops below half.</textarea>
+    </div>
+    <div class="create-side">
+      <div class="row">
+        <button class="btn hot">✦ Revise</button>
+        <span class="pill live">Player2 connected</span>
+      </div>
+      <div class="row">
+        <label class="msg">Template</label>
+        <select><option>— load —</option><option>Iron Moth</option><option>Sky Duelist</option></select>
+      </div>
+      <div class="hist">
+        <span>History</span>
+        <span class="step">generated</span>→<span class="step">+pods</span>→<span class="step now">now</span>
+        <button class="btn sm alt">↶ Undo</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- TREE -->
+    <div class="panel">
+      <h3>Spec tree <span class="spacer"></span><span class="pill">9 / 24</span></h3>
+      <div class="treebar">
+        <button class="btn sm">+ Add ▾</button>
+        <button class="btn sm alt">⧉ Duplicate</button>
+        <button class="btn sm alt">↑</button>
+        <button class="btn sm alt">↓</button>
+        <button class="btn sm alt" style="color:#8a5a5a">🗑</button>
+      </div>
+      <div class="tree">
+        <div class="tgroup">Entities</div>
+        <div class="tn"><span class="ic">◼</span>root <span class="sub">core · 180hp</span></div>
+        <div class="tn d1"><span class="ic">◆</span>shieldPod <span class="sub">40hp</span></div>
+        <div class="tn d2 sel"><span class="ic">✦</span>podGun <span class="sub">emitter → seeker</span></div>
+        <div class="tn d1 added"><span class="ic">◆</span>podMount <span class="sub">new · 25hp</span></div>
+        <div class="tn d1 err"><span class="ic">✦</span>maw <span class="sub">emitter</span></div>
+
+        <div class="tgroup">Defs</div>
+        <div class="tn"><span class="ic">▷</span>seeker <span class="sub">homing · ttl 3</span></div>
+        <div class="tn"><span class="ic">▷</span>mine <span class="sub">contact 18</span></div>
+
+        <div class="tgroup">Brain — utility</div>
+        <div class="tn"><span class="ic">●</span>engage <span class="sub">start · 4 actions</span></div>
+        <div class="tn d1"><span class="ic">▸</span>strafeRun</div>
+        <div class="tn d1"><span class="ic">▸</span>lobMine</div>
+        <div class="tn d1"><span class="ic">▸</span>retreat</div>
+        <div class="tn d1"><span class="ic">▸</span>hold</div>
+        <div class="tn"><span class="ic">●</span>wounded <span class="sub">hpPct &lt; 0.5</span></div>
+      </div>
+    </div>
+
+    <!-- INSPECTOR -->
+    <div class="panel">
+      <h3>
+        <span class="mono" style="color:var(--text);text-transform:none;letter-spacing:0">root.children[0].emitters.podGun</span>
+        <span class="spacer"></span>
+        <button class="btn sm alt">Inspector</button><button class="btn sm">JSON</button>
+      </h3>
+      <div class="pad">
+
+        <div class="comp">
+          <header><span class="sw on"></span><b>Emitter</b> <span class="hint">— what this muzzle launches</span></header>
+          <div class="body">
+            <div class="f"><label>Source</label><select><option>ref → a def entity</option><option>plain projectile</option></select><span class="val"></span></div>
+            <div class="f"><label>ref</label><select><option>seeker</option><option>mine</option></select><span class="val"></span></div>
+            <div class="f"><label>Offset x</label><input type="range" value="34" min="-80" max="80"><span class="val">-12</span></div>
+            <div class="f"><label>Offset y</label><input type="range" value="50" min="-80" max="80"><span class="val">0</span></div>
+            <div class="subhead">Sound</div>
+            <div class="f"><label>Cue</label><select><option>Auto — weapon.fire.enemy</option><option>weapon.fire.rocket</option></select><span class="val">▶</span></div>
+            <div class="f"><label>Level ×</label><input type="range" value="55" min="0" max="100"><span class="val">1.10</span></div>
+          </div>
+        </div>
+
+        <div class="comp off"><header><span class="sw"></span><b>Visual</b> <span class="hint">— emitters draw nothing; the def does</span></header></div>
+
+        <p class="msg" style="margin:14px 0 6px">Selecting <code>shieldPod</code> instead would show:</p>
+
+        <div class="comp">
+          <header><span class="sw on"></span><b>Visual</b> <span class="hint">— shape, size, colour</span></header>
+          <div class="body">
+            <div class="f"><label>Shape</label><select><option>diamond</option><option>box</option><option>circle</option><option>ellipse</option></select><span class="val"></span></div>
+            <div class="f"><label>Width</label><input type="range" value="30" min="4" max="400"><span class="val">58 px</span></div>
+            <div class="f"><label>Height</label><input type="range" value="14" min="4" max="400"><span class="val">26 px</span></div>
+            <div class="f"><label>Colour</label><input type="color" value="#b49aff"><span class="val mono">#b49aff</span></div>
+          </div>
+        </div>
+
+        <div class="comp">
+          <header><span class="sw on"></span><b>Health</b> <span class="hint">— destructible part</span></header>
+          <div class="body"><div class="f"><label>Max</label><input type="range" value="8" min="1" max="500"><span class="val">40</span></div></div>
+        </div>
+
+        <div class="comp">
+          <header><span class="sw on"></span><b>Link</b> <span class="hint">— lifecycle vs. the parent</span></header>
+          <div class="body">
+            <div class="f"><label>On parent death</label><select><option>destroy</option><option>detach</option><option>disable</option><option>ignore</option><option>transform</option></select><span class="val"></span></div>
+            <div class="f"><label>On own death</label><select><option>detach</option><option>destroy</option></select><span class="val"></span></div>
+          </div>
+        </div>
+
+        <div class="comp">
+          <header><span class="sw on"></span><b>Events</b> <span class="hint">— on: destroy → 2 actions</span></header>
+          <div class="body">
+            <div class="row" style="padding:6px 0 3px"><span class="pill">destroy</span><button class="btn sm alt">+ handler ▾</button></div>
+            <div class="lrow" style="padding-left:0"><span class="mono">signal</span><span class="meta">"podDown"</span><span class="spacer"></span><button class="x">×</button></div>
+            <div class="lrow" style="padding-left:0"><span class="mono">add</span><span class="meta">root.vars.rage += 1</span><span class="spacer"></span><button class="x">×</button></div>
+          </div>
+        </div>
+
+        <div class="comp off"><header><span class="sw"></span><b>Motion</b> <span class="hint">— follows the parent</span></header></div>
+        <div class="comp off"><header><span class="sw"></span><b>Contact</b> <span class="hint">— no touch damage</span></header></div>
+        <div class="comp off"><header><span class="sw"></span><b>Life (ttl)</b></header></div>
+        <div class="comp off"><header><span class="sw"></span><b>Vars</b></header></div>
+      </div>
+    </div>
+
+    <!-- PREVIEW + LIBRARY -->
+    <div>
+      <div class="panel" style="margin-bottom:14px">
+        <h3>Live preview <span class="spacer"></span><span class="pill live">real runtime</span></h3>
+        <div class="stage">
+          <svg viewBox="0 0 470 250" preserveAspectRatio="none" height="250">
+            <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#0c1424"/><stop offset="1" stop-color="#16232a"/></linearGradient></defs>
+            <rect width="470" height="250" fill="url(#sky)"/>
+            <rect x="0" y="212" width="470" height="38" fill="#22303f"/><rect x="0" y="212" width="470" height="2" fill="#6fd3ff"/>
+            <rect x="188" y="150" width="110" height="10" fill="#26384a"/><rect x="188" y="150" width="110" height="2" fill="#6fd3ff"/>
+            <!-- enemy -->
+            <rect x="72" y="96" width="52" height="42" rx="4" fill="#c96a5a"/>
+            <polygon points="60,112 82,104 82,124" fill="#b49aff"/>
+            <polygon points="136,112 114,104 114,124" fill="#b49aff"/>
+            <rect x="72" y="88" width="52" height="4" fill="rgba(0,0,0,.5)"/><rect x="72" y="88" width="38" height="4" fill="#57c98a"/>
+            <circle cx="150" cy="118" r="5" fill="#8affc1"/><circle cx="186" cy="126" r="5" fill="#8affc1"/>
+            <!-- soldier -->
+            <rect x="356" y="172" width="26" height="40" rx="5" fill="#7ad7ff"/>
+            <line x1="369" y1="188" x2="345" y2="180" stroke="#0b0f18" stroke-width="5"/>
+            <circle cx="342" cy="179" r="4" fill="#ffd36a"/>
+            <rect x="356" y="164" width="26" height="4" fill="rgba(0,0,0,.5)"/><rect x="356" y="164" width="20" height="4" fill="#7ad7ff"/>
+            <circle cx="300" cy="176" r="4" fill="#ffe08a"/>
+          </svg>
+          <div class="hud">live preview — real runtime</div>
+          <div class="ctl">
+            <span class="pill on">⌨ You have control</span>
+            <button class="btn sm alt">⛶</button>
+            <button class="btn sm alt">↻</button>
+          </div>
+          <div class="keys">A / D move &nbsp; MOUSE aim &nbsp; S crouch &nbsp; SPACE jump &nbsp; CLICK fire &nbsp; R reload</div>
+        </div>
+        <div class="row" style="padding:9px 11px 0">
+          <label class="msg">Weapon</label>
+          <select><option>MK-2 Carbine</option><option>Breach Shotgun</option><option>Lance Rifle</option></select>
+          <label class="msg">Aim</label><input type="range" style="width:70px" value="80">
+          <span class="pill">8</span>
+        </div>
+        <div class="readout">
+          <div class="stat"><span>State</span><b>engage</b></div>
+          <div class="stat"><span>HP</span><b>128/180</b></div>
+          <div class="stat"><span>Parts</span><b>4</b></div>
+          <div class="stat"><span>You</span><b>72/100</b></div>
+        </div>
+        <div class="verdict ok">✓ dry-run ok — moves, attacks, 4 part(s)</div>
+      </div>
+
+      <div class="panel" style="margin-bottom:14px">
+        <h3>Live roster <span class="spacer"></span><span class="pill">6 built-in + 2 custom</span></h3>
+        <div class="lrow"><span class="nm">Bulwark Drone</span><span class="meta">tank · t3 · threat 240</span><span class="spacer"></span><span class="pill ok">in roster</span><button class="x">×</button></div>
+        <div class="lrow"><span class="nm">Ash Skimmer</span><span class="meta">skirmisher · t2 · threat 95</span><span class="spacer"></span><span class="pill ok">in roster</span><button class="x">×</button></div>
+        <div class="lrow" style="color:var(--muted)"><span>Reload the game page to pick these up.</span></div>
+      </div>
+
+      <div class="panel">
+        <h3>Enemy library <span class="spacer"></span><span class="pill">local</span></h3>
+        <div class="lrow"><span class="nm">Bulwark Drone</span><span class="meta">tank · t3 · int 4 · 240</span><span class="spacer"></span><button class="btn sm alt">Load</button><button class="x">×</button></div>
+        <div class="lrow"><span class="nm">Ash Skimmer</span><span class="meta">skirmisher · t2 · int 3 · 95</span><span class="spacer"></span><button class="btn sm alt">Load</button><button class="x">×</button></div>
+        <div class="lrow"><span class="nm">Choir Node</span><span class="meta">support · t2 · int 2 · 110</span><span class="spacer"></span><button class="btn sm alt">Load</button><button class="x">×</button></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<!-- ==================== VIEW 2 — REVISE ==================== -->
+<div class="view" id="v-revise">
+<p class="mk-note">
+  <b>Revision, not regeneration.</b> The current sparse spec goes back to the model as the prior assistant turn,
+  the instruction as the next user turn — the same shape <code>generateEnemySpec</code>'s repair round already uses.
+  A revision lands in a <b>staging slot</b>, never straight onto your work: you see what changed, the verdict, and
+  keep or discard. History is a stack of specs, so Undo is free.
+</p>
+<div class="tool">
+  <div class="head">
+    <button class="btn ghost">← Tools</button>
+    <input class="name" value="Bulwark Drone" spellcheck="false">
+    <span class="id mono">bulwark_drone</span>
+    <span class="spacer"></span>
+    <span class="pill on">revision 3 — staged</span>
+  </div>
+
+  <div class="create">
+    <div>
+      <div class="seg"><button>Generate new</button><button class="on">Revise this enemy</button></div>
+      <textarea class="prompt" spellcheck="false">Give the shield pod its own destructible mount, and make it retreat when the core drops below half.</textarea>
+    </div>
+    <div class="create-side">
+      <div class="row"><button class="btn hot">✦ Revise</button><span class="pill live">Player2 connected</span></div>
+      <div class="msg">Validated + dry-run before it is offered. One repair round on failure.</div>
+      <div class="hist"><span>History</span><span class="step">generated</span>→<span class="step">+pods</span>→<span class="step now">staged</span><button class="btn sm alt">↶ Undo</button></div>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr 470px">
+    <div class="panel">
+      <h3>What the revision changed <span class="spacer"></span><span class="pill">+18 −4 lines</span></h3>
+      <div class="pad">
+        <div class="diff">
+          <div class="ctxl">  "root": {</div>
+          <div class="ctxl">    "children": [</div>
+          <div class="add">+     { "id": "podMount", "at": [-46, 2],</div>
+          <div class="add">+       "visual": { "shape": "box", "size": [18, 14], "color": "#7a6ba8" },</div>
+          <div class="add">+       "health": { "max": 25 },</div>
+          <div class="add">+       "link": { "onOwnDeath": "destroy" },</div>
+          <div class="add">+       "children": [</div>
+          <div class="ctxl">          { "id": "shieldPod", … }</div>
+          <div class="add">+       ] },</div>
+          <div class="ctxl">    ]</div>
+          <div class="ctxl">  },</div>
+          <div class="ctxl">  "brain": { "mode": "utility",</div>
+          <div class="add">+   "states": { "engage": { …, "transitions": [</div>
+          <div class="add">+     { "when": "self.hpPct &lt; 0.5", "to": "wounded" } ] },</div>
+          <div class="add">+     "wounded": { "actions": [</div>
+          <div class="add">+       { "id": "retreat", "score": "2.4 + 2 * sense.playerApproaching",</div>
+          <div class="add">+         "steps": [ { "moveTo": { "target": "player", "offset": [-320, -60], "speed": 300 } } ] },</div>
+          <div class="del">-       { "id": "hold", "score": 0.5, "steps": [ { "wait": 0.3 } ] }</div>
+          <div class="add">+       { "id": "hold", "score": 0.4, "steps": [ { "wait": 0.3 } ] } ] } }</div>
+        </div>
+        <div class="row" style="margin-top:13px">
+          <button class="btn go">✓ Keep revision</button>
+          <button class="btn alt">Discard</button>
+          <button class="btn alt">Revise again from here</button>
+          <span class="spacer"></span>
+          <span class="msg ok">Entities 7 → 9 · threat 240 → 240 (unchanged)</span>
+        </div>
+        <div class="warn" style="margin-top:13px">
+          <b>The model changed something you did not ask about.</b> <code>hold.score</code> dropped 0.5 → 0.4.
+          Harmless here, but it is why revisions stage instead of applying.
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel" style="margin-bottom:14px">
+        <h3>Preview <span class="spacer"></span>
+          <div class="seg" style="margin:0"><button>Current</button><button class="on">Staged</button></div>
+        </h3>
+        <div class="stage">
+          <svg viewBox="0 0 470 220" preserveAspectRatio="none" height="220">
+            <rect width="470" height="220" fill="#101c26"/>
+            <rect x="0" y="184" width="470" height="36" fill="#22303f"/><rect x="0" y="184" width="470" height="2" fill="#6fd3ff"/>
+            <rect x="76" y="82" width="52" height="42" rx="4" fill="#c96a5a"/>
+            <rect x="52" y="96" width="18" height="14" fill="#7a6ba8"/>
+            <polygon points="52,103 30,95 30,115" fill="#b49aff"/>
+            <rect x="134" y="96" width="18" height="14" fill="#7a6ba8"/>
+            <polygon points="152,103 174,95 174,115" fill="#b49aff"/>
+            <rect x="76" y="74" width="52" height="4" fill="rgba(0,0,0,.5)"/><rect x="76" y="74" width="24" height="4" fill="#e0a24e"/>
+            <rect x="356" y="144" width="26" height="40" rx="5" fill="#7ad7ff"/>
+            <line x1="369" y1="160" x2="347" y2="152" stroke="#0b0f18" stroke-width="5"/>
+            <text x="188" y="60" fill="#8b95a3" font-size="11" font-family="system-ui">core &lt; 50% → state: wounded</text>
+            <path d="M150 118 L250 140" stroke="#e0a24e" stroke-width="2" stroke-dasharray="4 4" fill="none"/>
+          </svg>
+          <div class="keys">A / D move &nbsp; MOUSE aim &nbsp; SPACE jump &nbsp; CLICK fire</div>
+        </div>
+        <div class="readout">
+          <div class="stat"><span>State</span><b>wounded</b></div>
+          <div class="stat"><span>HP</span><b>74/180</b></div>
+          <div class="stat"><span>Parts</span><b>6</b></div>
+        </div>
+        <div class="verdict ok">✓ dry-run ok — moves, attacks, 6 part(s)</div>
+      </div>
+
+      <div class="panel">
+        <h3>If the revision fails</h3>
+        <div class="pad">
+          <div class="verdict bad" style="margin:0 0 10px">✗ root.children[0].link.transformTo — transform requires transformTo naming an entry in defs</div>
+          <p class="msg" style="margin:0">Errors are fed back verbatim for one repair round. Still failing → nothing is
+          staged and your spec is untouched. The tool never holds an unvalidated enemy.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ==================== VIEW 3 — PLAYTEST ==================== -->
+<div class="view" id="v-playtest">
+<p class="mk-note">
+  <b>The dummy becomes a real <code>Soldier</code>.</b> This already exists — it is the Firing Room's
+  <code>manual</code> mode: <code>new Soldier(…)</code>, <code>MissionInput</code>, <code>fire()</code>,
+  <code>stepActor</code>. Expanding takes the preview to a 1:1 arena big enough to actually fight in.
+  <b>Note the “Take control” toggle</b> — <code>MissionInput</code> binds <code>keydown</code> on
+  <code>window</code>, so WASD must be off while you are typing in the name, prompt, or JSON fields.
+</p>
+<div class="tool">
+  <div class="head">
+    <button class="btn ghost">✕ Close playtest</button>
+    <span style="font-weight:700;font-size:15px">Bulwark Drone</span>
+    <span class="id mono">bulwark_drone</span>
+    <span class="spacer"></span>
+    <label class="msg">Weapon</label>
+    <select><option>MK-2 Carbine</option><option>Breach Shotgun</option></select>
+    <label class="msg">Aim</label><input type="range" style="width:80px" value="80"><span class="pill">8</span>
+    <label class="msg">Count</label><input type="range" style="width:70px" value="20"><span class="pill">2</span>
+    <button class="btn alt">↻ Restart</button>
+    <span class="pill on">⌨ You have control</span>
+  </div>
+
+  <div class="panel">
+    <div class="stage">
+      <svg viewBox="0 0 1380 560" preserveAspectRatio="none" height="560">
+        <defs><linearGradient id="sky2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#0c1424"/><stop offset="1" stop-color="#16232a"/></linearGradient></defs>
+        <rect width="1380" height="560" fill="url(#sky2)"/>
+        <g stroke="rgba(120,160,210,.07)"><path d="M170 0V500M340 0V500M510 0V500M680 0V500M850 0V500M1020 0V500M1190 0V500"/></g>
+        <rect x="0" y="500" width="1380" height="60" fill="#22303f"/><rect x="0" y="500" width="1380" height="2" fill="#6fd3ff"/>
+        <rect x="1374" y="0" width="6" height="500" fill="#1a2735"/>
+        <rect x="430" y="370" width="210" height="16" fill="#26384a"/><rect x="430" y="370" width="210" height="2" fill="#6fd3ff"/>
+        <rect x="760" y="286" width="210" height="16" fill="#26384a"/><rect x="760" y="286" width="210" height="2" fill="#6fd3ff"/>
+        <rect x="300" y="222" width="170" height="16" fill="#26384a"/><rect x="300" y="222" width="170" height="2" fill="#6fd3ff"/>
+
+        <!-- enemy 1 -->
+        <g>
+          <rect x="700" y="196" width="62" height="50" rx="5" fill="#c96a5a"/>
+          <rect x="672" y="212" width="20" height="16" fill="#7a6ba8"/><polygon points="672,220 646,210 646,232" fill="#b49aff"/>
+          <rect x="770" y="212" width="20" height="16" fill="#7a6ba8"/><polygon points="790,220 816,210 816,232" fill="#b49aff"/>
+          <rect x="700" y="186" width="62" height="5" fill="rgba(0,0,0,.5)"/><rect x="700" y="186" width="40" height="5" fill="#57c98a"/>
+          <rect x="694" y="190" width="74" height="62" fill="none" stroke="rgba(255,90,90,.75)" stroke-width="2" rx="6"/>
+        </g>
+        <!-- enemy 2 -->
+        <g>
+          <rect x="1090" y="330" width="62" height="50" rx="5" fill="#c96a5a"/>
+          <rect x="1062" y="346" width="20" height="16" fill="#7a6ba8"/><polygon points="1062,354 1036,344 1036,366" fill="#b49aff"/>
+          <rect x="1090" y="320" width="62" height="5" fill="rgba(0,0,0,.5)"/><rect x="1090" y="320" width="18" height="5" fill="#e05a5a"/>
+        </g>
+        <!-- projectiles -->
+        <circle cx="606" cy="252" r="7" fill="#8affc1"/><circle cx="540" cy="266" r="7" fill="#8affc1"/>
+        <circle cx="470" cy="282" r="7" fill="#8affc1"/>
+        <circle cx="1006" cy="372" r="7" fill="#8affc1"/>
+        <rect x="330" y="300" width="16" height="5" fill="#ffd36a"/><rect x="392" y="296" width="16" height="5" fill="#ffd36a"/>
+        <!-- soldier -->
+        <rect x="252" y="326" width="30" height="46" rx="6" fill="#7ad7ff"/>
+        <line x1="267" y1="345" x2="312" y2="330" stroke="#0b0f18" stroke-width="6"/>
+        <circle cx="318" cy="328" r="6" fill="#ffd36a"/>
+        <rect x="252" y="316" width="30" height="5" fill="rgba(0,0,0,.5)"/><rect x="252" y="316" width="22" height="5" fill="#7ad7ff"/>
+        <circle cx="352" cy="316" r="9" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2"/>
+        <line x1="352" y1="303" x2="352" y2="310" stroke="rgba(255,255,255,.55)" stroke-width="2"/>
+        <line x1="352" y1="322" x2="352" y2="329" stroke="rgba(255,255,255,.55)" stroke-width="2"/>
+      </svg>
+      <div class="hud">real combat — Soldier + fire() + combat.js + updateSpecEnemy</div>
+      <div class="ctl">
+        <button class="btn sm alt">⛶ Shrink</button>
+      </div>
+      <div class="keys">A / D move &nbsp; MOUSE aim &nbsp; S crouch &nbsp; SPACE jump &nbsp; CLICK / J fire &nbsp; R reload &nbsp;&nbsp;·&nbsp;&nbsp; ESC releases the keyboard</div>
+    </div>
+    <div class="readout">
+      <div class="stat"><span>Enemy state</span><b>engage</b></div>
+      <div class="stat"><span>Enemy HP</span><b>132/180</b></div>
+      <div class="stat"><span>Parts alive</span><b>3 / 4</b></div>
+      <div class="stat"><span>You</span><b>68/100</b></div>
+      <div class="stat"><span>Ammo</span><b>17/30</b></div>
+      <div class="stat"><span>Time to kill</span><b>—</b></div>
+      <div class="stat"><span>Damage taken</span><b>32</b></div>
+    </div>
+  </div>
+
+  <p class="mk-note" style="margin-top:14px">
+    <b>Two things this arena needs that the small preview does not.</b> A camera (the mission scene has one; the
+    Firing Room dodges it with a fixed 960px range) and a respawn rule for you — the Firing Room's
+    <code>respawnShooter()</code> is the precedent: no permadeath in a test bed.
+  </p>
+</div>
+</div>
+
+<!-- ==================== VIEW 4 — ROSTER ==================== -->
+<div class="view" id="v-roster">
+<p class="mk-note">
+  <b>The button that connects the tool to the game.</b> The library is browser-local scratch; the roster is what
+  <code>missionRoster()</code> hands the level generator. Adding is a deliberate second act, so a half-finished
+  enemy in the library can never leak into a campaign. Threat is the budget currency —
+  <code>enemyThreat()</code> already reads <code>def.threat</code> for specs, so a custom enemy is priced with
+  no new code.
+</p>
+<div class="tool">
+  <div class="head">
+    <span style="font-weight:700;font-size:15px">Live mission roster</span>
+    <span class="spacer"></span>
+    <label class="msg">Custom enemies</label>
+    <select><option>append to the built-ins</option><option>replace the built-ins</option></select>
+    <button class="btn alt">Reset to built-ins</button>
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr 430px">
+    <div class="panel">
+      <h3>What the level generator will place <span class="spacer"></span><span class="pill">8 enabled</span></h3>
+      <table class="rost">
+        <tr><th style="width:34px"></th><th>Enemy</th><th>Role</th><th>Tier</th><th>Threat</th><th>Placement</th><th>Source</th><th>Verdict</th></tr>
+        <tr><td><span class="chk on"></span></td><td>Husk Charger</td><td>charger</td><td>1</td><td class="bignum">50</td><td>charger</td><td class="meta">built-in</td><td><span class="pill ok">ok</span></td></tr>
+        <tr><td><span class="chk on"></span></td><td>Lurk Gunner</td><td>artillery</td><td>1</td><td class="bignum">70</td><td>shooter</td><td class="meta">built-in</td><td><span class="pill ok">ok</span></td></tr>
+        <tr><td><span class="chk on"></span></td><td>Spore Wisp</td><td>skirmisher</td><td>1</td><td class="bignum">65</td><td>shooter</td><td class="meta">built-in</td><td><span class="pill ok">ok</span></td></tr>
+        <tr><td><span class="chk on"></span></td><td>Strafe Raider</td><td>skirmisher</td><td>2</td><td class="bignum">85</td><td>shooter</td><td class="meta">built-in</td><td><span class="pill ok">ok</span></td></tr>
+        <tr><td><span class="chk"></span></td><td style="opacity:.5">Cowardly Duelist</td><td style="opacity:.5">elite</td><td style="opacity:.5">2</td><td class="bignum" style="opacity:.5">110</td><td style="opacity:.5">charger</td><td class="meta">built-in</td><td><span class="pill">off</span></td></tr>
+        <tr><td><span class="chk on"></span></td><td>Sky Duelist</td><td>elite</td><td>2</td><td class="bignum">120</td><td>shooter</td><td class="meta">built-in</td><td><span class="pill ok">ok</span></td></tr>
+        <tr class="custom"><td><span class="chk on"></span></td><td>Bulwark Drone</td><td>tank</td><td>3</td><td class="bignum">240</td><td>charger</td><td class="meta">yours</td><td><span class="pill ok">20s ok</span></td></tr>
+        <tr class="custom"><td><span class="chk on"></span></td><td>Ash Skimmer</td><td>skirmisher</td><td>2</td><td class="bignum">95</td><td>shooter</td><td class="meta">yours</td><td><span class="pill ok">20s ok</span></td></tr>
+        <tr class="custom"><td><span class="chk"></span></td><td style="opacity:.5">Choir Node</td><td style="opacity:.5">support</td><td style="opacity:.5">2</td><td class="bignum" style="opacity:.5">110</td><td style="opacity:.5">shooter</td><td class="meta">yours</td><td><span class="pill bad">dry-run failed</span></td></tr>
+      </table>
+      <div class="pad">
+        <div class="warn">
+          <b>Choir Node cannot be enabled.</b> The roster re-runs the dry run at 20s (the Save gate uses 4s) and
+          refuses on failure — <code>enemy neither moved nor attacked in the dry run</code>. A mission is minutes
+          long; four seconds is not evidence.
+        </div>
+        <p class="msg" style="margin:0">
+          Placement is derived from <code>role</code>, not authored: <code>charger / tank / fodder → "charger"</code>,
+          everything else → <code>"shooter"</code>. Nothing new to fill in, and <code>behavior</code> stays out of
+          the spec schema.
+        </p>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel" style="margin-bottom:14px">
+        <h3>Budget check <span class="spacer"></span><span class="pill">simulated</span></h3>
+        <div class="pad">
+          <p class="msg" style="margin:0 0 10px">Roll a few leads against this roster before committing it.</p>
+          <div class="lrow" style="padding-left:0"><span class="nm">Low</span><span class="meta">budget 220</span><span class="spacer"></span><span class="meta">4 enemies · 0 custom</span></div>
+          <div class="lrow" style="padding-left:0"><span class="nm">Medium</span><span class="meta">budget 430</span><span class="spacer"></span><span class="meta">5 enemies · 1 custom</span></div>
+          <div class="lrow" style="padding-left:0"><span class="nm">High</span><span class="meta">budget 760</span><span class="spacer"></span><span class="meta">6 enemies · 2 custom</span></div>
+          <div class="lrow" style="padding-left:0"><span class="nm">Boss</span><span class="meta">budget 1150</span><span class="spacer"></span><span class="meta">Iron Moth + 5</span></div>
+          <div class="row" style="margin-top:11px"><button class="btn alt">↻ Reroll 20 leads</button><span class="msg">custom enemies appeared in 14 / 20</span></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:14px">
+        <h3>Before it counts</h3>
+        <div class="pad">
+          <div class="lrow" style="padding-left:0"><span class="pill ok">✓</span><span>Ids are pinned — renaming will not orphan the entry</span></div>
+          <div class="lrow" style="padding-left:0"><span class="pill ok">✓</span><span>20s dry run passed on a platformed arena</span></div>
+          <div class="lrow" style="padding-left:0"><span class="pill ok">✓</span><span>Spawn limits inside engine caps</span></div>
+          <div class="lrow" style="padding-left:0"><span class="pill on">↻</span><span><b>Reload the game page</b> — roster is read at load, like every other store</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Make it permanent</h3>
+        <div class="pad">
+          <p class="msg" style="margin:0 0 10px">
+            The roster lives in <code>localStorage</code> — this browser only. Export pastes into
+            <code>src/game/enemyspecs.js</code> the same way a weapon goes into <code>arsenal.js</code>.
+          </p>
+          <div class="row"><button class="btn">Copy roster JSON</button><button class="btn alt">Copy this enemy</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+  document.querySelectorAll(".mk-tabs button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      document.querySelectorAll(".mk-tabs button").forEach(function (x) { x.classList.remove("active"); });
+      document.querySelectorAll(".view").forEach(function (v) { v.classList.remove("on"); });
+      b.classList.add("active");
+      document.getElementById("v-" + b.dataset.v).classList.add("on");
+      window.scrollTo(0, 0);
+    });
+  });
+  // tree selection + component toggles, so the mockup is pokeable
+  document.querySelectorAll(".tn").forEach(function (n) {
+    n.addEventListener("click", function () {
+      n.closest(".tree").querySelectorAll(".tn").forEach(function (x) { x.classList.remove("sel"); });
+      n.classList.add("sel");
+    });
+  });
+  document.querySelectorAll(".comp > header").forEach(function (h) {
+    h.addEventListener("click", function () {
+      h.parentElement.classList.toggle("off");
+      h.querySelector(".sw").classList.toggle("on");
+    });
+  });
+</script>
+</body>
+</html>
