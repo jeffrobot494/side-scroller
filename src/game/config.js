@@ -189,6 +189,16 @@ export const SCHEMA = [
         help: "Seconds before the fastest squadmate moves. The Speed stat interpolates between this and the Speed-1 latency. Live.",
       },
       {
+        key: "knockbackDecay",
+        label: "Knockback decay",
+        type: "range",
+        default: 3000,
+        min: 500,
+        max: 12000,
+        step: 250,
+        help: "How fast a knockback impulse bleeds off (px/s²). Does NOT change how far a hit throws you — that is the weapon's own 0–1 force. This is how VIOLENT it looks: higher = a short hard shove, lower = a long float. Live.",
+      },
+      {
         key: "companionBrain",
         label: "Companion AI",
         type: "enum",

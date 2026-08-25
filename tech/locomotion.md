@@ -131,6 +131,27 @@ enemyspec-specific, since Soldiers use it too), imported by the enemyspec runtim
 and by the companion path. Tunable numbers (jump impulse, walk accel, dash speed
 defaults) go in the config `SCHEMA` per the editor convention.
 
+## External velocity is not locomotion (K1, built)
+
+The locomotor is the single actuation point for velocity an agent *chooses*.
+Knockback is velocity done *to* it, and it has its own channel.
+
+| | |
+|---|---|
+| **Why it cannot live in `vx`** | `actuateHorizontal` re-ASSIGNS `vx` every frame (`driveX` → `vx = v`; `steer`/`burst`/`holdRange` likewise) and `Soldier.applyMovement` clamps it to run speed whenever a movement key is held. An impulse written there survived one frame. Measured before the fix: a maximum-force hit moved a chasing Husk Charger **−483px** and a running player **5px** |
+| **The channel** | `shoveX`/`shoveY` on the actor, added to displacement in `stepActor` and in `FLYING.apply`, decayed at `config.knockbackDecay`, zeroed by wall collision. `shoveActor()` / `bodyMass()` / `decayShove()` in `src/mission/entities.js` |
+| **The agent still resists** | Its own velocity is a second displacement pulling the other way, so a sprinting charger covers a third of what a drifting flier does from the same hit. It just cannot ERASE the impulse |
+| **Why a decay constant at all** | A telegraphing enemy, a flyer, a player not touching the keys and anything mid-air have no traction of their own to spend. Without it they slide until they hit a wall |
+| **Mass** | `v = impulse / √mass`, mass derived from the body box against a 30×46 soldier. Dividing the impulse outright makes distance scale `1/m²` — measured as a 52:1 spread with the boss ending up *closer* than it started. The square root makes distance scale `1/m`, an 8:1 spread |
+| **The unit** | `force` is 0–1 of `KNOCKBACK_MAX_V` (2450 px/s) and is a **velocity**: half the force is half the speed and a quarter of the distance. `knockbackDecay` sets how long the slide takes, never how far it goes |
+| **The shove lands on the ROOT** | A spec enemy's children are re-placed from the root every frame, so shoving a wing does nothing |
+| **Not done: the brain never learns it was hit** | Dashes, telegraphs and tracks run through a shove untouched. Hitstun is a separate feature |
+
+Both golden files are untouched by this: the characterization sim never shoves
+anything (`test/locomotion-characterization.test.mjs` imports `applyDamage` only
+to `void` it, and its soldier is a static `vx: 0` stub), so a channel that starts
+at zero changes nothing it records.
+
 ## Reuses
 
 | What | Where | Why |

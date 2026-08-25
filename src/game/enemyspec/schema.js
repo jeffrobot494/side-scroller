@@ -182,7 +182,7 @@ export const ENTITY_FIELDS = {
   motion: [F("type", "Motion", "enum", "static", { options: Object.keys(MOTIONS) })], // params appended by motionFields()
   contact: [
     F("damage", "Touch damage", "number", 8, { min: RANGES["contact.damage"][0], max: RANGES["contact.damage"][1], step: 1 }),
-    F("knockback", "Knockback", "number", 0, { min: 0, max: 600, step: 10 }),
+    F("knockback", "Knockback", "number", 0, { min: 0, max: 1, step: 0.05 }),
     F("destroySelf", "Dies on contact", "bool", false, { help: "Missiles and other one-shot bodies." }),
   ],
   life: [F("ttl", "Lifetime", "number", 3, { min: RANGES["life.ttl"][0], max: RANGES["life.ttl"][1], step: 0.05, unit: "s" })],
@@ -259,7 +259,7 @@ export function vocabularyDoc() {
     `  body.jump is how HIGH this body can get, so it decides which ledges it can traverse: 665 clears a ~110px perch, 520 only ~68px. Raise it for something that should chase onto rooftops, lower it for something heavy. Omit it unless the design calls for it. Meaningless on a flying body (gravity 0).`,
     `  health: { max } — omit for indestructible decoration; root MUST have health`,
     `  motion: one of ${Object.keys(MOTIONS).join(", ")} with params, e.g. ${JSON.stringify({ type: "keepDistance", ...MOTIONS.keepDistance.params })}`,
-    `  contact: { damage, destroySelf?, knockback? } — touch damage to the player`,
+    `  contact: { damage, destroySelf?, knockback? } — touch damage to the player; knockback is 0-1 (0 = none, 1 = hurled a screen), NOT a velocity in pixels`,
     `  emitters: { <name>: { at:[dx,dy], ref:"<defId>" | projectile:{ speed,w,h,color,life,damage,effects? }, sound?: "<cueId>"|{cue,gain} } }`,
     `  children: [entities], at: [dx,dy] offset from parent`,
     `  on: { ${EVENTS.join("|")}|${SIGNAL_PREFIX}<name>: [actions] }`,

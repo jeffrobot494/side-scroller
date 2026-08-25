@@ -29,6 +29,78 @@ export function clamp(v, min, max) {
 
 // Integrate one actor against gravity + platforms for a fixed step. `world`
 // supplies gravity and width for edge clamping.
+// ---------------------------------------------------------------------------
+// EXTERNAL VELOCITY — the knockback channel.
+//
+// Knockback is not locomotion, and it must not live in `vx`. A locomotor
+// re-ASSIGNS vx from scratch every frame (locomotion.js `actuateHorizontal`:
+// driveX → vx = v, steer/burst/holdRange all absolute) and a Soldier clamps it
+// to run speed whenever a movement key is held — so an impulse written there
+// survived exactly one frame and vanished. Measured before this channel
+// existed, a maximum-force hit moved a chasing enemy a NEGATIVE distance and a
+// running player 5px.
+//
+// So external velocity gets its own axis pair, added to displacement and never
+// touched by a controller. The agent still resists — its own velocity is a
+// second displacement pulling the other way, which is why a sprinting charger
+// covers a third of what a drifting flier does from the same hit — it just
+// cannot ERASE the impulse any more.
+//
+// The channel decays at `config.knockbackDecay` for every body, which is what
+// makes a knockback number mean the same thing whatever it hits. Nothing else
+// stops it: a telegraphing enemy, a flyer, a player who is not touching the
+// keys and anything mid-air all have no traction of their own to spend.
+// ---------------------------------------------------------------------------
+
+// Mass scales the impulse, so a heavy body moves less (v = impulse / √mass).
+// Derived from the body box against a standing soldier, which is mass 1 —
+// authored per enemy would be one more field to get wrong on every spec, and
+// the box is already the thing the player reads as "big". The SQUARE ROOT is
+// deliberate: dividing the impulse outright makes distance scale 1/m², which
+// measured as a 52:1 spread across the roster and left the boss ending up
+// closer than it started. This way distance scales 1/m and the spread is 8:1.
+// The impulse a `force: 1` knockback delivers to a mass-1 body. Calibrated so
+// that body slides ~1000px at the default decay — but the number IS a velocity,
+// not a distance: halve the force and you halve the speed, which quarters the
+// distance. Changing `knockbackDecay` changes how long the slide takes, not how
+// far it goes, because the distance is v²/2·decay and the velocity is fixed here.
+export const KNOCKBACK_MAX_V = 2450;
+
+// How much of the impulse goes upward. Kept at the ratio the old code used.
+export const KNOCKBACK_LIFT = 0.35;
+
+const SOLDIER_W = 30; // the reference body, with STAND_H below
+
+export function bodyMass(a) {
+  // A spec entity's authored box, never its live one: a crouching soldier must
+  // not get heavier, and a child part inherits the root's mass below.
+  const b = a.spec && a.spec.body;
+  const w = b ? b.w : a.w;
+  const h = b ? b.h : (a.crouched ? STAND_H : a.h);
+  return Math.max(0.05, (w * h) / (SOLDIER_W * STAND_H));
+}
+
+/**
+ * Shove a body. `vx`/`vy` are the raw impulse; mass divides it here, so callers
+ * pass what the WEAPON does and never think about what it hit.
+ *
+ * The shove always lands on the ROOT: a spec enemy's children are re-placed
+ * from the root's position every frame, so shoving a wing does nothing at all.
+ */
+export function shoveActor(a, vx, vy = 0) {
+  const t = a.root || a;
+  const m = Math.sqrt(bodyMass(t));
+  t.shoveX = (t.shoveX || 0) + vx / m;
+  t.shoveY = (t.shoveY || 0) + vy / m;
+}
+
+/** Bleed the channel toward rest. One rate for every body, on purpose. */
+export function decayShove(a, dt) {
+  const drop = config.knockbackDecay * dt;
+  if (a.shoveX) a.shoveX = Math.abs(a.shoveX) <= drop ? 0 : a.shoveX - Math.sign(a.shoveX) * drop;
+  if (a.shoveY) a.shoveY = Math.abs(a.shoveY) <= drop ? 0 : a.shoveY - Math.sign(a.shoveY) * drop;
+}
+
 export function stepActor(a, dt, world, platforms) {
   a.vy += world.gravity * dt;
   if (a.vy > MAX_FALL) a.vy = MAX_FALL;
@@ -36,12 +108,13 @@ export function stepActor(a, dt, world, platforms) {
   // A `slow` status scales horizontal displacement only (one choke point so the
   // slow effect works for every actor without the AI needing to know about it).
   const slowMult = a.slow && a.slow.time > 0 ? a.slow.factor : 1;
-  a.x += a.vx * slowMult * dt;
+  a.x += (a.vx * slowMult + (a.shoveX || 0)) * dt;
   collideAxis(a, platforms, "x");
 
-  a.y += a.vy * dt;
+  a.y += (a.vy + (a.shoveY || 0)) * dt;
   a.onGround = false;
   collideAxis(a, platforms, "y");
+  decayShove(a, dt);
 
   // Coyote time: keep a small window open after the ground disappears in which
   // a jump still fires (tech/agent-navigation.md, N2). Routing plans a takeoff
@@ -75,18 +148,24 @@ export function consumeJump(a) {
 function collideAxis(a, platforms, axis) {
   for (const p of platforms) {
     if (!overlaps(a, p)) continue;
+    // Which way the body was actually travelling — its own velocity PLUS any
+    // shove. Reading vx/vy alone resolves a shoved body to the wrong side.
     if (axis === "x") {
-      if (a.vx > 0) a.x = p.x - a.w;
-      else if (a.vx < 0) a.x = p.x + p.w;
+      const push = a.vx + (a.shoveX || 0);
+      if (push > 0) a.x = p.x - a.w;
+      else if (push < 0) a.x = p.x + p.w;
       a.vx = 0;
+      a.shoveX = 0; // a wall stops a shove too
     } else {
-      if (a.vy > 0) {
+      const push = a.vy + (a.shoveY || 0);
+      if (push > 0) {
         a.y = p.y - a.h;
         a.onGround = true;
-      } else if (a.vy < 0) {
+      } else if (push < 0) {
         a.y = p.y + p.h;
       }
       a.vy = 0;
+      a.shoveY = 0;
     }
   }
 }

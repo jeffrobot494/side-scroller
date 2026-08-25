@@ -70,12 +70,77 @@ export default async function run(t) {
     t.ok("slow: displacement halved (~5px not 10)", Math.abs(e.x - before - 5) < 0.01);
   }
 
-  // knockback — imparts horizontal velocity in the shot's direction
+  // knockback — an impulse into the SHOVE channel, not into vx. It has to be a
+  // separate axis pair: a locomotor re-assigns vx every frame, so an impulse
+  // written there survived one frame and vanished (tech/locomotion.md, K1).
   {
     const e = enemy(100, 100);
-    const s = scene({ enemies: [e], projectiles: [proj([{ kind: "knockback", force: 200 }], 100, 110, 600, 0)] });
+    const s = scene({ enemies: [e], projectiles: [proj([{ kind: "knockback", force: 1 }], 100, 110, 600, 0)] });
     updateProjectiles(s, 0.016, ctx());
-    t.ok("knockback: enemy shoved right", e.vx >= 200);
+    t.ok("knockback: goes to the shove channel, never to vx", e.vx === 0 && e.shoveX > 0);
+    t.ok("knockback: shoved along the shot", e.shoveX >= 1000);
+    t.ok("knockback: and lifted", e.shoveY < 0);
+  }
+
+  // `force` is 0–1 of one maximum impulse, and it is a VELOCITY: half the force
+  // is half the speed, which is a QUARTER of the distance.
+  {
+    const half = enemy(100, 100), full = enemy(400, 100);
+    const s = scene({ enemies: [half, full], projectiles: [
+      proj([{ kind: "knockback", force: 0.5 }], 100, 110, 600, 0),
+      proj([{ kind: "knockback", force: 1 }], 400, 110, 600, 0),
+    ] });
+    updateProjectiles(s, 0.016, ctx());
+    t.ok("knockback: half the force is half the velocity", Math.abs(full.shoveX / half.shoveX - 2) < 0.01);
+    t.ok("knockback: force above 1 is clamped, not extrapolated", (() => {
+      const e = enemy(100, 100);
+      const sc = scene({ enemies: [e], projectiles: [proj([{ kind: "knockback", force: 9 }], 100, 110, 600, 0)] });
+      updateProjectiles(sc, 0.016, ctx());
+      return Math.abs(e.shoveX - full.shoveX) < 0.01;
+    })());
+  }
+
+  // Mass divides the impulse by its square root, so a big body moves less from
+  // the same hit — derived from the body box, with a 30x46 soldier as mass 1.
+  {
+    const light = { ...enemy(100, 100), w: 20, h: 20 };
+    const heavy = { ...enemy(400, 100), w: 96, h: 44 };
+    const s = scene({ enemies: [light, heavy], projectiles: [
+      proj([{ kind: "knockback", force: 1 }], 100, 105, 600, 0),
+      proj([{ kind: "knockback", force: 1 }], 400, 105, 600, 0),
+    ] });
+    updateProjectiles(s, 0.016, ctx());
+    t.ok("knockback: a heavier body is shoved less", heavy.shoveX < light.shoveX);
+    t.ok("knockback: by the square root of the mass ratio", (() => {
+      const ratio = Math.sqrt((96 * 44) / (20 * 20));
+      return Math.abs(light.shoveX / heavy.shoveX - ratio) < 0.01;
+    })());
+  }
+
+  // The channel is what a controller cannot erase: vx is re-assigned every
+  // frame here, exactly as a locomotor does, and the shove still lands.
+  {
+    const e = enemy(100, 300);
+    const s = scene({ platforms: [{ x: 0, y: 340, w: 4000, h: 40 }], enemies: [e],
+      projectiles: [proj([{ kind: "knockback", force: 1 }], 100, 310, 600, 0)] });
+    updateProjectiles(s, 1 / 60, ctx());
+    const x0 = e.x;
+    for (let i = 0; i < 120; i++) {
+      e.vx = -200;                       // the "controller", overwriting every frame
+      stepActor(e, 1 / 60, { gravity: 2000, width: 8000 }, s.platforms);
+    }
+    t.ok("knockback: survives a controller that re-assigns vx", e.x - x0 > 300);
+    t.ok("knockback: and the channel bleeds to rest", e.shoveX === 0);
+  }
+
+  // A wall stops a shove, or you keep pressing into it forever.
+  {
+    const e = enemy(100, 300);
+    const s = scene({ platforms: [{ x: 200, y: 200, w: 40, h: 200 }], enemies: [e],
+      projectiles: [proj([{ kind: "knockback", force: 1 }], 100, 310, 600, 0)] });
+    updateProjectiles(s, 1 / 60, ctx());
+    for (let i = 0; i < 30; i++) stepActor(e, 1 / 60, { gravity: 2000, width: 8000 }, s.platforms);
+    t.ok("knockback: a wall stops the shove", e.shoveX === 0 && e.x + e.w <= 200.01);
   }
 
   // burn — ticks damage over time via updateStatuses
