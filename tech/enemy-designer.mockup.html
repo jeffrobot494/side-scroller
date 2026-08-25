@@ -169,6 +169,37 @@
   .warn { border:1px solid #5c4a2c; background:rgba(92,74,44,.16); color:#e0c48e;
     border-radius:5px; padding:9px 11px; font-size:12px; line-height:1.55; }
   .warn b { color:var(--light); }
+  /* ---- 5: the enemy browser ---- */
+  .browse { display:flex; flex-direction:column; }
+  .bhead, .brow { display:grid; grid-template-columns:1fr 120px 92px 168px 148px; align-items:center;
+    gap:10px; padding:7px 12px; }
+  .bhead { font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:#5f6b7a;
+    border-bottom:1px solid var(--line); }
+  .brow { border-bottom:1px solid rgba(51,61,74,.4); font-size:12.5px; }
+  .brow:hover { background:rgba(255,255,255,.025); }
+  .brow.open { background:var(--steel); }
+  .brow.off .bname, .brow.off .bmeta { opacity:.42; }
+  .bname b { font-weight:600; }
+  .bname .id { display:block; font-size:10.5px; margin-top:1px; }
+  .bmeta { color:var(--muted); font-size:11.5px; }
+  .bacts { display:flex; gap:5px; justify-content:flex-end; }
+  .bstate { display:flex; align-items:center; gap:7px; }
+  .newmenu { border:1px solid var(--line); border-radius:5px; background:rgba(14,18,24,.75); width:290px; }
+  .newmenu div { padding:8px 11px; font-size:12.5px; border-bottom:1px solid rgba(51,61,74,.4); cursor:pointer; }
+  .newmenu div:last-child { border-bottom:0; }
+  .newmenu div:hover { background:rgba(255,255,255,.04); }
+  .newmenu small { display:block; color:var(--muted); font-size:11px; margin-top:2px; }
+  .ed-io { margin-top:14px; }
+  .ed-json { width:100%; min-height:120px; resize:vertical; background:var(--track); color:var(--text);
+    border:1px solid var(--line); border-radius:5px; padding:9px 11px; font-size:11.5px;
+    font-family:ui-monospace,Menlo,monospace; }
+  .ed-io .msg code { color:var(--credits); }
+  .stores { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .store { border:1px solid var(--line); border-radius:5px; padding:9px 11px; background:rgba(14,18,24,.5); }
+  .store h4 { margin:0 0 4px; font-size:11.5px; letter-spacing:.04em; }
+  .store code { color:var(--credits); font-size:11px; }
+  .store p { margin:4px 0 0; font-size:11.5px; line-height:1.5; color:var(--muted); }
+  .store.newstore { border-color:#3c4d78; }
   .board { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
   .board .panel { height:100%; }
   ol.steps { margin:0; padding-left:19px; font-size:12.5px; line-height:1.75; }
@@ -190,29 +221,25 @@
     <button data-v="flight">2 · A turn in flight</button>
     <button data-v="manual">3 · Manual tab</button>
     <button data-v="mech">4 · How a turn works</button>
+    <button data-v="crud">5 · Enemies — one list</button>
   </div>
 </div>
 
 <!-- ==================== 1 — WORKSPACE ==================== -->
 <div class="view on" id="v-chat">
-<p class="mk-note">
-  <b>One conversation, no modes.</b> The first message with no enemy loaded is a generate; every message after is a
-  revise — same call, same acceptance pipeline. The left rail is the definition <i>and</i> the manual editor — tree on top, the selected
-  node's properties directly beneath it, no tab switching. The <b>spec itself</b> is the top node — identity, sound
-  and limits live there, because they are one-per-enemy rather than per-entity. It redraws as the model edits, with touched nodes marked. The preview never stops running and you keep the keyboard.
-</p>
 <div class="tool">
 
   <div class="head">
-    <button class="btn ghost">← Tools</button>
+    <button class="btn ghost">← Enemies</button>
     <input class="name" value="Bulwark Drone" spellcheck="false">
     <span class="id mono">bulwark_drone</span>
-    <span class="pill on">id pinned</span>
+    <label class="msg" style="margin-left:8px">Placement
+      <select style="margin-left:5px"><option>charger</option><option selected>shooter</option><option>turret</option></select>
+    </label>
     <span class="spacer"></span>
     <span class="pill ok">✓ valid · dry-run ok</span>
     <span class="pill live">Player2 connected</span>
-    <button class="btn">Save to library</button>
-    <button class="btn go">▲ Add to roster</button>
+    <button class="btn go">Save</button>
   </div>
 
   <div class="work">
@@ -524,7 +551,7 @@
 </p>
 <div class="tool">
   <div class="head">
-    <button class="btn ghost">← Tools</button>
+    <button class="btn ghost">← Enemies</button>
     <input class="name" value="Bulwark Drone" spellcheck="false">
     <span class="id mono">bulwark_drone</span>
     <div class="railtabs" style="border:1px solid var(--line);border-radius:4px;width:250px;margin-left:12px">
@@ -532,8 +559,7 @@
     </div>
     <span class="spacer"></span>
     <span class="pill ok">✓ valid</span>
-    <button class="btn">Save to library</button>
-    <button class="btn go">▲ Add to roster</button>
+    <button class="btn go">Save</button>
   </div>
 
   <div class="work" style="grid-template-columns:250px 1fr 1fr 280px">
@@ -733,6 +759,134 @@
 </div>
 </div>
 
+<!-- ==================== 5 — ENEMIES: ONE LIST ==================== -->
+<div class="view" id="v-crud">
+<div class="tool">
+
+  <div class="head">
+    <button class="btn ghost">← Tools</button>
+    <b style="font-size:13px;letter-spacing:1px">ENEMIES</b>
+    <span class="spacer"></span>
+    <button class="btn hot">＋ New</button>
+  </div>
+
+  <div class="board" style="grid-template-columns:1fr 290px; align-items:start">
+
+    <div class="panel browse">
+      <h3>Enemies <span class="spacer"></span><span class="msg">10 · 7 in missions</span></h3>
+
+      <div class="row" style="padding:9px 12px; border-bottom:1px solid var(--line)">
+        <input class="name" placeholder="filter…" style="width:150px">
+        <button class="btn sm">All</button>
+        <button class="btn sm alt">In missions</button>
+        <button class="btn sm alt">Changed</button>
+      </div>
+
+      <div class="bhead">
+        <span>Enemy</span><span>Role · threat</span><span>Placement</span><span>In missions</span><span></span>
+      </div>
+
+      <div class="brow">
+        <span class="bname"><b>Husk Charger</b> <span class="id">husk_charger</span></span>
+        <span class="bmeta">charger · 50</span>
+        <span class="bmeta">charger</span>
+        <span class="bstate"><span class="sw on"></span><span class="pill on">edited</span> <button class="btn sm alt">↺</button></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow">
+        <span class="bname"><b>Lurk Gunner</b> <span class="id">lurk_gunner</span></span>
+        <span class="bmeta">artillery · 70</span>
+        <span class="bmeta">shooter</span>
+        <span class="bstate"><span class="sw on"></span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow off">
+        <span class="bname"><b>Spore Wisp</b> <span class="id">spore_wisp</span></span>
+        <span class="bmeta">skirmisher · 65</span>
+        <span class="bmeta">shooter</span>
+        <span class="bstate"><span class="sw"></span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow">
+        <span class="bname"><b>Strafe Raider</b> <span class="id">strafe_raider</span></span>
+        <span class="bmeta">skirmisher · 85</span>
+        <span class="bmeta">shooter</span>
+        <span class="bstate"><span class="sw on"></span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow">
+        <span class="bname"><b>Cowardly Duelist</b> <span class="id">cowardly_duelist</span></span>
+        <span class="bmeta">elite · 110</span>
+        <span class="bmeta">charger</span>
+        <span class="bstate"><span class="sw on"></span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow">
+        <span class="bname"><b>Sky Duelist</b> <span class="id">sky_duelist</span></span>
+        <span class="bmeta">elite · 120</span>
+        <span class="bmeta">shooter</span>
+        <span class="bstate"><span class="sw on"></span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow">
+        <span class="bname"><b>Iron Moth</b> <span class="id">iron_moth</span></span>
+        <span class="bmeta">boss · 320</span>
+        <span class="bmeta">shooter</span>
+        <span class="bstate"><span class="sw on"></span><span class="pill">boss</span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow">
+        <span class="bname"><b>Rust Mite</b> <span class="id">rust_mite</span></span>
+        <span class="bmeta">charger · 40</span>
+        <span class="bmeta">charger</span>
+        <span class="bstate"><span class="sw on"></span><span class="pill new">new</span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow off">
+        <span class="bname"><b>Shield Drone</b> <span class="id">shield_drone</span></span>
+        <span class="bmeta">tank · 180</span>
+        <span class="bmeta">charger</span>
+        <span class="bstate"><span class="sw"></span><span class="pill new">new</span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+      <div class="brow off">
+        <span class="bname"><b>Mine Layer</b> <span class="id">mine_layer</span></span>
+        <span class="bmeta">artillery · 90</span>
+        <span class="bmeta">shooter</span>
+        <span class="bstate"><span class="sw"></span><span class="pill new">new</span></span>
+        <span class="bacts"><button class="btn sm">Open</button><button class="btn sm alt">⧉</button><button class="btn sm alt">✕</button></span>
+      </div>
+
+    </div>
+
+    <div class="panel">
+      <h3>＋ New enemy</h3>
+      <div class="pad">
+        <div class="newmenu">
+          <div>Blank</div>
+          <div>From a template ▸</div>
+          <div>Duplicate the selected row</div>
+          <div>Describe it…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <section class="ed-io">
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn">Reset my changes</button>
+      <button class="btn">Export JSON ▾</button>
+      <button class="btn">▴ Import JSON</button>
+      <span class="msg">Imported 3 enemies · 1 skipped: <code>bad_moth</code> root.emitters.maw — emitter needs either ref or projectile</span>
+    </div>
+    <textarea class="ed-json" spellcheck="false"
+      placeholder="Export writes the whole list here — paste it into src/game/enemyspecs.js to make it permanent. Paste enemy JSON and hit Import to add it to this browser."></textarea>
+  </section>
+
+</div>
+</div>
+
 <script>
   document.querySelectorAll(".mk-tabs button").forEach(function (b) {
     b.addEventListener("click", function () {
@@ -753,6 +907,18 @@
     h.addEventListener("click", function () {
       h.parentElement.classList.toggle("off");
       h.querySelector(".sw").classList.toggle("on");
+    });
+  });
+  document.querySelectorAll(".brow").forEach(function (r) {
+    r.addEventListener("click", function (e) {
+      if (e.target.closest(".sw")) {
+        var sw = e.target.closest(".sw");
+        sw.classList.toggle("on");
+        r.classList.toggle("off", !sw.classList.contains("on"));
+        return;
+      }
+      document.querySelectorAll(".brow").forEach(function (x) { x.classList.remove("open"); });
+      r.classList.add("open");
     });
   });
   document.querySelectorAll(".railtabs button").forEach(function (b) {
