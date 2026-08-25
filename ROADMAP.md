@@ -76,6 +76,7 @@ description of what the game does today; this is only the index.
 |---|---|
 | EnemySpec — format, runtime, designer, wired into all mission enemies | `tech/enemyspec.md` |
 | LLM enemy authoring — Enemy Designer Generate via Player2 chat completions | `tech/enemyspec-llm.md` |
+| Enemy Designer v2 E1–E4 — a preview you fight in, the spec as an editable tree, one LLM conversation with rewind, and enemies you made admitted to the mission roster | `tech/enemy-designer.md` |
 | Locomotor refactor L1–L3 — brain/body split, soldier locomotor, companions on the shared brain | `tech/locomotion.md` |
 | Level generation Slice 1 — seeded procedural levels, leads, difficulty budgets | `tech/level-generation.md` |
 | Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `tech/sound.md` |
