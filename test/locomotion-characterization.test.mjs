@@ -8,9 +8,10 @@
 // cadence. The snapshots are stored in a golden file (locomotion.golden.json);
 // the refactor must reproduce them bit-for-(rounded)-bit.
 //
-// Determinism is engineered, not assumed: root.rng defaults to Math.random and
-// makeInstance seeds hoverPhase/orbitAngle from Math.random, so right after
-// instantiate we (1) seed root.rng with a fixed PRNG and (2) zero every entity's
+// Determinism is engineered, not assumed: this suite instantiates with no stream
+// (tech/mission-determinism.md), so root.rng falls back to Math.random and
+// makeInstance seeds hoverPhase/orbitAngle off it. Right after instantiate we
+// therefore (1) seed root.rng with a fixed PRNG and (2) zero every entity's
 // hoverPhase/orbitAngle. A twice-run self-check catches any missed source before
 // the golden is trusted. Roots only are snapshotted (spawned projectiles pick
 // their own random phases, but those never feed back into a root's position).
@@ -22,6 +23,7 @@ import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { TEMPLATE_BY_ID } from "../src/game/enemyspec/templates.js";
 import { MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC } from "../src/game/enemyspecs.js";
 import { instantiate, updateSpecEnemy, applyDamage } from "../src/mission/enemyspec/runtime.js";
+import { makeRng } from "../src/game/gen/rng.js";
 
 const STEP = 1 / 60;
 const SECONDS = 4;
@@ -30,21 +32,20 @@ const GOLDEN = fileURLToPath(new URL("./locomotion.golden.json", import.meta.url
 
 // ---- determinism helpers --------------------------------------------------
 
-// mulberry32 — a tiny, fast, fully-deterministic PRNG so a seeded root produces
-// the identical decision/aim/jitter stream on every run and every code version.
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
+// The generator is the repo's one PRNG (src/game/gen/rng.js) — mulberry32, the
+// same stream every generated level and every seeded mission runs on. This
+// suite used to carry a private copy of it; the only difference between the two
+// was that makeRng maps a seed of 0 to 1, and the seeds below are
+// 0x1234 + i * 7919, so the golden's values are unaffected by the swap
+// (tech/mission-determinism.md, D3).
+//
+// determinize() still earns its keep next to the seam D1/D2 built: production
+// now DRAWS hoverPhase/orbitAngle off a stream, where this zeroes them. Re-basing
+// it onto instantiate's rng parameter would move locomotion.golden.json, and this
+// golden is the strictest guard over that work — it must not be re-baselined by
+// the work it guards.
 function determinize(root, seed) {
-  root.rng = mulberry32(seed);
+  root.rng = makeRng(seed);
   const walk = (e) => {
     e.hoverPhase = 0;
     e.orbitAngle = 0;
