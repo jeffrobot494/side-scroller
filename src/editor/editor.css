@@ -445,6 +445,14 @@
 }
 .es-mini { min-height: 62px; font-size: 11.5px; padding: 7px 9px; }
 
+/* ---- E4: the mission roster ---- */
+.es-roster .es-rosterbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.es-roster .es-rosterbar .ed-msg { flex: 1; min-width: 140px; font-size: 11.5px; }
+.es-rrow .toggle { width: 32px; height: 18px; border-radius: 10px; flex: none; }
+.es-rrow .toggle .knob { width: 12px; height: 12px; }
+.es-rrow .toggle.on .knob { left: 17px; }
+.es-rrow.off .wd-saved-name, .es-rrow.off .wd-saved-budget { opacity: 0.45; }
+
 /* ---- E3: the conversation column ---- */
 /* The Designer is a three-column tool — rail, fight, conversation — so it
    breaks out of the editor's 900px body permanently, the same trick the

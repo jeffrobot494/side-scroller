@@ -73,6 +73,9 @@ import { TEMPLATES, TEMPLATE_BY_ID } from "../../game/enemyspec/templates.js";
 import { chatEnemySpec, composeChat, accept } from "../../game/enemyspec/generate.js";
 import { diffSpecs, summarize } from "../../game/enemyspec/specdiff.js";
 import { listEnemySpecs, saveEnemySpec, deleteEnemySpec, listCustomWeapons } from "../../game/customcontent.js";
+import { admitSpec, removeRosterSpec, rosterSpec, ROSTER_DRYRUN_SECONDS } from "../../game/rosterspecs.js";
+import { rosterEntries, setEnemyEnabled, applyEnemyRoster, BUILTIN_SPEC_IDS } from "../../game/enemyspecs.js";
+import { resolveId } from "./weapon-designer.js";
 import { ARSENAL } from "../../game/arsenal.js";
 import { Soldier, stepActor, startReload, tickReload } from "../../mission/entities.js";
 import { fire, aimAccuracy } from "../../mission/ai.js";
@@ -98,6 +101,10 @@ export function createEnemyDesigner(container, onBack) {
   let p2 = null; // Player2Client once connected
   let generating = false;
   let selected = ""; // the selected tree node's path ("" = the spec node)
+  // Pinned once a SAVED entry is loaded, so re-saving overwrites it instead of
+  // re-slugging the name into a duplicate. A template or a chat landing leaves
+  // it null, where the id follows the name (weapon-designer.js resolveId).
+  let loadedId = null;
 
   // ---- the conversation ---------------------------------------------------
   // The transcript is the tool's history AND the model's context: `turns` is
@@ -194,6 +201,15 @@ export function createEnemyDesigner(container, onBack) {
             <h3 class="wd-h">Enemy library</h3>
             <p class="wd-saved-note">Saved to this browser. The Firing Room lists these under “Enemy” — fight them there. Export JSON to make one permanent.</p>
             <div class="wd-saved-list" id="es-saved"></div>
+          </div>
+          <div class="wd-saved es-roster">
+            <h3 class="wd-h">Mission roster</h3>
+            <p class="wd-saved-note">What the level generator is allowed to place. Admission is stricter than Save: a declared threat cost plus a ${ROSTER_DRYRUN_SECONDS}-second dry run. Built-ins can be switched off one at a time, but the roster can never be emptied. <strong>Reload the game page</strong> to see a change in missions.</p>
+            <div class="es-rosterbar">
+              <button class="btn" data-es="admit">＋ Put this enemy in missions</button>
+              <span class="ed-msg" id="es-rostermsg"></span>
+            </div>
+            <div class="wd-saved-list" id="es-rosterlist"></div>
           </div>
         </div>
 
@@ -402,7 +418,7 @@ export function createEnemyDesigner(container, onBack) {
   // ---- validation / refresh pipeline -------------------------------------
   // The spec object is the single source: any change funnels through here.
   function refresh({ rebuildRail = false, rewriteJson = true } = {}) {
-    spec.id = slug(spec.name, "custom_spec");
+    spec.id = resolveId(spec.name, loadedId) || slug(spec.name, "custom_spec");
     validation = validateSpec(spec);
     normalized = validation.ok ? normalizeSpec(spec) : null;
 
@@ -862,6 +878,53 @@ export function createEnemyDesigner(container, onBack) {
       : `<p class="wd-empty">No saved enemies yet — build one and Save.</p>`;
   }
 
+  // ---- the mission roster (E4) -------------------------------------------
+  function renderRoster() {
+    const el = $("#es-rosterlist");
+    if (!el) return;
+    el.innerHTML = rosterEntries().map((e) => `
+      <div class="wd-saved-row es-rrow${e.enabled ? "" : " off"}" data-id="${escapeHtml(e.id)}">
+        <button type="button" role="switch" class="toggle${e.enabled ? " on" : ""}" data-esrost="${escapeHtml(e.id)}" title="${e.enabled ? "Placed in generated missions" : "Never placed"}"><span class="knob"></span></button>
+        <span class="wd-saved-name">${escapeHtml(e.name)}</span>
+        <span class="wd-saved-budget">${escapeHtml(e.source)} · ${escapeHtml(e.role)} · ${e.threat}${e.boss ? " · boss" : ""}</span>
+        ${e.source === "custom"
+          ? `<button class="btn btn-ghost" data-es="rost-load" data-id="${escapeHtml(e.id)}">Load</button>
+             <button class="wd-fx-x" data-es="rost-del" data-id="${escapeHtml(e.id)}" title="Remove from missions">×</button>`
+          : ""}
+      </div>`).join("");
+  }
+
+  function rosterMsg(text, cls) {
+    const el = $("#es-rostermsg");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "ed-msg" + (cls ? " " + cls : "");
+  }
+
+  // Admission runs the SAME accept() gate as Save, only longer, plus the
+  // threat requirement the generator's budget depends on.
+  function admitCurrent() {
+    const res = admitSpec(spec, { reserved: BUILTIN_SPEC_IDS });
+    if (!res.ok) {
+      rosterMsg(`Not admitted — ${res.errors[0]}`, "bad");
+      return res;
+    }
+    applyEnemyRoster(); // this page's Level Generator resolves through the same map
+    rosterMsg(res.replaced
+      ? `Updated "${res.id}" in the roster. Reload the game to see it.`
+      : `"${res.id}" will now appear in generated missions. Reload the game to see it.`, "ok");
+    renderRoster();
+    return res;
+  }
+
+  function toggleRoster(id, on) {
+    const res = setEnemyEnabled(id, on);
+    rosterMsg(res.ok ? "" : res.error, res.ok ? "" : "bad");
+    if (res.ok) applyEnemyRoster();
+    renderRoster();
+    return res;
+  }
+
   function saveCurrent() {
     const res = accept(spec, { seconds: 4 });
     const msg = $("#es-msg");
@@ -1117,6 +1180,12 @@ export function createEnemyDesigner(container, onBack) {
       refresh({ rebuildRail: true, rewriteJson: true });
       return;
     }
+    // a roster enable switch
+    const rost = e.target.closest("[data-esrost]");
+    if (rost) {
+      toggleRoster(rost.dataset.esrost, !rost.classList.contains("on"));
+      return;
+    }
     // a component on/off switch
     const comp = e.target.closest("[data-esc]");
     if (comp && !comp.disabled) {
@@ -1146,9 +1215,21 @@ export function createEnemyDesigner(container, onBack) {
       case "rewind": rewind(Number(el.dataset.v)); break;
       case "load-saved": {
         const s = listEnemySpecs().find((x) => x.id === el.dataset.id);
-        if (s) loadSpec(clone(s), `Loaded "${s.name || s.id}" from the library.`);
+        if (s) loadSpec(clone(s), `Loaded "${s.name || s.id}" from the library.`, { pin: true });
         break;
       }
+      case "admit": admitCurrent(); break;
+      case "rost-load": {
+        const r = rosterSpec(el.dataset.id);
+        if (r) loadSpec(clone(r), `Loaded "${r.name || r.id}" from the mission roster.`, { pin: true });
+        break;
+      }
+      case "rost-del":
+        removeRosterSpec(el.dataset.id);
+        applyEnemyRoster();
+        rosterMsg(`Removed from the roster. It is still in the library.`, "");
+        renderRoster();
+        break;
       case "del-saved":
         deleteEnemySpec(el.dataset.id);
         renderSaved();
@@ -1204,8 +1285,9 @@ export function createEnemyDesigner(container, onBack) {
   // Loading is a NEW enemy: the checkpoints belonged to the old one, so the
   // stack restarts at v0. The transcript is kept and told what happened —
   // hiding the switch would make an earlier "rewind" button lie.
-  function loadSpec(next, note) {
+  function loadSpec(next, note, { pin = false } = {}) {
     spec = next;
+    loadedId = pin ? next.id || null : null;
     checkpoints = [{ version: 0, spec: clone(next), label: "loaded" }];
     version = 0;
     touched = [];
@@ -1371,6 +1453,7 @@ export function createEnemyDesigner(container, onBack) {
   checkpoints = [{ version: 0, spec: clone(spec), label: "loaded" }];
   renderRail();
   renderSaved();
+  renderRoster();
   renderKeys();
   renderChat();
   setSendable();
@@ -1411,6 +1494,12 @@ export function createEnemyDesigner(container, onBack) {
     version: () => version,
     rewind,
     touched: () => touched,
+    // E4's roster, driven the same way: admit whatever is loaded, flip an
+    // entry, read the list back.
+    admit: admitCurrent,
+    roster: rosterEntries,
+    toggleRoster,
+    load: (next, opts) => loadSpec(next, null, opts),
     // Hold a set of actions for `frames` steps, as the window key handler would
     // fill them in, and report what happened to the fight.
     drive(hold = {}, frames = 1, dt = 1 / 60) {

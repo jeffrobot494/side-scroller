@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import { WEAPONS, ENEMIES } from "./content.js";
+import { BUILTIN_SPEC_IDS } from "./enemyspecs.js";
 
 const WEAPON_KEY = "sidescroller.weapons.v1";
 const ENEMY_KEY = "sidescroller.enemies.v1";
@@ -122,8 +123,13 @@ export function listEnemySpecs() {
   return readStore(ENEMYSPEC_KEY);
 }
 
+// Reserved against the BUILT-IN mission specs: E4 merges the library's ids into
+// the same namespace missionSpecById resolves through, so a library entry named
+// "Husk Charger" slugging to `husk_charger` would shadow the built-in. It gets
+// `husk_charger_2` instead. (The roster store pins ids and REFUSES a collision
+// rather than suffixing — a mission enemy must carry the name its author saw.)
 export function saveEnemySpec(spec) {
-  return saveInto(ENEMYSPEC_KEY, spec, [], "custom_spec");
+  return saveInto(ENEMYSPEC_KEY, spec, BUILTIN_SPEC_IDS, "custom_spec");
 }
 
 export function deleteEnemySpec(id) {

@@ -142,4 +142,74 @@ export default async function run(t) {
   const oneSpec = missionRoster().find((d) => d.id === "husk_charger");
   t.ok("gen: custom roster respected", generateLevel({ seed: 3, difficulty: "high", roster: [oneSpec] }).level.enemies.every((e) => e.type === "husk_charger"));
   t.ok("gen: mission is MISSION-shaped", g1.mission.id && g1.mission.name && g1.mission.brief && g1.mission.difficulty);
+
+  // ---- the roster merge (tech/enemy-designer.md, E4) ----------------------
+  // The custom-roster case above passes an explicit roster, so it never touches
+  // the merge. THIS is the case that does: nothing is passed, so generateLevel
+  // goes through missionRoster() and whatever the store says.
+  {
+    const rs = await import("../src/game/rosterspecs.js");
+    const es = await import("../src/game/enemyspecs.js");
+    rs.clearRoster();
+
+    // An untouched store is exactly today's behaviour — which is what keeps the
+    // golden level file frozen.
+    t.eq("roster: an empty store is the six built-ins", missionRoster().length, 6);
+    t.ok("roster: and every entry is a built-in", missionRoster().every((d) => es.BUILTIN_SPEC_IDS.includes(d.id)));
+
+    // ---- admission is stricter than Save --------------------------------
+    const mite = () => ({
+      v: 1, id: "rust_mite", name: "Rust Mite", threat: 40, role: "charger", tier: 1, intelligence: 1,
+      root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [22, 20], color: "#a0a0a0" },
+        health: { max: 18 }, motion: { type: "chase", speed: 240 }, contact: { damage: 8 } },
+    });
+
+    const noThreat = { ...mite() };
+    delete noThreat.threat;
+    const rejected = rs.admitSpec(noThreat, { reserved: es.BUILTIN_SPEC_IDS, seconds: 2 });
+    t.ok("roster: a spec with no threat is refused", !rejected.ok && rejected.errors[0].includes("threat"));
+
+    const collide = { ...mite(), id: "husk_charger" };
+    const shadow = rs.admitSpec(collide, { reserved: es.BUILTIN_SPEC_IDS, seconds: 2 });
+    t.ok("roster: a built-in id is refused, not suffixed", !shadow.ok && shadow.errors[0].includes("built-in"));
+    t.eq("roster: so the built-in is still the built-in", missionRoster().length, 6);
+
+    const broken = mite();
+    broken.root.motion = { type: "no_such_motion" };
+    t.ok("roster: a spec the engine rejects never reaches the store",
+      !rs.admitSpec(broken, { reserved: es.BUILTIN_SPEC_IDS, seconds: 2 }).ok && rs.listRosterSpecs().length === 0);
+
+    // ---- a real admission reaches generated missions ---------------------
+    const ok = rs.admitSpec(mite(), { reserved: es.BUILTIN_SPEC_IDS, seconds: 2 });
+    t.ok("roster: a valid spec is admitted under its own id", ok.ok && ok.id === "rust_mite");
+    t.eq("roster: the roster grew by one", missionRoster().length, 7);
+    t.ok("roster: its placement hint is derived from its role",
+      missionRoster().find((d) => d.id === "rust_mite").behavior === "charger");
+    t.ok("roster: applyEnemyRoster installs it for the loader",
+      es.applyEnemyRoster().includes("rust_mite") && !!missionSpecById.rust_mite);
+
+    // A roster of ONLY the custom enemy must actually place it — the proof the
+    // merge reaches generation and not just the list.
+    for (const e of missionRoster()) if (e.id !== "rust_mite") es.setEnemyEnabled(e.id, false);
+    const only = generateLevel({ seed: 31, difficulty: "high" });
+    t.ok("roster: a generated mission places the custom enemy",
+      only.level.enemies.length > 0 && only.level.enemies.every((e) => e.type === "rust_mite"));
+    t.ok("roster: and every placed type still resolves to a spec", only.level.enemies.every((e) => missionSpecById[e.type]));
+
+    // ---- the roster is never empty ---------------------------------------
+    const last = es.setEnemyEnabled("rust_mite", false);
+    t.ok("roster: disabling the last enabled entry is refused, with a reason", !last.ok && !!last.error);
+    t.ok("roster: so the roster still has something in it", missionRoster().length >= 1);
+
+    // ---- removing it puts the built-ins back ------------------------------
+    rs.removeRosterSpec("rust_mite");
+    t.ok("roster: removed from the store", !rs.inRoster("rust_mite"));
+    // Every built-in is still switched OFF, so this is the fallback path: a
+    // store that resolves to nothing must not generate an empty mission.
+    t.eq("roster: an all-disabled store falls back to the built-ins", missionRoster().length, 6);
+    t.ok("roster: which still generates enemies", generateLevel({ seed: 32, difficulty: "high" }).level.enemies.length > 0);
+
+    rs.clearRoster();
+    t.eq("roster: cleared is back to the untouched six", missionRoster().length, 6);
+  }
 }

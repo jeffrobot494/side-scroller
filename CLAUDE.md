@@ -201,6 +201,17 @@ section + the tests are the source of truth for what currently exists):
   Companions already run it: `config.companionBrain` defaults to `"spec"`
   (`updateCompanionSpec` + `src/game/companionspecs.js`), with the old
   `updateCompanion` kept as the `"legacy"` fallback.
+  **A custom enemy can now reach missions** (`tech/enemy-designer.md` E4):
+  `src/game/rosterspecs.js` is a guarded-localStorage store of admitted specs +
+  per-entry enable flags, and `enemyspecs.js` merges it — `missionRoster()`
+  filters built-ins by flag and appends enabled customs, `applyEnemyRoster()`
+  (called from `createState()` and `editor.js`, like `applyWeaponOverrides()`)
+  installs them into `missionSpecById` for `loadMission`. Admission is stricter
+  than the library Save: a declared `threat`, a pinned id refused on collision
+  with a built-in, and a 12-second dry run. **The roster can never be emptied** —
+  disabling the last entry is refused and an all-off store falls back to the
+  built-ins, because an empty roster generates missions with zero enemies.
+  Admit / enable / disable live in the Enemy Designer's "Mission roster" panel.
   **Known issue:** `on.spawn` handlers run from `instantiate()`, which has no
   scene, so `fire`/`spawn`/`sound` there are silently skipped (they used to
   crash). Fix = defer the spawn event to the first update; see "Known issues" in

@@ -13,9 +13,23 @@
 // expose exactly the flat fields fillEnemies + enemyThreat read (id/w/h/speed/
 // behavior/threat); loadMission resolves a placed `type` back to the normalized
 // spec via missionSpecById and instantiate()s the real runtime tree.
+//
+// THE MERGE (tech/enemy-designer.md, E4) lives here, and only here. This module
+// imports rosterspecs.js — the store of enemies admitted from the Enemy
+// Designer — and nothing imports back, so the store stays ignorant of what a
+// built-in is. missionRoster() filters the built-ins by their enable flag and
+// appends the enabled custom descriptors; applyEnemyRoster() installs their
+// normalized specs into missionSpecById so loadMission can resolve a placement.
+//
+// THE ROSTER IS NEVER EMPTY. Disabling the last enabled entry is refused, and a
+// store that somehow resolves to nothing falls back to the built-ins: with an
+// empty roster fillEnemies computes Math.min(...[]) → Infinity, its
+// guarantee-one-enemy fallback finds no descriptor, and the mission generates
+// with zero enemies. No throw, no error, just an empty level.
 // ---------------------------------------------------------------------------
 
 import { normalizeSpec } from "./enemyspec/normalize.js";
+import { listRosterSpecs, disabledIds, isRosterEnabled, setRosterEnabled } from "./rosterspecs.js";
 
 // Authored (sparse) specs. normalizeSpec fills every default at load. `behavior`
 // is NOT part of the spec schema — it's a generator placement hint (below).
@@ -229,7 +243,14 @@ export const MISSION_ENEMY_SPECS = [
 ];
 export const MISSION_BOSS_SPEC = IRON_MOTH;
 
-// Normalized-by-id, for the loader (loadMission) — includes the boss.
+// The ids nothing else may claim. customcontent.js takes this as the library's
+// reserved set so a saved "Husk Charger" cannot slug to `husk_charger` and
+// shadow the built-in once the maps merge.
+export const BUILTIN_SPEC_IDS = [...MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC].map((s) => s.id);
+
+// Normalized-by-id, for the loader (loadMission) — includes the boss, and
+// (after applyEnemyRoster) every enabled custom enemy. Mutated in place, never
+// replaced: entities.js holds this exact reference.
 export const missionSpecById = Object.fromEntries(
   [...MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC].map((s) => [s.id, normalizeSpec(s)])
 );
@@ -239,9 +260,18 @@ export function specIsFlying(nspec) {
   return nspec && nspec.root && nspec.root.body && nspec.root.body.gravity === 0;
 }
 
+// A custom enemy's placement hint, derived from its role (approximation 6 —
+// the derivation is lossy, and the built-ins prove role does not determine it:
+// cowardly_duelist and sky_duelist are both `elite` and get different hints).
+// BEHAVIOR stays the authority for the seven built-ins.
+const ROLE_BEHAVIOR = {
+  fodder: "charger", charger: "charger", tank: "charger", elite: "charger",
+  skirmisher: "shooter", artillery: "shooter", support: "shooter", boss: "shooter",
+};
+
 // A generator roster descriptor: the flat fields fillEnemies + enemyThreat read.
 function descriptorFor(spec) {
-  const n = missionSpecById[spec.id];
+  const n = missionSpecById[spec.id] || installSpec(spec);
   const motion = (n.root && n.root.motion) || {};
   const speed = motion.speed ?? motion.driftSpeed ?? 100;
   return {
@@ -250,15 +280,103 @@ function descriptorFor(spec) {
     w: n.root.body.w,
     h: n.root.body.h,
     speed,
-    behavior: BEHAVIOR[spec.id] || "shooter",
+    behavior: BEHAVIOR[spec.id] || ROLE_BEHAVIOR[spec.role] || "shooter",
     threat: spec.threat ?? 50,
     isSpec: true,
   };
 }
 
+// ---- the roster merge -----------------------------------------------------
+
+// Normalize a custom spec into missionSpecById. Called eagerly by
+// applyEnemyRoster() and lazily by descriptorFor(), so a roster read can never
+// outrun the map the loader resolves through.
+function installSpec(spec) {
+  try {
+    missionSpecById[spec.id] = normalizeSpec(spec);
+  } catch {
+    // Fallback discipline: a stored spec that will not normalize (an older
+    // schema, a hand-edited store) drops out of the roster instead of taking
+    // the generator down with it.
+    return null;
+  }
+  return missionSpecById[spec.id];
+}
+
+/**
+ * Install every ENABLED custom enemy into missionSpecById.
+ *
+ * Called explicitly (not as an import side effect) from BOTH pages, mirroring
+ * applyWeaponOverrides(): the game's createState() and the editor's boot. The
+ * editor needs its own call because the Level Generator previews placements
+ * without ever building a state. Idempotent.
+ *
+ * @returns {string[]} the ids installed
+ */
+export function applyEnemyRoster() {
+  const off = disabledIds();
+  const ids = [];
+  for (const spec of listRosterSpecs()) {
+    if (off.has(spec.id)) continue;
+    if (installSpec(spec)) ids.push(spec.id);
+  }
+  return ids;
+}
+
+/** Every custom enemy's spec that is currently switched on. */
+function enabledCustomSpecs() {
+  const off = disabledIds();
+  return listRosterSpecs().filter((s) => !off.has(s.id) && installSpec(s));
+}
+
 // Roster the generator places against. { boss:true } appends the boss so a boss
-// lead's "toughest roster enemy" framing selects it.
+// lead's "toughest roster enemy" framing selects it — and a custom enemy whose
+// role is `boss` is treated the same way, so a 320-threat monster cannot wander
+// into a recon mission.
 export function missionRoster({ boss = false } = {}) {
-  const specs = boss ? [...MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC] : MISSION_ENEMY_SPECS;
+  const off = disabledIds();
+  const builtins = MISSION_ENEMY_SPECS.filter((s) => !off.has(s.id));
+  const custom = enabledCustomSpecs();
+  const normal = [...builtins, ...custom.filter((s) => s.role !== "boss")];
+  const bosses = [MISSION_BOSS_SPEC, ...custom.filter((s) => s.role === "boss")]
+    .filter((s) => !off.has(s.id));
+
+  const specs = boss ? [...normal, ...(bosses.length ? bosses : [MISSION_BOSS_SPEC])] : normal;
+  // Never empty: an all-disabled store would generate missions with zero
+  // enemies rather than failing loudly, which is the exact failure fallback
+  // discipline exists to prevent.
+  if (!specs.length) return MISSION_ENEMY_SPECS.map(descriptorFor);
   return specs.map(descriptorFor);
+}
+
+/**
+ * Every roster entry, built-in and custom, for the Designer's enable list.
+ * @returns {Array<{id, name, role, threat, source:"built-in"|"custom", enabled, boss:boolean}>}
+ */
+export function rosterEntries() {
+  const off = disabledIds();
+  const row = (s, source) => ({
+    id: s.id, name: s.name || s.id, role: s.role || "?", threat: s.threat ?? 50,
+    source, enabled: !off.has(s.id), boss: s.role === "boss",
+  });
+  return [
+    ...MISSION_ENEMY_SPECS.map((s) => row(s, "built-in")),
+    row(MISSION_BOSS_SPEC, "built-in"),
+    ...listRosterSpecs().map((s) => row(s, "custom")),
+  ];
+}
+
+/**
+ * Flip one entry on or off. Turning the LAST enabled non-boss entry off is
+ * refused: the generator places against that list, and an empty one produces a
+ * mission with no enemies in it.
+ * @returns {{ok:true, id, enabled} | {ok:false, error:string}}
+ */
+export function setEnemyEnabled(id, on) {
+  if (!on) {
+    const left = rosterEntries().filter((e) => e.enabled && !e.boss && e.id !== id);
+    if (!left.length) return { ok: false, error: "the roster cannot be empty — enable another enemy first" };
+  }
+  setRosterEnabled(id, !!on);
+  return { ok: true, id, enabled: isRosterEnabled(id) };
 }

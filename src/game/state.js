@@ -13,7 +13,7 @@ import { config } from "./config.js";
 import { listCustomWeapons } from "./customcontent.js";
 import { applyWeaponOverrides } from "./weaponoverrides.js";
 import { generateLevel } from "./gen/levelgen.js";
-import { missionRoster } from "./enemyspecs.js";
+import { missionRoster, applyEnemyRoster } from "./enemyspecs.js";
 
 let nextId = 1;
 const uid = (p) => `${p}_${nextId++}`;
@@ -23,6 +23,11 @@ export function createState() {
   // place, so BLUEPRINTS (which hold direct references) see them too. Must run
   // before the armory line below, which clones out of WEAPONS.
   applyWeaponOverrides();
+
+  // Enemies admitted to the roster from the Enemy Designer, installed into
+  // missionSpecById so a generated placement can be resolved by loadMission.
+  // Same load-time-not-live contract as everything else read out of storage.
+  applyEnemyRoster();
 
   const state = {
     day: 1,

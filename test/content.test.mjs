@@ -33,6 +33,12 @@ export default async function run(t) {
   t.eq("specs: one entry after upsert", cc.listEnemySpecs().length, 1);
   t.ok("specs: store separate from legacy enemies", !cc.customEnemyMap().mine_layer);
   t.ok("specs: delete works", cc.deleteEnemySpec("mine_layer").ok && cc.listEnemySpecs().length === 0);
+  // E4 merges the library's ids into the namespace missionSpecById resolves
+  // through, so a library entry must not be able to claim a built-in's id.
+  const shadow = cc.saveEnemySpec({ v: 1, name: "Husk Charger", threat: 50, root: { health: { max: 10 } } });
+  t.ok("specs: a library entry cannot shadow a built-in id", shadow.ok && shadow.id !== "husk_charger");
+  t.ok("specs: it is suffixed rather than refused", shadow.id.startsWith("husk_charger"));
+  cc.deleteEnemySpec(shadow.id);
 
   // ---- guarded without localStorage ----
   const saved = globalThis.localStorage;
@@ -64,4 +70,23 @@ export default async function run(t) {
   t.ok("loadMission: flying enemy is lifted airborne", m.specRoots[1].y < 454);
   t.ok("loadMission: unknown type falls back to a built-in", m.specRoots[2].alive === true);
   t.ok("loadMission: kill loot derives from threat", !!m.specRoots[0].loot && m.specRoots[0].loot.value > 0);
+
+  // ---- loadMission resolves a ROSTER enemy too (E4) ----------------------
+  // The whole point of the roster: a placement carrying a custom id must build
+  // the custom enemy, not fall back to husk_charger.
+  {
+    const rs = await import("../src/game/rosterspecs.js");
+    const es = await import("../src/game/enemyspecs.js");
+    rs.clearRoster();
+    const scrap = { v: 1, id: "scrap_hound", name: "Scrap Hound", threat: 45, role: "charger", tier: 1, intelligence: 1,
+      root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [24, 22], color: "#909090" },
+        health: { max: 33 }, motion: { type: "chase", speed: 200 }, contact: { damage: 7 } } };
+    t.ok("roster: admitted for the loader", rs.admitSpec(scrap, { reserved: es.BUILTIN_SPEC_IDS, seconds: 2 }).ok);
+    es.applyEnemyRoster();
+    const rl = { ...level, enemies: [{ type: "scrap_hound", x: 500, y: 478 }] };
+    const rm = loadMission(rl, []);
+    t.eq("loadMission: a roster placement builds the custom enemy", rm.specRoots[0].maxHealth, 33);
+    t.ok("loadMission: not the fallback built-in", rm.specRoots[0].maxHealth !== 24);
+    rs.clearRoster();
+  }
 }
