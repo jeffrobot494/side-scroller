@@ -188,9 +188,16 @@ section + the tests are the source of truth for what currently exists):
   nested destructible parts, projectiles-as-entities, 10 motion controllers,
   fire patterns, events/signals, tracks + utility (scored-action) brains,
   perception/memory, engine-enforced spawn limits. The **Enemy Designer** was
-  rebuilt around it (template/form/JSON authoring + LLM generate via Player2
-  chat completions + live real-runtime preview + library) and the **Firing
-  Room** spawns saved specs as waves. Plan: `tech/enemyspec.md`.
+  rebuilt around it and now has **two screens** (`tech/enemy-designer.md` E7):
+  the **ENEMIES list** it opens on — one flat table of every enemy this browser
+  has, with an in-missions switch and Open / ⧉ / ✕ per row, ＋New (blank /
+  template / describe), and Export / Import / Reset over one textarea — and the
+  **workspace** behind Open: tree + inspector rail, whole-spec JSON, a playable
+  1:1 preview, and one conversation that authors and revises. `← Enemies` comes
+  back. Both screens are mounted at once and toggled by a class on the root,
+  because the workspace owns a rAF loop, a keyboard-owning canvas and a
+  transcript. The **Firing Room** spawns any enemy in the list as waves,
+  including ones switched out of missions. Plan: `tech/enemyspec.md`.
   **Wired into missions:** every mission enemy is an EnemySpec instance now —
   `loadMission` instantiates the built-in roster (`src/game/enemyspecs.js`) and
   the runtime brain/perception drive them; the legacy flat archetypes were

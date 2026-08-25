@@ -1,6 +1,15 @@
 // ---------------------------------------------------------------------------
 // ENEMY DESIGNER — author EnemySpec enemies: prompt an LLM or build by hand.
 //
+// TWO SCREENS (tech/enemy-designer.md, E7). The tool OPENS on the ENEMIES list
+// — one flat table of every enemy this browser has, shipped and local alike,
+// with an in-missions switch and Open / ⧉ / ✕ on every row, ＋New, and an
+// Export / Import / Reset section. Open takes you to the WORKSPACE (everything
+// below); `← Enemies` comes back. Both are mounted at once and toggled by a
+// class on the root: the workspace owns a rAF loop, a focusable canvas and a
+// whole conversation, none of which survives being rebuilt. The preview does
+// not step while the list is showing.
+//
 // The working object is a sparse EnemySpec (tech/enemyspec.md).
 // Three ways in: a starter template, the TREE + INSPECTOR rail (E2), or the JSON
 // panel (still authoritative for everything). Every change re-validates; a valid spec re-instantiates the
@@ -44,8 +53,13 @@
 // (config.player2GameClientId, Settings tab). Without it, manual authoring
 // through the rail and the JSON panel is fully functional.
 //
-// Save: gated on accept() (validate → normalize → dry-run) into the EnemySpec
-// library (localStorage) — the Firing Room can spawn saved specs.
+// Save: gated on accept() (validate → normalize → dry-run) into THE enemy list
+// (src/game/enemyspecs.js + enemystore.js). It writes an edit if the file ships
+// that id and an addition if it does not, and it leaves a new enemy OUT of
+// missions — the list's in-missions switch is the mission gate, and it re-runs
+// the pipeline for longer. Placement (the generator's hint) is the one control
+// on the spec node that is not part of the spec: it rides beside it on the
+// record, so it is tool state until Save.
 //
 // createEnemyDesigner(container, onBack) → { dispose() }
 // ---------------------------------------------------------------------------
@@ -74,8 +88,9 @@ import { chatEnemySpec, composeChat, accept } from "../../game/enemyspec/generat
 import { diffSpecs, summarize } from "../../game/enemyspec/specdiff.js";
 import { listCustomWeapons } from "../../game/customcontent.js";
 import {
-  enemyEntries, enemyRecord, saveEnemyToList, deleteEnemy, revertEnemy,
-  setEnemyEnabled, applyEnemyRoster, MISSION_DRYRUN_SECONDS,
+  enemyList, enemyEntries, enemyRecord, saveEnemyToList, deleteEnemy, revertEnemy,
+  setEnemyEnabled, applyEnemyRoster, resetEnemyList, seedBehavior,
+  PLACEMENTS, MISSION_DRYRUN_SECONDS,
 } from "../../game/enemyspecs.js";
 import { resolveId } from "./weapon-designer.js";
 import { ARSENAL } from "../../game/arsenal.js";
@@ -107,6 +122,19 @@ export function createEnemyDesigner(container, onBack) {
   // re-slugging the name into a duplicate. A template or a chat landing leaves
   // it null, where the id follows the name (weapon-designer.js resolveId).
   let loadedId = null;
+  // The record's placement hint. NOT part of the spec — it rides beside it
+  // (tech/enemy-designer.md, E6), so it is tool state until Save.
+  let behavior = seedBehavior(spec.role);
+
+  // ---- the two screens (E7) -----------------------------------------------
+  // The tool opens on the LIST and the workspace is what you open from it.
+  // Both are mounted at once and toggled by a class: the workspace owns a rAF
+  // loop, a focusable canvas and a whole conversation, none of which survives
+  // being torn down and rebuilt.
+  let screen = "list";
+  let listFilter = "";
+  let listTab = "all";   // all | missions | changed
+  let newOpen = false;
 
   // ---- the conversation ---------------------------------------------------
   // The transcript is the tool's history AND the model's context: `turns` is
@@ -135,9 +163,62 @@ export function createEnemyDesigner(container, onBack) {
   }
 
   container.innerHTML = `
-    <div class="wd es-wide">
+    <div class="wd es-wide es-on-list" id="es-root">
+
+      <div class="es-list">
+        <div class="wd-head">
+          <button class="btn btn-ghost" data-es="back">← Tools</button>
+          <span class="wd-name es-listtitle">Enemies</span>
+          <span class="wd-id" id="es-listcount"></span>
+          <span class="es-headgap"></span>
+          <button class="btn" data-es="new">＋ New</button>
+        </div>
+
+        <div class="es-listgrid" id="es-listgrid">
+          <div class="es-browse">
+            <div class="es-filterbar">
+              <input class="wd-name es-filter" data-es="filter" placeholder="filter…" spellcheck="false" />
+              <button class="btn btn-alt es-sm es-tab on" data-es="tab" data-tab="all">All</button>
+              <button class="btn btn-alt es-sm es-tab" data-es="tab" data-tab="missions">In missions</button>
+              <button class="btn btn-alt es-sm es-tab" data-es="tab" data-tab="changed">Changed</button>
+            </div>
+            <div class="es-bhead">
+              <span>Enemy</span><span>Role · threat</span><span>Placement</span><span>In missions</span><span></span>
+            </div>
+            <div id="es-rows"></div>
+          </div>
+
+          <div class="wd-saved es-newpanel" id="es-newpanel">
+            <h3 class="wd-h">＋ New enemy</h3>
+            <div class="es-newmenu">
+              <button type="button" data-es="new-blank">Blank<small>A minimal enemy you build up yourself.</small></button>
+              <div class="es-newtpl">
+                <label class="lg-field">From a template
+                  <select data-es="new-tplsel">${TEMPLATES.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("")}</select>
+                </label>
+                <button class="btn btn-alt es-sm" data-es="new-tpl">Create</button>
+              </div>
+              <button type="button" data-es="new-describe">Describe it…<small>Opens the workspace with the conversation ready.</small></button>
+            </div>
+            <p class="wd-saved-note">Duplicating an enemy is <b>⧉</b> on its row. A new enemy arrives OUT of missions — the switch is the mission gate, and it re-runs the pipeline for ${MISSION_DRYRUN_SECONDS} seconds.</p>
+          </div>
+        </div>
+
+        <section class="ed-io es-io">
+          <div class="ed-io-btns">
+            <button class="btn" data-es="io-reset">Reset my changes</button>
+            <button class="btn" data-es="io-export">Export JSON ▾</button>
+            <button class="btn" data-es="io-import">▴ Import JSON</button>
+            <span class="ed-msg" id="es-iomsg"></span>
+          </div>
+          <textarea id="es-io" class="ed-json" spellcheck="false"
+            placeholder="Export writes the whole list here — paste it into src/game/enemyspecs.js to make it permanent. Paste enemy JSON and hit Import to add it to this browser."></textarea>
+        </section>
+      </div>
+
+      <div class="es-work">
       <div class="wd-head">
-        <button class="btn btn-ghost" data-es="back">← Tools</button>
+        <button class="btn btn-ghost" data-es="tolist">← Enemies</button>
         <input class="wd-name" data-es="name" value="${escapeHtml(spec.name)}" spellcheck="false" />
         <span class="wd-id" id="es-id"></span>
       </div>
@@ -199,12 +280,6 @@ export function createEnemyDesigner(container, onBack) {
             </div>
             <span class="ed-msg" id="es-msg"></span>
           </div>
-          <div class="wd-saved es-roster">
-            <h3 class="wd-h">Enemies</h3>
-            <p class="wd-saved-note">One list — what this build ships plus whatever you have added. The switch is what puts an enemy in generated missions: flipping it on runs a ${MISSION_DRYRUN_SECONDS}-second dry run, and the roster can never be emptied. <strong>Reload the game page</strong> to see a change in missions.</p>
-            <span class="ed-msg" id="es-rostermsg"></span>
-            <div class="wd-saved-list" id="es-rosterlist"></div>
-          </div>
         </div>
 
         <div class="es-chat" id="es-chat">
@@ -230,6 +305,8 @@ export function createEnemyDesigner(container, onBack) {
           </div>
         </div>
       </div>
+      </div>
+
     </div>`;
 
   const $ = (sel) => container.querySelector(sel);
@@ -584,6 +661,7 @@ export function createEnemyDesigner(container, onBack) {
     return `
       <h4 class="es-h4">Identity</h4>
       ${rows("", SPEC_IDENTITY)}
+      ${placementRow()}
       <h4 class="es-h4">Sound</h4>
       <p class="wd-saved-note">Every slot has an engine default, so <strong>Auto</strong> is fine — this is for giving one enemy its own voice. <code>fire</code> is the default for every emitter; an emitter overrides it on its own node. For a specific moment (a telegraph, a phase change) use a <code>sound</code> step.</p>
       ${SOUND_ROWS.map((r) => cuePickerRowHTML({
@@ -595,6 +673,17 @@ export function createEnemyDesigner(container, onBack) {
       <h4 class="es-h4">Limits</h4>
       <p class="wd-saved-note">Engine-enforced, and clamped at runtime whatever is written here.</p>
       ${rows("", SPEC_LIMITS)}`;
+  }
+
+  // Placement is the ONE field on this node that is not part of the spec — it
+  // rides beside it on the record (tech/enemy-designer.md, E6), so it writes to
+  // tool state and lands with Save rather than through setAt().
+  function placementRow() {
+    const help = "Where the generator prefers to put it — <b>shooter</b>/<b>turret</b> want a perch, <b>charger</b> wants the ground. Not part of the enemy's JSON.";
+    return `<div class="cfg-row wd-row">
+      <div class="cfg-meta"><span class="cfg-label">Placement</span><span class="cfg-help">${help}</span></div>
+      <div class="cfg-control"><select data-esplace>${PLACEMENTS.map((b) => `<option value="${b}"${b === behavior ? " selected" : ""}>${b}</option>`).join("")}</select></div>
+    </div>`;
   }
 
   function entityInspector(node) {
@@ -858,29 +947,75 @@ export function createEnemyDesigner(container, onBack) {
     return typeof em.sound === "string" ? em.sound : (em.sound && em.sound.cue) || "";
   }
 
-  // ---- the enemy list (E6) ------------------------------------------------
-  // ONE list. `origin` is how an entry got here, not a category it belongs to:
-  // every row takes the same verbs.
-  const ORIGIN = { file: "", edited: " \u00b7 edited", added: " \u00b7 new" };
+  // ---- the Enemies screen (E7) --------------------------------------------
+  // ONE flat table. `origin` is how an entry got here, not a category it
+  // belongs to: every row takes the same verbs.
+  const ORIGIN_PILL = {
+    edited: `<span class="es-pill es-pill-edit">edited</span>`,
+    added: `<span class="es-pill es-pill-new">new</span>`,
+  };
 
-  function renderRoster() {
-    const el = $("#es-rosterlist");
-    if (!el) return;
-    el.innerHTML = enemyEntries().map((e) => `
-      <div class="wd-saved-row es-rrow${e.inMissions ? "" : " off"}" data-id="${escapeHtml(e.id)}">
-        <button type="button" role="switch" class="toggle${e.inMissions ? " on" : ""}" data-esrost="${escapeHtml(e.id)}" title="${e.inMissions ? "Placed in generated missions" : "Never placed"}"><span class="knob"></span></button>
-        <span class="wd-saved-name">${escapeHtml(e.name)}</span>
-        <span class="wd-saved-budget">${escapeHtml(e.role)} \u00b7 ${e.threat} \u00b7 ${escapeHtml(e.behavior)}${e.boss ? " \u00b7 boss" : ""}${ORIGIN[e.origin] || ""}</span>
-        <button class="btn btn-ghost" data-es="load-enemy" data-id="${escapeHtml(e.id)}">Load</button>
-        ${e.origin === "edited" ? `<button class="btn btn-ghost" data-es="revert-enemy" data-id="${escapeHtml(e.id)}" title="Drop my changes and take the shipped version">\u21ba</button>` : ""}
-        <button class="wd-fx-x" data-es="del-enemy" data-id="${escapeHtml(e.id)}" title="Delete">\u00d7</button>
-      </div>`).join("");
+  function showScreen(next) {
+    screen = next === "work" ? "work" : "list";
+    const root = $("#es-root");
+    if (root) root.className = `wd es-wide es-on-${screen}`;
+    if (screen === "list") {
+      blurStage();          // the list is all text fields — never hold the keys here
+      renderList();
+    } else {
+      refresh({ rebuildRail: true });
+    }
+    return screen;
   }
 
-  function rosterMsg(text, cls) {
-    const el = $("#es-rostermsg");
+  function visibleRows() {
+    const q = listFilter.trim().toLowerCase();
+    return enemyEntries().filter((e) => {
+      if (listTab === "missions" && !e.inMissions) return false;
+      if (listTab === "changed" && e.origin === "file") return false;
+      if (!q) return true;
+      return `${e.name} ${e.id} ${e.role} ${e.behavior}`.toLowerCase().includes(q);
+    });
+  }
+
+  function renderList() {
+    const rows = visibleRows();
+    const all = enemyEntries();
+    const count = $("#es-listcount");
+    if (count) count.textContent = `${all.length} · ${all.filter((e) => e.inMissions).length} in missions`;
+
+    const grid = $("#es-listgrid");
+    if (grid) grid.className = "es-listgrid" + (newOpen ? " es-newon" : "");
+    for (const b of container.querySelectorAll(".es-tab")) {
+      b.className = "btn btn-alt es-sm es-tab" + (b.dataset.tab === listTab ? " on" : "");
+    }
+
+    const el = $("#es-rows");
     if (!el) return;
-    el.textContent = text;
+    el.innerHTML = rows.length ? rows.map((e) => `
+      <div class="es-brow${e.inMissions ? "" : " off"}${e.id === loadedId ? " open" : ""}" data-id="${escapeHtml(e.id)}">
+        <span class="es-bname"><b>${escapeHtml(e.name)}</b><span class="wd-id">${escapeHtml(e.id)}</span></span>
+        <span class="es-bmeta">${escapeHtml(e.role)} · ${e.threat}</span>
+        <span class="es-bmeta">${escapeHtml(e.behavior)}</span>
+        <span class="es-bstate">
+          <button type="button" role="switch" class="toggle${e.inMissions ? " on" : ""}" data-esrost="${escapeHtml(e.id)}" title="${e.inMissions ? "Placed in generated missions" : "Never placed"}"><span class="knob"></span></button>
+          ${e.boss ? `<span class="es-pill">boss</span>` : ""}
+          ${ORIGIN_PILL[e.origin] || ""}
+          ${e.origin !== "file" ? `<button class="btn btn-ghost es-sm" data-es="revert-enemy" data-id="${escapeHtml(e.id)}" title="Drop my changes and take the shipped version">↺</button>` : ""}
+        </span>
+        <span class="es-bacts">
+          <button class="btn es-sm" data-es="open-enemy" data-id="${escapeHtml(e.id)}">Open</button>
+          <button class="btn btn-ghost es-sm" data-es="dup-enemy" data-id="${escapeHtml(e.id)}" title="Duplicate">⧉</button>
+          <button class="btn btn-ghost es-sm es-del" data-es="del-enemy" data-id="${escapeHtml(e.id)}" title="Delete">✕</button>
+        </span>
+      </div>`).join("")
+      : `<p class="wd-empty">Nothing matches.</p>`;
+  }
+
+  function listMsg(text, cls) {
+    const el = $("#es-iomsg");
+    if (!el) return;
+    el.innerHTML = text || "";
     el.className = "ed-msg" + (cls ? " " + cls : "");
   }
 
@@ -888,10 +1023,160 @@ export function createEnemyDesigner(container, onBack) {
   // at mission length; turning one off can be refused for stranding a slot.
   function toggleRoster(id, on, opts) {
     const res = setEnemyEnabled(id, on, opts);
-    rosterMsg(res.ok ? "" : res.error, res.ok ? "" : "bad");
+    listMsg(res.ok ? "" : escapeHtml(res.error), res.ok ? "" : "bad");
     if (res.ok) applyEnemyRoster(); // this page's Level Generator resolves through the same map
-    renderRoster();
+    renderList();
     return res;
+  }
+
+  // ---- opening, duplicating, deleting -------------------------------------
+
+  function openEnemy(id) {
+    const r = enemyRecord(id);
+    if (!r) return null;
+    behavior = r.behavior;
+    loadSpec(clone(r.spec), `Opened "${r.spec.name || r.spec.id}".`, { pin: true });
+    showScreen("work");
+    return r;
+  }
+
+  // A duplicate is a NEW enemy: its id follows its new name (approximation 17 —
+  // Duplicate is the only way to get a different id), so it is not pinned.
+  function duplicateEnemy(id) {
+    const r = enemyRecord(id);
+    if (!r) return null;
+    const next = clone(r.spec);
+    next.name = `${next.name || next.id} copy`;
+    delete next.id;
+    behavior = r.behavior;
+    loadSpec(next, `Duplicated "${r.spec.name || r.spec.id}" — rename it and Save.`);
+    showScreen("work");
+    return next;
+  }
+
+  function removeEnemyRow(id) {
+    const res = deleteEnemy(id);
+    listMsg(res.ok ? `Deleted "${escapeHtml(res.id)}".` : escapeHtml(res.error), res.ok ? "" : "bad");
+    if (res.ok && loadedId === id) loadedId = null;
+    renderList();
+    return res;
+  }
+
+  // ---- ＋ New --------------------------------------------------------------
+
+  const BLANK_SPEC = () => ({
+    v: 1, name: "New Enemy", role: "skirmisher", tier: 1, threat: 50, intelligence: 2,
+    root: {
+      id: "root", tags: ["enemy"],
+      visual: { shape: "box", size: [30, 40], color: "#c05a5a" },
+      health: { max: 30 },
+      motion: { type: "chase", speed: 180 },
+      contact: { damage: 8 },
+    },
+  });
+
+  // Everything ＋New makes is UNPINNED, so its id follows the name you give it.
+  function newEnemy(kind = "blank", arg = "") {
+    const next = kind === "template"
+      ? clone(TEMPLATE_BY_ID[arg] || TEMPLATE_BY_ID.tpl_charger)
+      : BLANK_SPEC();
+    if (kind === "template") delete next.id; // a template's id is the template's
+    behavior = seedBehavior(next.role);
+    loadSpec(next, kind === "describe"
+      ? "New enemy. Describe it below and the conversation will build it."
+      : `New enemy. Name it and Save.`);
+    showScreen("work");
+    if (kind === "describe") {
+      const say = $("#es-say");
+      if (say && say.focus) say.focus();
+    }
+    return next;
+  }
+
+  // ---- Export / Import / Reset --------------------------------------------
+  // Same contract the settings tab has: the browser is not the authority, the
+  // file is. Export dumps the merged list to paste into enemyspecs.js; Import
+  // is how it crosses to another browser (approximation 14).
+
+  function exportList() {
+    const payload = {
+      v: 1,
+      enemies: enemyList().map((r) => ({ spec: r.spec, behavior: r.behavior, inMissions: r.inMissions })),
+    };
+    const text = JSON.stringify(payload, null, 2);
+    const el = $("#es-io");
+    if (el) el.value = text;
+    listMsg(`Exported ${payload.enemies.length} enemies — paste them into <code>src/game/enemyspecs.js</code> to make them permanent.`, "ok");
+    return text;
+  }
+
+  // Tolerant about shape, strict about content: the payload, a bare array of
+  // records or specs, or one spec. Every spec still goes through accept().
+  function incoming(obj) {
+    const one = (x) => {
+      if (!x || typeof x !== "object" || Array.isArray(x)) return null;
+      if (x.spec && typeof x.spec === "object") return { spec: x.spec, behavior: x.behavior, inMissions: x.inMissions };
+      if (x.root && typeof x.root === "object") return { spec: x, behavior: undefined, inMissions: undefined };
+      return null;
+    };
+    if (Array.isArray(obj)) return obj.map(one).filter(Boolean);
+    if (obj && Array.isArray(obj.enemies)) return obj.enemies.map(one).filter(Boolean);
+    const solo = one(obj);
+    return solo ? [solo] : [];
+  }
+
+  /**
+   * Merge pasted JSON in by id — an id the list has becomes an edit, one it
+   * does not becomes an addition. No per-row choices (approximation 15): a
+   * spec that fails accept() is skipped and named.
+   */
+  function importList(text, opts = {}) {
+    let obj;
+    try {
+      obj = JSON.parse(text != null ? text : (($("#es-io") || {}).value || ""));
+    } catch (e) {
+      listMsg(`Import failed — that is not JSON (${escapeHtml(e.message)}).`, "bad");
+      return { ok: false, added: 0, skipped: [] };
+    }
+    const list = incoming(obj);
+    if (!list.length) {
+      listMsg("Import failed — no enemies in that JSON.", "bad");
+      return { ok: false, added: 0, skipped: [] };
+    }
+    const skipped = [];
+    let landed = 0;
+    for (const item of list) {
+      const res = accept(item.spec, { seconds: opts.seconds ?? 4 });
+      if (!res.ok) {
+        skipped.push({ id: item.spec.id || item.spec.name || "?", error: res.errors[0] });
+        continue;
+      }
+      // inMissions is deliberately NOT taken from the payload: the switch is
+      // the mission gate and has its own dry run, so an import cannot walk past
+      // it. Omitting it keeps whatever the entry already had and leaves a NEW
+      // one out of missions — re-importing your own export must not switch the
+      // shipped enemies off.
+      const saved = saveEnemyToList(item.spec, { behavior: item.behavior });
+      if (saved.ok) landed++;
+      else skipped.push({ id: item.spec.id || "?", error: saved.error });
+    }
+    applyEnemyRoster();
+    renderList();
+    listMsg(
+      `Imported ${landed} enem${landed === 1 ? "y" : "ies"}` +
+      (skipped.length
+        ? ` · ${skipped.length} skipped: ` + skipped.map((sk) => `<code>${escapeHtml(sk.id)}</code> ${escapeHtml(sk.error)}`).join("; ")
+        : " — a new one arrives out of missions; switch it on to place it."),
+      skipped.length ? "bad" : "ok"
+    );
+    return { ok: landed > 0, added: landed, skipped };
+  }
+
+  function resetList() {
+    resetEnemyList();
+    loadedId = null;
+    renderList();
+    listMsg("Reset — the list is what this build ships.", "ok");
   }
 
   function saveCurrent() {
@@ -902,7 +1187,7 @@ export function createEnemyDesigner(container, onBack) {
       msg.className = "ed-msg bad";
       return { ok: false, error: res.errors[0] };
     }
-    const saved = saveEnemyToList(spec);
+    const saved = saveEnemyToList(spec, { behavior });
     if (saved.ok) loadedId = saved.id; // saving pins the id, so the next Save overwrites
     msg.textContent = !saved.ok
       ? `Not saved — ${saved.error}`
@@ -910,7 +1195,7 @@ export function createEnemyDesigner(container, onBack) {
         ? `Saved as "${saved.id}". Switch it on to put it in missions.`
         : `Saved "${saved.id}".`;
     msg.className = "ed-msg " + (saved.ok ? "ok" : "bad");
-    renderRoster();
+    renderList();
     return saved;
   }
 
@@ -1117,6 +1402,12 @@ export function createEnemyDesigner(container, onBack) {
       refresh({ rebuildRail: true, rewriteJson: true });
       return;
     }
+    // Placement is record state, not spec state — nothing to validate, nothing
+    // to rewrite in the JSON panel. It lands with Save.
+    if (t.dataset.esplace !== undefined) {
+      behavior = PLACEMENTS.includes(t.value) ? t.value : behavior;
+      return;
+    }
     if (t.dataset.esp !== undefined) {
       // enum / colour / tags / json land here; a bad JSON edit says so and is
       // dropped rather than half-applied.
@@ -1132,7 +1423,9 @@ export function createEnemyDesigner(container, onBack) {
     if (t.dataset.es === "weapon") {
       setWeapon(t.value);
     } else if (t.dataset.es === "template" && t.value) {
-      loadSpec(clone(TEMPLATE_BY_ID[t.value]), `Loaded the ${TEMPLATE_BY_ID[t.value].name} template.`);
+      const tpl = clone(TEMPLATE_BY_ID[t.value]);
+      behavior = seedBehavior(tpl.role); // a template is a new enemy, so reseed the hint
+      loadSpec(tpl, `Loaded the ${TEMPLATE_BY_ID[t.value].name} template.`);
       t.value = "";
     }
   });
@@ -1173,6 +1466,23 @@ export function createEnemyDesigner(container, onBack) {
     if (!el) return;
     switch (el.dataset.es) {
       case "back": onBack(); break;
+      case "tolist": showScreen("list"); break;
+      case "open-enemy": openEnemy(el.dataset.id); break;
+      case "dup-enemy": duplicateEnemy(el.dataset.id); break;
+      case "del-enemy": removeEnemyRow(el.dataset.id); break;
+      case "revert-enemy":
+        revertEnemy(el.dataset.id);
+        listMsg("Reverted to the version this build ships.", "");
+        renderList();
+        break;
+      case "new": newOpen = !newOpen; renderList(); break;
+      case "new-blank": newEnemy("blank"); break;
+      case "new-tpl": newEnemy("template", (($("[data-es='new-tplsel']") || {}).value) || ""); break;
+      case "new-describe": newEnemy("describe"); break;
+      case "tab": listTab = el.dataset.tab || "all"; renderList(); break;
+      case "io-export": exportList(); break;
+      case "io-import": importList(); break;
+      case "io-reset": resetList(); break;
       case "save": saveCurrent(); break;
       case "copy": copyJSON(); break;
       case "reset": resetFight(); break;
@@ -1188,24 +1498,21 @@ export function createEnemyDesigner(container, onBack) {
       case "connect": connectP2(); break;
       case "send": say(($("#es-say") || {}).value); break;
       case "rewind": rewind(Number(el.dataset.v)); break;
-      case "load-enemy": {
-        const r = enemyRecord(el.dataset.id);
-        if (r) loadSpec(clone(r.spec), `Loaded "${r.spec.name || r.spec.id}".`, { pin: true });
-        break;
-      }
-      case "revert-enemy":
-        revertEnemy(el.dataset.id);
-        rosterMsg("Reverted to the version this build ships.", "");
-        renderRoster();
-        break;
-      case "del-enemy": {
-        const res = deleteEnemy(el.dataset.id);
-        rosterMsg(res.ok ? `Deleted "${res.id}".` : res.error, res.ok ? "" : "bad");
-        renderRoster();
-        break;
-      }
     }
   });
+
+  // Give the keyboard back — leaving the workspace must never leave the stage
+  // holding the keys, or typing into the filter box would drive a soldier
+  // nobody can see.
+  function blurStage() {
+    if (canvas && typeof canvas.blur === "function") canvas.blur();
+    else takeKeys(false);
+  }
+
+  const filterEl = $("[data-es='filter']");
+  if (filterEl && filterEl.addEventListener) {
+    filterEl.addEventListener("input", () => { listFilter = filterEl.value || ""; renderList(); });
+  }
 
   // ⏎ sends, ⇧⏎ is a newline. The composer is a text field, so the canvas is
   // already blurred and MissionInput is already off — typing here can never
@@ -1415,14 +1722,19 @@ export function createEnemyDesigner(container, onBack) {
     let dt = (now - last) / 1000;
     last = now;
     if (dt > 0.05) dt = 0.05;
-    step(dt);
-    draw();
+    // The list screen has no stage to draw to, and a fight nobody can see must
+    // not run: the preview would be mid-way through something when you open an
+    // enemy. Loading one calls resetPreview anyway; this just stops the burn.
+    if (screen === "work") {
+      step(dt);
+      draw();
+    }
     raf = req(loop);
   }
 
   checkpoints = [{ version: 0, spec: clone(spec), label: "loaded" }];
   renderRail();
-  renderRoster();
+  renderList();
   renderKeys();
   renderChat();
   setSendable();
@@ -1469,6 +1781,21 @@ export function createEnemyDesigner(container, onBack) {
     roster: enemyEntries,
     toggleRoster,
     load: (next, opts) => loadSpec(next, null, opts),
+    // E7's two screens and the verbs on the list, driven the same way.
+    screen: () => screen,
+    show: showScreen,
+    rows: () => visibleRows().map((e) => e.id),
+    filter(q) { listFilter = q || ""; renderList(); return visibleRows().map((e) => e.id); },
+    tab(which) { listTab = which; renderList(); return visibleRows().map((e) => e.id); },
+    open: openEnemy,
+    duplicate: duplicateEnemy,
+    remove: removeEnemyRow,
+    create: newEnemy,
+    placement: () => behavior,
+    setPlacement(b) { behavior = PLACEMENTS.includes(b) ? b : behavior; return behavior; },
+    exportList,
+    importList,
+    resetList,
     // Hold a set of actions for `frames` steps, as the window key handler would
     // fill them in, and report what happened to the fight.
     drive(hold = {}, frames = 1, dt = 1 / 60) {

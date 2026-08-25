@@ -277,6 +277,98 @@ export default async function run(t) {
     es.resetEnemyList();
   }
 
+  // ---- Enemy Designer: the Enemies screen (E7) ----------------------------
+  // The list is the tool's front door, so what belongs HERE is that it opens on
+  // it, that every row verb reaches the store, that ＋New and Duplicate produce
+  // enemies whose ids follow their names, and that Export/Import round-trips.
+  {
+    installDom();
+    const es = await import("../src/game/enemyspecs.js");
+    es.resetEnemyList();
+
+    const ed = createEnemyDesigner(makeEl(), () => {});
+    t.eq("enemy-designer: opens on the list, not the workspace", ed.screen(), "list");
+    t.eq("enemy-designer: showing every enemy the build ships", ed.rows().length, 7);
+
+    // Open is what crosses to the workspace, and it pins the id so Save
+    // overwrites rather than minting a second enemy.
+    t.ok("enemy-designer: Open loads the enemy", !!ed.open("lurk_gunner"));
+    t.eq("enemy-designer: and shows the workspace", ed.screen(), "work");
+    t.eq("enemy-designer: with that enemy in hand", ed.specNow().id, "lurk_gunner");
+    t.eq("enemy-designer: and its placement hint beside it", ed.placement(), "shooter");
+    t.eq("enemy-designer: ← Enemies goes back", ed.show("list"), "list");
+
+    // Duplicate is the ONLY way to a new id (approximation 17): the copy is
+    // unpinned, so its id follows the name it is given.
+    ed.duplicate("lurk_gunner");
+    ed.select("root");
+    ed.op("add", "child");
+    t.ok("enemy-designer: a duplicate takes a new id", ed.specNow().id !== "lurk_gunner");
+    t.ok("enemy-designer: derived from its new name", ed.specNow().id.includes("copy"));
+    t.eq("enemy-designer: and inherits the placement hint", ed.placement(), "shooter");
+    t.ok("enemy-designer: saving it adds an eighth enemy", ed.save().ok && ed.roster().length === 8);
+
+    // ＋New: blank and template, both unpinned.
+    ed.create("blank");
+    t.eq("enemy-designer: ＋New blank starts from nothing named", ed.specNow().name, "New Enemy");
+    ed.specNow().name = "Bulwark Drone";
+    ed.select("root");
+    ed.op("add", "child");
+    t.eq("enemy-designer: its id follows the name you give it", ed.specNow().id, "bulwark_drone");
+    ed.create("template", "tpl_shooter");
+    ed.specNow().name = "Perch Thing";
+    ed.select("root");
+    ed.op("add", "child");
+    t.eq("enemy-designer: a template copy does not keep the template's id", ed.specNow().id, "perch_thing");
+
+    // The Placement control writes record state, never the spec.
+    ed.open("husk_charger");
+    t.eq("enemy-designer: placement reads off the record", ed.placement(), "charger");
+    ed.setPlacement("turret");
+    t.ok("enemy-designer: and is not written into the spec", ed.specNow().behavior === undefined);
+    ed.save();
+    t.eq("enemy-designer: it lands with Save",
+      ed.roster().find((e) => e.id === "husk_charger").behavior, "turret");
+    ed.show("list");
+
+    // Filter and the tabs are views of the same list.
+    t.eq("enemy-designer: the filter matches on name and id", ed.filter("husk").length, 1);
+    t.eq("enemy-designer: an empty filter is everything", ed.filter("").length, 8);
+    t.ok("enemy-designer: the Changed tab shows only local entries",
+      ed.tab("changed").length === 2 && ed.tab("changed").includes("husk_charger"));
+    t.eq("enemy-designer: the In-missions tab excludes the new ones", ed.tab("missions").length, 7);
+    ed.tab("all");
+
+    // Export → Import round trip, and a bad spec is skipped and NAMED.
+    const dump = ed.exportList();
+    t.ok("enemy-designer: Export is parseable and carries every enemy",
+      JSON.parse(dump).enemies.length === 8);
+    es.resetEnemyList();
+    ed.show("list");
+    t.eq("enemy-designer: reset is back to the file", ed.rows().length, 7);
+    const back = ed.importList(dump, { seconds: 2 });
+    t.ok("enemy-designer: Import merges it back in", back.ok && back.added === 8);
+    t.eq("enemy-designer: without duplicating the shipped entries", ed.rows().length, 8);
+    // Import must not walk past the mission gate — but re-importing your own
+    // export must not switch the shipped enemies off either.
+    t.ok("enemy-designer: a re-imported shipped enemy keeps its place",
+      ed.roster().find((e) => e.id === "husk_charger").inMissions === true);
+    t.ok("enemy-designer: while an imported NEW enemy arrives out of missions",
+      ed.roster().find((e) => e.id.includes("copy")).inMissions === false);
+
+    const bad = JSON.stringify({ v: 1, enemies: [{ spec: { v: 1, id: "bad_moth", name: "Bad Moth", root: { motion: { type: "no_such_motion" } } } }] });
+    const skip = ed.importList(bad, { seconds: 2 });
+    t.ok("enemy-designer: an unacceptable spec is skipped and named",
+      !skip.ok && skip.skipped.length === 1 && skip.skipped[0].id === "bad_moth");
+    t.ok("enemy-designer: junk is refused without throwing", !ed.importList("not json").ok);
+
+    ed.resetList();
+    t.eq("enemy-designer: Reset my changes drops everything local", ed.rows().length, 7);
+
+    ed.dispose();
+    es.resetEnemyList();
+  }
+
   // With a local enemy in the list, both tools still mount (the Firing Room
   // lists it under "Enemy"; the Designer shows its row).
   {
