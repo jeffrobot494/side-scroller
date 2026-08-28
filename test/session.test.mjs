@@ -1059,6 +1059,12 @@ export default async function run(t) {
     const main = readFileSync(join(ROOT, "src/main.js"), "utf8");
     const body = (main.match(/function swapTo\(id\) \{[\s\S]*?\n\}/) || [""])[0];
     t.ok("swapTo re-points the hub", /hub\.setView\(/.test(body));
+    // FIVE since W1 (tech/multiplayer-session.md): the seat's transport client is
+    // a binding too, and a swap that moves the views but not the client sends the
+    // next click down the previous commander's wire. `you` survives beside it —
+    // the round dispatcher compares it against a dispatch's owner to decide
+    // whether to swap seats at all.
+    t.ok("...the seat's transport client", /\bclient\s*=\s*clients\.get\(/.test(body));
     t.ok("...the ambient layer", /ambient\.setView\(/.test(body));
     t.ok("...the command closure's player id", /\byou\s*=\s*id\b/.test(body));
     t.ok("...and the hot-seat control, which holds its own", /hotSeat\.setPlayer\(/.test(body));

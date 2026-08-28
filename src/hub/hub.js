@@ -44,6 +44,7 @@ export class Hub {
     this.result = null;
     this.turn = null; // the day summary a round's last mission report carried
     this.shareOpen = null; // lead id whose "Share with" list is open (S6)
+    this.pending = null; // { action, id } while a command is in flight (W1)
 
     this.root.addEventListener("click", (e) => this._onClick(e));
     this.root.addEventListener("change", (e) => this._onChange(e));
@@ -76,6 +77,7 @@ export class Hub {
     this.sold = false;
     this.shareOpen = null;
     this._lastSquad = null;
+    this.pending = null; // an in-flight command belongs to the seat that sent it
     this.render();
   }
 
@@ -92,6 +94,47 @@ export class Hub {
   // spent inside the LAST of its missions reporting, so this screen is the
   // only place the day summary can land — the route it used, the ready click's
   // flash, no longer carries one in any round where somebody deployed.
+  // ---- sending (tech/multiplayer-session.md, W1) --------------------------
+
+  // Send a command and reconcile when the answer lands. The answer is no longer
+  // a return value, so every write site here is written against a callback and
+  // will not change again when the loopback becomes a socket.
+  //
+  // The control that issued the command is marked COMMITTED immediately. That
+  // is the optimistic half, and it is deliberately the BUTTON and never the
+  // numbers: nothing derived from campaign state — money, the roster, the board,
+  // the day — is predicted here, because predicting it means implementing the
+  // campaign's rules a second time on this side of the wire. A refusal releases
+  // the control and says why, which is the whole of "it snaps back".
+  //
+  // One command in flight at a time. In one process the answer beats the next
+  // frame so this is never felt; over a wire it is what stops a second click
+  // queueing a command against state the first one is about to change.
+  _send(btn, cmd, onAnswer) {
+    if (this.pending) return;
+    this.pending = { action: btn.dataset.action, id: btn.dataset.id || null };
+    this.render();
+    this.api.command(cmd, (res) => {
+      this.pending = null;
+      onAnswer(res);
+    });
+  }
+
+  // Applied after the screen is built, so no template has to know this exists.
+  // Disabling is not decoration: _onClick ignores a disabled button, so the
+  // in-flight control cannot be pressed twice.
+  _markPending() {
+    const p = this.pending;
+    if (!p) return;
+    const sel = p.id ? `[data-action="${p.action}"][data-id="${p.id}"]` : `[data-action="${p.action}"]`;
+    const el = this.root.querySelector(sel);
+    if (!el) return;
+    el.disabled = true;
+    // NOT "committed" — hub.css already gives that class to a lead row you have
+    // deployed to, and reusing it would dim every committed mission on the board.
+    el.classList.add("in-flight");
+  }
+
   showResults(result, turn) {
     this.result = result;
     this.turn = turn && turn.dayTurned ? turn : null;
@@ -108,6 +151,7 @@ export class Hub {
 
     if (this.mode === "end") {
       this.root.innerHTML = this._endScreen();
+      this._markPending();
       return;
     }
 
@@ -126,6 +170,7 @@ export class Hub {
         </main>
       </div>
     `;
+    this._markPending();
     this.flash = null;
   }
 
@@ -734,66 +779,70 @@ export class Hub {
         break;
 
       case "hire": {
-        const res = this.api.command({ type: "hire", recruitId: btn.dataset.id });
-        this.setFlash(
-          res.ok ? "good" : "bad",
-          res.ok ? "Recruit enlisted — already suited up and asking when we deploy." : res.reason
-        );
-        this.render();
+        this._send(btn, { type: "hire", recruitId: btn.dataset.id }, (res) => {
+          this.setFlash(
+            res.ok ? "good" : "bad",
+            res.ok ? "Recruit enlisted — already suited up and asking when we deploy." : res.reason
+          );
+          this.render();
+        });
         break;
       }
 
       case "commission": {
-        const res = this.api.command({ type: "commission", blueprintId: btn.dataset.id });
-        this.setFlash(res.ok ? "good" : "bad", res.ok ? "Fabrication started. It finishes when a day passes." : res.reason);
-        this.render();
+        this._send(btn, { type: "commission", blueprintId: btn.dataset.id }, (res) => {
+          this.setFlash(res.ok ? "good" : "bad", res.ok ? "Fabrication started. It finishes when a day passes." : res.reason);
+          this.render();
+        });
         break;
       }
 
       case "sell": {
-        const res = this.api.command({ type: "sellLoot" });
-        if (res.ok) {
-          this.setFlash("good", `Sold ${res.count} item(s) for §${res.total}.`);
-          if (this.mode === "results") this.sold = true;
-        } else {
-          this.setFlash("bad", res.reason);
-        }
-        this.render();
+        this._send(btn, { type: "sellLoot" }, (res) => {
+          if (res.ok) {
+            this.setFlash("good", `Sold ${res.count} item(s) for §${res.total}.`);
+            if (this.mode === "results") this.sold = true;
+          } else {
+            this.setFlash("bad", res.reason);
+          }
+          this.render();
+        });
         break;
       }
 
       case "advance": {
-        const res = this.api.command({ type: "ready" });
-        // THREE outcomes, not two. A ready that is not the last one and a
-        // stand-down are both `ok` and turn no day, so they carry no `finished`
-        // / `expired` / `arrived` — reading those here is a TypeError on most
-        // Ready clicks in a two-commander campaign, which is exactly the shape
-        // this branch had before S4.
-        if (!res.ok) this.setFlash("bad", res.reason);
-        else if (res.roundClosed) {
-          // The FOURTH answer (S5): everyone readied, the choices locked, and
-          // the round's missions are about to run. No day yet — it turns when
-          // the last of them reports. Without this arm it falls below and
-          // prints "Waiting on 0 more."
-          this.setFlash("good", `The task force is committed. ${res.missions} mission(s) to run.`);
-        } else if (!res.dayTurned) {
-          this.setFlash(
-            "good",
-            res.ready
-              ? `Ready. Waiting on ${res.waitingOn} more.`
-              : "Stood down. Any pending deployment is released."
-          );
-        } else {
-          const parts = [];
-          if (res.finished.length) parts.push(`Finished: ${res.finished.join(", ")}.`);
-          if (res.expired.length) parts.push(`Lead lost: ${res.expired.join(", ")}.`);
-          if (res.arrived.length) parts.push(`Ops has ${res.arrived.length} new lead(s).`);
-          this.setFlash(
-            res.expired.length ? "bad" : "good",
-            parts.length ? `A new day. ${parts.join(" ")}` : "A day passes. The clock ticks on."
-          );
-        }
-        this.render();
+        this._send(btn, { type: "ready" }, (res) => {
+          // THREE outcomes, not two. A ready that is not the last one and a
+          // stand-down are both `ok` and turn no day, so they carry no `finished`
+          // / `expired` / `arrived` — reading those here is a TypeError on most
+          // Ready clicks in a two-commander campaign, which is exactly the shape
+          // this branch had before S4.
+          if (!res.ok) this.setFlash("bad", res.reason);
+          else if (res.roundClosed) {
+            // The FOURTH answer (S5): everyone readied, the choices locked, and
+            // the round's missions are about to run. No day yet — it turns when
+            // the last of them reports. Without this arm it falls below and
+            // prints "Waiting on 0 more."
+            this.setFlash("good", `The task force is committed. ${res.missions} mission(s) to run.`);
+          } else if (!res.dayTurned) {
+            this.setFlash(
+              "good",
+              res.ready
+                ? `Ready. Waiting on ${res.waitingOn} more.`
+                : "Stood down. Any pending deployment is released."
+            );
+          } else {
+            const parts = [];
+            if (res.finished.length) parts.push(`Finished: ${res.finished.join(", ")}.`);
+            if (res.expired.length) parts.push(`Lead lost: ${res.expired.join(", ")}.`);
+            if (res.arrived.length) parts.push(`Ops has ${res.arrived.length} new lead(s).`);
+            this.setFlash(
+              res.expired.length ? "bad" : "good",
+              parts.length ? `A new day. ${parts.join(" ")}` : "A day passes. The clock ticks on."
+            );
+          }
+          this.render();
+        });
         break;
       }
 
@@ -805,13 +854,14 @@ export class Hub {
         break;
 
       case "share": {
-        const res = this.api.command({ type: "share", leadId: btn.dataset.id, to: btn.dataset.to });
-        this.shareOpen = null;
-        this.setFlash(
-          res.ok ? "good" : "bad",
-          res.ok ? `${res.leadName} shared with ${res.toName}. They can deploy to it now.` : res.reason
-        );
-        this.render();
+        this._send(btn, { type: "share", leadId: btn.dataset.id, to: btn.dataset.to }, (res) => {
+          this.shareOpen = null;
+          this.setFlash(
+            res.ok ? "good" : "bad",
+            res.ok ? `${res.leadName} shared with ${res.toName}. They can deploy to it now.` : res.reason
+          );
+          this.render();
+        });
         break;
       }
 
@@ -832,11 +882,12 @@ export class Hub {
       }
 
       case "release-deploy": {
-        const res = this.api.command({ type: "release", leadId: this.deploy.missionId });
-        this.setFlash(res.ok ? "good" : "bad", res.ok ? "Deployment released. The squad stands down." : res.reason);
-        this.mode = "hub";
-        this.location = "operations";
-        this.render();
+        this._send(btn, { type: "release", leadId: this.deploy.missionId }, (res) => {
+          this.setFlash(res.ok ? "good" : "bad", res.ok ? "Deployment released. The squad stands down." : res.reason);
+          this.mode = "hub";
+          this.location = "operations";
+          this.render();
+        });
         break;
       }
 
@@ -857,7 +908,7 @@ export class Hub {
         break;
 
       case "launch":
-        this._launch();
+        this._launch(btn);
         break;
 
       case "return":
@@ -889,28 +940,35 @@ export class Hub {
   // commander has readied, and the page — not this hub — is what takes the
   // round out. Re-committing to the same lead replaces the held choice, so this
   // is one command whether or not something was pending.
-  _launch() {
-    const res = this.api.command({
-      type: "deploy",
-      leadId: this.deploy.missionId,
-      soldierIds: [...this.deploy.selected],
-      weapons: this.deploy.weapons,
-    });
-    if (!res.ok) {
-      this.setFlash("bad", res.reason);
-      this.render();
-      return;
-    }
-    const solo = (this.game.taskForce || []).length < 2;
-    this.setFlash(
-      "good",
-      solo
-        ? `${res.leadName} — squad committed. Advance the day to run it.`
-        : `${res.leadName} — squad committed. It runs when every commander is ready.`
+  _launch(btn) {
+    this._send(
+      btn,
+      {
+        type: "deploy",
+        leadId: this.deploy.missionId,
+        soldierIds: [...this.deploy.selected],
+        weapons: this.deploy.weapons,
+      },
+      (res) => {
+        if (!res.ok) {
+          // Refused: the deploy screen stays exactly as it was, with the squad
+          // still picked, so the commander can fix what was wrong.
+          this.setFlash("bad", res.reason);
+          this.render();
+          return;
+        }
+        const solo = (this.game.taskForce || []).length < 2;
+        this.setFlash(
+          "good",
+          solo
+            ? `${res.leadName} — squad committed. Advance the day to run it.`
+            : `${res.leadName} — squad committed. It runs when every commander is ready.`
+        );
+        this.mode = "hub";
+        this.location = "operations";
+        this.render();
+      }
     );
-    this.mode = "hub";
-    this.location = "operations";
-    this.render();
   }
 }
 

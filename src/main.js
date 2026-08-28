@@ -15,6 +15,8 @@
 // ---------------------------------------------------------------------------
 
 import { createSession } from "./game/session.js";
+import { createLoopback } from "./net/loopback.js";
+import { connect } from "./net/client.js";
 import { createHotSeat } from "./hub/hotseat.js";
 import { Hub } from "./hub/hub.js";
 import { Mission } from "./mission/mission.js";
@@ -59,14 +61,22 @@ function seats() {
 const roster = seats();
 const session = createSession({ players: roster });
 
+// This page is the HOST (tech/multiplayer-session.md, W1): it holds the session,
+// the wire drawn over it, and one client per seat. A SCREEN holds a client and
+// nothing else — no session, no other seat, no round — which is what makes the
+// same hub correct once the wire is a socket instead of a loopback.
+const transport = createLoopback(session);
+const clients = new Map(roster.map((p) => [p.id, connect(transport, p.id)]));
+
 // The seat on screen. THREE bindings capture a player and all three move
 // together on a swap: the hub's view, the ambient layer's, and the command
 // closure below. Re-pointing the two views and not the closure would send one
 // commander's clicks to another's campaign, and no test imports this file.
 let you = roster[0].id;
+let client = clients.get(you);
 
 // Ambient crew walking behind the hub DOM (paused + hidden during missions).
-const ambient = createHubAmbient(session.view(you));
+const ambient = createHubAmbient(client.view());
 document.body.insertBefore(ambient.el, hubRoot);
 
 // The hub's FPS chip. Mounted on the body, NOT in #hub-root — Hub.render()
@@ -79,7 +89,7 @@ document.body.appendChild(fpsMeter.el);
 const mission = new Mission(canvas, onMissionComplete);
 
 // The hub launches missions through this small API.
-const hub = new Hub(hubRoot, session.view(you), {
+const hub = new Hub(hubRoot, client.view(), {
   // Bound to whichever seat is on screen, so the hub never holds a session
   // reference and never learns a player id.
   //
@@ -87,10 +97,18 @@ const hub = new Hub(hubRoot, session.view(you), {
   // must never see another commander's locked lead or squad. Deferred by a
   // microtask so the hub finishes the render it is in the middle of before the
   // canvas takes the screen from it.
-  command(cmd) {
-    const res = session.command(you, cmd);
-    if (res && res.roundClosed) queueMicrotask(runRound);
-    return res;
+  command(cmd, onAnswer) {
+    client.send(cmd, (res) => {
+      // The hub reconciles FIRST, the round starts second. That ordering used to
+      // be bought with a queueMicrotask here — the answer was a return value, so
+      // deferring the round was the only way to let the hub finish the render it
+      // was in the middle of before the canvas took the screen. The answer now
+      // arrives on a microtask of its own, and the hub's render happens inside
+      // `onAnswer`, so the order is expressed by these two lines instead of by a
+      // scheduling trick. It still has to hold.
+      if (onAnswer) onAnswer(res);
+      if (res && res.roundClosed) runRound();
+    });
   },
   // Called by the results screen's "Return to base". That click is the only
   // signal the page has that a commander has finished reading — starting the
@@ -112,7 +130,8 @@ const hub = new Hub(hubRoot, session.view(you), {
 // swap arriving from the dropdown sets the id it already holds.
 function swapTo(id) {
   you = id;
-  const view = session.view(you);
+  client = clients.get(id); // FIVE bindings now: the seat's client is one of them
+  const view = client.view();
   hub.setView(view); // renders
   ambient.setView(view);
   hotSeat.setPlayer(id);
@@ -129,7 +148,9 @@ let queue = [];
 let current = null;
 
 function runRound() {
-  queue = session.takeRound();
+  // Still a pull, and still the host's rather than a seat's: a round is what the
+  // page sequences. W2 turns this into a push the transport makes.
+  queue = transport.takeRound();
   playNext();
 }
 
@@ -150,13 +171,15 @@ function onMissionComplete(result) {
   current = null;
   // Routed by the DISPATCH, not by the seat on screen: the commander who owns
   // the mission is on it, and the seat can be swapped while a mission is up.
-  const res = session.command(done.playerId, {
-    type: "missionResult",
-    result,
-    dispatchId: done.dispatchId,
+  // Sent through the OWNER's client, not the seat on screen — the mission's
+  // commander is who the report belongs to, and the seat can be swapped while a
+  // mission is up. The results screen is the only place the round's day summary
+  // can land (S5), and that summary is this command's answer, so the screen is
+  // built inside the callback rather than before it.
+  clients.get(done.playerId).send({ type: "missionResult", result, dispatchId: done.dispatchId }, (res) => {
+    showScene("hub");
+    hub.showResults(result, res);
   });
-  showScene("hub");
-  hub.showResults(result, res);
 }
 
 // Toggle which surface is visible. The DOM hub and the canvas never render at

@@ -317,6 +317,11 @@ body::after {
 }
 .btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
 .btn:disabled { background: #2c313a; color: #7a808a; cursor: not-allowed; box-shadow: none; }
+/* A control whose command is in flight (tech/multiplayer-session.md, W1). It
+   reads as pressed the moment it is clicked and is released when the session
+   answers - the optimistic half of a send. In one process the answer beats the
+   next frame, so this is written for the wire rather than for today. */
+.in-flight { transform: translateY(1px); filter: saturate(0.55) brightness(0.9); opacity: 0.85; }
 .btn-alt { background: linear-gradient(180deg, #46536a, #2f3a49); box-shadow: none; }
 .btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); box-shadow: none; }
 .btn-go { background: linear-gradient(180deg, #57c98a, #2f9d63); box-shadow: 0 2px 8px rgba(47, 157, 99, 0.35); }
