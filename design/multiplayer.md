@@ -146,6 +146,7 @@ Victory is individual and defeat is collective.
 |---|---|
 | A player who leaves mid-mission | Their squad is handed to the AI and fights on as companions of the remaining player |
 | Their soldiers | Remain subject to permadeath while under AI control |
+| A player who leaves at base | The campaign stalls until they come back. The day cannot advance without their ready, and the other player cannot spend it alone |
 
 ## Not in this design
 
