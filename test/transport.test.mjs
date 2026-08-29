@@ -73,8 +73,8 @@ export default async function run(t) {
 
   // ---- the loopback answers later, never as a return value ----------------
   {
-    const session = createSession({ state: createState() });
-    const transport = createLoopback(session);
+    let session = null;
+    const transport = createLoopback((announce) => (session = createSession({ state: createState(), announce })));
     const client = connect(transport, "p1");
 
     let answer = null;
@@ -117,8 +117,8 @@ export default async function run(t) {
   // The assertion this suite exists for. Real session, real campaign, the seven
   // command types the hub and the page send, each checked in both directions.
   {
-    const session = createSession({ players: ["p1", "p2"] });
-    const transport = createLoopback(session);
+    let session = null;
+    const transport = createLoopback((announce) => (session = createSession({ players: ["p1", "p2"], announce })));
     const p1 = connect(transport, "p1");
     const p2 = connect(transport, "p2");
 
@@ -133,24 +133,31 @@ export default async function run(t) {
         });
       });
 
-    const view = p1.view();
+    // WHICH seat can see a lead is a coin flip: rollVisibility stamps each lead
+    // against a random subset of commanders (src/game/state.js) and the seeded
+    // board is small. Acting as p1 unconditionally made this suite fail about
+    // one run in six on `leads[0]` being undefined — a flake in the test, not in
+    // the seam. At least one commander sees every lead, so this always finds one.
+    const actor = p1.view().leads.length ? p1 : p2;
+    const bystander = actor === p1 ? p2 : p1;
+    const view = actor.view();
     const recruit = view.recruits[0];
     const lead = view.leads[0];
 
-    await send(p1, { type: "hire", recruitId: recruit.id });
-    await send(p1, { type: "commission", blueprintId: "blueprint-that-does-not-exist" });
-    await send(p1, { type: "sellLoot" });
-    await send(p1, { type: "share", leadId: lead.id, to: "p2" });
-    await send(p1, {
+    await send(actor, { type: "hire", recruitId: recruit.id });
+    await send(actor, { type: "commission", blueprintId: "blueprint-that-does-not-exist" });
+    await send(actor, { type: "sellLoot" });
+    await send(actor, { type: "share", leadId: lead.id, to: bystander.playerId });
+    await send(actor, {
       type: "deploy",
       leadId: lead.id,
-      soldierIds: [p1.view().roster[0].id],
-      weapons: { [p1.view().roster[0].id]: "carbine" },
+      soldierIds: [actor.view().roster[0].id],
+      weapons: { [actor.view().roster[0].id]: "carbine" },
     });
-    await send(p1, { type: "release", leadId: lead.id });
-    await send(p1, { type: "ready" });
-    await send(p2, { type: "ready" });
-    await send(p1, {
+    await send(actor, { type: "release", leadId: lead.id });
+    await send(actor, { type: "ready" });
+    await send(bystander, { type: "ready" });
+    await send(actor, {
       type: "missionResult",
       dispatchId: "d1",
       result: {
@@ -173,8 +180,8 @@ export default async function run(t) {
 
   // ---- a client is one seat, and nothing else -----------------------------
   {
-    const session = createSession({ players: ["p1", "p2"] });
-    const transport = createLoopback(session);
+    let session = null;
+    const transport = createLoopback((announce) => (session = createSession({ players: ["p1", "p2"], announce })));
     const p1 = connect(transport, "p1");
 
     t.eq("client: exposes exactly a seat, a send and a view", Object.keys(p1).sort(), ["playerId", "send", "view"]);
@@ -195,12 +202,61 @@ export default async function run(t) {
     t.ok("...and not to the other one", session.view("p2").taskForce.find((c) => c.id === "p2").ready === false);
   }
 
-  // ---- the round stays the host's ----------------------------------------
+  // ---- the round stays the host's, and is PUSHED to it (W2) ---------------
   {
-    const session = createSession({ players: ["p1"] });
-    const transport = createLoopback(session);
+    // The suite sits between the session and the transport, which the factory
+    // makes possible: the announcement is composed, not intercepted.
+    const seen = [];
+    const transport = createLoopback((announce) =>
+      createSession({
+        players: ["p1"],
+        announce: (round) => {
+          seen.push("push");
+          announce(round);
+        },
+      })
+    );
+    const p1 = connect(transport, "p1");
+
     t.ok("host: the transport can take a round", typeof transport.takeRound === "function");
     t.eq("host: with nothing dispatched it is empty", transport.takeRound(), []);
+
+    const v = p1.view();
+    await new Promise((d) => p1.send({ type: "hire", recruitId: v.recruits[0].id }, d));
+    const lead = p1.view().leads[0];
+    await new Promise((d) =>
+      p1.send({ type: "deploy", leadId: lead.id, soldierIds: [p1.view().roster[0].id] }, d)
+    );
+    t.eq("host: a held choice is not a round", transport.takeRound(), []);
+
+    p1.send({ type: "ready" }, () => seen.push("answer"));
+    await settle();
+    // The reason runRound is still called off `roundClosed` and not from the
+    // arrival of the push: closeRound runs INSIDE session.command, so the round
+    // is already at the host before the hub has been told anything. A mission
+    // started on arrival would take the screen mid-render.
+    t.eq("host: the push lands before the answer that reports it", seen, ["push", "answer"]);
+
+    const round = transport.takeRound();
+    t.eq("host: the announced round is waiting when the answer arrives", round.length, 1);
+    t.eq("host: and it drains once", transport.takeRound(), []);
+
+    // What W2 is for. The raw dispatch could not cross this wire at all: a lead
+    // carries `seenBy`, a Map naming which OTHER commanders can see it, and the
+    // generated level was in the payload twice.
+    const d = round[0];
+    t.ok("round: a dispatch is data", !threw(() => assertData(d, "dispatch")));
+    t.eq("round: the lead crosses as a projection", Object.keys(d.mission).sort(), ["id", "name", "seed"]);
+    t.ok("round: carrying the seed the mission's rng is made from", typeof d.mission.seed === "number");
+    t.ok("round: and not who else has seen the lead", d.mission.seenBy === undefined);
+    t.ok("round: the level crosses whole, and once", !!d.level.platforms && d.mission.level === undefined);
+    t.eq(
+      "round: a soldier crosses as the seven fields the mission reads",
+      Object.keys(d.squad[0].data).sort(),
+      ["callsign", "id", "name", "stats", "wounds"]
+    );
+    t.ok("round: with the whole weapon", !!d.squad[0].weapon && typeof d.squad[0].weapon.name === "string");
+    t.ok("round: and the routing the page sequences on", typeof d.dispatchId === "string" && d.playerId === "p1");
   }
 
   resetConfig();

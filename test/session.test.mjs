@@ -21,6 +21,10 @@ const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 
 // A lead the campaign math can resolve without running level generation — the
 // same trick test/wiring.test.mjs uses, plus the `level` the deploy hands back.
+// Distinct per lead, because a real lead carries one (makeLead, src/game/state.js)
+// and a dispatch has to carry the RIGHT one — the mission's random stream is
+// made from it (tech/mission-determinism.md).
+let fakeSeed = 0;
 const fakeLead = (id) => ({
   id,
   name: id,
@@ -29,6 +33,7 @@ const fakeLead = (id) => ({
   threatReward: 0,
   winsCampaign: false,
   daysLeft: 9,
+  seed: ++fakeSeed * 1000,
   level: { platforms: [] },
 });
 
@@ -244,23 +249,50 @@ export default async function run(t) {
     t.eq("the round hands out one dispatch per held choice", round.length, 3);
     t.ok("every dispatch names the commander it belongs to", round.every((d) => d.playerId === "p1"));
     t.ok("...and carries a dispatch id to report against", new Set(round.map((d) => d.dispatchId)).size, 3);
-    // The lead OBJECT, not its id: a board filter cannot strip it out from
-    // under a mission that is already running.
     // Re-committing moved lead_1 to the back of the list, so the dispatches
     // are indexed by lead rather than by the order they were made.
     const disp = (id) => round.find((d) => d.mission.id === id);
-    t.ok("a dispatch carries the lead object", disp("lead_1").mission === leadOf("lead_1"));
-    t.ok("...and its level", disp("lead_1").level === leadOf("lead_1").level);
 
-    // The assertion a playthrough cannot make: a clone would still print the
-    // right name on the results screen and still match by id, and only diverge
-    // later, where entities.js reads data.wounds off the live soldier.
-    t.ok("the squad holds the LIVE roster soldier", disp("lead_1").squad[0].data === campaign.roster[0]);
+    // W2 replaced four identity assertions here with these. It USED to hand out
+    // the lead object itself, on the argument that a board filter could not then
+    // strip it from under a running mission — which was true, and which also
+    // put `seenBy` (who ELSE is looking at that lead) into one commander's
+    // dispatch, and the generated level into the payload twice.
+    const d1 = disp("lead_1");
+    t.eq("a dispatch carries a projection of the lead, not the lead", Object.keys(d1.mission).sort(), ["id", "name", "seed"]);
+    t.ok("...including its own SEED, which projectLead does not carry", d1.mission.seed === leadOf("lead_1").seed);
+    t.ok("...and not what a mission never reads", d1.mission.seenBy === undefined && d1.mission.report === undefined);
+    t.ok("...nor the level a second time, inside it", d1.mission.level === undefined);
+    t.ok("the level itself is still there, whole", d1.level.platforms.length === leadOf("lead_1").level.platforms.length);
+
+    // The squad is a projection too, and this is where it BITES: entities.js
+    // reads data.wounds, so a soldier on two of one commander's choices used to
+    // carry mission one's wounds into mission two mid-round. Now they carry
+    // what they had when the round locked. Deliberate, and the one behaviour
+    // change of the slice a player could see (tech/multiplayer-session.md,
+    // Approximation 9).
+    t.ok("the squad holds a projection of the soldier", disp("lead_1").squad[0].data !== campaign.roster[0]);
+    t.eq(
+      "...carrying exactly what the mission and the results screen read",
+      Object.keys(disp("lead_1").squad[0].data).sort(),
+      ["callsign", "id", "name", "stats", "wounds"]
+    );
+    t.ok("...and not the soldier's career record", disp("lead_1").squad[0].data.record === undefined);
+    // The weapon is still passed by reference, and so is the level: projecting
+    // is about WHAT crosses, and copying is the wire's job (src/net/wire.js).
     // weaponId defaults to "carbine" at hire, so the fallback chain is only
     // visible when a pick is actually made.
     t.ok("no pick falls back to the soldier's own weapon", disp("lead_1").squad[0].weapon === campaign.armory[0]);
     t.ok("an explicit pick resolves to the live armory entry", disp("lead_2").squad[0].weapon === campaign.armory[1]);
     t.ok("an unresolvable weapon falls back to the carbine", disp("lead_3").squad[0].weapon === WEAPONS.carbine);
+    // Approximation 9, made reachable: dayPerDeploy is off in this block and
+    // this soldier is on all three choices, which is the only way to see it.
+    // Mission one's wounds used to land on the live object mission two then
+    // read; the dispatch is now as of the lock.
+    campaign.roster[0].wounds = 5;
+    t.eq("a dispatch's wounds are as of the LOCK, not as of the mission", disp("lead_2").squad[0].data.wounds, 0);
+    campaign.roster[0].wounds = 0;
+
     t.eq("a round is taken once, not replayed", s.takeRound().length, 0);
     t.eq("...and the choices left the player record when they locked", v.pending.length, 0);
 
@@ -1068,6 +1100,17 @@ export default async function run(t) {
     t.ok("...the ambient layer", /ambient\.setView\(/.test(body));
     t.ok("...the command closure's player id", /\byou\s*=\s*id\b/.test(body));
     t.ok("...and the hot-seat control, which holds its own", /hotSeat\.setPlayer\(/.test(body));
+
+    // W2, and the same kind of guard for the same reason. Handing a built
+    // session to createLoopback would work perfectly and quietly undo the
+    // slice: the announcement channel has to be in place before the session
+    // exists, and a session built outside the transport can only announce
+    // straight to the page, without crossing the wire.
+    t.ok("the page builds its session through the transport", /createLoopback\(\s*\(announce\)\s*=>\s*createSession\(/.test(main));
+    // And the round is collected on the ANSWER. The push lands first — inside
+    // session.command — so a mission started on arrival takes the screen from a
+    // render in progress.
+    t.ok("...and drains the round on the answer, not on the push", /res\.roundClosed\)\s*runRound\(\)/.test(main));
   }
 
   resetConfig();

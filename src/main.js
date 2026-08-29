@@ -59,13 +59,18 @@ function seats() {
 // view of it. Single-player is a session with one player — there is no second
 // path through which state changes. Plan: tech/multiplayer-state.md.
 const roster = seats();
-const session = createSession({ players: roster });
 
-// This page is the HOST (tech/multiplayer-session.md, W1): it holds the session,
-// the wire drawn over it, and one client per seat. A SCREEN holds a client and
-// nothing else — no session, no other seat, no round — which is what makes the
-// same hub correct once the wire is a socket instead of a loopback.
-const transport = createLoopback(session);
+// This page is the HOST (tech/multiplayer-session.md, W1–W2): it holds the
+// session, the wire drawn over it, and one client per seat. A SCREEN holds a
+// client and nothing else — no session, no other seat, no round — which is what
+// makes the same hub correct once the wire is a socket instead of a loopback.
+//
+// The session is built INSIDE the transport (W2), and the page never names it
+// again. It has to be: the round is announced to a channel handed in at
+// construction, so the thing receiving the announcement must exist first. The
+// page still says who the seats are, which is the only part of it that is the
+// page's business.
+const transport = createLoopback((announce) => createSession({ players: roster, announce }));
 const clients = new Map(roster.map((p) => [p.id, connect(transport, p.id)]));
 
 // The seat on screen. THREE bindings capture a player and all three move
@@ -148,8 +153,11 @@ let queue = [];
 let current = null;
 
 function runRound() {
-  // Still a pull, and still the host's rather than a seat's: a round is what the
-  // page sequences. W2 turns this into a push the transport makes.
+  // The round was PUSHED (W2) and is waiting on the transport; this drains it.
+  // Still called off the `roundClosed` answer rather than from the arrival of
+  // the push, because the push lands first — inside session.command, before the
+  // hub has rendered the answer — and a mission that starts there takes the
+  // screen out from under a render in progress.
   queue = transport.takeRound();
   playNext();
 }

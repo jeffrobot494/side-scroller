@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// THE LOOPBACK TRANSPORT  (tech/multiplayer-session.md, W1)
+// THE LOOPBACK TRANSPORT  (tech/multiplayer-session.md, W1–W2)
 //
 // The session and the page in one process, with a wire drawn between them
 // anyway. Nothing here is faster, safer or more capable than calling the
@@ -14,14 +14,34 @@
 // before the socket rather than with it.
 //
 // The session is reached through exactly its public surface — command and view.
-// `takeRound` is here too and is the one thing NO client may call: a round is
-// the page's to sequence, not a seat's to read, and W2 turns this pull into a
-// push. It is on the transport rather than on a client for that reason.
+// A round is the HOST's and no client's: `takeRound` is on the transport rather
+// than on a client for that reason.
+//
+// W2 turned the round from a pull into a push, and the SESSION IS BUILT HERE for
+// that reason. The announcement has to be handed to the session at construction
+// (its public surface is six names and stays six names), so something has to
+// exist before the session does to receive it. If the page built the session and
+// handed it in, the dispatch would reach the host without crossing `toWire`,
+// and "projected on the way out" would be proven by nothing.
 // ---------------------------------------------------------------------------
 
 import { toWire } from "./wire.js";
 
-export function createLoopback(session) {
+// `makeSession` is called once, with the inbound round handler. The caller
+// decides what session it is (seats, world, a seeded campaign); the transport
+// decides only how the round gets out.
+export function createLoopback(makeSession) {
+  // The announced round, held until the host asks for it. NOT started on
+  // arrival: `closeRound` runs inside `session.command`, so this fires BEFORE
+  // the loopback delivers the answer the hub renders on — starting a mission
+  // here would put the canvas on screen in the middle of the hub's render,
+  // which is the hazard W1's ordering exists to avoid.
+  let pending = [];
+
+  const session = makeSession((dispatches) => {
+    pending = toWire(dispatches, "round");
+  });
+
   return {
     // A command from one seat. The answer is delivered, never returned — a
     // caller that wants it takes `deliver`. Both directions cross the wire, so
@@ -37,13 +57,17 @@ export function createLoopback(session) {
     // W1 hands over the session's own live view. W3 is where this becomes a
     // snapshot pushed to each client — the read half of the seam, and the half
     // that costs something. Until then the page reads exactly what it read
-    // before, which is what keeps this slice invisible.
+    // before, which is what keeps that slice invisible.
     view: (playerId) => session.view(playerId),
 
-    // The round, whole and in order, for the HOST. Not a client's, not crossing
-    // the wire yet: it still carries the raw lead and live roster soldiers, and
-    // projecting it is W2's job.
-    takeRound: () => session.takeRound(),
+    // The round the session announced, whole and in order, drained once. The
+    // page decides WHEN — off the `roundClosed` answer, the same signal it used
+    // when this was a pull.
+    takeRound() {
+      const round = pending;
+      pending = [];
+      return round;
+    },
 
     playerIds: () => session.playerIds(),
   };

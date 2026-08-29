@@ -109,6 +109,51 @@ function projectLead(lead, playerId) {
   };
 }
 
+// What a DISPATCH may carry (W2). The second outbound channel, and the one that
+// until now carried the raw lead: `seenBy` is a Map, so the payload was not even
+// legal on the wire, and the generated level was in there twice — once as
+// `level` and again inside `mission.level`.
+//
+// The field list is not a judgement about what looks necessary. It is what the
+// mission and the results screen READ, which is a shorter list than it looks:
+// `applyMissionResult` matches on ids and reads `difficulty`, `threatReward` and
+// `winsCampaign` off the LIVE lead in its own campaign, never off what comes
+// back from the mission.
+//
+// `seed` is the field to be careful with. It is absent from `projectLead` (a
+// commander has no use for it), and a mission handed no seed installs no random
+// stream and plays on — so dropping it here would un-seed every mission and
+// nothing would go red. tech/mission-determinism.md hangs off this one number.
+function projectDispatch(d) {
+  return {
+    dispatchId: d.dispatchId,
+    playerId: d.playerId,
+    mission: { id: d.mission.id, name: d.mission.name, seed: d.mission.seed },
+    // Whole, and once. Regenerating it from the seed needs the length band and
+    // the pressure scale, which makeLead draws and does not keep — see
+    // Approximation 7.
+    level: d.level,
+    squad: d.squad.map((s) => ({
+      // The weapon whole: the reload path, the sound layer and every effect in
+      // combat.js read it.
+      weapon: s.weapon,
+      // Seven fields. `record` is deliberately not among them — nothing in
+      // src/mission/ touches it, and it is the soldier's whole career.
+      data: {
+        id: s.data.id,
+        name: s.data.name,
+        callsign: s.data.callsign,
+        wounds: s.data.wounds || 0,
+        stats: {
+          health: s.data.stats.health,
+          aim: s.data.stats.aim,
+          speed: s.data.stats.speed,
+        },
+      },
+    })),
+  };
+}
+
 function makeView(campaign, player, players, round) {
   const v = { playerId: player.id };
   for (const key of VIEW_FIELDS) {
@@ -263,6 +308,13 @@ export function createSession(opts = {}) {
   // game passes neither.
   const seatOne = opts.state || null;
 
+  // The round's outbound channel (W2). Handed in at construction rather than
+  // hung off the returned object, because the public surface below is asserted
+  // to be exactly six names and that assertion is a statement about the seam.
+  // A host that passes nothing keeps the pull and nothing else changes, which
+  // is every test that is not about the transport.
+  const announce = typeof opts.announce === "function" ? opts.announce : null;
+
   // A seat is an id or an { id, name }. Names are cosmetic — the design rules
   // out any mechanical difference between nations — but the task-force strip
   // has to print WHO, by name, so the name travels with the seat rather than
@@ -415,7 +467,19 @@ export function createSession(opts = {}) {
       return res.ok ? { ...res, ready: true } : res;
     }
 
-    round.flight = { dispatches, outstanding: new Set(dispatches.map((d) => d.dispatchId)), taken: false };
+    // Projected HERE, once, and stored projected: the announcement and
+    // takeRound must hand over the same thing, or the page and the suite are
+    // testing two different dispatches.
+    //
+    // This is also the moment the squad stops being live. A soldier held on two
+    // of one commander's choices (dayPerDeploy off) now enters the second
+    // mission at the wounds they had when the round locked, rather than the
+    // wounds the first mission gave them mid-round.
+    const outbound = dispatches.map(projectDispatch);
+    round.flight = { dispatches: outbound, outstanding: new Set(outbound.map((d) => d.dispatchId)), taken: false };
+    // After the flight exists, never before: a report arriving during the
+    // announcement has to find one.
+    if (announce) announce(outbound.map((d) => ({ ...d })));
     // The FOURTH answer `ready` can give: locked, no day yet. Without it this
     // falls into the readied-not-last arm and the hub prints "Waiting on 0
     // more."
@@ -561,6 +625,10 @@ export function createSession(opts = {}) {
   // that dispatcher's stand-in.
   //
   // Taken once. A second call is an empty list rather than a replayed round.
+  // Still here, and still the page's rather than a seat's. W2 gave the round a
+  // push, and this stayed: the session's own suite drives the session with no
+  // transport in front of it, and a host that installs no announcement (every
+  // test but one) still has a way to collect a round.
   function takeRound() {
     const flight = round.flight;
     if (!flight || flight.taken) return [];
