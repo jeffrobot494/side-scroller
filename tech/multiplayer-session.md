@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: unbuilt
+status: building
 resolution: sharp
 needs: [multiplayer-state]
 related: [multiplayer, multiplayer-state, mission-determinism, campaign-pacing]
@@ -19,7 +19,7 @@ interface is proven before a socket exists.
 | # | Slice | Changes runtime behaviour |
 |---|---|---|
 | **W1** | **The client seam, and the loopback behind it.** The page connects to a session and gets one client per seat instead of the session object. Commands go out through the client and answers come back through a callback rather than a return value — **eight sites**: the seven `api.command` calls in `src/hub/hub.js` and `onMissionComplete` in `src/main.js`, whose answer is the round's day summary and can only land on the results screen. The loopback delivers on a microtask and **checks that every payload survives a JSON round-trip**, which is what makes "the interface is proven" a fact rather than a hope. Each of those eight sites also **commits its own control on send and reconciles on the answer** — the button reads as pressed immediately and snaps back with the refusal if the session says no. That is done here rather than at T2 because these are the same eight edits, and doing them twice is the only alternative. Views and dispatches are untouched: the client hands over the same live view object the page reads today | No — but the page's existing microtask deferral stops protecting what it was written to protect. See Approximations |
-| **W2** | **Dispatches are pushed, and projected on the way out.** `takeRound()` is a privileged read the page performs on the session; it becomes an announcement the session makes to the HOST — the whole round, in order, once — because the page is what sequences a round and follows the seat through it. A dispatch stops carrying the raw lead and carries a projection of it, the way a view already carries `projectLead` rather than the lead | Yes, in one respect that is invisible and one that is not. A dispatch no longer carries live roster soldiers, and no longer carries `seenBy`, `report` or anything else the mission does not read |
+| **W2** | **Dispatches are pushed, and projected on the way out.** The round stops being pulled and is **announced by the session** — whole, in order, once, to the HOST, because the page is what sequences a round and follows the seat through it. The announcement is handed in at construction; `session.takeRound()` stays, because the session's suite drives the session directly and its public surface is six names either way. A dispatch also stops carrying the raw lead and carries a projection, the way a view already carries a projection rather than the lead. That is not tidying: **today's dispatch cannot cross the wire at all** — `mission.seenBy` is a `Map`, which `src/net/wire.js` refuses — and it carries the generated level twice, once as `level` and again inside `mission.level` | Yes, once invisibly and once not. Invisible: the payload halves, and stops naming which other commanders have seen the lead. Visible: with `dayPerDeploy` off, a soldier on two of one commander's pending choices starts the second mission at the wounds they had when the round **locked**, not the wounds the first mission gave them |
 | **W3** | **The view crosses the seam.** The client stops handing over the session's live projection and holds a snapshot, refreshed by a push. **The push is a broadcast**: one seat's command routinely moves shared world state and other seats' campaigns, so every client is refreshed, each with its own projection and nothing else. The hub and the ambient layer keep reading through a stable handle rather than through the snapshot object itself. `session.view()` is unchanged — the server half still projects live, which is what keeps its suite meaningful | Yes — the hub renders a copy, so identity between what is drawn and what the campaign holds is gone |
 
 **W1–W3 are what `tech/multiplayer.md`'s Phase 2 table calls T1.** That row is
@@ -38,6 +38,25 @@ deliberately destroys the screen it is on. Discovering that at T3 means
 discovering it after a node process exists and while hot-seat is being deleted.
 W3 pays it here, in one page, with the whole suite still watching.
 
+**What a dispatch carries after W2.** The rule is what the mission and the
+results screen READ, and it was derived by reading them, not by narrowing what
+looked unnecessary.
+
+| Field | Read by |
+|---|---|
+| `dispatchId`, `playerId` | `src/main.js` — the seat swap and the report routing; `src/game/session.js` closes the flight on the id |
+| `mission.seed` | `src/mission/mission.js` → `loadMission` → `makeRng`. **The whole of `tech/mission-determinism.md` hangs off this one number** |
+| `mission.id` | `result.missionId`, which `applyMissionResult` matches the lead on |
+| `mission.name` | The intro banner, and `result.missionName` |
+| `level` | `loadMission` — whole, and once. Approximation 7 |
+| `squad[].weapon` | `Soldier`, the reload path, `weaponSound`, every effect in `combat.js`. Whole |
+| `squad[].data` | `id`, `name`, `callsign`, `wounds`, and `stats.health` / `stats.aim` / `stats.speed` — the seven fields `src/mission/entities.js`, `src/mission/ai.js` and `src/hub/hub.js`'s `_nameFor` read between them. Nothing in `src/mission/` reads `record` |
+
+Everything else on a lead — `difficulty`, `threatReward`, `winsCampaign`,
+`brief`, `daysLeft`, `report`, `seenBy` — is read by `applyMissionResult` off
+the **live campaign lead**, never off the dispatch, so dropping it costs
+nothing.
+
 They land in order, and any prefix is shippable.
 
 ## Reuses
@@ -48,9 +67,9 @@ They land in order, and any prefix is shippable.
 | **Commands are already data** | `src/hub/hub.js`, `src/main.js` | Seven of the eight carry ids and nothing else (`{ type, leadId, soldierIds, weapons }` at its widest), with the session resolving them against its own campaign. The eighth, `missionResult`, carries the mission's own report object — itself id-keyed and already JSON-shaped. The write half of the protocol needs no redesign, which is why W1 is small |
 | **A mission result is already id-keyed** | `src/game/state.js` | `applyMissionResult` matches survivors, casualties, wounds and kills by id and reads nothing by reference, so a squad's report crosses a wire exactly as it stands |
 | `dispatchId` | `src/game/session.js`, `src/main.js` | A round's missions are already routed by id rather than by which seat is on screen — the identity a push needs, built at S5 for a different reason |
-| `projectLead` and the view's field list | `src/game/session.js` | What a commander may hold is already decided, already narrow, and already pinned by a suite. W2's dispatch projection and W3's snapshot copy that decision rather than re-deriving it |
+| `projectLead` and the view's field list | `src/game/session.js` | What a commander may hold is already decided, already narrow, and already pinned by a suite. W2's dispatch projection and W3's snapshot copy **the decision** — a projection beside `projectLead`, pinned the same way. **Not the field list:** `projectLead` has no `seed`, and `loadMission` treats a missing seed as "install no stream" and plays on, so reusing it would un-seed every mission with nothing going red |
 | The DOM-free, storage-free rule **and its assertion** | `src/game/session.js`, `test/session.test.mjs` | The property that lets the session run somewhere else. Asserted rather than trusted, and the new modules inherit the same rule |
-| The four bindings a seat swap moves | `src/main.js`, `src/hub/hub.js`, `src/hub/ambient.js`, `src/hub/hotseat.js` | A client per seat re-points the same four things `swapTo` already re-points. The shape is built; what hangs off it changes |
+| The five bindings a seat swap moves | `src/main.js`, `src/hub/hub.js`, `src/hub/ambient.js`, `src/hub/hotseat.js` | A client per seat re-points the same four things `swapTo` already re-points. The shape is built; what hangs off it changes |
 | The source-scan guard | `test/session.test.mjs` | No suite imports `src/main.js`, so its bindings are pinned by reading the file. It matches the seat assignment literally, so the slice that changes that binding's shape edits the assertion in the same commit |
 | The hot-seat switcher | `src/hub/hotseat.js` | Written to be deleted at T3. Untouched here — one page holding several clients is exactly what it already expresses |
 
@@ -59,12 +78,13 @@ They land in order, and any prefix is shippable.
 | Path | Change |
 |---|---|
 | `src/net/` (new) | The transport interface, the loopback implementation, and the client the page holds. DOM-free and storage-free, the same rule `src/game/session.js` keeps, because T2 runs half of this in node |
-| `src/game/session.js` | Learns to announce — a round's dispatches (W2) and a state change (W3). **Taken in at construction, not exposed as a method**: the suite asserts the session's public surface is exactly six names, and that assertion is a statement about the seam rather than an accident. Also gains the dispatch projection, beside `projectLead` |
-| `src/main.js` | Connects instead of constructing, holds a client per seat, and receives the round it used to pull. Two answer sites move, not one — the ready click and the mission report |
+| `src/game/session.js` | Learns to announce — a round's dispatches (W2) and a state change (W3). **Taken in at construction, not exposed as a method**: the suite asserts the session's public surface is exactly six names, and that assertion is a statement about the seam rather than an accident. `takeRound` is one of those six and **stays** — the session's own suite drives the session with no transport in front of it, and removing it would redden that assertion for nothing. Also gains the dispatch projection, beside `projectLead`. The announcement fires from `closeRound`, **after `round.flight` is set** (a report arriving first must find a flight) and **only on the branch that has dispatches** — the nobody-deployed branch returns early and there is no round to announce |
+| `src/main.js` | Connects instead of constructing, holds a client per seat, and receives the round it used to pull. Two answer sites move, not one — the ready click and the mission report. **The construction order is the constraint at W2**: the session needs its announcement channel before the loopback that carries it exists, and today the page builds the session first. The transport is what closes that loop, so the dispatch crosses `toWire` like everything else rather than being handed over in-process behind the seam's back |
+| `src/net/loopback.js` | Stops forwarding `takeRound` to the session and starts receiving the announcement, putting it through `toWire` and holding it. `transport.takeRound()` survives as the HOST's drain of what was announced — the page still decides *when*, which is what keeps W1's ordering (below) |
 | `src/hub/hub.js` | Its `api` object stops answering synchronously (seven sites), and it gains a refresh path **distinct from `setView`**, which is a seat swap that clears the screen's transient state on purpose |
 | `src/hub/ambient.js` | Reads its roster every frame, so it takes the same stable handle the hub does rather than a snapshot object captured once |
-| `test/transport.test.mjs` (new) | The loopback: delivery order, a payload that does not survive a round-trip refused, one client per seat, a snapshot carrying only its own seat's projection, and a broadcast reaching every client |
-| `test/session.test.mjs` | The `src/main.js` source scan follows the bindings it pins |
+| `test/transport.test.mjs` | The loopback: delivery order, a payload that does not survive a round-trip refused, one client per seat, a snapshot carrying only its own seat's projection, and a broadcast reaching every client. W2 edits its two `takeRound` assertions and adds the announcement, the projection's field list, and the buffer |
+| `test/session.test.mjs` | The `src/main.js` source scan follows the bindings it pins. **W2 also rewrites six assertions it cannot keep** — the four identity checks on a dispatch (`mission === leadOf(...)`, `level === lead.level`, `squad[0].data === roster[0]`, and the two weapon identities) become assertions about the projection, in the same commit, and the comment beside the live-soldier one explains what changed rather than being deleted |
 
 Conventions from `CLAUDE.md` that bind: no dependencies; **no build step and no
 process** — `server.mjs` stays a static file server until T2, and single-player
@@ -97,8 +117,9 @@ projected or neither is.
 | Command semantics | Refusals and their exact wording, the round's ordering, the day charge, the deploy cap. All `src/game/session.js`'s, all pinned by `test/session.test.mjs`. This changes how a command ARRIVES, never what it does |
 | The session's public surface | Six names, asserted. An announcement is handed in, not hung off the object |
 | Game rules | `src/game/state.js`. A transport that starts adjudicating anything has become a second authority |
+| **The round starts off the answer, never off the push** | `closeRound` runs inside `session.command`, so the announcement reaches the host **before** the loopback delivers the answer that the hub renders on. Starting the round from the announcement handler therefore puts the canvas on screen mid-render — exactly the hazard W1's ordering was written to avoid (Approximation 4). The push fills a buffer; `roundClosed` is still what starts the round |
 | **The optimism stops at the control** | A pressed button may look pressed before the answer lands. Nothing derived from campaign state — money, the roster, the board, the day — may be predicted, because predicting it means implementing the rules a second time on the client, which is the previous row by another route |
-| The mission scene | `src/mission/`. A dispatch's payload changes shape at W2; what `Mission.start` is handed does not |
+| The mission scene | `src/mission/`. Not one line of it changes. W2 changes what is INSIDE the three arguments `Mission.start` already takes, never the call — which is why the fields above were read off the mission rather than chosen |
 | What a commander may see | The view's field list, `projectLead`, and now the dispatch projection. Anything that copies more than those leaks another commander's board — decision 4 of `design/multiplayer.md`, and the thing S6 spent a slice on |
 | The page's ordering | `src/main.js` decides which of a round's missions plays first, what is drawn between them, and whose base is on screen meanwhile. W2 changes how the round arrives, not who sequences it |
 | `src/hub/hotseat.js` | Deleted at T3, not here. Hot-seat is how this gets played before a server exists |
@@ -112,10 +133,10 @@ The table is which suite watches which part of this seam.
 
 | Suite | What it guards |
 |---|---|
-| `test/session.test.mjs` | The command switch, the deal, the ready gate, the deploy commit, visibility, the finale — 231 assertions the transport must leave untouched. Two are load-bearing for this spec in particular: **the session's public surface is exactly six names**, and **the view reads through live and aliases the campaign's arrays**. W3 adds a copy on the client; it does not turn the projection into one |
+| `test/session.test.mjs` | The command switch, the deal, the ready gate, the deploy commit, visibility, the finale — 232 assertions, whose SEMANTICS the transport must leave untouched. Not the file: W2 rewrites the six dispatch-identity assertions listed above, because identity is the thing it deliberately removes. Two are load-bearing for this spec in particular: **the session's public surface is exactly six names**, and **the view reads through live and aliases the campaign's arrays**. W3 adds a copy on the client; it does not turn the projection into one |
 | `test/wiring.test.mjs` | State wiring end to end — generated leads, `loadMission`, result application, the boss gate — through the actions a command delegates to |
 | `test/hubambient.test.mjs` | The ambient layer, whose roster read is per-frame and therefore the one consumer a naive snapshot silently freezes |
-| `test/mission-golden.test.mjs` | A mission replays from its seed. W2 changes what a dispatch carries, and this is what says the mission that runs is the same one |
+| `test/mission-golden.test.mjs` | A mission replays from its seed — and that is ALL it says. It builds its own level and squad literals and never constructs a session, so **it does not see a dispatch and would stay green if the projection dropped `seed` entirely**. The guard for the projection is `test/transport.test.mjs`, which must assert the seed by name, plus playing it |
 | `test/docs.test.mjs` | This document's citations, and the seven parts once its status leaves `unbuilt` |
 | Everything else | Nothing in this spec should reach the generator, the editor or the audio layer. If it does, the seam leaked |
 
@@ -133,8 +154,10 @@ which W1 disturbs — is guarded by playing it and by nothing else.
 | 4 | **W1 disturbs an ordering the page relies on.** `src/main.js` defers a round by a microtask so the hub finishes the render it is in the middle of before the canvas takes the screen. Once the answer that triggers the round is itself delivered on a microtask, both land in the same drain and that protection stops meaning what it meant. The same applies to the mission report, whose results screen currently paints synchronously after the command returns | No suite imports either file. The guard is deploying a mission and watching the hand-off, both directions, in a two-commander campaign |
 | 5 | **The snapshot is whole, and taken per command.** No diffing, no dirty tracking, and a broadcast refreshes every seat's copy whether or not that seat's campaign moved | None needed at this size — a roster, a board, an armoury and a log. Recorded so a later profile knows it was a choice |
 | 6 | **Identity is lost at W3.** The hub renders a copy, not the campaign's own arrays. Verified safe as the code stands: the mission only READS soldier data, `applyMissionResult` matches by id, and `_nameFor` reads names off `_lastSquad` | No suite sees it — `test/session.test.mjs` does not import the hub. The guard is playing it, which is why W2 and W3 are separate commits |
-| 7 | **A dispatch still carries a generated level.** The seed alone will NOT do, even after `tech/mission-determinism.md`: regenerating a level also needs the difficulty, the length band and the pressure scale, and `makeLead` draws the last two at generation time and stores neither, so nothing on a lead can reproduce it. Making a level reproducible from a lead is its own change and is not in this spec | Nothing. Recorded so T2 sizes its payload from a known cost rather than discovering the level in it |
+| 7 | **A dispatch still carries a generated level.** The seed alone will NOT do, even after `tech/mission-determinism.md`: regenerating a level also needs the difficulty, the length band and the pressure scale, and `makeLead` draws the last two at generation time and stores neither. `lead.report` records what those draws PRODUCED (`seed`, `difficulty`, `width`, `budget`), but `generateLevel` takes the bands, not the products, so nothing on a lead can reproduce it through the door that exists. Making a level reproducible from a lead is its own change and is not in this spec | Nothing. Recorded so T2 sizes its payload from a known cost rather than discovering the level in it |
 | 8 | **The page is still trusted.** In hot-seat one page holds every seat's client, so nothing stops it reading another commander's snapshot. Privacy is enforced by the shape of what leaves the session, not by the transport | Nothing, and it cannot be otherwise until there are two processes. Named because "a mission choice is private" reads like a transport guarantee and is not one until T2 |
+| 9 | **The stale-wounds divergence is real and nearly unreachable.** A live-soldier dispatch means a soldier on two of one commander's choices carries mission one's wounds into mission two; a projected one means they carry the wounds they had at lock. Reaching it needs `dayPerDeploy` off and the same soldier committed twice — `deployCommand` forbids a duplicate within one squad, not across two held choices | A `test/session.test.mjs` assertion added by W2. It is the one behaviour change of this slice a player could see, and it was invisible in the spec until a review found it |
+| 10 | **Two design lines W2 does not serve, and neither is this spec's.** `design/multiplayer.md` says both missions begin at the same moment, and that a squad is visible to a commander standing on the same level. W2 hardens one seat's squad per dispatch and leaves sequencing with the page. Both are deferred by name to Phase 3 in `tech/multiplayer.md` (M2–M4); recorded here because a builder reading only this document would write a projection rule believing it was permanent | Nothing, deliberately. Phase 3 will widen the payload, and this row is what tells it that it may |
 
 **As built (W1).** Three things the plan did not have right.
 
