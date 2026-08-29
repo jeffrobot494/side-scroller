@@ -713,6 +713,14 @@ body::after {
   border-color: #3d5a7a;
   color: #9ec5ee;
 }
+/* The other direction: a lead YOU disclosed, on your own board. Deliberately
+   quieter than tag-shared — a lead you were given changes what you can do this
+   day, a lead you gave away does not change your board at all. */
+.tag-given {
+  background: #2a2b23;
+  border-color: #5c5a3a;
+  color: #cfc79a;
+}
 .sharemenu {
   display: flex;
   flex-direction: column;

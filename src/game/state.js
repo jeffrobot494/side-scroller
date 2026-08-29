@@ -169,10 +169,15 @@ export function createState() {
 // against the CURRENT board, a stale entry could later attach to a recycled id
 // and show somebody a lead nobody gave them. On the lead, it dies with the lead.
 //
-// `seenBy` is a Map of playerId -> sharer name (null when the roll gave it to
-// you directly). ABSENT is not the same as EMPTY, and only absent is ever
-// written: a lead carrying no map at all is visible to everyone, which is what
-// keeps createState() campaigns and every hand-authored test lead working.
+// `seenBy` is a Map of playerId -> the id of whoever handed it over (null when
+// the roll gave it to you directly). ABSENT is not the same as EMPTY, and only
+// absent is ever written: a lead carrying no map at all is visible to everyone,
+// which is what keeps createState() campaigns and every hand-authored test lead
+// working.
+//
+// An ID, not a name. Names are cosmetic and nothing else in the seam is keyed to
+// one; storing the id is what lets a projection answer "who did I give this to?"
+// without matching strings, and the name is resolved at the moment it is shown.
 
 // makeLead is handed a world by seedBoard and a player's campaign by everything
 // else. Campaigns carry a non-enumerable `world` back-reference; a world is its
@@ -184,9 +189,23 @@ export function canSee(lead, playerId) {
   return !lead || !lead.seenBy || lead.seenBy.has(playerId);
 }
 
-/** Who handed this lead to this player, or null if the roll did. */
+/** Who handed this lead to this player (their id), or null if the roll did. */
 export function sharerFor(lead, playerId) {
   return (lead && lead.seenBy && lead.seenBy.get(playerId)) || null;
+}
+
+/**
+ * Who this player disclosed this lead TO — the ids of the commanders holding it
+ * because of them. Read only for the sharer's own board: it is the one thing
+ * about another commander's board a player already knows, because they are the
+ * one who put it there. There is no chain, so a lead passed on again is not in
+ * anybody's list twice.
+ */
+export function sharedWithBy(lead, playerId) {
+  if (!lead || !lead.seenBy || !playerId) return [];
+  const out = [];
+  for (const [id, by] of lead.seenBy) if (by === playerId) out.push(id);
+  return out;
 }
 
 /** Grant a lead to a player. Idempotent — an existing holder keeps their tag. */

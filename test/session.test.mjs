@@ -807,11 +807,12 @@ export default async function run(t) {
 
     t.eq("a projected lead carries exactly what Operations draws",
       Object.keys(usa.leads[0]).sort(),
-      ["brief", "daysLeft", "difficulty", "id", "name", "sharedBy", "winsCampaign"]);
+      ["brief", "daysLeft", "difficulty", "id", "name", "sharedBy", "sharedWith", "winsCampaign"]);
     t.ok("...and not the generated level, which is the session's alone",
       usa.leads.every((l) => l.level === undefined && l.report === undefined));
     t.ok("...nor who ELSE can see it", usa.leads.every((l) => l.seenBy === undefined));
     t.ok("a lead you rolled yourself is tagged with nobody", usa.leads.every((l) => l.sharedBy === null));
+    t.ok("...and names nobody you gave it to", usa.leads.every((l) => l.sharedWith.length === 0));
     resetConfig();
   }
 
@@ -853,8 +854,16 @@ export default async function run(t) {
     t.ok("...and it is an ordinary lead otherwise",
       got.daysLeft === mine.daysLeft && got.difficulty === mine.difficulty);
     t.ok("the giver still has it", usa.leads.some((l) => l.id === mine.id));
-    t.ok("...and is not told anything about it changing hands",
+    // The giver's own board says where their lead went. It is the only thing
+    // this projection ever says about another commander's board, and it is
+    // theirs already: they are the one who put it there. A disclosure a player
+    // cannot see the consequence of is the failure mode.
+    t.eq("...and their board names who they gave it to",
+      usa.leads.find((l) => l.id === mine.id).sharedWith, ["China"]);
+    t.ok("...but still nobody as having given it to THEM",
       usa.leads.find((l) => l.id === mine.id).sharedBy === null);
+    t.ok("the receiver is not told they are holding a shared copy",
+      china.leads.find((l) => l.id === mine.id).sharedWith.length === 0);
     t.ok("sharing it twice is refused", !s.command("usa", { type: "share", leadId: mine.id, to: "china" }).ok);
 
     // Passed on again: the tag records whoever handed it to YOU, not the origin.
@@ -865,6 +874,12 @@ export default async function run(t) {
     s3.command("b", { type: "share", leadId: lead.id, to: "c" });
     t.eq("a lead passed on is tagged with the last giver, not the first",
       s3.view("c").leads.find((l) => l.id === lead.id).sharedBy, "B");
+    // ...and there is no chain in the other direction either: A sees the one
+    // disclosure A made, not what B did with it afterwards.
+    t.eq("the first giver is told about their own disclosure only",
+      s3.view("a").leads.find((l) => l.id === lead.id).sharedWith, ["B"]);
+    t.eq("...and the second about theirs",
+      s3.view("b").leads.find((l) => l.id === lead.id).sharedWith, ["C"]);
 
     resetConfig();
   }

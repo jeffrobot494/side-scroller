@@ -37,6 +37,7 @@ import {
   livingRoster,
   canSee,
   sharerFor,
+  sharedWithBy,
   grantLead,
   registerCommanders,
 } from "./state.js";
@@ -96,7 +97,14 @@ const VIEW_FIELDS = [
 // The fields of a lead a commander is allowed to hold. Exact, and pinned by the
 // suite: `level` and `report` are deliberately absent (the hub renders neither,
 // and `level` is the whole generated map), and so is `seenBy`.
-function projectLead(lead, playerId) {
+//
+// `sharedWith` is the ONE thing this projection says about another commander's
+// board, and it is only ever the reader's own doing: the commanders they handed
+// this lead to. Board privacy (design/multiplayer.md, decision 4) is about what
+// you cannot learn — a player who shared a lead already knows who has it, and
+// the alternative is a disclosure they cannot see the consequence of. Who ELSE
+// holds it, and who gave it to THEM, stays invisible.
+function projectLead(lead, playerId, nameOf) {
   return {
     id: lead.id,
     name: lead.name,
@@ -105,7 +113,9 @@ function projectLead(lead, playerId) {
     daysLeft: lead.daysLeft,
     winsCampaign: !!lead.winsCampaign,
     // Who handed it to you, or null. Never who ELSE holds it.
-    sharedBy: sharerFor(lead, playerId),
+    sharedBy: nameOf(sharerFor(lead, playerId)),
+    // Who YOU handed it to. Empty for a lead you have not disclosed.
+    sharedWith: sharedWithBy(lead, playerId).map(nameOf),
   };
 }
 
@@ -169,7 +179,13 @@ function makeView(campaign, player, players, round) {
   // The cost is lead identity through the view. Nothing needs it: the hub reads
   // names and ids, and deployCommand resolves the real lead off the campaign.
   Object.defineProperty(v, "leads", {
-    get: () => campaign.leads.filter((l) => canSee(l, player.id)).map((l) => projectLead(l, player.id)),
+    get: () =>
+      campaign.leads
+        .filter((l) => canSee(l, player.id))
+        // Names are resolved HERE and stored nowhere: the lead holds ids, and a
+        // commander's name is a display detail the view is the last place to
+        // know about.
+        .map((l) => projectLead(l, player.id, (id) => (id && players.get(id) ? players.get(id).name : null))),
     enumerable: true,
   });
   Object.defineProperty(v, "taskForce", {
@@ -559,7 +575,7 @@ export function createSession(opts = {}) {
         if (canSee(lead, target.id)) return fail(`${target.name} already has that lead.`);
         // Tagged with whoever handed it to YOU, not where it started: the tag
         // records the favour received, and there is no chain.
-        grantLead(lead, target.id, player.name);
+        grantLead(lead, target.id, player.id);
         return { ok: true, shared: true, leadName: lead.name, to: target.id, toName: target.name };
       }
       case "release": {

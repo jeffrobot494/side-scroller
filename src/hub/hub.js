@@ -467,9 +467,17 @@ export class Hub {
                   : "")
               : "";
             // Given to you by another commander, and by whom. Never who else
-            // holds it — the view does not carry that and must not.
+            // holds it — with the one exception below, the view does not carry
+            // that and must not.
             const shared = m.sharedBy
               ? `<span class="tag tag-shared">shared by ${m.sharedBy.toUpperCase()}</span>`
+              : "";
+            // Where YOUR lead went, on your own board. Not a leak: you are the
+            // one who sent it, and a disclosure with no visible consequence is
+            // a decision made blind. Several names when a lead has been given
+            // to several commanders.
+            const gave = (m.sharedWith || []).length
+              ? `<span class="tag tag-given">shared with ${m.sharedWith.map((n) => n.toUpperCase()).join(", ")}</span>`
               : "";
             const held = pending.find((c) => c.leadId === m.id);
             const action = `<button class="btn${held ? " btn-alt" : ""}" data-action="predeploy" data-id="${m.id}" ${
@@ -478,7 +486,7 @@ export class Hub {
             return `
         <article class="mission-row ${m.winsCampaign ? "is-boss" : ""}${held ? " committed" : ""}">
           <div class="mission-main">
-            <div class="mission-title">${m.name} ${status} ${life} ${shared} ${
+            <div class="mission-title">${m.name} ${status} ${life} ${shared} ${gave} ${
               held ? `<span class="tag tag-committed">squad committed</span>` : ""
             }</div>
             <p class="mission-brief">${m.brief}</p>

@@ -48,6 +48,7 @@ one.
 | One world set | Leads are generated once for the world, not once per player |
 | Partial visibility | Each player sees a portion of the set. Neither sees all of it |
 | Sharing | A player can disclose a lead to the other, making it visible and deployable for them |
+| A disclosure is visible to whoever made it | A lead you shared says so on your board, naming who you gave it to. The receiver is not told they hold a copy, and nobody learns about a disclosure they were not part of |
 | Everything else | Arrival, expiry, the ceiling, and the thin-board rule are unchanged from `campaign-pacing.md` |
 
 Partial visibility is what makes a lead worth telling someone about. A shared
