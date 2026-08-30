@@ -1090,6 +1090,31 @@ export default async function run(t) {
     t.ok("session.js does not reach localStorage directly", !/\blocalStorage\b/.test(src));
   }
 
+  // ---- the session announces that it changed (W3) --------------------------
+  // It carries nothing and it is unconditional. Both halves matter: a session
+  // that said WHAT moved would be keeping a second model of its own campaign,
+  // and one that announced only on success would miss the state a refusal has
+  // already changed.
+  {
+    let beats = 0;
+    const s = createSession({ players: ["p1", "p2"], changed: () => beats += 1 });
+    t.eq("nothing is announced before a command", beats, 0);
+    s.command("p1", { type: "sellLoot" });
+    t.eq("a command announces exactly once", beats, 1);
+    // NOT "ghost" — RECRUIT_POOL has a soldier with that id, and this passed
+    // four runs in six before it did not.
+    t.ok("a refused command announces too",
+      !s.command("p1", { type: "hire", recruitId: "nobody-was-ever-hired" }).ok && beats === 2);
+    t.ok("...and so does one from nobody", !s.command("who", { type: "ready" }).ok && beats === 3);
+    s.view("p1");
+    t.eq("reading a view announces nothing", beats, 3);
+
+    // The server half is UNCHANGED: still a live projection over the campaign's
+    // own arrays. The snapshot is the transport's copy of it (W3), never this.
+    const v = s.view("p1");
+    t.ok("the session's own view is still the live one", s.view("p1") === v);
+  }
+
   // ---- the seat swap moves every binding ----------------------------------
   // A SOURCE check, and only because there is no other kind available: no suite
   // imports src/main.js, so the alternative is no guard at all. It caught
@@ -1121,7 +1146,12 @@ export default async function run(t) {
     // slice: the announcement channel has to be in place before the session
     // exists, and a session built outside the transport can only announce
     // straight to the page, without crossing the wire.
-    t.ok("the page builds its session through the transport", /createLoopback\(\s*\(announce\)\s*=>\s*createSession\(/.test(main));
+    // Both construction-time channels, matched literally: the round announcement
+    // (W2) and the state-changed broadcast (W3). A factory that drops the second
+    // argument still runs — every screen simply stops updating for anything the
+    // seat did not do itself, which is not a failure any suite here would see.
+    t.ok("the page builds its session through the transport",
+      /createLoopback\(\s*\(announce,\s*changed\)\s*=>/.test(main) && /createSession\(\{[^}]*announce,\s*changed/.test(main));
     // And the round is collected on the ANSWER. The push lands first — inside
     // session.command — so a mission started on arrival takes the screen from a
     // render in progress.

@@ -331,6 +331,12 @@ export function createSession(opts = {}) {
   // is every test that is not about the transport.
   const announce = typeof opts.announce === "function" ? opts.announce : null;
 
+  // The state-changed announcement (W3), handed in the same way and for the
+  // same reason. It carries NOTHING: what changed is answered by reading a
+  // view, and a session that tried to say what moved would be keeping a second
+  // model of its own campaign. The host asks each seat's view for itself.
+  const changed = typeof opts.changed === "function" ? opts.changed : null;
+
   // A seat is an id or an { id, name }. Names are cosmetic — the design rules
   // out any mechanical difference between nations — but the task-force strip
   // has to print WHO, by name, so the name travels with the seat rather than
@@ -502,7 +508,22 @@ export function createSession(opts = {}) {
     return { ok: true, ready: true, dayTurned: false, roundClosed: true, missions: dispatches.length };
   }
 
+  // Every command, whatever it answers. The announcement is UNCONDITIONAL and
+  // this wrapper is why: a refusal can still have moved the world. `closeRound`
+  // empties every commander's pending list and writes `round.last` before
+  // `endRound` is in a position to refuse the day, so a Ready that comes back
+  // `ok: false` has already changed what three screens would draw.
+  //
+  // It fires BEFORE the answer goes back, because every hub write site renders
+  // inside its answer callback. An announcement that landed afterwards would
+  // leave all of them drawing one command stale.
   function command(playerId, cmd) {
+    const res = run(playerId, cmd);
+    if (changed) changed();
+    return res;
+  }
+
+  function run(playerId, cmd) {
     const player = players.get(playerId);
     if (!player) return fail("Unknown player.");
     if (!cmd || !cmd.type) return fail("Malformed command.");

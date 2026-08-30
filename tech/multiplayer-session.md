@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: building
+status: built
 resolution: sharp
 needs: [multiplayer-state]
 related: [multiplayer, multiplayer-state, mission-determinism, campaign-pacing]
@@ -152,6 +152,7 @@ The table is which suite watches which part of this seam.
 |---|---|
 | `test/session.test.mjs` | The command switch, the deal, the ready gate, the deploy commit, visibility, the finale — 245 assertions, whose SEMANTICS the transport must leave untouched. Not the file: W2 rewrites the dispatch-identity assertions listed above, because identity is the thing it deliberately removes. Two are load-bearing for this spec in particular: **the session's public surface is exactly six names**, and **the view reads through live and aliases the campaign's arrays**. W3 adds a copy on the client; it does not turn the projection into one |
 | `test/wiring.test.mjs` | State wiring end to end — generated leads, `loadMission`, result application, the boss gate — through the actions a command delegates to |
+| `test/hub-refresh.test.mjs` (new at W3) | The second door: that a broadcast repaints without spending the flash or clearing any of the nine transient fields, that a stale deploy screen falls back rather than throwing, and that `setView` still destroys — because it is a seat swap |
 | `test/hubambient.test.mjs` | The ambient layer mounting, scaling with the roster and animating. **It does NOT guard the freeze case** — it constructs the layer with a raw campaign rather than a view or a client, and re-points it by an explicit `setView`, so it stays green under a fully frozen handle. The per-frame read is real (`livingRoster(game)` inside `step`) and the guard for it is a new assertion, not this file |
 | `test/mission-golden.test.mjs` | A mission replays from its seed — and that is ALL it says. It builds its own level and squad literals and never constructs a session, so **it does not see a dispatch and would stay green if the projection dropped `seed` entirely**. The guard for the projection is `test/transport.test.mjs`, which must assert the seed by name, plus playing it |
 | `test/docs.test.mjs` | This document's citations, and the seven parts once its status leaves `unbuilt` |
@@ -239,3 +240,12 @@ snapshots live on the transport because a client has nowhere to keep them, and
 own guards: `test/hubambient.test.mjs` does not watch the freeze case, the
 DOM-free assertion covers only `src/game/session.js`, `src/hub/hotseat.js` holds
 no view, and the assertion count had moved again.
+
+**As built (W3).** Four things the plan did not have right.
+
+| | As built | Why |
+|---|---|---|
+| The announcement carries nothing | `changed()` takes no argument. The transport answers "what moved?" by re-reading every seat's view | A session that said what changed would be keeping a second model of its own campaign, and the answer is already available by asking. The transport snapshots `session.view(id)` per seat through `toWire`, which is also what proves a view is wire-legal |
+| A flash needs explicit rescue | `render()` remembers what it drew (`_lastFlash`) and `refresh()` puts it back | A flash lasts one paint by design. Once a broadcast can repaint, the other commander readying **spends** your flash before you have read it — the screen goes quiet for reasons you cannot see. Found by driving it headlessly, not by reasoning about it |
+| The hub got its first suite | `test/hub-refresh.test.mjs` | The spec said the door's only guard was playing it. It is not true that the hub cannot be driven headlessly: a `makeEl` root, a real transport and two seats are enough, and the nine fields a repaint must not touch are exactly the kind of thing a person does not notice going missing |
+| The stale deploy screen gets a refusal, not a crash | `refresh()` drops to the hub and flashes "That lead is no longer on the board." | The review found `_deployScreen` dereferences the lead unguarded, reachable only once something repaints a screen it did not open. The wording is the session's own refusal for a lead you cannot see — the same words, because it is the same fact |

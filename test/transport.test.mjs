@@ -20,7 +20,7 @@ import { createSession } from "../src/game/session.js";
 import { createLoopback } from "../src/net/loopback.js";
 import { connect } from "../src/net/client.js";
 import { assertData, toWire } from "../src/net/wire.js";
-import { createState } from "../src/game/state.js";
+import { createState, livingRoster } from "../src/game/state.js";
 import { config, resetConfig } from "../src/game/config.js";
 
 // Let every queued microtask drain, which is where the loopback delivers.
@@ -74,7 +74,7 @@ export default async function run(t) {
   // ---- the loopback answers later, never as a return value ----------------
   {
     let session = null;
-    const transport = createLoopback((announce) => (session = createSession({ state: createState(), announce })));
+    const transport = createLoopback((announce, changed) => (session = createSession({ state: createState(), announce, changed })));
     const client = connect(transport, "p1");
 
     let answer = null;
@@ -118,7 +118,7 @@ export default async function run(t) {
   // command types the hub and the page send, each checked in both directions.
   {
     let session = null;
-    const transport = createLoopback((announce) => (session = createSession({ players: ["p1", "p2"], announce })));
+    const transport = createLoopback((announce, changed) => (session = createSession({ players: ["p1", "p2"], announce, changed })));
     const p1 = connect(transport, "p1");
     const p2 = connect(transport, "p2");
 
@@ -181,7 +181,7 @@ export default async function run(t) {
   // ---- a client is one seat, and nothing else -----------------------------
   {
     let session = null;
-    const transport = createLoopback((announce) => (session = createSession({ players: ["p1", "p2"], announce })));
+    const transport = createLoopback((announce, changed) => (session = createSession({ players: ["p1", "p2"], announce, changed })));
     const p1 = connect(transport, "p1");
 
     t.eq("client: exposes exactly a seat, a send and a view", Object.keys(p1).sort(), ["playerId", "send", "view"]);
@@ -189,9 +189,10 @@ export default async function run(t) {
     t.ok("client: it cannot reach the round", p1.takeRound === undefined);
     t.ok("client: it cannot reach another seat's view", p1.view.length === 0);
 
-    // W1 hands over the session's live projection unchanged — W3 is where this
-    // becomes a snapshot. Pinned so that slice is a deliberate act.
-    t.ok("client: W1's view is still the session's own", p1.view() === session.view("p1"));
+    // W1 handed over the session's live projection; W3 hands over a handle onto
+    // this seat's snapshot. The assertion that pinned the old behaviour lived
+    // here so that this slice would have to be a deliberate act — this is it.
+    t.ok("client: its view is NOT the session's live projection", p1.view() !== session.view("p1"));
 
     // The seat is fixed at connect: a command cannot be sent as somebody else,
     // because there is nowhere to say who you are.
@@ -202,18 +203,83 @@ export default async function run(t) {
     t.ok("...and not to the other one", session.view("p2").taskForce.find((c) => c.id === "p2").ready === false);
   }
 
+  // ---- the view is a snapshot, refreshed by a broadcast (W3) --------------
+  {
+    const order = [];
+    const transport = createLoopback((announce, changed) =>
+      createSession({
+        players: ["p1", "p2"],
+        announce,
+        changed: () => {
+          order.push("refresh");
+          changed();
+        },
+      })
+    );
+    const p1 = connect(transport, "p1");
+    const p2 = connect(transport, "p2");
+
+    const h1 = p1.view();
+    t.ok("view: a seat's handle is an object, not an accessor", h1 && typeof h1 === "object");
+    // The hub and the ambient layer hand this straight to livingRoster(g), so
+    // it has to look like a campaign, not like an API.
+    t.ok("view: it looks like a campaign", Array.isArray(livingRoster(h1)));
+    t.ok("view: it carries the seat", h1.playerId === "p1");
+    t.ok("view: and it is data all the way down", !threw(() => assertData({ ...h1 }, "snapshot")));
+
+    // Identity never changes: the hub captures this once in its constructor and
+    // the ambient layer holds it in a module binding. Handing out a fresh object
+    // per refresh would leave both pointed at a snapshot nobody updates again.
+    const before = p1.view().roster.length;
+    await new Promise((d) => p1.send({ type: "hire", recruitId: p1.view().recruits[0].id }, d));
+    t.ok("view: the handle survives a command", p1.view() === h1);
+    // ...and READS THROUGH. A handle that copied field values would be stale
+    // here, because applyMissionResult and advanceDay REPLACE these arrays.
+    t.eq("view: the same handle sees the new roster", h1.roster.length, before + 1);
+
+    // The broadcast. p2 clicked nothing.
+    t.ok("view: a seat sees the other one ready without acting",
+      p2.view().taskForce.find((c) => c.id === "p1").ready === false);
+    await new Promise((d) => p1.send({ type: "ready" }, d));
+    t.ok("view: ...and now it does", p2.view().taskForce.find((c) => c.id === "p1").ready === true);
+
+    // The one command that puts a lead on somebody else's board.
+    const mine = p1.view().leads.find((l) => !p2.view().leads.some((b) => b.id === l.id));
+    if (mine) {
+      await new Promise((d) => p1.send({ type: "share", leadId: mine.id, to: "p2" }, d));
+      t.ok("view: a shared lead reaches the other board with no click",
+        p2.view().leads.some((l) => l.id === mine.id));
+    } else {
+      t.ok("view: (both boards already held every lead this roll)", true);
+    }
+
+    // A REFUSAL still moves the world: closeRound empties every pending list
+    // before endRound can refuse the day. A broadcast gated on res.ok would
+    // miss it.
+    const n = order.length;
+    await new Promise((d) => p1.send({ type: "hire", recruitId: "nobody-was-ever-hired" }, d));
+    t.ok("view: a refused command broadcasts too", order.length > n);
+
+    // And it lands BEFORE the answer, because every hub write site renders
+    // inside its answer callback.
+    order.length = 0;
+    await new Promise((d) => p1.send({ type: "sellLoot" }, () => { order.push("answer"); d(); }));
+    t.eq("view: the refresh lands before the answer", order, ["refresh", "answer"]);
+  }
+
   // ---- the round stays the host's, and is PUSHED to it (W2) ---------------
   {
     // The suite sits between the session and the transport, which the factory
     // makes possible: the announcement is composed, not intercepted.
     const seen = [];
-    const transport = createLoopback((announce) =>
+    const transport = createLoopback((announce, changed) =>
       createSession({
         players: ["p1"],
         announce: (round) => {
           seen.push("push");
           announce(round);
         },
+        changed,
       })
     );
     const p1 = connect(transport, "p1");

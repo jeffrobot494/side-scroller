@@ -70,7 +70,9 @@ const roster = seats();
 // construction, so the thing receiving the announcement must exist first. The
 // page still says who the seats are, which is the only part of it that is the
 // page's business.
-const transport = createLoopback((announce) => createSession({ players: roster, announce }));
+const transport = createLoopback((announce, changed) =>
+  createSession({ players: roster, announce, changed })
+);
 const clients = new Map(roster.map((p) => [p.id, connect(transport, p.id)]));
 
 // The seat on screen. THREE bindings capture a player and all three move
@@ -121,6 +123,13 @@ const hub = new Hub(hubRoot, client.view(), {
   // learn where everyone else went.
   roundNext: playNext,
 });
+
+// Every command refreshes every seat's snapshot (W3), and this is what puts the
+// result on screen for a commander who did not click anything: the other one
+// readying, the shared doom clock moving, a lead arriving on their board. The
+// hub's own write sites still render inside their answer callbacks — this
+// repaint has already happened by then, and carries no flash of its own.
+transport.watch(() => hub.refresh());
 
 // The hot-seat strip, above the top bar and outside #hub-root (Hub.render()
 // replaces that element's innerHTML on every navigation). Hidden at one player.

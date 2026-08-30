@@ -40,6 +40,7 @@ export class Hub {
     this.location = "barracks";
     this.mode = "hub"; // hub | deploy | results | end
     this.flash = null;
+    this._lastFlash = null; // what render() last drew — see refresh()
     this.deploy = null; // { missionId, selected:Set, weapons:{soldierId:weaponId} }
     this.result = null;
     this.turn = null; // the day summary a round's last mission report carried
@@ -71,6 +72,7 @@ export class Hub {
     this.game = view;
     this.mode = "hub";
     this.flash = null;
+    this._lastFlash = null;
     this.deploy = null;
     this.result = null;
     this.turn = null;
@@ -143,6 +145,29 @@ export class Hub {
     this.render();
   }
 
+  // The OTHER door (tech/multiplayer-session.md, W3). `setView` is a seat swap
+  // and nulls nine transient fields on purpose; a broadcast is not a swap, and
+  // going through that door would blank the results screen's dead (`_lastSquad`
+  // is the fallback that exists for exactly the moment applyMissionResult has
+  // dropped the casualties from the roster), throw away a refused deploy's
+  // picked squad, and clear the in-flight control marker.
+  //
+  // So: repaint, and touch nothing. The flash is carried across because a
+  // repaint is not a new action — whatever the screen was saying, it goes on
+  // saying until this commander does something.
+  refresh() {
+    // A broadcast can remove the lead this screen is built on: another
+    // commander's mission report clears it from the shared board. Nothing else
+    // repaints a screen it did not open, so nothing else could hit this.
+    if (this.mode === "deploy" && !this.game.leads.some((l) => l.id === this.deploy.missionId)) {
+      this.mode = "hub";
+      this.deploy = null;
+      this.setFlash("bad", "That lead is no longer on the board.");
+    }
+    if (!this.flash) this.flash = this._lastFlash;
+    this.render();
+  }
+
   // ---- top-level render ---------------------------------------------------
 
   render() {
@@ -171,6 +196,10 @@ export class Hub {
       </div>
     `;
     this._markPending();
+    // A flash lasts one paint — except that a broadcast repaint is not a paint
+    // this commander asked for. `refresh` puts this back, so the other seat
+    // readying does not swallow the last thing you were told.
+    this._lastFlash = this.flash;
     this.flash = null;
   }
 

@@ -27,6 +27,27 @@
 
 import { toWire } from "./wire.js";
 
+// One seat's stable handle over its latest snapshot (W3).
+//
+// An OBJECT, not an accessor function: `livingRoster(g)` and `soldierMaxHp(s)`
+// are handed this directly by the hub and by the ambient layer, so it has to
+// look like a campaign. Its identity never changes, because the hub captures it
+// once in its constructor and the ambient layer holds it in a module-level
+// binding — handing out a fresh object per refresh would leave both of them
+// pointed at a snapshot that stops being updated.
+//
+// Every field READS THROUGH on access. That is not a style choice: advanceDay
+// and applyMissionResult REPLACE `state.leads` and `state.roster` rather than
+// mutating them, so a handle that copied field values at refresh time would be
+// stale one command later while still pointing at the right snapshot.
+function makeHandle(read) {
+  const handle = {};
+  for (const key of Object.keys(read())) {
+    Object.defineProperty(handle, key, { get: () => read()[key], enumerable: true });
+  }
+  return handle;
+}
+
 // `makeSession` is called once, with the inbound round handler. The caller
 // decides what session it is (seats, world, a seeded campaign); the transport
 // decides only how the round gets out.
@@ -38,9 +59,40 @@ export function createLoopback(makeSession) {
   // which is the hazard W1's ordering exists to avoid.
   let pending = [];
 
-  const session = makeSession((dispatches) => {
-    pending = toWire(dispatches, "round");
-  });
+  // The seat snapshots and the handles over them. They live HERE and not on a
+  // client because `connect` is a free function and a client's surface is three
+  // names — there is nowhere on a client to keep a registry of every other
+  // client, which is what "refresh every seat" needs.
+  const snapshots = new Map();
+  const handles = new Map();
+  // What the host does when a snapshot moves. One watcher: the page.
+  let watcher = null;
+
+  const session = makeSession(
+    (dispatches) => {
+      pending = toWire(dispatches, "round");
+    },
+    // A BROADCAST, not a refresh of the seat that acted. One command routinely
+    // moves shared world state and other seats' campaigns: the day, the doom
+    // clock, lead expiry and arrivals, the world log every War Room renders,
+    // another commander's readiness, and `share`, which is the one command that
+    // puts a lead on somebody else's board.
+    () => refresh()
+  );
+
+  function refresh() {
+    for (const id of session.playerIds()) {
+      snapshots.set(id, toWire(session.view(id), `view ${id}`));
+    }
+    if (watcher) watcher();
+  }
+
+  // Before anything asks: the hub's first render reads `money` and the ambient
+  // layer steps once at mount, both before a command has ever been sent.
+  for (const id of session.playerIds()) {
+    snapshots.set(id, toWire(session.view(id), `view ${id}`));
+    handles.set(id, makeHandle(() => snapshots.get(id)));
+  }
 
   return {
     // A command from one seat. The answer is delivered, never returned — a
@@ -54,11 +106,18 @@ export function createLoopback(makeSession) {
       });
     },
 
-    // W1 hands over the session's own live view. W3 is where this becomes a
-    // snapshot pushed to each client — the read half of the seam, and the half
-    // that costs something. Until then the page reads exactly what it read
-    // before, which is what keeps that slice invisible.
-    view: (playerId) => session.view(playerId),
+    // The seat's handle over its own snapshot (W3) — never the session's live
+    // projection, which is what a client could not possibly hold once it is in
+    // another process. `session.view` is unchanged and still projects live: the
+    // server half of the seam keeps its own suite meaningful.
+    view: (playerId) => handles.get(playerId),
+
+    // The host's repaint. Called after every broadcast, because a commander's
+    // screen has to show the other one readying, the shared clock moving and a
+    // lead arriving on their board without them clicking anything.
+    watch(fn) {
+      watcher = typeof fn === "function" ? fn : null;
+    },
 
     // The round the session announced, whole and in order, drained once. The
     // page decides WHEN — off the `roundClosed` answer, the same signal it used
