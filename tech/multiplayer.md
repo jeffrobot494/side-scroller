@@ -21,8 +21,8 @@ number. It opens at the top of `design/multiplayer.md` in the design map.
 | Phase | Spec | Ends with |
 |---|---|---|
 | 1 | `tech/multiplayer-state.md` | Two people playing a full campaign together in one browser |
-| 2 | `tech/multiplayer-session.md` (new) | Two people playing that campaign from different houses |
-| 3 | `tech/multiplayer-missions.md` (new) | Two squads on the same level at the same time |
+| 2 | `tech/multiplayer-session.md` (the seam) · `tech/multiplayer-service.md` (the process) | Two people playing that campaign from different houses |
+| 3 | `tech/multiplayer-missions.md` (unwritten) | Two squads on the same level at the same time |
 
 Nothing in phase 2 can start before phase 1 lands, and phase 3 needs both. The
 one exception is M1, which depends on nothing and can land whenever.
@@ -48,14 +48,22 @@ playable and tunable throughout.
 
 ## Phase 2 — the transport
 
-Provisional. These slices have no spec yet and will move when one is written.
+Every row below is superseded by a spec. `tech/multiplayer-session.md` owns T1
+(as W1–W3, built); `tech/multiplayer-service.md` owns T2–T4 (as V1–V4). Those
+documents are the source of truth for what each contains, and both re-cut the
+rows they replaced.
 
-| Slice | | Mockup |
-|---|---|---|
-| T1 | The transport seam — `connect` / `send` / `onCommand`, implemented in-process first so the interface is proven before any networking exists | — invisible |
-| T2 | The service — a node process serving the static files and holding the authoritative session, with the room in the URL | — |
-| T3 | Two browsers, one campaign — real per-client views over the wire | §7 is **deleted** here |
-| T4 | Presence and disconnection | §1 the dimmed chip |
+| Slice | | Spec | Mockup |
+|---|---|---|---|
+| T1 | The transport seam — the page holds a client per seat, commands answer through a callback, the round is pushed and projected, and a view is a per-seat snapshot | `tech/multiplayer-session.md` W1–W3 | — invisible |
+| T2 | The service — a node process holding the authoritative session, with the room in the URL | `tech/multiplayer-service.md` V1–V2 | — |
+| T3 | Two browsers, one campaign | `tech/multiplayer-service.md` V3 | §7 is hidden in a room, not yet deleted |
+| T4 | Presence and disconnection | `tech/multiplayer-service.md` V4 | §1 the dimmed chip |
+
+**T2 and T3 were not separable as written** — a session in another process is
+unreachable without a wire, so there is no order in which the first is true and
+the second is not. What is separable is the service existing and being driven by
+a suite from a browser talking to it, which is the V1/V2 cut.
 
 T2 is where the repo's "static, no build step" property stops applying to the
 multiplayer path. Single-player keeps it.
@@ -87,4 +95,4 @@ rolling checksum for cross-machine divergence.
 |---|---|
 | The payoff is last | The thing that makes this feel like a game played *with* someone is phase 3, sitting behind a state refactor and a transport. Nothing can reorder that — ownership needs the session and lockstep needs determinism — but M1 was pulled forward for a small win, and has landed |
 | M4 has no mockup | The moment another player takes a pickup you were running for is the entire competitive texture of this design, and nothing visualises it. Partly because it is feel rather than UI, which is also why it is the most likely thing to be wrong the first time it is played |
-| Two of three specs do not exist | Phases 2 and 3 are named here, not specified. Each needs `/spec` run by whoever is about to build it, and their slice tables above will move when that happens |
+| One of three specs does not exist | Phase 3 is named here, not specified. It needs `/spec` run by whoever is about to build it, and its slice table above will move when that happens |
