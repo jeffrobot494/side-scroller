@@ -42,6 +42,50 @@ duplicated between the two files for the length of V1; V2 is where they
 converge, because that is the slice where `src/main.js` stops naming its own
 seats when the URL carries a room.
 
+**As built (V2) — commands are serialised, one in flight per seat.** The plan
+treated the carrier swap as behaviour-free, and one property does not survive
+it: `test/transport.test.mjs` pins "answers arrive in send order" and calls it
+the one wire property a loopback can honestly claim, and the page relies on it
+because every hub write site renders inside its answer callback. `fetch` claims
+nothing of the sort — two commands in flight can answer in either order, and a
+double-clicked Ready resolving backwards renders the hub off the wrong answer.
+`src/net/remote.js` chains its sends so the next one is not issued until the last
+has answered. The cost is one round trip of latency on a game that advances a day
+at a click.
+
+**As built (V2) — a lost command answers as a refusal.** The plan did not say
+what a send that never arrives should do, because a loopback cannot fail. It has
+to answer *something*: a hub write site that never gets its callback leaves a
+screen mid-click with nothing on it to say so, which is worse than a wrong
+answer. `src/net/remote.js` delivers `{ ok: false, reason }` — the session's own
+refusal shape, so no caller learns a new one — and the campaign is untouched
+either way, because the server ran the command or did not and the next snapshot
+says which.
+
+**As built (V2) — the dispatcher forks on a MISSING NAME, not on a flag.** The
+plan said the round dispatcher forks; this is how. `takeRound` is absent from the
+remote transport rather than stubbed to return `[]`, and `onDispatch` is absent
+from the loopback, so `src/main.js` branches on which one exists. A transport
+that half-answered both would be one the page could not tell apart from the host,
+which is the failure the two shapes exist to keep visible. The transport surface
+gains a sixth name for the same slice, `seat()`, because a room's commander is
+named by the server and the page no longer has a list to look one up in.
+
+**As built (V2) — `src/net/remote.js` is inside the bar, and the spec said it
+would not be.** "Where the bar cannot see this at all" listed it with
+`src/main.js` and `server.mjs` under *playing it*. It is a module, and its two
+browser globals are constructor options, so `test/service.test.mjs` drives the
+real remote transport against the real registry with no HTTP and no browser: the
+promise that resolves only on the first snapshot, the stable handle reading
+through a pushed snapshot, a command attributed to the token's seat, the
+serialisation above, the lost-command refusal, a dispatch that arrived before the
+page installed its dispatcher, and a stale link rejecting rather than hanging.
+**`src/main.js` is what is genuinely unwatched**, and it is the only thing on
+that list now. It was also driven over the real routes by hand at V2 rather than
+only at V3 — two seats, real HTTP and real SSE, a deploy, a round closed, one
+dispatch delivered to its owner and four snapshots pushed to the other seat with
+no click.
+
 **V1–V4 own the T2, T3 and T4 rows of `tech/multiplayer.md`**, the way W1–W3
 own T1. Those rows now cite this document rather than describing the work, and
 were rewritten in this spec's own commit for the three reasons below. The
@@ -61,7 +105,7 @@ They land in order, and any prefix is shippable.
 | What | Where | Used for |
 |---|---|---|
 | `toWire` and `assertData` | `src/net/wire.js` | The data rule, unchanged and now load-bearing rather than didactic. Everything crossing a real socket goes through the same walk that has been rejecting Maps in-process since W1. **As built (V1): the two directions are not symmetric, and the plan read as though they were.** Outbound — an answer, a snapshot, a dispatch — is where the walk earns its keep, because a Map reaching `JSON.stringify` on a socket becomes `{}` in silence. Inbound over HTTP it is structurally unreachable: a body has already been through `JSON.parse`, which cannot produce a Map, a function or an `undefined`. The inbound check still bites exactly where it always did — in-process, at the send, with the stack pointing at whoever built the command — which is `src/net/remote.js` from V2 |
-| The transport surface | `src/net/loopback.js` | `send` / `view` / `watch` / `takeRound` / `playerIds` is the shape V2 reimplements. It was written against a socket it did not have; this is the slice that finds out |
+| The transport surface | `src/net/loopback.js` | `send` / `view` / `watch` / `takeRound` / `playerIds` is the shape V2 reimplements. It was written against a socket it did not have; this is the slice that finds out. **As built: it reimplements four of the five and deliberately omits `takeRound`**, adding `onDispatch` and `seat` — the shape held everywhere it described a seat, and split exactly where it described a HOST, which is the half a room page is not |
 | `connect` | `src/net/client.js` | **Untouched.** Three names, no session, no other seat — a client is already correct for a remote transport, which was the point of pinning it that small |
 | The stable handle | `src/net/loopback.js` | `makeHandle` — one object per seat whose fields read through to the current snapshot. The remote transport needs exactly this, for exactly the reason W3 found: `advanceDay` and `applyMissionResult` replace `leads` and `roster` rather than mutating them. **It is module-private today, so V2 moves it** — see Where the code goes. Duplicating it is the wrong answer: two handles that drift is two transports that behave differently, which is the failure this whole seam exists to prevent |
 | The session's six names, and its two announcements | `src/game/session.js` | The authority moves house without changing. `announce` (the round) and `changed` (the broadcast) are already the two outbound channels a server needs, and the module is already DOM-free and storage-free — the property `tech/multiplayer-state.md` S1 built it for |
@@ -147,9 +191,12 @@ The whole suite green before any slice commits.
 imported by no suite, and V2 and V3 land almost entirely in `src/main.js`. The
 hub is **not** on that list — `test/hub-refresh.test.mjs` has imported it since
 W3 and drives it off a real transport with two seats, which is what V4's strip
-should be pinned by rather than by playing it. The remaining guards are
-`test/service.test.mjs` for the half that is a module, and **playing it — two
-browsers, two machines, a campaign to the finale** — for `src/main.js`.
+should be pinned by rather than by playing it. **Nor is `src/net/remote.js`, as
+built** — see the V2 note above; it is a module with injectable browser globals
+and `test/service.test.mjs` drives it. The remaining guards are
+`test/service.test.mjs` for the two halves that are modules, a source scan for
+the `src/main.js` bindings, and **playing it — two browsers, two machines, a
+campaign to the finale** — for the rest of `src/main.js`.
 
 ## Approximations
 
@@ -160,7 +207,7 @@ browsers, two machines, a campaign to the finale** — for `src/main.js`.
 | 3 | **A token is a link, not an account.** Whoever holds a seat's URL is that seat. No login, no revocation, no rate limit, and the SSE token rides in the query string because `EventSource` cannot set a header. Privacy between commanders is real — the server projects per seat — but it is privacy against the *other player*, not against an attacker who has the link | Nothing. Named because Approximation 8 of `tech/multiplayer-session.md` says privacy stops being a hole once there are two processes, and this is the exact width of the remaining hole |
 | 4 | **Rooms are unbounded and never collected.** A room with nobody in it stays in memory until the process restarts | Nothing at this scale. It becomes real the first time this is deployed for anyone but Bo |
 | 5 | **SSE, not WebSocket.** One-way push plus `fetch` for commands, because it is plain HTTP text, needs no dependency and no hand-rolled framing, reconnects by itself in the browser, and survives proxies that would need WebSocket explicitly enabled. The cost is a second connection per seat and no client-to-server streaming — neither of which turn-boundary JSON needs | Swapping to WebSocket later changes `src/net/remote.js` and the routes, and nothing above them. That is the property that makes this the reversible choice |
-| 6 | **Latency is still unproven where it matters.** W1's Approximation 3 said the optimistic control's refusal path could not be observed in-process. V2 is where it can be — and only by playing it, because the suite still drives everything at microtask speed | Playing it on a real connection, which is V3's milestone and not a test |
+| 6 | **Latency is still unproven where it matters.** W1's Approximation 3 said the optimistic control's refusal path could not be observed in-process. V2 is where it can be — and only by playing it, because the suite still drives everything at microtask speed. **As built, one step of this was paid early**: the remote transport was driven over real HTTP and real SSE against `server.mjs` at V2, so the carrier is proven end to end. What is still unproven is what a person SEES while a command is in flight on a slow link, which is a screen and not a wire | Playing it on a real connection, which is V3's milestone and not a test |
 | 7 | **A dispatch still carries a generated level.** Unchanged from W2 and now a real payload over a real connection: the seed alone cannot reproduce a level, because `makeLead` draws the length band and the pressure scale at generation time and stores neither. **As built: measured at V1 rather than V2**, because the routes could be driven by hand as soon as they existed — a one-soldier dispatch on a 21-platform level is **~1.6 KB of JSON**, sent once per mission at a turn boundary. The debt is real and the bill is small; nothing here needs the seed-only form | Nothing. `tech/multiplayer-session.md` Approximation 7 is the same debt, now billed |
 | 8 | **The page forks at the round, and stays forked.** A hot-seat page drains the host's whole round and swaps seats between missions; a room page plays the one dispatch that arrived for it. Two shapes in one file until hot-seat is deleted, which this spec deliberately does not do | Nothing but reading it. Recorded because a builder finding two round dispatchers should know it is a temporary state with a named exit, not an oversight |
 | 9 | **The commander a seat plays is fixed by its link.** No picker, no name entry. The design rules out mechanical differences between nations, so this costs a label and not a choice | One screen, whenever it is wanted. Recorded because it is the one answer in this spec that is a default rather than a decision |

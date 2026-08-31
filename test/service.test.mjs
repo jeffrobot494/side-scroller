@@ -16,6 +16,8 @@
 // ---------------------------------------------------------------------------
 
 import { createRooms } from "../src/net/rooms.js";
+import { createRemote } from "../src/net/remote.js";
+import { connect } from "../src/net/client.js";
 import { assertData } from "../src/net/wire.js";
 import { config, resetConfig } from "../src/game/config.js";
 
@@ -274,6 +276,192 @@ export default async function run(t) {
     rooms.attach(only.token, again.send);
     t.eq("a second stream is given the snapshot", again.of("snapshot").length, 1);
     t.eq("...and not the round again", again.of("dispatch").length, 0);
+  }
+
+  // -----------------------------------------------------------------------
+  // THE REMOTE TRANSPORT (V2), driven against the real registry.
+  //
+  // The spec put src/net/remote.js outside the bar and said the guard was
+  // playing it. It is a module with injectable `fetch` and `EventSource`, so
+  // both halves of the wire can be driven here with no HTTP and no browser —
+  // which leaves only src/main.js genuinely unwatched. It goes in THIS suite
+  // rather than test/transport.test.mjs because that one is the loopback's and
+  // the spec forbids editing it: a remote transport that made the loopback's
+  // assertions move has been built by loosening the shape rather than matching
+  // it.
+  //
+  // What this still CANNOT see: real latency, a real dropped connection, and
+  // EventSource's own reconnect. Those are V3's playtest.
+  // -----------------------------------------------------------------------
+
+  // A stand-in for the browser's EventSource over the registry. It attaches on
+  // a microtask rather than in the constructor, because a real one does and
+  // because remote.js registers its listeners AFTER the constructor returns.
+  function streamOver(rooms) {
+    return class FakeStream {
+      constructor(url) {
+        this.listeners = new Map();
+        this.onerror = null;
+        const token = new URL(url, "http://x").searchParams.get("token");
+        queueMicrotask(() => {
+          // Frames carry TEXT, exactly as SSE does — parsing is remote.js's job
+          // and a stub that handed over live objects would test nothing.
+          this.detach = rooms.attach(token, (event, data) => {
+            const fn = this.listeners.get(event);
+            if (fn) fn({ data: JSON.stringify(data) });
+          });
+          if (!this.detach && this.onerror) this.onerror();
+        });
+      }
+      addEventListener(type, fn) { this.listeners.set(type, fn); }
+      close() { if (this.detach) this.detach(); }
+    };
+  }
+
+  // The command route, as a fetch. `log` records when each call starts and ends,
+  // which is how the serialisation below is observed.
+  function fetchOver(rooms, log = []) {
+    return (url, opts) => {
+      const body = JSON.parse(opts.body);
+      log.push(`start ${body.cmd.type}`);
+      return Promise.resolve({
+        json: () => {
+          const answer = rooms.command(body.token, body.cmd);
+          log.push(`end ${body.cmd.type}`);
+          return Promise.resolve(answer);
+        },
+      });
+    };
+  }
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  {
+    const rooms = createRooms();
+    const { seats } = rooms.createRoom({ players: 2 });
+    const [a, b] = seats;
+    const log = [];
+
+    // IT IS NOT READY WHEN IT RETURNS. This is the whole reason src/main.js
+    // stopped constructing the hub at module top level.
+    const pending = createRemote(a.token, { EventSource: streamOver(rooms), fetch: fetchOver(rooms, log) });
+    t.ok("a remote transport is a promise, not a transport", typeof pending.then === "function");
+    const remote = await pending;
+    t.ok("...that resolves once the first snapshot has arrived", !!remote);
+
+    t.eq("it knows its one seat", remote.playerIds(), ["p1"]);
+    t.eq("...by name, off the task-force strip", remote.seat().name, "USA");
+
+    // THE ROUND IS NOT ITS TO DRAIN. Absence, not a stub that returns [] — the
+    // page forks on which name exists.
+    t.ok("a room page is not the host", remote.takeRound === undefined);
+
+    // The handle: the same object the loopback hands out, from the same module.
+    const client = connect(remote, "p1");
+    const h = client.view();
+    t.ok("a seat's handle is an object, not an accessor", h && typeof h === "object");
+    t.eq("...carrying the seat", h.playerId, "p1");
+    t.ok("...and it is data all the way down", !threw(() => assertData({ ...h }, "snapshot")));
+    t.ok("a handle for another seat is a throw, not a shrug", threw(() => remote.view("p2")));
+
+    // A command crosses, is attributed to the token's seat, and answers.
+    let answer = null;
+    const returned = client.send({ type: "ready" }, (res) => { answer = res; });
+    t.ok("send returns nothing", returned === undefined);
+    t.ok("...and the answer has not arrived yet", answer === null);
+    await settle();
+    t.ok("the answer arrives later", answer && answer.ok === true);
+
+    // ...and the handle READS THROUGH to the snapshot the broadcast pushed. A
+    // handle that copied field values would still say `false` here.
+    t.ok("the same handle sees the pushed snapshot",
+      h.taskForce.find((c) => c.id === "p1").ready === true);
+
+    // The repaint the page hangs its hub off. p2 acts; p1 clicked nothing.
+    let repaints = 0;
+    remote.watch(() => { repaints += 1; });
+    rooms.command(b.token, { type: "sellLoot" });
+    t.ok("a snapshot pushed from elsewhere repaints this page", repaints > 0);
+
+    // A command that is not data fails AT THE SEND, synchronously, so the stack
+    // still points at whoever built it. On the server an inbound body has
+    // already been through JSON.parse, so this is now the ONLY place an
+    // outbound command is checked at all.
+    t.ok("a command carrying a live object is refused at the send",
+      threw(() => client.send({ type: "deploy", lead: { seenBy: new Map() } }, () => {})));
+
+    // COMMANDS ARE SERIALISED, one in flight per seat. The loopback's suite
+    // pins "answers arrive in send order" and the page relies on it; `fetch`
+    // does not claim it, so remote.js has to produce it.
+    log.length = 0;
+    const seen = [];
+    client.send({ type: "hire", recruitId: "nobody" }, () => seen.push("a"));
+    client.send({ type: "sellLoot" }, () => seen.push("b"));
+    client.send({ type: "commission", blueprintId: "nobody" }, () => seen.push("c"));
+    await settle();
+    t.eq("answers arrive in send order", seen, ["a", "b", "c"]);
+    t.eq("...because the next command is not sent until the last has answered",
+      log, ["start hire", "end hire", "start sellLoot", "end sellLoot", "start commission", "end commission"]);
+  }
+
+  // ---- a lost command reads as a refused one ------------------------------
+  // Every hub write site renders inside its answer callback, so a send that
+  // never answers leaves a screen mid-click forever — a worse failure than a
+  // wrong one, because nothing on screen says so.
+  {
+    const rooms = createRooms();
+    const { seats } = rooms.createRoom({ players: 1 });
+    const remote = await createRemote(seats[0].token, {
+      EventSource: streamOver(rooms),
+      fetch: () => Promise.reject(new Error("network down")),
+    });
+    let answer = null;
+    connect(remote, "p1").send({ type: "ready" }, (res) => { answer = res; });
+    await settle();
+    t.ok("a send that cannot reach the room still answers", answer !== null);
+    t.ok("...in the session's own refusal shape", answer.ok === false && typeof answer.reason === "string");
+  }
+
+  // ---- a dispatch reaches the page, including one that beat the install ----
+  {
+    const rooms = createRooms();
+    const { seats } = rooms.createRoom({ players: 1 });
+    const tok = seats[0].token;
+    const remote = await createRemote(tok, { EventSource: streamOver(rooms), fetch: fetchOver(rooms) });
+    const client = connect(remote, "p1");
+
+    const v = client.view();
+    await new Promise((d) => client.send({ type: "hire", recruitId: v.recruits[0].id }, d));
+    await new Promise((d) =>
+      client.send({ type: "deploy", leadId: v.leads[0].id, soldierIds: [v.roster[0].id] }, d)
+    );
+    // The round closes BEFORE the page has installed its dispatcher, which is
+    // the ordering src/main.js cannot guarantee: `mount()` installs after the
+    // transport resolves, and a dispatch can already be on the wire.
+    await new Promise((d) => client.send({ type: "ready" }, d));
+
+    const played = [];
+    remote.onDispatch((d) => played.push(d));
+    t.eq("a dispatch that arrived before the page was ready is not lost", played.length, 1);
+    t.ok("...and it is this seat's, whole", played[0].playerId === "p1" && !!played[0].level.platforms);
+    t.ok("...and it is data", !threw(() => assertData(played[0], "dispatch")));
+  }
+
+  // ---- a stale link does not hang the page --------------------------------
+  // EventSource does not retry a non-200, so a page waiting on a room that will
+  // never answer would wait forever. A bad token is the V3 failure a person
+  // will actually hit: a link from a server that has since restarted.
+  {
+    const rooms = createRooms();
+    rooms.createRoom({ players: 1 });
+    let failed = null;
+    try {
+      await createRemote("not-a-token", { EventSource: streamOver(rooms), fetch: fetchOver(rooms) });
+    } catch (e) {
+      failed = e;
+    }
+    t.ok("a stale seat link rejects rather than hanging", failed !== null);
+    t.ok("...saying so in words a player could act on", /room|link|stale/i.test(failed.message));
   }
 
   resetConfig();

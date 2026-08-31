@@ -822,8 +822,20 @@ export default async function run(t) {
     config.leadVisibility = 0; // every lead to exactly one commander
     config.leadCount = 6;
     config.seedLeads = 6;
-    const s = createSession({ players: [{ id: "usa", name: "USA" }, { id: "china", name: "China" }] });
-    const usa = s.view("usa"), china = s.view("china");
+    // REDRAWN UNTIL THE DEAL IS USABLE, and that is not the same as asserting
+    // it. At zero visibility rollVisibility gives each lead to ONE commander by
+    // a coin flip (src/game/state.js), so six leads landing on one board is a
+    // legal roll that happens 1 time in 32 — and every assertion below needs a
+    // lead on each side, so the whole suite threw when it came up. What this
+    // block is about is SHARING; the deal is a precondition it needs, not a
+    // property it pins, and pretending otherwise is what made it flake.
+    let s, usa, china;
+    for (let i = 0; i < 40; i++) {
+      s = createSession({ players: [{ id: "usa", name: "USA" }, { id: "china", name: "China" }] });
+      usa = s.view("usa");
+      china = s.view("china");
+      if (usa.leads.length && china.leads.length) break;
+    }
 
     t.ok("at zero visibility no lead is on two boards",
       !usa.leads.some((a) => china.leads.some((b) => b.id === a.id)));
@@ -1142,6 +1154,16 @@ export default async function run(t) {
   {
     const main = readFileSync(join(ROOT, "src/main.js"), "utf8");
     const body = (main.match(/function swapTo\(id\) \{[\s\S]*?\n\}/) || [""])[0];
+
+    // THE CAPTURE ITSELF, FIRST. It is non-greedy and ends at a brace in column
+    // 0, so it is correct only while `swapTo` is a top-level function — tuck it
+    // inside V2's async boot and the match silently widens to the rest of the
+    // file, at which point every assertion below passes by finding the literal
+    // somewhere else entirely. That is a guard that reports green while guarding
+    // nothing, which is worse than no guard, so the bound is checked before
+    // anything is checked inside it.
+    t.ok("the swapTo capture is bounded to swapTo", !!body && !/function playNext/.test(body));
+
     t.ok("swapTo re-points the hub", /hub\.setView\(/.test(body));
     // FIVE since W1 (tech/multiplayer-session.md): the seat's transport client is
     // a binding too, and a swap that moves the views but not the client sends the
@@ -1168,6 +1190,31 @@ export default async function run(t) {
     // session.command — so a mission started on arrival takes the screen from a
     // render in progress.
     t.ok("...and drains the round on the answer, not on the push", /res\.roundClosed\)\s*runRound\(\)/.test(main));
+
+    // V2 (tech/multiplayer-service.md): the page holds one of two transports and
+    // THE URL DECIDES. The loopback branch is pinned above and must stay exactly
+    // what it was — the single-player URL is the one thing this whole spec
+    // promises not to touch.
+    t.ok("the page picks its transport off the URL",
+      /get\("seat"\)/.test(main) && /createRemote\(/.test(main));
+
+    // The round dispatcher forks, and it forks on WHICH NAME THE TRANSPORT HAS
+    // rather than on a flag the page carries. Both halves are asserted because
+    // either one alone is a page that hangs: without the install a room never
+    // starts its mission, and without the bail a hot-seat drain runs against a
+    // transport that has no round to give.
+    t.ok("a pushed dispatch is played", /transport\.onDispatch\(playPushed\)/.test(main));
+    // AFTER the first paint, and this one is a real bug the ordering caused
+    // rather than a shape being tidied. Installing the dispatcher flushes any
+    // dispatch the server was already holding for this seat — what a page that
+    // reloaded mid-round is owed — and playing one calls showScene("mission").
+    // Installed before the mount's own showScene("hub") + render(), the hub is
+    // painted back over a canvas that has just taken the screen, and the
+    // commander sees their base with a mission running underneath it.
+    t.ok("...and the dispatcher is installed after the first paint, not before",
+      main.indexOf("transport.onDispatch(playPushed)") > main.indexOf("hub.render()"));
+    t.ok("...and a room page does not drain a round it is not host to",
+      /if \(!transport\.takeRound\) return;/.test(main));
   }
 
   resetConfig();

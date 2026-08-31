@@ -26,27 +26,11 @@
 // ---------------------------------------------------------------------------
 
 import { toWire } from "./wire.js";
-
-// One seat's stable handle over its latest snapshot (W3).
-//
-// An OBJECT, not an accessor function: `livingRoster(g)` and `soldierMaxHp(s)`
-// are handed this directly by the hub and by the ambient layer, so it has to
-// look like a campaign. Its identity never changes, because the hub captures it
-// once in its constructor and the ambient layer holds it in a module-level
-// binding — handing out a fresh object per refresh would leave both of them
-// pointed at a snapshot that stops being updated.
-//
-// Every field READS THROUGH on access. That is not a style choice: advanceDay
-// and applyMissionResult REPLACE `state.leads` and `state.roster` rather than
-// mutating them, so a handle that copied field values at refresh time would be
-// stale one command later while still pointing at the right snapshot.
-function makeHandle(read) {
-  const handle = {};
-  for (const key of Object.keys(read())) {
-    Object.defineProperty(handle, key, { get: () => read()[key], enumerable: true });
-  }
-  return handle;
-}
+// The stable handle moved to its own module at V2 (tech/multiplayer-service.md)
+// so that `src/net/remote.js` imports the SAME one. It was module-private here
+// for the whole of W3, and duplicating it would be two transports that behave
+// differently — see src/net/handle.js for what it is and why it reads through.
+import { makeHandle } from "./handle.js";
 
 // `makeSession` is called once, with the inbound round handler. The caller
 // decides what session it is (seats, world, a seeded campaign); the transport
