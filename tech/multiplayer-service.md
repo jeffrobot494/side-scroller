@@ -86,6 +86,54 @@ only at V3 — two seats, real HTTP and real SSE, a deploy, a round closed, one
 dispatch delivered to its owner and four snapshots pushed to the other seat with
 no click.
 
+**As built (V3) — room creation is a fourth URL, not a control in the hub.**
+The slice says "the page shows them" and does not say which page, or what a
+person clicks to get there. `index.html?room=N` opens a room and prints one link
+per seat; it builds no transport, no client, no hub and no ambient layer,
+because nothing on it belongs to a commander yet, and following a link is a
+fresh page load down the `?seat=` branch. The alternative — a "play with a
+friend" button in the bunker — is a decision about what the single-player game
+contains, which is design and not this spec's to make; `?players=N` had already
+established the shape.
+
+**As built (V3) — the slice is two modules plus a fork, not "almost entirely
+`src/main.js`".** "Where the bar cannot see this at all" predicted V3 would land
+where nothing could watch it. Room creation and the seat link are `openRoom` and
+`seatLink` in `src/net/remote.js`, beside `createRemote` because a seat is a link
+and that file is what both makes the link and consumes it. The screen is
+`src/hub/lobby.js`, rendered as an HTML string into a container with one
+delegated click listener — exactly how `src/hub/hub.js` renders — so
+`test/service.test.mjs` mounts it against the harness's mock DOM and reads what a
+person would see. `src/main.js` keeps the URL fork and two guards. This is the
+same correction V2 made and it is worth stating as a rule rather than as a
+surprise twice: **the part of a slice that is a decision goes in a module, and
+what is left in `src/main.js` is wiring.**
+
+**As built (V3) — a seat link REPLACES the lobby's query rather than extending
+it.** The lobby's own URL carries `?room=N`. A link built by appending to it
+would open a fresh room every time somebody followed it, handing each commander
+a private campaign while both believed they were sharing one — a failure that
+looks exactly like the game working, right up until the task-force strip never
+reaches two. `seatLink` sets the whole query and drops the hash, and the suite
+pins the resulting URL literally.
+
+**As built (V3) — hot-seat is hidden by not being built.** The slice says
+"hidden in a room". It was already invisible there, because a room page holds one
+seat and the strip hides itself at one player — but invisible for the wrong
+reason: the control's purpose is swapping between seats *this page holds*, and a
+room page holds one because the others are other people's. `src/main.js`
+constructs it only outside a room and guards the `showScene` call. The call in
+`swapTo` is deliberately left unguarded: `swapTo` is unreachable in a room (its
+only caller swaps when a dispatch's owner is not the seat on screen, and the
+server routes this seat nothing else), so a throw there means the routing has
+broken and is a better outcome than a page that half-swaps to a commander it has
+no client for.
+
+**As built (V3) — the lobby starts at two seats; the registry still allows one.**
+`seatCount` in `src/hub/lobby.js` clamps to 2–6. A room of one commander is
+single-player with a process in the way, and six is `MAX_SEATS`; clamping on the
+screen is what stops it promising seats the answer will not contain.
+
 **V1–V4 own the T2, T3 and T4 rows of `tech/multiplayer.md`**, the way W1–W3
 own T1. Those rows now cite this document rather than describing the work, and
 were rewritten in this spec's own commit for the three reasons below. The
@@ -123,10 +171,11 @@ They land in order, and any prefix is shippable.
 | `src/net/rooms.js` (new) | The room registry: create a room, hold its session, route a command by token, hold each seat's snapshot and each seat's undelivered dispatches. **No HTTP** — it takes and returns values, so the round-closing and broadcast wiring is testable without a listener. DOM-free and storage-free, inherited from `src/game/session.js` |
 | `server.mjs` | Three routes and the process's room registry. Zero dependencies still — node's own `http`, and SSE is text on an open response. **The routes go above the method guard**, not above the static server: lines 81–83 answer 405 to anything that is not GET or HEAD, as the handler's first statement, so a command route added below it is unreachable |
 | `src/net/handle.js` (new) | `makeHandle`, extracted from `src/net/loopback.js` where it is a module-private function. A mechanical move at V2: both transports import the one implementation, because a copy that drifts is two transports that behave differently |
-| `src/net/remote.js` (new) | The browser half of the transport: commands out over `fetch`, snapshots and dispatches in over `EventSource`, the shared stable handle. **Browser-only by design** — see The seam |
-| `src/main.js` | Picks its transport from the URL, and stops constructing the hub at module top level. In a room it plays its own dispatch and never swaps seats; outside one it is what it is today |
+| `src/net/remote.js` (new) | The browser half of the transport: commands out over `fetch`, snapshots and dispatches in over `EventSource`, the shared stable handle. **Browser-only by design** — see The seam. **As built, V3 adds the other two things a browser does with the service, and neither is a transport**: `openRoom` opens one, `seatLink` turns a token into the URL that reaches it. They are here because `createRemote` is what consumes that URL — split across two modules, the two halves of "a seat is a link" could disagree about what one looks like |
+| `src/main.js` | Picks its transport from the URL, and stops constructing the hub at module top level. In a room it plays its own dispatch and never swaps seats; outside one it is what it is today. **V3 adds a fourth URL that is not a game** — `?room=N` mounts the lobby and returns before any transport exists — **and stops building the hot-seat control in a room at all** |
+| `src/hub/lobby.js` (new, V3) | The screen that hands a seat to a person: opens a room, prints one link each, copies one. No session, no view, no client and no commander — the page has not joined anything and may never join this room. It borrows `#hub-root` and the bunker's CSS and nothing else, and renders as an HTML string so a suite can mount it |
 | `src/hub/hub.js` | `_taskforce` learns a seat can be absent (V4). Nothing else — `refresh()` already does the work, and the strip is drivable headlessly, which is what `test/hub-refresh.test.mjs` does |
-| `test/service.test.mjs` (new) | V1's only client, and V1's whole guard: a room, two seats, a command routed by token, a snapshot per seat carrying only its own projection, a round announced to the seat that owns it and to nobody else, and a payload that would not survive the wire refused |
+| `test/service.test.mjs` (new) | V1's only client, and V1's whole guard: a room, two seats, a command routed by token, a snapshot per seat carrying only its own projection, a round announced to the seat that owns it and to nobody else, and a payload that would not survive the wire refused. **It grew past the registry at V2 and again at V3**, both times because the slice's substance turned out to be in a module: the remote transport, then room creation, the seat link, and the lobby screen. V3's chain is the slice end to end — a room opened, a link built for its *second* seat, the token dug back out of that link the way a page does, and China connecting |
 | `test/hub-refresh.test.mjs` | Gains V4's strip: a seat shown absent, and a repaint that still spends none of the nine transient fields. The suite already builds a `makeEl` root, a real transport and two seats, so this is an assertion rather than a new harness |
 | `test/transport.test.mjs` | The loopback's suite. **Unchanged by V1 and V2** — if a slice edits it, the remote transport has been built by loosening the shape rather than by matching it |
 | `test/session.test.mjs` | The `src/main.js` source scan follows the bindings it pins. V2 edits it in the same commit, and **the fragile half is `swapTo`, not `createLoopback`**: the capture is `/function swapTo\(id\) \{[\s\S]*?\n\}/`, which ends at a brace in column 0, so moving `swapTo` inside an async boot silently widens it to a whole-file scan that passes while guarding nothing. It also gains the source scan below |
@@ -193,10 +242,13 @@ hub is **not** on that list — `test/hub-refresh.test.mjs` has imported it sinc
 W3 and drives it off a real transport with two seats, which is what V4's strip
 should be pinned by rather than by playing it. **Nor is `src/net/remote.js`, as
 built** — see the V2 note above; it is a module with injectable browser globals
-and `test/service.test.mjs` drives it. The remaining guards are
-`test/service.test.mjs` for the two halves that are modules, a source scan for
-the `src/main.js` bindings, and **playing it — two browsers, two machines, a
-campaign to the finale** — for the rest of `src/main.js`.
+and `test/service.test.mjs` drives it. **Nor is V3's screen**: `src/hub/lobby.js`
+renders as an HTML string and is mounted against the harness's mock DOM, so what
+a person is shown — one row per seat, each name, a full URL as text as well as a
+button, and the warning that the links are shown once — is read by the suite.
+The remaining guards are `test/service.test.mjs` for everything that is a module,
+a source scan for the `src/main.js` bindings, and **playing it — two browsers,
+two machines, a campaign to the finale** — for the rest of `src/main.js`.
 
 ## Approximations
 
@@ -215,6 +267,7 @@ campaign to the finale** — for the rest of `src/main.js`.
 | 11 | **A room runs on built-in config and built-in content.** `src/game/config.js` and the custom/override stores are localStorage, guarded to no-ops in node, and `src/game/state.js` reads `config` at seventeen sites — `leadCount`, `leadLifeMin`/`Max`, `seedLeads`, `leadArrivalRate`, `bossHighWins`, `healPerDay`, `doomPerDay`, `leadVisibility` — plus `config.dayPerDeploy` in the session. A room therefore paces itself on defaults while each browser keeps its own overrides for mission feel, and `applyWeaponOverrides()` / `listCustomWeapons()` no-op, so a room's armory is built-ins only and a dispatched squad carries built-in weapons. Two of `CLAUDE.md`'s conventions stop holding on the room path: "everything tweakable in the editor", and "cross-page data goes through localStorage" | Nothing, and it is visible: an editor rebalance that changes a solo campaign will not change a room's. Shipping config to the room is a real slice and is not in this spec |
 | 12 | **What a returning seat is owed is only half-specified.** W3 paid for the snapshot half — a client that attaches is sent a fresh view. The other half is a dispatch that was already delivered to a browser that is now gone; V1's registry holds undelivered dispatches per seat and this spec does not say what happens to a delivered one. In practice it is row 10 by another route | Nothing. Named so it is not mistaken for solved by `tech/multiplayer-session.md`'s "reconnection is already paid for by W3" |
 | 13 | **Nothing here is Phase 3.** Both missions do not begin at the same moment, a squad is not visible to a commander on the same level, and there is no lockstep. All three are M2–M4 in `tech/multiplayer.md` | Deliberate, and the same deferral W2 recorded. A builder reading only this document would otherwise think the transport was supposed to provide them |
+| 14 | **A room's links are shown once, and there is no route that lists them.** The lobby is the only place a seat token is ever printed, and closing that tab before sending the other links loses them. That is deliberate rather than unfinished: a `GET /api/rooms/<id>/seats` would hand every seat's token to anyone holding the room id, which is strictly worse than Approximation 3 — a link is a credential, and a room id would become a master key to every credential in the room. The screen says the links are shown once, and what makes it survivable is that opening another room is free, instant and loses nothing (nobody has joined yet) | Nothing, and nothing should. The cost is one wasted room in the registry, which Approximation 4 already covers |
 
 ## Background
 

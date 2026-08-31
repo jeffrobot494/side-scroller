@@ -8,15 +8,19 @@
 // screen.
 //
 // It also owns WHICH player the page is currently showing, and — since V2
-// (tech/multiplayer-service.md) — WHICH TRANSPORT it is holding. Three URLs:
+// (tech/multiplayer-service.md) — WHICH TRANSPORT it is holding. Four URLs:
 //
 //   index.html                the single-player game. A loopback, one seat, the
 //                             switcher hidden, and no process needed to serve it
 //   index.html?players=2      hot-seat. A loopback, several seats in one tab,
 //                             the page as host. Development scaffolding
+//   index.html?room=2         the LOBBY (V3). Opens a room and prints one link
+//                             per seat. It joins nothing: no session, no
+//                             transport, no commander — it hands out the seats
+//                             and the game starts when somebody follows one
 //   index.html?seat=<token>   a ROOM. The session is in server.mjs and this page
-//                             is one commander's end of it. Nothing hands out
-//                             that link until V3 — you build it by hand
+//                             is one commander's end of it. The lobby is what
+//                             hands that link to a person
 //
 // The two transports differ in exactly two ways that reach this file, and both
 // are here rather than hidden behind the seam because they are the page's own
@@ -29,9 +33,10 @@
 
 import { createSession } from "./game/session.js";
 import { createLoopback } from "./net/loopback.js";
-import { createRemote } from "./net/remote.js";
+import { createRemote, openRoom, seatLink } from "./net/remote.js";
 import { connect } from "./net/client.js";
 import { createHotSeat } from "./hub/hotseat.js";
+import { createLobby } from "./hub/lobby.js";
 import { Hub } from "./hub/hub.js";
 import { Mission } from "./mission/mission.js";
 import { createHubAmbient } from "./hub/ambient.js";
@@ -85,6 +90,10 @@ let ambient = null;
 let hub = null;
 let hotSeat = null;
 
+// Whether this page is a seat in a room, decided once in `boot()` off the URL.
+// Read by `mount()` for exactly one thing — see the hot-seat strip there.
+let inRoom = false;
+
 // The seat on screen. FIVE bindings capture a player and all five move together
 // on a swap: the hub's view, the ambient layer's, the command closure below, the
 // seat's client, and the switcher's own idea of the current seat. Re-pointing
@@ -115,8 +124,29 @@ document.body.appendChild(fpsMeter.el);
 // not this page's at all — `server.mjs` holds it — and `createRemote` resolves
 // only once the first snapshot has arrived.
 async function boot() {
-  const token = new URLSearchParams(location.search).get("seat");
+  const params = new URLSearchParams(location.search);
+  const token = params.get("seat");
+
+  // THE LOBBY IS NOT A GAME, and it returns before any of the below. It opens a
+  // room and prints its links; it builds no transport, no client, no hub and no
+  // ambient layer, because nothing on this page belongs to a commander yet. A
+  // seat link is what starts a game, and following one is a fresh page load
+  // down the `token` branch.
+  //
+  // `?seat=` wins if somehow both are present: a token is a real seat in a real
+  // room, and opening a second room on top of it would be strictly worse.
+  if (params.get("room") !== null && !token) {
+    fpsMeter.setSceneVisible(false); // nothing is being drawn to measure
+    createLobby(hubRoot, {
+      players: params.get("room"),
+      open: (spec) => openRoom(spec),
+      link: (t) => seatLink(location.href, t),
+    });
+    return;
+  }
+
   if (token) {
+    inRoom = true;
     transport = await createRemote(token);
     // The seat and its name come off the snapshot, because a room's roster is
     // the server's to state. This page holds ONE commander and never learns of
@@ -179,11 +209,21 @@ function mount() {
   transport.watch(() => hub.refresh());
 
   // The hot-seat strip, above the top bar and outside #hub-root (Hub.render()
-  // replaces that element's innerHTML on every navigation). Hidden at one
-  // player, which is every room and the plain single-player URL alike — V3 is
-  // where a room hides it deliberately rather than incidentally.
-  hotSeat = createHotSeat(roster, swapTo);
-  document.body.insertBefore(hotSeat.el, ambient.el);
+  // replaces that element's innerHTML on every navigation).
+  //
+  // NOT BUILT IN A ROOM (V3). It was already invisible there — a room page holds
+  // one seat and the strip hides itself at one player — but invisible for the
+  // wrong reason: the control's whole purpose is swapping between seats this
+  // page holds, and a room page holds one seat because the OTHERS ARE OTHER
+  // PEOPLE'S. Not constructing it is what says so, and it is why the two call
+  // sites below are guarded rather than the control being handed an empty list.
+  //
+  // Outside a room it is untouched, one player or six: hot-seat is the only way
+  // to drive two commanders on one machine and this spec deliberately does not
+  // delete it. That is the next spec's, once a room is easier to open than
+  // `?players=2` — which is what this slice just made true.
+  hotSeat = inRoom ? null : createHotSeat(roster, swapTo);
+  if (hotSeat) document.body.insertBefore(hotSeat.el, ambient.el);
 
   showScene("hub");
   hub.render();
@@ -225,6 +265,12 @@ function swapTo(id) {
   const view = client.view();
   hub.setView(view); // renders
   ambient.setView(view);
+  // UNGUARDED, unlike the call in showScene, and that is the point: in a room
+  // `hotSeat` is null and this whole function is unreachable, because the only
+  // caller swaps when a dispatch's owner is not the seat on screen and the
+  // server routes this seat nothing else. If it ever runs in a room, the routing
+  // has broken and a thrown TypeError is a better outcome than a page that
+  // half-swaps to a commander it has no client for.
   hotSeat.setPlayer(id);
 }
 
@@ -295,8 +341,9 @@ function showScene(name) {
   ambient.setVisible(!inMission);
   fpsMeter.setSceneVisible(!inMission);
   // No swapping seats mid-mission: the hub is not on screen, and a swap would
-  // re-point it under a result that has not landed yet.
-  hotSeat.setSceneVisible(!inMission);
+  // re-point it under a result that has not landed yet. Absent in a room, where
+  // there is nothing to swap to.
+  if (hotSeat) hotSeat.setSceneVisible(!inMission);
 }
 
 // The wait before the first snapshot is a visible state — a page with nothing on

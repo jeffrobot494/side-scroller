@@ -200,3 +200,59 @@ export function createRemote(token, opts = {}) {
     };
   });
 }
+
+// ---------------------------------------------------------------------------
+// OPENING ONE, AND LINKING TO IT  (V3)
+//
+// The other two things a browser does with the service, and neither of them is
+// a transport: one opens a room, the other turns a token into the URL that
+// reaches it. They live here because `createRemote` is the third — a seat is a
+// link, and this is the file that both makes the link and consumes it. Split
+// across two modules, the two halves of that one sentence could disagree about
+// what a seat's URL looks like.
+// ---------------------------------------------------------------------------
+
+// Open a room and get its seats back, tokens and all. `spec` is what
+// `createRoom` takes — a player count, or an explicit seat list.
+export function openRoom(spec = {}, opts = {}) {
+  const base = opts.base || "";
+  const post = opts.fetch || ((...args) => globalThis.fetch(...args));
+  return post(`${base}/api/rooms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(spec),
+  })
+    .then((r) => r.json())
+    .then(
+      (room) => {
+        if (!room || !Array.isArray(room.seats) || !room.seats.length) {
+          throw new Error("Something answered /api/rooms, but not with a room.");
+        }
+        return room;
+      },
+      // TWO HANDLERS RATHER THAN A `.catch`, so this one cannot swallow the
+      // check above it. What it catches is the ordinary case and the one worth
+      // spelling out: single-player is static files, so the obvious way to run
+      // this repo has no room service in it at all and answers this POST with a
+      // 501 and some HTML. "Failed to fetch" would send somebody looking for a
+      // network fault that isn't there.
+      () => {
+        throw new Error(
+          "No room service answered. A room needs `node server.mjs` running — a plain file server can serve the single-player game but cannot hold a campaign."
+        );
+      }
+    );
+}
+
+// A seat's whole address, built off the page that is handing it out so a room
+// opened on a laptop yields links that name that laptop rather than localhost.
+export function seatLink(href, token) {
+  const url = new URL(href);
+  // THE WHOLE QUERY IS REPLACED, not appended to. This is called from the lobby
+  // page, whose own URL carries `?room=N`, and a seat link that kept that would
+  // open a fresh room every time somebody followed it — handing each commander
+  // their own private campaign while both believed they were playing one.
+  url.search = `seat=${encodeURIComponent(token)}`;
+  url.hash = "";
+  return url.href;
+}

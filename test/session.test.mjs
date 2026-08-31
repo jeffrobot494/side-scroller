@@ -1215,6 +1215,27 @@ export default async function run(t) {
       main.indexOf("transport.onDispatch(playPushed)") > main.indexOf("hub.render()"));
     t.ok("...and a room page does not drain a round it is not host to",
       /if \(!transport\.takeRound\) return;/.test(main));
+
+    // V3: a FOURTH URL, and it is the one that is not a game. `?room=N` opens a
+    // room and prints its links; it builds no transport, no client and no hub,
+    // because nothing on that page belongs to a commander yet. Pinned by index
+    // because the failure is silent in the other direction: a lobby that fell
+    // through to the transport branch would open a room AND join a seat of it,
+    // which looks like it worked right up until the second player arrives at a
+    // room nobody else is in.
+    t.ok("the page opens a lobby off the URL",
+      /get\("room"\)/.test(main) && /createLobby\(hubRoot/.test(main));
+    t.ok("...and the lobby joins nothing",
+      main.indexOf("createLobby(hubRoot") < main.indexOf("createRemote(token)"));
+
+    // Hot-seat is HIDDEN IN A ROOM (V3) by not existing there. It was already
+    // invisible — the strip hides itself at one player — but for the wrong
+    // reason, and the two guards are what make the absence real rather than
+    // incidental. The swapTo call above is deliberately NOT one of them: it is
+    // unreachable in a room, and a throw there beats a half-swap.
+    t.ok("a room page builds no hot-seat control", /hotSeat = inRoom \? null :/.test(main));
+    t.ok("...and the scene toggle survives its absence",
+      /if \(hotSeat\) hotSeat\.setSceneVisible\(/.test(main));
   }
 
   resetConfig();

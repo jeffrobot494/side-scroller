@@ -270,8 +270,10 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   **Since `tech/multiplayer-service.md` V1 it is also the multiplayer service**:
   it imports `src/net/rooms.js` and holds the authoritative campaign for every
   room, over three `/api` routes (open a room, send a command, open a seat's SSE
-  stream). Single-player is unaffected and still needs no process — it is static
-  files and `python3 -m http.server` serves a playable game. Nothing in `src/`
+  stream). **Open one at `index.html?room=2`** (V3) — that page prints one link
+  per seat, and following a link (`index.html?seat=<token>`) is that commander's
+  end of the campaign. Single-player is unaffected and still needs no process —
+  it is static files and `python3 -m http.server` serves a playable game. Nothing in `src/`
   imports `server.mjs`, and no suite does either: it binds a port on load, so
   the routes are guarded by curling them while the rules underneath them are
   guarded by `test/service.test.mjs`.

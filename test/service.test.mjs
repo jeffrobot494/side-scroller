@@ -13,13 +13,22 @@
 // the three routes are guarded by curling them and, from V2, by playing it.
 // That gap is stated in the spec rather than papered over here: what is in this
 // file is the registry, which is exactly why the registry has no HTTP in it.
+//
+// It grew past the registry twice, both times for the same reason — a slice's
+// substance turned out to be in a module rather than in `src/main.js`, and a
+// module can be driven. V2 added the remote transport (`src/net/remote.js`,
+// browser globals injected); V3 adds room creation, the seat link, and the
+// lobby screen (`src/hub/lobby.js`, mounted against the harness's mock DOM).
+// What is left genuinely unwatched is `src/main.js` and the milestone itself.
 // ---------------------------------------------------------------------------
 
 import { createRooms } from "../src/net/rooms.js";
-import { createRemote } from "../src/net/remote.js";
+import { createRemote, openRoom, seatLink } from "../src/net/remote.js";
+import { createLobby, seatCount } from "../src/hub/lobby.js";
 import { connect } from "../src/net/client.js";
 import { assertData } from "../src/net/wire.js";
 import { config, resetConfig } from "../src/game/config.js";
+import { makeEl } from "./harness.mjs";
 
 const threw = (fn) => {
   try {
@@ -462,6 +471,179 @@ export default async function run(t) {
     }
     t.ok("a stale seat link rejects rather than hanging", failed !== null);
     t.ok("...saying so in words a player could act on", /room|link|stale/i.test(failed.message));
+  }
+
+  // -----------------------------------------------------------------------
+  // THE SECOND BROWSER (V3): a room is opened, and a seat is a link.
+  //
+  // V1 built rooms and V2 taught a browser to sit in one; between them the seat
+  // token was something you dug out of a curl. This is the slice that hands it
+  // to a person, and the two halves of it that are not `src/main.js` are both
+  // modules: `openRoom` + `seatLink` in src/net/remote.js, and the lobby screen
+  // in src/hub/lobby.js.
+  //
+  // What this still CANNOT see is the milestone itself — two machines, a real
+  // connection, a campaign played to the finale. That is the playtest.
+  // -----------------------------------------------------------------------
+
+  // The room route, as a fetch. Same shape as `fetchOver` above and separate
+  // from it because this one answers a different route with a different body.
+  function roomFetch(rooms) {
+    return (url, opts) =>
+      Promise.resolve({ json: () => Promise.resolve(rooms.createRoom(JSON.parse(opts.body))) });
+  }
+
+  // ---- a room is opened from the browser, and its seats are live ----------
+  {
+    const rooms = createRooms();
+    const room = await openRoom({ players: 3 }, { fetch: roomFetch(rooms) });
+
+    t.eq("a room opens with the seats that were asked for", room.seats.length, 3);
+    t.ok("...named", room.seats.map((s) => s.name).join(",") === "USA,China,Brazil");
+    t.ok("...and every token is a seat this registry knows",
+      room.seats.every((s) => rooms.seatFor(s.token)));
+    // The tokens are what a person is about to be handed, one each. Two seats
+    // sharing one would be two commanders playing the same base.
+    t.eq("every seat gets its own token", new Set(room.seats.map((s) => s.token)).size, 3);
+  }
+
+  // ---- a static server is the failure a person will actually hit ----------
+  // Single-player is documented as `python3 -m http.server`, so the obvious way
+  // to have this repo open in a browser has no room service in it at all: the
+  // POST comes back 501 with some HTML and `r.json()` rejects. "Failed to fetch"
+  // would send somebody hunting a network fault that is not there.
+  {
+    let failed = null;
+    try {
+      await openRoom({ players: 2 }, { fetch: () => Promise.reject(new Error("Failed to fetch")) });
+    } catch (e) {
+      failed = e;
+    }
+    t.ok("no service means a message naming the process to start",
+      failed !== null && /server\.mjs/.test(failed.message));
+
+    // And the shape check is not swallowed by that handler — a service that
+    // answers with something that is not a room is a different fault.
+    let shape = null;
+    try {
+      await openRoom({}, { fetch: () => Promise.resolve({ json: () => Promise.resolve({ ok: true }) }) });
+    } catch (e) {
+      shape = e;
+    }
+    t.ok("...and an answer that is not a room is not reported as no answer",
+      shape !== null && !/server\.mjs/.test(shape.message));
+  }
+
+  // ---- a seat link replaces the lobby's query, it does not extend it -------
+  // The lobby's own URL is `?room=N`. A seat link that carried that forward
+  // would open a FRESH ROOM every time somebody followed it — handing each
+  // commander a private campaign while both believed they were sharing one,
+  // which is a bug that looks like the game working.
+  {
+    const url = seatLink("http://box.local:8000/index.html?room=3#deploy", "abc123");
+    t.eq("a seat link is the page, plus the seat, and nothing else",
+      url, "http://box.local:8000/index.html?seat=abc123");
+    t.ok("...built off the host that is handing it out, not localhost",
+      url.startsWith("http://box.local:8000/"));
+  }
+
+  // ---- the link round-trips: opened here, joined as a real commander -------
+  // The whole slice in one chain, and the assertion V3 exists for. A room is
+  // opened, a link is made for its SECOND seat, the token is dug back out of
+  // that link the way a browser would, and what connects is China — not the
+  // seat that opened the room.
+  {
+    const rooms = createRooms();
+    const room = await openRoom({ players: 2 }, { fetch: roomFetch(rooms) });
+    const link = seatLink("http://box.local:8000/index.html?room=2", room.seats[1].token);
+    const token = new URL(link).searchParams.get("seat");
+
+    const guest = await createRemote(token, {
+      EventSource: streamOver(rooms),
+      fetch: fetchOver(rooms),
+    });
+    t.eq("following a seat link makes you that commander", guest.seat().id, "p2");
+    t.eq("...by name", guest.seat().name, "China");
+  }
+
+  // ---- two browsers, one campaign -----------------------------------------
+  // Both seats connected off their own links, and what one commander does shows
+  // up on the other's screen with no click on that side. V2 pinned the pushed
+  // snapshot with one remote; this is the same property with the two ends a
+  // person actually has, which is what "two people, two machines, one campaign"
+  // means when nobody is looking at a suite.
+  {
+    const rooms = createRooms();
+    const room = await openRoom({ players: 2 }, { fetch: roomFetch(rooms) });
+    const wire = { EventSource: streamOver(rooms), fetch: fetchOver(rooms) };
+    const link = (i) => new URL(seatLink("http://x/index.html?room=2", room.seats[i].token))
+      .searchParams.get("seat");
+
+    const one = await createRemote(link(0), wire);
+    const two = await createRemote(link(1), wire);
+
+    let repaints = 0;
+    two.watch(() => { repaints += 1; });
+
+    const readyOf = (t2, id) => (t2.view().taskForce.find((p) => p.id === id) || {}).ready;
+    t.ok("before anything, nobody is ready", !readyOf(two, "p1"));
+
+    connect(one, "p1").send({ type: "ready" }, () => {});
+    await settle();
+
+    t.ok("one commander readying shows on the other's screen", readyOf(two, "p1"));
+    t.ok("...without that browser having clicked anything", repaints > 0);
+    // And the boundary still holds with two live ends: the strip is readiness
+    // and nothing else, so a seat still cannot read the other's credits.
+    t.eq("...and still shows only its own campaign", two.view().playerId, "p2");
+  }
+
+  // ---- the lobby prints one link per seat ---------------------------------
+  // The screen itself, mounted against the harness's mock DOM. `src/main.js` is
+  // what wires it to a real fetch and a real location; this is what a person
+  // sees, which is the half that was previously invisible to the bar.
+  {
+    const rooms = createRooms();
+    const root = makeEl();
+    await createLobby(root, {
+      players: "3",
+      open: (spec) => openRoom(spec, { fetch: roomFetch(rooms) }),
+      link: (token) => seatLink("http://box.local:8000/index.html?room=3", token),
+    });
+
+    const html = root.innerHTML;
+    t.eq("the lobby prints one row per seat", (html.match(/class="lobby-seat"/g) || []).length, 3);
+    t.ok("...naming each commander", /USA/.test(html) && /China/.test(html) && /Brazil/.test(html));
+    t.ok("...with a full URL a person can send",
+      (html.match(/http:\/\/box\.local:8000\/index\.html\?seat=/g) || []).length >= 3);
+    // Selectable text AND a copy target: a clipboard write is refused outside a
+    // secure context, and a lobby whose only affordance failed silently would be
+    // a screen with no way to send anybody a seat.
+    t.ok("...as text as well as a button", /<code class="lobby-url">http/.test(html));
+    t.ok("...and says the links are shown once", /reloading/i.test(html));
+  }
+
+  // ---- the lobby is clamped to what a room can actually be ----------------
+  // A room of one commander is single-player with a process in the way, and the
+  // registry caps at six. Clamping here is what stops the screen promising
+  // seats the answer will not contain.
+  {
+    t.eq("a lobby for nobody is a lobby for two", seatCount("1"), 2);
+    t.eq("...as is a lobby for a word", seatCount("lots"), 2);
+    t.eq("...and eight is six", seatCount("8"), 6);
+    t.eq("what is asked for is what is opened", seatCount("4"), 4);
+  }
+
+  // ---- a lobby with no service says so, on the screen ---------------------
+  {
+    const root = makeEl();
+    await createLobby(root, {
+      players: 2,
+      open: () => Promise.reject(new Error("No room service answered. A room needs `node server.mjs`.")),
+    });
+    t.ok("a lobby that cannot open a room prints the reason",
+      /No room opened/.test(root.innerHTML) && /server\.mjs/.test(root.innerHTML));
+    t.ok("...and prints no links it does not have", !/class="lobby-seat"/.test(root.innerHTML));
   }
 
   resetConfig();
