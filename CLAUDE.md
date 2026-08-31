@@ -262,12 +262,19 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   `"type":"module"` so the `.js` source parses as ESM under node) **and so a
   host can find `npm start`**. It introduces no build step, carries no
   dependencies, and the browser ignores it. Don't add dependencies.
-- **`server.mjs` is not part of the game** and nothing in `src/` imports it. It
-  is the one file that lets the repo be *hosted*: a platform runs a process and
-  expects it to bind `$PORT`, not a folder to serve. Zero-dependency node. It
-  emits directory listings on purpose — `src/docmap/app.js` discovers docs by
-  scraping one — which also means the whole repo, `editor.html` included, is
-  readable at a deployed URL.
+- **`server.mjs` is the one file that lets the repo be *hosted*:** a platform
+  runs a process and expects it to bind `$PORT`, not a folder to serve.
+  Zero-dependency node. It emits directory listings on purpose —
+  `src/docmap/app.js` discovers docs by scraping one — which also means the
+  whole repo, `editor.html` included, is readable at a deployed URL.
+  **Since `tech/multiplayer-service.md` V1 it is also the multiplayer service**:
+  it imports `src/net/rooms.js` and holds the authoritative campaign for every
+  room, over three `/api` routes (open a room, send a command, open a seat's SSE
+  stream). Single-player is unaffected and still needs no process — it is static
+  files and `python3 -m http.server` serves a playable game. Nothing in `src/`
+  imports `server.mjs`, and no suite does either: it binds a port on load, so
+  the routes are guarded by curling them while the rules underneath them are
+  guarded by `test/service.test.mjs`.
 - Write suites as `test/<name>.test.mjs` exporting `export default async
   function run(t) { … }` and assert with `t.ok(name, cond)` / `t.eq(name,
   actual, expected)`. Import the game via `../src/...`.

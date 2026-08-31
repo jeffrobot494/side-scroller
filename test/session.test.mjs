@@ -1081,13 +1081,25 @@ export default async function run(t) {
   }
 
   // the session would pass every other suite silently.
+  // `src/net/rooms.js` is here too since V1 (tech/multiplayer-service.md): the
+  // room registry runs in the node process and would be just as silently broken
+  // by a DOM global. And note WHY this is a source scan rather than an import
+  // check — test/run.mjs installs a DOM before any suite runs, so a room that
+  // named `document` would keep test/service.test.mjs green forever.
+  //
+  // The rule splits at V1 and the split is stated rather than assumed:
+  // loopback.js, wire.js, client.js and rooms.js run in both places and name no
+  // browser global. `src/net/remote.js` (V2) runs only in a browser and may name
+  // `fetch` and `EventSource`, so it is deliberately NOT on this list.
   {
-    const src = readFileSync(join(ROOT, "src/game/session.js"), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "");
-    const dom = /\b(document|window|navigator|requestAnimationFrame|cancelAnimationFrame|HTMLElement|Image|alert)\b/.exec(src);
-    t.ok(`session.js names no DOM global${dom ? ` — found "${dom[1]}"` : ""}`, !dom);
-    t.ok("session.js does not reach localStorage directly", !/\blocalStorage\b/.test(src));
+    for (const rel of ["src/game/session.js", "src/net/rooms.js"]) {
+      const src = readFileSync(join(ROOT, rel), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+      const dom = /\b(document|window|navigator|requestAnimationFrame|cancelAnimationFrame|HTMLElement|Image|alert)\b/.exec(src);
+      t.ok(`${rel} names no DOM global${dom ? ` — found "${dom[1]}"` : ""}`, !dom);
+      t.ok(`${rel} does not reach localStorage directly`, !/\blocalStorage\b/.test(src));
+    }
   }
 
   // ---- the session announces that it changed (W3) --------------------------

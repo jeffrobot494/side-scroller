@@ -23,6 +23,25 @@ single-player.
 | **V3** | **The second browser.** Room creation hands back one link per seat, the page shows them, and a seat opened elsewhere is a real commander: two people, two machines, one campaign. Hot-seat is **hidden in a room** and left alive outside one | Yes — and this is the first internet playtest, the milestone `tech/multiplayer.md` puts at the end of T3 |
 | **V4** | **Presence.** A seat with no open stream is shown as gone on every other seat's task-force strip. **The producer is the registry, not the session** — whether a stream is open is a fact about the transport and the session must never learn it, so `src/net/rooms.js` decorates each seat's snapshot with a per-seat connected flag on the way out and `session.view` is untouched. Display only: the design says an absent commander stalls the campaign until they return, so there is no timeout, no forfeit and no way to spend a day without them | Yes, and only visually |
 
+**As built (V1) — the round is buffered, and the spec did not say so.** The
+registry holds the announced round until `session.command` has returned, then
+routes it. The plan said only that undelivered dispatches are held per seat; it
+did not say *when* a delivered one goes out, and pushing it on arrival is wrong:
+`announce` fires inside the session's `run()`, **before** `changed`, so a
+dispatch sent from the announcement would reach the browser ahead of the
+snapshot the same command produced — and a mission would start off a campaign
+one command stale. The loopback never had this problem because the page drained
+the round off the `roundClosed` answer. Two connections mean the ordering has to
+be produced rather than inherited, and the suite pins it: the frame before a
+dispatch is always that seat's snapshot.
+
+**As built (V1) — a room of one is legal, and single-player still does not use
+one.** `createRoom({ players })` takes a count or an explicit seat list and caps
+at six, matching `src/main.js`'s `MAX_PLAYERS`. The commander names are
+duplicated between the two files for the length of V1; V2 is where they
+converge, because that is the slice where `src/main.js` stops naming its own
+seats when the URL carries a room.
+
 **V1–V4 own the T2, T3 and T4 rows of `tech/multiplayer.md`**, the way W1–W3
 own T1. Those rows now cite this document rather than describing the work, and
 were rewritten in this spec's own commit for the three reasons below. The
@@ -41,7 +60,7 @@ They land in order, and any prefix is shippable.
 
 | What | Where | Used for |
 |---|---|---|
-| `toWire` and `assertData` | `src/net/wire.js` | The data rule, unchanged and now load-bearing rather than didactic. Everything crossing a real socket goes through the same walk that has been rejecting Maps in-process since W1 |
+| `toWire` and `assertData` | `src/net/wire.js` | The data rule, unchanged and now load-bearing rather than didactic. Everything crossing a real socket goes through the same walk that has been rejecting Maps in-process since W1. **As built (V1): the two directions are not symmetric, and the plan read as though they were.** Outbound — an answer, a snapshot, a dispatch — is where the walk earns its keep, because a Map reaching `JSON.stringify` on a socket becomes `{}` in silence. Inbound over HTTP it is structurally unreachable: a body has already been through `JSON.parse`, which cannot produce a Map, a function or an `undefined`. The inbound check still bites exactly where it always did — in-process, at the send, with the stack pointing at whoever built the command — which is `src/net/remote.js` from V2 |
 | The transport surface | `src/net/loopback.js` | `send` / `view` / `watch` / `takeRound` / `playerIds` is the shape V2 reimplements. It was written against a socket it did not have; this is the slice that finds out |
 | `connect` | `src/net/client.js` | **Untouched.** Three names, no session, no other seat — a client is already correct for a remote transport, which was the point of pinning it that small |
 | The stable handle | `src/net/loopback.js` | `makeHandle` — one object per seat whose fields read through to the current snapshot. The remote transport needs exactly this, for exactly the reason W3 found: `advanceDay` and `applyMissionResult` replace `leads` and `roster` rather than mutating them. **It is module-private today, so V2 moves it** — see Where the code goes. Duplicating it is the wrong answer: two handles that drift is two transports that behave differently, which is the failure this whole seam exists to prevent |
@@ -142,7 +161,7 @@ browsers, two machines, a campaign to the finale** — for `src/main.js`.
 | 4 | **Rooms are unbounded and never collected.** A room with nobody in it stays in memory until the process restarts | Nothing at this scale. It becomes real the first time this is deployed for anyone but Bo |
 | 5 | **SSE, not WebSocket.** One-way push plus `fetch` for commands, because it is plain HTTP text, needs no dependency and no hand-rolled framing, reconnects by itself in the browser, and survives proxies that would need WebSocket explicitly enabled. The cost is a second connection per seat and no client-to-server streaming — neither of which turn-boundary JSON needs | Swapping to WebSocket later changes `src/net/remote.js` and the routes, and nothing above them. That is the property that makes this the reversible choice |
 | 6 | **Latency is still unproven where it matters.** W1's Approximation 3 said the optimistic control's refusal path could not be observed in-process. V2 is where it can be — and only by playing it, because the suite still drives everything at microtask speed | Playing it on a real connection, which is V3's milestone and not a test |
-| 7 | **A dispatch still carries a generated level.** Unchanged from W2 and now a real payload over a real connection: the seed alone cannot reproduce a level, because `makeLead` draws the length band and the pressure scale at generation time and stores neither. Sizing it is the first thing to measure at V2 | Nothing. `tech/multiplayer-session.md` Approximation 7 is the same debt, now billed |
+| 7 | **A dispatch still carries a generated level.** Unchanged from W2 and now a real payload over a real connection: the seed alone cannot reproduce a level, because `makeLead` draws the length band and the pressure scale at generation time and stores neither. **As built: measured at V1 rather than V2**, because the routes could be driven by hand as soon as they existed — a one-soldier dispatch on a 21-platform level is **~1.6 KB of JSON**, sent once per mission at a turn boundary. The debt is real and the bill is small; nothing here needs the seed-only form | Nothing. `tech/multiplayer-session.md` Approximation 7 is the same debt, now billed |
 | 8 | **The page forks at the round, and stays forked.** A hot-seat page drains the host's whole round and swaps seats between missions; a room page plays the one dispatch that arrived for it. Two shapes in one file until hot-seat is deleted, which this spec deliberately does not do | Nothing but reading it. Recorded because a builder finding two round dispatchers should know it is a temporary state with a named exit, not an oversight |
 | 9 | **The commander a seat plays is fixed by its link.** No picker, no name entry. The design rules out mechanical differences between nations, so this costs a label and not a choice | One screen, whenever it is wanted. Recorded because it is the one answer in this spec that is a default rather than a decision |
 | 10 | **A commander who vanishes mid-mission deadlocks the room, and this spec does not fix it.** `round.flight` is cleared only when the last outstanding `dispatchId` reports (`src/game/session.js`), and while it is set, `ready`, `deploy`, `share` and `release` all refuse with "The round is under way." In one page this was unreachable, because the host played every mission. With two browsers a closed tab means that dispatch never reports and BOTH commanders are locked out for the life of the process. The design's answer — the squad is handed to the AI and fights on as companions of the remaining player — needs another client already simulating that level, which is Phase 3 and does not exist. So a room today has a hazard the hot-seat page did not | Nothing, and that is the point of recording it. It is the first question Phase 3 inherits, and the one thing here a player could hit on a normal evening |
