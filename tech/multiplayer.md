@@ -9,9 +9,9 @@ related: [multiplayer, multiplayer-state]
 
 # Multiplayer
 
-The order the three multiplayer specs land in, and which mockup panel each piece
-puts on screen. A map, not a spec — the seven parts for each phase live in that
-phase's own file, and only the first of the three is written.
+The order the multiplayer specs land in, and which mockup panel each piece puts
+on screen. A map, not a spec — the seven parts live in each phase's own file, and
+all three phases now have one.
 
 `design/multiplayer.mockup.html` is the mockup this references by section
 number. It opens at the top of `design/multiplayer.md` in the design map.
@@ -22,7 +22,7 @@ number. It opens at the top of `design/multiplayer.md` in the design map.
 |---|---|---|
 | 1 | `tech/multiplayer-state.md` | Two people playing a full campaign together in one browser |
 | 2 | `tech/multiplayer-session.md` (the seam) · `tech/multiplayer-service.md` (the process) | Two people playing that campaign from different houses |
-| 3 | `tech/multiplayer-missions.md` (unwritten) | Two squads on the same level at the same time |
+| 3 | `tech/multiplayer-missions.md` | Two squads on the same level at the same time |
 
 Nothing in phase 2 can start before phase 1 lands, and phase 3 needs both. The
 one exception is M1, which depends on nothing and can land whenever.
@@ -73,7 +73,13 @@ turn-boundary JSON, so latency does not matter yet.
 
 ## Phase 3 — joint missions
 
-Provisional, as above.
+Superseded by `tech/multiplayer-missions.md`, which owns these rows as J0–J6 and
+re-cut them four ways: **M4 was not a slice** (contested pickups already work by
+first touch; independent exits is the only weight in it), **the checksum moved to
+the front and asks a different question** (stream-consumption order, answerable
+in one process, not floating point), **the campaign side was missing entirely**
+(two results for one lead is a corruption that already exists), and **the
+dispatch has to change** — a client cannot simulate a squad it was never sent.
 
 | Slice | | Mockup |
 |---|---|---|
@@ -95,4 +101,4 @@ rolling checksum for cross-machine divergence.
 |---|---|
 | The payoff is last | The thing that makes this feel like a game played *with* someone is phase 3, sitting behind a state refactor and a transport. Nothing can reorder that — ownership needs the session and lockstep needs determinism — but M1 was pulled forward for a small win, and has landed |
 | M4 has no mockup | The moment another player takes a pickup you were running for is the entire competitive texture of this design, and nothing visualises it. Partly because it is feel rather than UI, which is also why it is the most likely thing to be wrong the first time it is played |
-| One of three specs does not exist | Phase 3 is named here, not specified. It needs `/spec` run by whoever is about to build it, and its slice table above will move when that happens |
+| Lockstep is assumed, not established | Phase 3's last slice needs two browsers to agree bit-for-bit, and `tech/mission-determinism.md` compares its own golden with a tolerance because floating-point results are implementation-defined. `tech/multiplayer-missions.md` J3 is the probe that answers it, and it is deliberately early — but until it runs, the end of this plan rests on an untested assumption |
