@@ -158,4 +158,12 @@ export default async function run(t) {
   const oneSpec = missionRoster().find((d) => d.id === "husk_charger");
   t.ok("gen: custom roster respected", generateLevel({ seed: 3, difficulty: "high", roster: [oneSpec] }).level.enemies.every((e) => e.type === "husk_charger"));
   t.ok("gen: mission is MISSION-shaped", g1.mission.id && g1.mission.name && g1.mission.brief && g1.mission.difficulty);
+
+  // One vocabulary: a lead carries the difficulty ID, and English is made from
+  // it at render. Storing the label is what let the finale gate compare against
+  // a display string, so this is the guard on that.
+  t.eq("gen: a lead carries the difficulty id, not a label", generateLevel({ seed: 5, difficulty: "high" }).mission.difficulty, "high");
+  t.eq("gen: the boss lead carries one too", boss.mission.difficulty, "extreme");
+  t.eq("gen: the label is derived from the id", ec.labelFor("high"), "High");
+  t.eq("gen: an unknown id labels like it budgets — the first band", ec.labelFor("nonsense"), "Low");
 }

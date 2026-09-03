@@ -180,7 +180,7 @@ export const MISSIONS = [
     name: "Recon: Perimeter Ridge",
     brief:
       "Cmdr. Voss: light contact on the ridge. Confirm the aliens are digging in and pull whatever tech you can off the relay.",
-    difficulty: "Low",
+    difficulty: "low",
     threatReward: 18,
     unlockAfter: [],
   },
@@ -190,7 +190,7 @@ export const MISSIONS = [
     name: "Raid: Supply Depot",
     brief:
       "Voss: they're stockpiling. Hit the depot hard, grab a fusion cell, and get your people back out. Expect real resistance.",
-    difficulty: "Medium",
+    difficulty: "medium",
     threatReward: 26,
     unlockAfter: ["m_recon"],
   },
@@ -200,7 +200,7 @@ export const MISSIONS = [
     name: "Assault: The Hive Core",
     brief:
       "Voss: this is it. We found the local hive. Punch through to the command node and tear it out — end the invasion in this sector.",
-    difficulty: "Extreme",
+    difficulty: "extreme",
     threatReward: 0,
     unlockAfter: ["m_recon", "m_raid"],
     winsCampaign: true,

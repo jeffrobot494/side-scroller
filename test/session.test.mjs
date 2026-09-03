@@ -29,7 +29,7 @@ const fakeLead = (id) => ({
   id,
   name: id,
   brief: "",
-  difficulty: "Medium",
+  difficulty: "medium",
   threatReward: 0,
   winsCampaign: false,
   daysLeft: 9,
@@ -981,7 +981,7 @@ export default async function run(t) {
     const fight = (plan, success = true) => {
       for (const [id, leadId, extra] of plan) {
         if (!world.leads.some((l) => l.id === leadId))
-          world.leads.push({ ...fakeLead(leadId), difficulty: "High", ...extra });
+          world.leads.push({ ...fakeLead(leadId), difficulty: "high", ...extra });
         s.command(id, { type: "deploy", leadId, soldierIds: [s.view(id).roster[0].id] });
       }
       s.command("usa", { type: "ready" });

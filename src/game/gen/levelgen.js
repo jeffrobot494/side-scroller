@@ -70,7 +70,6 @@ const threatRewardFor = (difficulty) =>
     high: config.threatRewardHigh,
     extreme: config.threatRewardExtreme,
   })[difficulty] ?? 20;
-const DIFF_LABEL = { low: "Low", medium: "Medium", high: "High", extreme: "Extreme" };
 
 // ---- main -----------------------------------------------------------------
 // params: { seed, difficulty="medium", length="medium", biome?, roster?,
@@ -150,7 +149,9 @@ export function generateLevel(params = {}) {
   const mission = {
     id,
     name: level.name,
-    difficulty: params.boss ? "Extreme" : DIFF_LABEL[difficulty],
+    // The id, not a label. `difficulty` is already "extreme" for a boss (above),
+    // so there is nothing left for this line to decide.
+    difficulty,
     brief: writeBrief(biome, site, difficulty, params.boss),
     threatReward: params.boss ? 0 : threatRewardFor(difficulty),
     winsCampaign: !!params.boss,

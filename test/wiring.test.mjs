@@ -49,7 +49,7 @@ export default async function run(t) {
   // searching the board for a fresh lead each pass is not something a test can
   // rely on finding.
   for (let i = 0; i < 3; i++) {
-    g.leads.push(fakeLead(`m${i}`, "Medium"));
+    g.leads.push(fakeLead(`m${i}`, "medium"));
     st.applyMissionResult(g, winResult(`m${i}`));
   }
   t.ok("4 wins recorded", g.completedMissions.length === 4);
@@ -64,9 +64,9 @@ export default async function run(t) {
   let boss;
   try {
     g.leads = [
-      fakeLead("h0", "High"),
-      fakeLead("h1", "High"),
-      fakeLead("filler", "Low"),
+      fakeLead("h0", "high"),
+      fakeLead("h1", "high"),
+      fakeLead("filler", "low"),
     ];
     for (let i = 0; i < config.bossHighWins; i++) st.applyMissionResult(g, winResult(`h${i}`));
     t.eq("cleared High leads are counted", g.highWins, config.bossHighWins);
@@ -178,7 +178,7 @@ export default async function run(t) {
       // The finale is exempt because it carries no lifespan at all, so it never
       // reaches the expired list — no special case in the charge.
       const bossOnly = st.createState();
-      bossOnly.leads = [{ ...fakeLead("boss", "High"), daysLeft: null, winsCampaign: true }];
+      bossOnly.leads = [{ ...fakeLead("boss", "high"), daysLeft: null, winsCampaign: true }];
       const bossHealth = bossOnly.campaignHealth;
       st.advanceDay(bossOnly);
       t.eq("the boss lead never expires, so it never charges", bossOnly.campaignHealth, bossHealth);

@@ -603,7 +603,7 @@ export function applyMissionResult(state, result) {
       state.cleared += 1;
       // The gate reads the lead's ADVERTISED threat — what the player agreed to
       // take on — not what the mission turned out to be.
-      if (mission && mission.difficulty === "High") state.highWins += 1;
+      if (mission && mission.difficulty === "high") state.highWins += 1;
     }
     if (mission) {
       state.campaignHealth = Math.min(100, state.campaignHealth + mission.threatReward);

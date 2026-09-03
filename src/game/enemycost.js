@@ -69,6 +69,15 @@ export function budgetFor(difficultyId, scale = 1) {
   return Math.round(band.budget * scale);
 }
 
+// The display name for a difficulty id, and the only place a difficulty becomes
+// English. A lead carries the ID — storing the label instead is what let
+// `mission.difficulty === "High"` gate the finale on a display string, and what
+// made the hub lowercase it straight back to get a CSS class. Unknown ids fall
+// back the same way budgetFor does.
+export function labelFor(difficultyId) {
+  return (BY_ID[difficultyId] || DIFFICULTY[0]).name;
+}
+
 // Check a set of placed enemy defs against a budget. Mirrors weaponcost.validate.
 export function validatePlacement(defs, budget, weapons = WEAPONS) {
   const spent = defs.reduce((s, d) => s + enemyThreat(d, weapons), 0);

@@ -20,6 +20,7 @@
 import { livingRoster } from "../game/state.js";
 import { BLUEPRINTS } from "../game/content.js";
 import { config } from "../game/config.js";
+import { labelFor } from "../game/enemycost.js";
 import { soldierMaxHp } from "../game/soldiers.js";
 
 const LOCATIONS = [
@@ -464,7 +465,7 @@ export class Hub {
     const rows = g.leads.length
       ? g.leads
           .map((m) => {
-            const status = `<span class="tag tag-diff-${m.difficulty.toLowerCase()}">${m.difficulty} threat</span>`;
+            const status = `<span class="tag tag-diff-${m.difficulty}">${labelFor(m.difficulty)} threat</span>`;
             // Leads rot. The boss carries no lifespan and shows no clock.
             const life =
               typeof m.daysLeft === "number"
