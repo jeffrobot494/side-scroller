@@ -235,6 +235,5 @@ export const BLUEPRINTS = [
 export const TUNING = {
   startMoney: 750,
   startCampaignHealth: 60,
-  doomPerDay: 6, // campaign health lost each day the invasion advances
   loseAt: 0,
 };

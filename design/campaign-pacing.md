@@ -73,6 +73,8 @@ the values are settled in play.
 | Lifespan | Rolled per lead when it is generated, within a tunable window — 1 to 3 days |
 | Ticks | On any day advance, whether that day came from a deploy or the time control |
 | On expiry | The lead leaves the board and is not replaced except by the daily roll |
+| Cost on expiry | A lead left to rot charges the doom clock a tunable amount, once per lead |
+| The boss lead | Exempt. It never expires, so it never charges |
 | Deploying spends the lead | Unchanged — win or wipe, that lead is gone |
 
 **Supersedes:** `design/missions.md` lists "Expires in: 4 days" as a lead field.
@@ -109,6 +111,7 @@ a magic constant. Names are indicative — the spec settles the exact keys.
 | `seedLeads` | 1 | 0 – 5 | Leads present on day 1 |
 | `bossHighWins` | 2 | 1 – 6 | High-threat wins required before the finale appears |
 | `dayPerDeploy` | on | on / off | Whether deploying advances the day. A switch on decision 1 itself, kept so the change can be A/B'd in play rather than reverted |
+| `doomPerExpiry` | 0 | 0 – 40 | Campaign health lost per lead that expires. **In addition to `doomPerDay`, never instead of it** — the two sources run together, and either is switched off by setting it to 0. Off by default; the amount is settled in play |
 
 Removed: the flat total-win count that previously gated the finale. It is
 replaced by `bossHighWins`, not kept alongside it.
@@ -136,3 +139,6 @@ rather than discovered as bugs.
 | Fishing for a High lead costs health | If High is not on the board, passing time to find one runs the clock — the intended tension, and also how a campaign can stall |
 | An empty board has one exit | With no leads and no top-up, the only action is to pass days, which costs health and cannot be refused. Nothing currently floors this |
 | The opening lead can rot | The campaign starts with one lead on a 1–3 day fuse and an empty roster. A player who hires slowly, or cannot afford a squad worth deploying, can watch the only mission expire and start the campaign on an empty board |
+| Rot is charged twice | An expiring lead costs the day it rotted on *and* its own expiry charge. The two clocks stack on the same tick by design |
+| A lead you were never shown still charges | The board is shared and so is the clock. A lead visible only to another commander rots against everyone's health, so health can fall further than the leads a player was told about would explain |
+| The finale has no expiry clock | The boss lead is exempt, so once it is on the board the only source of doom is the day |

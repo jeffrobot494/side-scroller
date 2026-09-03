@@ -141,14 +141,18 @@ Nothing on this side is scaled by, or read by, the difficulty model.
 ## Economy and the doom clock
 
 `TUNING` in `src/game/content.js`: `startMoney` 750 · `startCampaignHealth` 60 ·
-`doomPerDay` 6 · `loseAt` 0.
+`loseAt` 0. Every rate below is a config knob; none of them is a constant.
 
 | Event | Campaign health | Where |
 |---|---|---|
-| Day advanced | −6 | `advanceDay()` in `src/game/state.js` — reached from the top-bar control AND from every resolved mission (`config.dayPerDeploy`) |
-| Mission success | + the lead's `threatReward` (16–40), capped at 100 | `applyMissionResult()` |
-| Squad wiped | −10, flat, regardless of difficulty | `applyMissionResult()` |
+| Day advanced | −`doomPerDay` (6) | `advanceDay()` in `src/game/state.js`, reached from the top-bar control and from the ready gate |
+| Lead left to rot | −`doomPerExpiry` (0 — off until turned on), once per expired lead, on the day it expires | `advanceDay()`. **Adds to** the daily tick; the two are not a mode switch. The boss lead carries no lifespan and never charges |
+| Mission success | + the lead's `threatReward`, capped at 100 | `applyMissionResult()`. Stamped at generation from `threatRewardLow`/`Medium`/`High`/`Extreme` (16/24/32/40), so retuning moves the leads that arrive next |
+| Squad wiped | −`doomPerFailure` (10), flat, regardless of difficulty | `applyMissionResult()` |
 | Boss lead cleared | Campaign won outright | `applyMissionResult()` |
+
+All four charges run through one `chargeDoom()` in `src/game/state.js`, which is
+the only reader of `TUNING.loseAt`.
 
 Enemy loot is `threat × config.lootPerThreat` (default 0.5) per kill
 (`src/mission/entities.js`), so a mission's loot income scales linearly with its
@@ -168,6 +172,7 @@ ceiling arrivals never cross), alongside the knobs that spec introduced —
 | Key | Default | Governs |
 |---|---|---|
 | `threatScaleCap` | 2.2 | Ceiling on the pressure multiplier |
+| `threatRewardLow` / `Medium` / `High` / `Extreme` | 16 / 24 / 32 / 40 | Campaign health a win restores, per difficulty. Were constants in `src/game/gen/levelgen.js` until the loss sources became knobs; no design doc states what a win should be worth |
 | `genPlatformDensity` | 0.8 | Fraction of terrain slots that get a structure |
 | `genMaxTiers` | 3 | Max chained jumps a structure climbs |
 | `genStructureSpacing` | 460 | Px of level per terrain slot |
@@ -176,13 +181,6 @@ ceiling arrivals never cross), alongside the knobs that spec introduced —
 | `soldierBaseHp` / `soldierHpPerHealth` | 10 / 2 | Soldier HP curve |
 
 ## Known issues
-
-**`doomPerDay` is duplicated.** The value exists twice: as a config knob in
-`src/game/config.js` (default 6) and as a field on `TUNING` in
-`src/game/content.js` (also 6). `advanceDay()` in `src/game/state.js` reads the
-config one, so that is the value the campaign actually loses each day. The
-`TUNING` copy is now read by nothing — the War Room blurb in `src/hub/hub.js`
-printed it until `tech/campaign-pacing.md` C1 pointed it at the config knob.
 
 `startMoney`, `startCampaignHealth`, and `loseAt` live only on `TUNING` and have
 no config knob, so they do not have this problem.

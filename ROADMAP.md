@@ -95,7 +95,6 @@ description of what the game does today; this is only the index.
 | Issue | Where |
 |---|---|
 | `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
-| `doomPerDay` exists as both a config knob and a `TUNING` field; the `TUNING` copy is now read by nothing | `tech/game-balance.md` "Known issues" |
 | Flyers can grind against terrain — steering pushes in while resolution pushes out | out of scope in `sprints/2026-08.md` |
 | Grounded bodies guess when a steering intent implies a jump, from a 40px heuristic with no terrain knowledge | fixed by `tech/agent-navigation.md` N3 |
 | Two enemy jump impulses disagree, and the reflex hop out-jumps the deliberate jump | fixed by `tech/agent-navigation.md` N2 |

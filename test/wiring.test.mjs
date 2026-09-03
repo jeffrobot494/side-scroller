@@ -132,6 +132,77 @@ export default async function run(t) {
     config.seedLeads = seed;
   }
 
+  // ---- Doom sources: the day, each rotted lead, the wipe ---------------------
+  // design/campaign-pacing.md "Cost on expiry". The two clock sources ADD, so
+  // every case below pins BOTH knobs — a case that sets one and inherits the
+  // other is the one that would pass under a mode switch and lie under a sum.
+  {
+    const arrivals = config.leadArrivalRate, seed = config.seedLeads;
+    const min = config.leadLifeMin, max = config.leadLifeMax;
+    const day = config.doomPerDay, exp = config.doomPerExpiry, fail = config.doomPerFailure;
+    // A full board on a 1-day fuse: every lead rots on the first advance, so
+    // the number of charges is known rather than rolled.
+    config.leadArrivalRate = 0;
+    config.seedLeads = config.leadCount;
+    config.leadLifeMin = config.leadLifeMax = 1;
+    try {
+      const rot = (perDay, perExpiry) => {
+        config.doomPerDay = perDay;
+        config.doomPerExpiry = perExpiry;
+        const g = st.createState();
+        const n = g.leads.length;
+        const before = g.campaignHealth;
+        st.advanceDay(g);
+        return { n, lost: before - g.campaignHealth };
+      };
+
+      const dayOnly = rot(6, 0);
+      t.eq("day only: the whole board rotting costs one daily tick", dayOnly.lost, 6);
+
+      const expiryOnly = rot(0, 10);
+      t.eq("expiry only: the clock answers to leads, not days", expiryOnly.lost, expiryOnly.n * 10);
+
+      const both = rot(6, 10);
+      t.eq("both: the two sources add on the same tick", both.lost, 6 + both.n * 10);
+
+      // The other half of "expiry only" — with no day tick and nothing rotting,
+      // time is free. This is the state the mode exists to reach.
+      config.leadLifeMin = config.leadLifeMax = 9;
+      config.doomPerDay = 0;
+      config.doomPerExpiry = 10;
+      const quiet = st.createState();
+      const held = quiet.campaignHealth;
+      st.advanceDay(quiet);
+      t.eq("expiry only: a day with nothing rotting costs nothing", quiet.campaignHealth, held);
+
+      // The finale is exempt because it carries no lifespan at all, so it never
+      // reaches the expired list — no special case in the charge.
+      const bossOnly = st.createState();
+      bossOnly.leads = [{ ...fakeLead("boss", "High"), daysLeft: null, winsCampaign: true }];
+      const bossHealth = bossOnly.campaignHealth;
+      st.advanceDay(bossOnly);
+      t.eq("the boss lead never expires, so it never charges", bossOnly.campaignHealth, bossHealth);
+      t.ok("...and is still on the board", bossOnly.leads.length === 1);
+
+      // The wipe penalty was hardcoded at 10 until the clock grew a second
+      // source; it is a knob now and this is what proves the knob is read.
+      config.doomPerFailure = 25;
+      const wiped = st.createState();
+      const doomedLead = wiped.leads[0];
+      const wipedHealth = wiped.campaignHealth;
+      st.applyMissionResult(wiped, { success: false, missionId: doomedLead.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] });
+      t.eq("a wipe charges doomPerFailure", wiped.campaignHealth, wipedHealth - 25);
+    } finally {
+      config.leadArrivalRate = arrivals;
+      config.seedLeads = seed;
+      config.leadLifeMin = min;
+      config.leadLifeMax = max;
+      config.doomPerDay = day;
+      config.doomPerExpiry = exp;
+      config.doomPerFailure = fail;
+    }
+  }
+
   // ---- C3: a mission no longer buys its own day (multiplayer-state S4) ------
   // C3 shipped as `if (config.dayPerDeploy) advanceDay(state)` at the end of
   // applyMissionResult. S4 deleted it: two commanders resolving two missions

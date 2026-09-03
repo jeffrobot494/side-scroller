@@ -136,6 +136,22 @@ export default async function run(t) {
   const boss = generateLevel({ seed: 77, boss: true });
   t.ok("gen: boss carries winsCampaign", boss.mission.winsCampaign === true);
   t.ok("gen: boss threatReward 0", boss.mission.threatReward === 0);
+
+  // The win side of the doom clock is a knob per difficulty, not a constant
+  // table — and 0 is a legal setting, which is why the lookup reads `??`.
+  {
+    const med = config.threatRewardMedium;
+    t.eq("gen: a Medium lead carries the Medium reward", generateLevel({ seed: 5, difficulty: "medium" }).mission.threatReward, med);
+    config.threatRewardMedium = 3;
+    try {
+      t.eq("gen: retuning the reward moves newly generated leads", generateLevel({ seed: 5, difficulty: "medium" }).mission.threatReward, 3);
+      config.threatRewardMedium = 0;
+      t.eq("gen: a reward of 0 stays 0, not the unknown-difficulty default", generateLevel({ seed: 5, difficulty: "medium" }).mission.threatReward, 0);
+    } finally {
+      config.threatRewardMedium = med;
+    }
+    t.eq("gen: an unknown difficulty still falls back", generateLevel({ seed: 5, difficulty: "nonsense" }).mission.threatReward, 20);
+  }
   t.ok("gen: boss budget exceeds normal extreme", boss.report.budget > ec.budgetFor("extreme", 1));
   t.ok("gen: boss artifact worth more", boss.level.artifact.value > g1.level.artifact.value);
 

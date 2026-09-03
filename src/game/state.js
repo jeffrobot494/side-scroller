@@ -495,6 +495,24 @@ export function restDay(state) {
   return finished.map((f) => f.name);
 }
 
+// Everything that takes campaign health away goes through here: the day, each
+// lead left to rot, and a failed insertion. The subtraction was never the
+// interesting part — the loss check under it was, and it was copied at every
+// site. A third source is what made one place worth having.
+//
+// Zero is NOT short-circuited: a campaign already sitting at loseAt is lost the
+// next time anything charges it, which is what the day tick has always done.
+function chargeDoom(state, amount) {
+  state.campaignHealth = Math.max(0, state.campaignHealth - amount);
+  if (state.campaignHealth <= TUNING.loseAt) {
+    // The world's field, not the campaign's — a campaign's `outcome` is
+    // computed since S7. Defeat is collective, so this is the right place for
+    // it, and a win already recorded outranks it without any guard here.
+    worldOf(state).outcome = "lost";
+    note(state, "The invasion overran the sector. Campaign lost.");
+  }
+}
+
 export function advanceDay(state) {
   if (state.outcome) return { ok: false, reason: "The campaign is over." };
 
@@ -521,15 +539,12 @@ export function advanceDay(state) {
   // today frees its slot today. Passing time is how the player fishes for work.
   const arrived = arriveLeads(state) || [];
 
-  // Doom clock: the invasion advances whether or not you acted.
-  state.campaignHealth = Math.max(0, state.campaignHealth - config.doomPerDay);
-  if (state.campaignHealth <= TUNING.loseAt) {
-    // The world's field, not the campaign's — a campaign's `outcome` is
-    // computed since S7. Defeat is collective, so this is the right place for
-    // it, and a win already recorded outranks it without any guard here.
-    worldOf(state).outcome = "lost";
-    note(state, "The invasion overran the sector. Campaign lost.");
-  }
+  // Doom clock: the invasion advances whether or not you acted, and again for
+  // every lead nobody took. The two sources ADD — they are not a mode switch,
+  // and either is turned off by setting its knob to 0. Charged after the rot
+  // above, which is the only reason `expired` is in hand; the boss lead is
+  // exempt for free, because it never lands in that list.
+  chargeDoom(state, config.doomPerDay + expired.length * config.doomPerExpiry);
 
   return {
     ok: true,
@@ -605,10 +620,10 @@ export function applyMissionResult(state, result) {
       }
     }
   } else if (mission) {
-    // A failed insertion emboldens the enemy.
-    state.campaignHealth = Math.max(0, state.campaignHealth - 10);
+    // A failed insertion emboldens the enemy. The 10 was hardcoded until the
+    // clock grew a second source and every rate became a knob.
     note(state, `${mission.name} — failed. The squad was wiped.`);
-    if (state.campaignHealth <= TUNING.loseAt) worldOf(state).outcome = "lost";
+    chargeDoom(state, config.doomPerFailure);
   }
 
   // The lead is spent whether or not the squad survived. Nothing refills the

@@ -55,7 +55,21 @@ export const BIOMES = [
   { id: "ruins", verb: "Sweep", sites: ["Old Township", "Collapsed Overpass", "Transit Station"], artifacts: ["Black Box", "Civilian Manifest", "Data Core"] },
 ];
 
-const THREAT_REWARD = { low: 16, medium: 24, high: 32, extreme: 40 };
+// Campaign health a win restores, per difficulty. Knobs rather than a constant
+// table since the three loss sources became knobs — a doom clock tunable in one
+// direction only is half a clock. Read HERE, at generation, because the reward
+// is stamped onto the lead when it appears on the board: retuning moves the
+// leads that arrive next, never the ones already sitting there.
+//
+// `??` and not `||`, so a reward deliberately set to 0 stays 0 instead of
+// falling through to the unknown-difficulty default.
+const threatRewardFor = (difficulty) =>
+  ({
+    low: config.threatRewardLow,
+    medium: config.threatRewardMedium,
+    high: config.threatRewardHigh,
+    extreme: config.threatRewardExtreme,
+  })[difficulty] ?? 20;
 const DIFF_LABEL = { low: "Low", medium: "Medium", high: "High", extreme: "Extreme" };
 
 // ---- main -----------------------------------------------------------------
@@ -138,7 +152,7 @@ export function generateLevel(params = {}) {
     name: level.name,
     difficulty: params.boss ? "Extreme" : DIFF_LABEL[difficulty],
     brief: writeBrief(biome, site, difficulty, params.boss),
-    threatReward: params.boss ? 0 : (THREAT_REWARD[difficulty] || 20),
+    threatReward: params.boss ? 0 : threatRewardFor(difficulty),
     winsCampaign: !!params.boss,
     seed,
   };

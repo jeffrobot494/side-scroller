@@ -222,6 +222,23 @@ under C2.
 | 5 | **`doomPerDay`, `healPerDay` and `threatScaleCap` keep today's defaults.** The design says all three now mean something different and are worth retuning; the values are settled in play, not here | Sprint task 11 (playtest + tune). Shipping a guessed number would look like a decision |
 | 6 | **Lifespans tick in whole days.** No partial-day expiry, so a lead rolled at 1 day survives exactly one day advance | Matches the design's 1–3 day window; a finer clock has nothing to read it |
 
+**As built, after C5 — the clock has a second source.** `design/campaign-pacing.md`
+("Cost on expiry") now charges `doomPerExpiry` for every lead left to rot, and it
+**adds to** `doomPerDay` rather than replacing it: either source is switched off
+by setting its own knob to 0, and there is no mode field. The 10 a wipe cost was
+hardcoded and became `doomPerFailure` in the same change. Three things this spec
+says are affected:
+
+| Claim above | As built |
+|---|---|
+| Approximation 4 — the boss lead does not expire | Now load-bearing twice. It protects the finale from the clock as well as from the gate: a lead with no lifespan never reaches the expired list, so the charge needs no special case for it |
+| "Where the code goes" — the War Room's doom-rate text | The sentence is assembled from whichever sources are non-zero (`_doomLine()` in `src/hub/hub.js`), because printing "advances 6 each day" is a lie the moment the daily knob is 0 |
+| Approximation 5 — the rates keep today's defaults | Still holds. `doomPerExpiry` ships at **0**, so nothing changes until it is turned on; the value is settled in play |
+
+The loss check moved with it. All three charges go through one `chargeDoom()` in
+`src/game/state.js`, which is the only place `TUNING.loseAt` is read now — it was
+copied at each site, and a third source is what made one place worth having.
+
 ## How the board works today
 
 Background, for anyone reading this before the code.

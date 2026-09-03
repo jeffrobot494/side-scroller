@@ -556,6 +556,19 @@ export class Hub {
 
   // ---- War Room -----------------------------------------------------------
 
+  // What the clock costs, in the reader's terms. Two sources that add, either
+  // of which can be 0 — so this is assembled from whichever ones are live
+  // rather than asserting a daily rate the config may have turned off.
+  _doomLine() {
+    const parts = [];
+    if (config.doomPerDay > 0) parts.push(`<strong>${config.doomPerDay}</strong> each day`);
+    if (config.doomPerExpiry > 0) {
+      parts.push(`<strong>${config.doomPerExpiry}</strong> for every lead you let expire`);
+    }
+    if (!parts.length) return "The invasion is not advancing on its own.";
+    return `The invasion advances ${parts.join(" and ")}. Reach 0 and the sector falls.`;
+  }
+
   _warroom() {
     const g = this.game;
     const h = g.campaignHealth;
@@ -572,7 +585,7 @@ export class Hub {
       <section class="squad-block">
         <h2>Campaign Health</h2>
         <div class="big-meter"><span class="big-fill" style="width:${h}%;background:${color}"></span></div>
-        <p class="muted">Sector integrity at <strong>${h}</strong>. The invasion advances <strong>${config.doomPerDay}</strong> each day. Reach 0 and the sector falls. Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
+        <p class="muted">Sector integrity at <strong>${h}</strong>. ${this._doomLine()} Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
         <div class="card-foot">
           <span class="cost">Day ${g.day}</span>
         </div>
