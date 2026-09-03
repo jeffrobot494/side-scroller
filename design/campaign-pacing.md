@@ -73,7 +73,7 @@ the values are settled in play.
 | Lifespan | Rolled per lead when it is generated, within a tunable window — 1 to 3 days |
 | Ticks | On any day advance, whether that day came from a deploy or the time control |
 | On expiry | The lead leaves the board and is not replaced except by the daily roll |
-| Cost on expiry | A lead left to rot charges the doom clock a tunable amount, once per lead |
+| Cost on expiry | A lead left to rot charges the doom clock once, priced by the threat it advertised — ignoring an Extreme lead costs more than ignoring a milk run |
 | The boss lead | Exempt. It never expires, so it never charges |
 | Deploying spends the lead | Unchanged — win or wipe, that lead is gone |
 
@@ -111,7 +111,10 @@ a magic constant. Names are indicative — the spec settles the exact keys.
 | `seedLeads` | 1 | 0 – 5 | Leads present on day 1 |
 | `bossHighWins` | 2 | 1 – 6 | High-threat wins required before the finale appears |
 | `dayPerDeploy` | on | on / off | Whether deploying advances the day. A switch on decision 1 itself, kept so the change can be A/B'd in play rather than reverted |
-| `doomPerExpiry` | 0 | 0 – 40 | Campaign health lost per lead that expires. **In addition to `doomPerDay`, never instead of it** — the two sources run together, and either is switched off by setting it to 0. Off by default; the amount is settled in play |
+| `doomPerExpiryLow` | 5 | 0 – 60 | Campaign health lost when a Low-threat lead expires. **In addition to `doomPerDay`, never instead of it** — the two sources run together, and either is switched off at its own knob |
+| `doomPerExpiryMedium` | 10 | 0 – 60 | As above, Medium |
+| `doomPerExpiryHigh` | 15 | 0 – 60 | As above, High |
+| `doomPerExpiryExtreme` | 20 | 0 – 60 | As above, Extreme. The boss lead never expires, so it is never charged |
 
 Removed: the flat total-win count that previously gated the finale. It is
 replaced by `bossHighWins`, not kept alongside it.

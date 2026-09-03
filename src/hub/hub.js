@@ -563,8 +563,21 @@ export class Hub {
   _doomLine() {
     const parts = [];
     if (config.doomPerDay > 0) parts.push(`<strong>${config.doomPerDay}</strong> each day`);
-    if (config.doomPerExpiry > 0) {
-      parts.push(`<strong>${config.doomPerExpiry}</strong> for every lead you let expire`);
+    // Four tiers, printed as a range — the War Room states the rule, and the
+    // per-tier price belongs on the lead it applies to, in Ops.
+    const tiers = [
+      config.doomPerExpiryLow,
+      config.doomPerExpiryMedium,
+      config.doomPerExpiryHigh,
+      config.doomPerExpiryExtreme,
+    ];
+    const lo = Math.min(...tiers), hi = Math.max(...tiers);
+    if (hi > 0) {
+      parts.push(
+        lo === hi
+          ? `<strong>${hi}</strong> for every lead you let expire`
+          : `<strong>${lo}–${hi}</strong> for every lead you let expire, by threat`
+      );
     }
     if (!parts.length) return "The invasion is not advancing on its own.";
     return `The invasion advances ${parts.join(" and ")}. Reach 0 and the sector falls.`;

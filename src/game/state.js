@@ -502,6 +502,26 @@ export function restDay(state) {
 //
 // Zero is NOT short-circuited: a campaign already sitting at loseAt is lost the
 // next time anything charges it, which is what the day tick has always done.
+// What one rotted lead costs, by the tier it advertised. Keyed on the
+// difficulty ID the lead carries — the same vocabulary `threatRewardFor` reads
+// on the win side (`src/game/gen/levelgen.js`), which is the whole point of the
+// lead carrying an id rather than a label.
+//
+// Read at expiry, NOT stamped at generation like the reward is: a reward is a
+// promise the lead advertised when you took it, an expiry charge is a rule of
+// the world, so retuning moves the board already on screen. Unknown tiers fall
+// back to Low, the way budgetFor and labelFor fall back to the first band.
+function doomForExpiry(lead) {
+  return (
+    {
+      low: config.doomPerExpiryLow,
+      medium: config.doomPerExpiryMedium,
+      high: config.doomPerExpiryHigh,
+      extreme: config.doomPerExpiryExtreme,
+    }[lead.difficulty] ?? config.doomPerExpiryLow
+  );
+}
+
 function chargeDoom(state, amount) {
   state.campaignHealth = Math.max(0, state.campaignHealth - amount);
   if (state.campaignHealth <= TUNING.loseAt) {
@@ -540,11 +560,15 @@ export function advanceDay(state) {
   const arrived = arriveLeads(state) || [];
 
   // Doom clock: the invasion advances whether or not you acted, and again for
-  // every lead nobody took. The two sources ADD — they are not a mode switch,
-  // and either is turned off by setting its knob to 0. Charged after the rot
-  // above, which is the only reason `expired` is in hand; the boss lead is
-  // exempt for free, because it never lands in that list.
-  chargeDoom(state, config.doomPerDay + expired.length * config.doomPerExpiry);
+  // every lead nobody took — that one priced by what it advertised, so ignoring
+  // an Extreme lead costs more than ignoring a milk run. The two sources ADD;
+  // they are not a mode switch, and either is turned off at its own knob.
+  // Charged after the rot above, which is the only reason `expired` is in hand;
+  // the boss lead is exempt for free, because it never lands in that list.
+  chargeDoom(
+    state,
+    expired.reduce((sum, l) => sum + doomForExpiry(l), config.doomPerDay)
+  );
 
   return {
     ok: true,

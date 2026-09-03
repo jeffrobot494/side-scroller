@@ -146,7 +146,7 @@ Nothing on this side is scaled by, or read by, the difficulty model.
 | Event | Campaign health | Where |
 |---|---|---|
 | Day advanced | −`doomPerDay` (6) | `advanceDay()` in `src/game/state.js`, reached from the top-bar control and from the ready gate |
-| Lead left to rot | −`doomPerExpiry` (0 — off until turned on), once per expired lead, on the day it expires | `advanceDay()`. **Adds to** the daily tick; the two are not a mode switch. The boss lead carries no lifespan and never charges |
+| Lead left to rot | −`doomPerExpiryLow`/`Medium`/`High`/`Extreme` (5/10/15/20), once per expired lead, on the day it expires | `advanceDay()`. Priced by the tier the lead advertised and read at expiry, so retuning moves the board on screen. **Adds to** the daily tick; the two are not a mode switch. The boss lead carries no lifespan and never charges |
 | Mission success | + the lead's `threatReward`, capped at 100 | `applyMissionResult()`. Stamped at generation from `threatRewardLow`/`Medium`/`High`/`Extreme` (16/24/32/40), so retuning moves the leads that arrive next |
 | Squad wiped | −`doomPerFailure` (10), flat, regardless of difficulty | `applyMissionResult()` |
 | Boss lead cleared | Campaign won outright | `applyMissionResult()` |

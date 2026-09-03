@@ -134,42 +134,72 @@ export default async function run(t) {
 
   // ---- Doom sources: the day, each rotted lead, the wipe ---------------------
   // design/campaign-pacing.md "Cost on expiry". The two clock sources ADD, so
-  // every case below pins BOTH knobs — a case that sets one and inherits the
-  // other is the one that would pass under a mode switch and lie under a sum.
+  // every case below pins BOTH — a case that sets one and inherits the other is
+  // the one that would pass under a mode switch and lie under a sum.
   {
     const arrivals = config.leadArrivalRate, seed = config.seedLeads;
     const min = config.leadLifeMin, max = config.leadLifeMax;
-    const day = config.doomPerDay, exp = config.doomPerExpiry, fail = config.doomPerFailure;
-    // A full board on a 1-day fuse: every lead rots on the first advance, so
-    // the number of charges is known rather than rolled.
+    const day = config.doomPerDay, fail = config.doomPerFailure;
+    const tiers = {
+      low: config.doomPerExpiryLow, medium: config.doomPerExpiryMedium,
+      high: config.doomPerExpiryHigh, extreme: config.doomPerExpiryExtreme,
+    };
+    const setTiers = (t) => {
+      config.doomPerExpiryLow = t.low; config.doomPerExpiryMedium = t.medium;
+      config.doomPerExpiryHigh = t.high; config.doomPerExpiryExtreme = t.extreme;
+    };
+    const OFF = { low: 0, medium: 0, high: 0, extreme: 0 };
+    const PRICED = { low: 5, medium: 10, high: 15, extreme: 20 };
+    // A full board on a 1-day fuse: every lead rots on the first advance, so the
+    // charge is a known sum rather than a rolled one. The tiers on that board are
+    // still rolled, which is why the expectation is summed from the leads that
+    // actually expired instead of multiplying a count by one price.
     config.leadArrivalRate = 0;
     config.seedLeads = config.leadCount;
     config.leadLifeMin = config.leadLifeMax = 1;
     try {
-      const rot = (perDay, perExpiry) => {
+      const rot = (perDay, t) => {
         config.doomPerDay = perDay;
-        config.doomPerExpiry = perExpiry;
+        setTiers(t);
         const g = st.createState();
-        const n = g.leads.length;
         const before = g.campaignHealth;
-        st.advanceDay(g);
-        return { n, lost: before - g.campaignHealth };
+        const res = st.advanceDay(g);
+        const owed = res.expiredLeads.reduce((sum, l) => sum + t[l.difficulty], 0);
+        return { n: res.expiredLeads.length, owed, lost: before - g.campaignHealth };
       };
 
-      const dayOnly = rot(6, 0);
-      t.eq("day only: the whole board rotting costs one daily tick", dayOnly.lost, 6);
+      const dayOnly = rot(6, OFF);
+      t.ok("day only: a board rotted for free still costs the day", dayOnly.n > 0);
+      t.eq("...and costs exactly one daily tick", dayOnly.lost, 6);
 
-      const expiryOnly = rot(0, 10);
-      t.eq("expiry only: the clock answers to leads, not days", expiryOnly.lost, expiryOnly.n * 10);
+      const expiryOnly = rot(0, PRICED);
+      t.ok("expiry only: the board really did rot", expiryOnly.owed > 0);
+      t.eq("expiry only: the clock answers to leads, not days", expiryOnly.lost, expiryOnly.owed);
 
-      const both = rot(6, 10);
-      t.eq("both: the two sources add on the same tick", both.lost, 6 + both.n * 10);
+      const both = rot(6, PRICED);
+      t.eq("both: the two sources add on the same tick", both.lost, 6 + both.owed);
+
+      // Per tier, with the roll taken out: one lead of each difficulty, all on a
+      // 1-day fuse. 5 + 10 + 15 + 20, and nothing else.
+      config.doomPerDay = 0;
+      setTiers(PRICED);
+      const graded = st.createState();
+      graded.leads = ["low", "medium", "high", "extreme"].map((d) => ({ ...fakeLead(`x_${d}`, d), daysLeft: 1 }));
+      const gradedHealth = graded.campaignHealth;
+      st.advanceDay(graded);
+      t.eq("a rotted lead is priced by the threat it advertised", gradedHealth - graded.campaignHealth, 50);
+
+      // A lead with a tier nothing recognises still charges, at the first band —
+      // the same fallback budgetFor and labelFor take.
+      const odd = st.createState();
+      odd.leads = [{ ...fakeLead("x_odd", "nonsense"), daysLeft: 1 }];
+      const oddHealth = odd.campaignHealth;
+      st.advanceDay(odd);
+      t.eq("an unrecognised tier falls back to Low, not to free", oddHealth - odd.campaignHealth, PRICED.low);
 
       // The other half of "expiry only" — with no day tick and nothing rotting,
       // time is free. This is the state the mode exists to reach.
       config.leadLifeMin = config.leadLifeMax = 9;
-      config.doomPerDay = 0;
-      config.doomPerExpiry = 10;
       const quiet = st.createState();
       const held = quiet.campaignHealth;
       st.advanceDay(quiet);
@@ -198,8 +228,8 @@ export default async function run(t) {
       config.leadLifeMin = min;
       config.leadLifeMax = max;
       config.doomPerDay = day;
-      config.doomPerExpiry = exp;
       config.doomPerFailure = fail;
+      setTiers(tiers);
     }
   }
 

@@ -223,9 +223,10 @@ under C2.
 | 6 | **Lifespans tick in whole days.** No partial-day expiry, so a lead rolled at 1 day survives exactly one day advance | Matches the design's 1–3 day window; a finer clock has nothing to read it |
 
 **As built, after C5 — the clock has a second source.** `design/campaign-pacing.md`
-("Cost on expiry") now charges `doomPerExpiry` for every lead left to rot, and it
-**adds to** `doomPerDay` rather than replacing it: either source is switched off
-by setting its own knob to 0, and there is no mode field. The 10 a wipe cost was
+("Cost on expiry") now charges for every lead left to rot, priced by the tier
+the lead advertised (`doomPerExpiryLow`/`Medium`/`High`/`Extreme`, 5/10/15/20),
+and it **adds to** `doomPerDay` rather than replacing it: either source is
+switched off at its own knob, and there is no mode field. The 10 a wipe cost was
 hardcoded and became `doomPerFailure` in the same change. Three things this spec
 says are affected:
 
@@ -233,7 +234,7 @@ says are affected:
 |---|---|
 | Approximation 4 — the boss lead does not expire | Now load-bearing twice. It protects the finale from the clock as well as from the gate: a lead with no lifespan never reaches the expired list, so the charge needs no special case for it |
 | "Where the code goes" — the War Room's doom-rate text | The sentence is assembled from whichever sources are non-zero (`_doomLine()` in `src/hub/hub.js`), because printing "advances 6 each day" is a lie the moment the daily knob is 0 |
-| Approximation 5 — the rates keep today's defaults | Still holds. `doomPerExpiry` ships at **0**, so nothing changes until it is turned on; the value is settled in play |
+| Approximation 5 — the rates keep today's defaults | **Superseded for this knob.** The expiry charge ships ON, at 5/10/15/20, so every campaign now loses health for work it ignores. `doomPerDay` and the rest are untouched |
 
 The loss check moved with it. All three charges go through one `chargeDoom()` in
 `src/game/state.js`, which is the only place `TUNING.loseAt` is read now — it was
