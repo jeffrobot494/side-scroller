@@ -25,7 +25,7 @@ const K = {
   spreadRelief: 1.5, // more spread → less accurate → cheaper
   // value-effect weights
   slow: 26, // per (1-factor)·duration — crowd control is valuable
-  knockback: 0.03, // per unit of force
+  knockback: 22, // per unit of force (0–1). Set so the arsenal's prices barely moved when the unit changed
   explodeBase: 0.9, // AoE multiplier on its amount
   explodeRadius: 220, // radius that doubles an explosion's value
   chain: 0.85, // per (amount·jumps) — near-guaranteed extra hits
@@ -78,8 +78,9 @@ export const EFFECT_SCHEMA = {
     ],
   },
   knockback: {
-    label: "Knockback", value: true, defaults: { force: 200 },
-    params: [{ key: "force", label: "Force", min: 0, max: 600, step: 10 }],
+    label: "Knockback", value: true, defaults: { force: 0.3 },
+    params: [{ key: "force", label: "Force", min: 0, max: 1, step: 0.05,
+      help: "0–1 of the maximum shove. It is a VELOCITY, so distance goes as the square: 0.5 throws a soldier about a quarter as far as 1.0, not half." }],
   },
   explode: {
     label: "Explode (AoE)", value: true, defaults: { amount: 40, radius: 150 },

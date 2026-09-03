@@ -28,7 +28,7 @@
 // characterization suite (test/locomotion.golden.json) is the guard.
 // ---------------------------------------------------------------------------
 
-import { stepActor, canJump, consumeJump } from "./entities.js";
+import { stepActor, canJump, consumeJump, decayShove } from "./entities.js";
 import { config } from "../game/config.js";
 
 const cx = (e) => e.x + e.w / 2;
@@ -94,9 +94,13 @@ const FLYING = {
       else if (req.kind === "holdRange") ent.vy = 0;
       else if (req.kind === "burst") ent.vy = req.uy * req.speed; // full vertical, undamped on expiry
     }
+    // A flyer never calls stepActor, so it adds and decays the knockback
+    // channel itself. Its vy is re-assigned every frame by the controller
+    // above, which is exactly why the vertical impulse cannot live there.
     const slow = ent.slow && ent.slow.time > 0 ? ent.slow.factor : 1;
-    ent.x += ent.vx * slow * dt;
-    ent.y += ent.vy * slow * dt;
+    ent.x += (ent.vx * slow + (ent.shoveX || 0)) * dt;
+    ent.y += (ent.vy * slow + (ent.shoveY || 0)) * dt;
+    decayShove(ent, dt);
     ent.x = Math.max(0, Math.min(scene.world.width - ent.w, ent.x));
     ent.y = Math.max(-80, Math.min(scene.world.height - ent.h, ent.y));
     face(ent, req.target);
@@ -162,6 +166,8 @@ const SOLDIER = {
     // a live BOX, since the stance above moved the top edge of it.
     ent.vx = s.vx;
     ent.vy = s.vy;
+    ent.shoveX = s.shoveX || 0;
+    ent.shoveY = s.shoveY || 0;
     ent.onGround = s.onGround;
     ent.y = s.y;
     ent.h = s.h;

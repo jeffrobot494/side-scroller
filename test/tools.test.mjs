@@ -1,6 +1,6 @@
 // Editor tools boot headlessly (mount → no throw → dispose), plus a real-AI
 // behavior check that the Enemy Designer preview relies on (a shooter fires).
-import { installDom, makeEl } from "./harness.mjs";
+import { installDom, makeEl, windowListenerCount } from "./harness.mjs";
 import { createWeaponDesigner } from "../src/editor/tools/weapon-designer.js";
 import { createEnemyDesigner } from "../src/editor/tools/enemy-designer.js";
 import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
@@ -64,14 +64,320 @@ export default async function run(t) {
     if (threw) console.log("   ", threw && threw.stack);
   }
 
-  // With a saved EnemySpec in the library, both tools still mount (the Firing
-  // Room renders the "Designed" optgroup; the Designer lists the library row).
+  // ---- Enemy Designer: the preview is a fight you drive (E1) -------------
+  // Driven through the tool's own `drive()` hook, the way the Weapon Designer
+  // is driven through `load()`. The load-bearing part is the keyboard handover:
+  // MissionInput binds WINDOW keydown and preventDefaults every bound key, so a
+  // stage that takes the keys and never releases them would drive the soldier
+  // while you type in the name field or the JSON panel.
   {
-    const { saveEnemySpec } = await import("../src/game/customcontent.js");
+    installDom();
+    const ed = createEnemyDesigner(makeEl(), () => {});
+    t.eq("enemy-designer: mounting takes no window keys", windowListenerCount("keydown"), 0);
+
+    const start = ed.drive({}, 1);
+    const idle = ed.drive({ right: true }, 20);
+    t.ok("enemy-designer: unfocused, holding D does not move the soldier", idle.x === start.x);
+    t.ok("enemy-designer: and fires nothing", ed.drive({ fire: true }, 6).shots === 0);
+
+    t.ok("enemy-designer: focusing the stage takes the keyboard", ed.takeKeys(true) === true);
+    t.eq("enemy-designer: which is one window keydown handler", windowListenerCount("keydown"), 1);
+
+    const ran = ed.drive({ right: true }, 20);
+    t.ok("enemy-designer: focused, D runs the soldier right", ran.x > start.x);
+    const ducked = ed.drive({ crouch: true }, 2);
+    t.ok("enemy-designer: S drops the hitbox to a knee", ducked.h < start.h);
+    const shot = ed.drive({ fire: true }, 4);
+    t.ok("enemy-designer: fire spawns a real projectile", shot.shots > 0);
+    t.ok("enemy-designer: and it costs a round", shot.ammo < start.ammo);
+
+    ed.takeKeys(false);
+    t.eq("enemy-designer: blurring gives the keyboard back", windowListenerCount("keydown"), 0);
+
+    ed.takeKeys(true);
+    ed.dispose();
+    t.eq("enemy-designer: dispose releases the keyboard too", windowListenerCount("keydown"), 0);
+  }
+
+  // ---- Enemy Designer: the tree rail drives the spec (E2) ----------------
+  // spec-tree.js is unit-tested in enemyspec.test.mjs; what belongs HERE is the
+  // tool holding it correctly — that selection survives a structural edit, that
+  // the toolbar reports a refusal instead of failing silently, and that an edit
+  // through the rail reaches the spec the preview and Save actually use.
+  {
+    installDom();
+    const { validateSpec } = await import("../src/game/enemyspec/validate.js");
+    const ed = createEnemyDesigner(makeEl(), () => {});
+
+    t.eq("enemy-designer: the rail opens on the spec node", ed.selected(), "");
+    ed.select("root");
+    const added = ed.op("add", "gun");
+    t.ok("enemy-designer: adding the gun preset selects the new emitter", added.ok && ed.selected() === added.path);
+    t.ok("enemy-designer: the preset seeds a brain that pulls the trigger",
+      ed.tree().some((n) => n.kind === "step" && n.label.startsWith("fire")));
+    t.ok("enemy-designer: and the spec still validates", validateSpec(ed.specNow()).ok);
+
+    const before = ed.tree().length;
+    ed.select("root");
+    ed.op("add", "child");
+    t.ok("enemy-designer: adding a part grows the tree", ed.tree().length > before);
+    const part = ed.selected();
+    ed.op("dup");
+    t.ok("enemy-designer: duplicating selects the copy, not the original", ed.selected() !== part);
+    ed.op("del");
+    t.ok("enemy-designer: deleting selects the container, never nothing",
+      ed.tree().some((n) => n.path === ed.selected()));
+
+    // A refusal must be visible: the toolbar acts on the selection, and the
+    // selection is often something that cannot host the op.
+    ed.select("");
+    const refused = ed.op("del");
+    t.ok("enemy-designer: deleting the spec node is refused, with a reason", !refused.ok && !!refused.error);
+    t.eq("enemy-designer: and changes nothing", ed.selected(), "");
+
+    ed.dispose();
+  }
+
+  // ---- Enemy Designer: the conversation drives the spec (E3) -------------
+  // The pipeline is unit-tested in enemyspec-generate.test.mjs; what belongs
+  // HERE is the tool's half of a turn — that an answer changes nothing, that a
+  // landing swaps the spec and pushes a checkpoint, that a rejection leaves the
+  // enemy alone, and that rewinding is a real undo.
+  {
+    installDom();
     const { TEMPLATE_BY_ID } = await import("../src/game/enemyspec/templates.js");
-    saveEnemySpec(JSON.parse(JSON.stringify(TEMPLATE_BY_ID.tpl_shooter)));
-    mountable(t, "enemy-designer (with library)", createEnemyDesigner);
-    mountable(t, "firing-room (with spec library)", createFiringRoom);
+    const cl = (v) => JSON.parse(JSON.stringify(v));
+    // A stub client, envelope-shaped, queued reply by reply.
+    const queue = [];
+    const client = { chatJSON: async () => { const n = queue.shift(); if (n instanceof Error) throw n; return n; } };
+
+    const ed = createEnemyDesigner(makeEl(), () => {});
+    ed.useClient(client);
+    const started = JSON.stringify(ed.specNow());
+    t.eq("enemy-designer: the transcript starts empty", ed.chat().length, 0);
+    t.eq("enemy-designer: and the loaded spec is v0", ed.version(), 0);
+
+    // 1. A question: prose only, nothing lands.
+    queue.push({ reply: "It never closes because keepDistance holds it at 340.", spec: null });
+    await ed.say("Why does it never fire the mines?");
+    t.eq("enemy-designer: a question is answered", ed.chat().at(-1).kind, "answered");
+    t.eq("enemy-designer: and touches nothing", JSON.stringify(ed.specNow()), started);
+    t.eq("enemy-designer: so no checkpoint is pushed", ed.version(), 0);
+
+    // 2. An edit: the spec swaps, a checkpoint appears, the diff marks nodes.
+    const next = cl(TEMPLATE_BY_ID.tpl_shooter);
+    next.name = "Rebuilt Lurker";
+    queue.push({ reply: "Rebuilt it as a ranged lurker.", spec: next });
+    await ed.say("Rebuild it as a lurker.");
+    t.eq("enemy-designer: an edit lands", ed.chat().at(-1).kind, "edited");
+    t.eq("enemy-designer: the spec is the one that landed", ed.specNow().name, "Rebuilt Lurker");
+    t.eq("enemy-designer: a checkpoint is pushed", ed.version(), 1);
+    t.ok("enemy-designer: and the turn marks what it touched", ed.touched().length > 0);
+    t.ok("enemy-designer: the landed turn carries its version for rewind", ed.chat().at(-1).version === 1);
+
+    // 3. A reply the engine refuses: the transcript keeps it, the enemy does not
+    //    move. Two calls are consumed — the failure buys one repair round.
+    const bad = cl(next);
+    bad.brain.states.fight.tracks[0].steps[1].fire.emitter = "ghost_emitter";
+    queue.push({ reply: "Added a second gun.", spec: cl(bad) });
+    queue.push({ reply: "Fixed.", spec: cl(bad) });
+    await ed.say("Give it a second gun.");
+    t.eq("enemy-designer: a rejected turn says so", ed.chat().at(-1).kind, "failed");
+    t.ok("enemy-designer: with the engine's own error text", (ed.chat().at(-1).errors || []).some((e) => e.includes("ghost_emitter")));
+    t.eq("enemy-designer: and the enemy is untouched", ed.specNow().name, "Rebuilt Lurker");
+    t.eq("enemy-designer: no checkpoint for a failure", ed.version(), 1);
+    t.eq("enemy-designer: one repair round was spent on it", queue.length, 0);
+
+    // 4. Rewind is the undo — and the transcript is NOT truncated, because the
+    //    failures above are the model's context for the next turn.
+    const said = ed.chat().length;
+    t.ok("enemy-designer: rewind to v0 restores the loaded enemy", ed.rewind(0) === true);
+    t.eq("enemy-designer: exactly the spec that was there", JSON.stringify(ed.specNow()), started);
+    t.ok("enemy-designer: the transcript grows rather than shrinking", ed.chat().length > said);
+    t.eq("enemy-designer: v1 is still rewindable", ed.rewind(1), true);
+    t.eq("enemy-designer: back on the landed spec", ed.specNow().name, "Rebuilt Lurker");
+    t.ok("enemy-designer: rewinding to a version that never existed is refused", ed.rewind(99) === false);
+
+    // 5. A dead client cannot leave the tool stuck mid-turn.
+    queue.push(new Error("socket closed"));
+    await ed.say("anything");
+    t.eq("enemy-designer: a thrown client is a failed turn, not a crash", ed.chat().at(-1).kind, "failed");
+    queue.push({ reply: "ok", spec: null });
+    await ed.say("still there?");
+    t.eq("enemy-designer: and the composer still works after it", ed.chat().at(-1).kind, "answered");
+
+    ed.dispose();
+  }
+
+  // ---- Enemy Designer: the one enemy list (E6) ----------------------------
+  // The store and the merge are unit-tested in content.test.mjs and
+  // gen.test.mjs; what belongs HERE is the tool's half — that Save gates on the
+  // acceptance pipeline, that the switch is what reaches missions and reports a
+  // refusal, that loading an entry PINS its id so re-saving updates it instead
+  // of minting a second enemy, and that the list covers what the build ships.
+  {
+    installDom();
+    const es = await import("../src/game/enemyspecs.js");
+    es.resetEnemyList();
+
+    const ed = createEnemyDesigner(makeEl(), () => {});
+    t.eq("enemy-designer: the list opens on what the build ships", ed.roster().length, 7);
+    t.ok("enemy-designer: all of them from the file", ed.roster().every((e) => e.origin === "file"));
+    t.ok("enemy-designer: and all of them in missions", ed.roster().every((e) => e.inMissions));
+
+    // Save gates on accept() — a spec the engine rejects never lands.
+    ed.load({ v: 1, id: "bad_thing", name: "Bad Thing", threat: 40, role: "charger", tier: 1,
+      root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [20, 20], color: "#888" },
+        health: { max: 10 }, motion: { type: "no_such_motion" }, contact: { damage: 5 } } });
+    t.ok("enemy-designer: saving a spec the engine rejects is refused",
+      !ed.save().ok && ed.roster().length === 7);
+
+    const hound = { v: 1, id: "scrap_hound", name: "Scrap Hound", threat: 45, role: "charger", tier: 1, intelligence: 1,
+      root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [24, 22], color: "#909090" },
+        health: { max: 33 }, motion: { type: "chase", speed: 200 }, contact: { damage: 7 } } };
+    ed.load(hound, { pin: true });
+    const saved = ed.save();
+    t.ok("enemy-designer: a complete enemy is saved", saved.ok && saved.id === "scrap_hound" && saved.added);
+    t.eq("enemy-designer: and joins the list", ed.roster().length, 8);
+    // E6a: Save is not the mission gate. The switch is.
+    t.ok("enemy-designer: but not in missions until it is switched on",
+      ed.roster().find((e) => e.id === "scrap_hound").inMissions === false);
+    t.ok("enemy-designer: switching it on passes the mission dry run",
+      ed.toggleRoster("scrap_hound", true, { seconds: 2 }).ok);
+    t.ok("enemy-designer: which the list reflects",
+      ed.roster().find((e) => e.id === "scrap_hound").inMissions === true);
+
+    // Id pinning: renaming a SAVED entry must not mint a second enemy.
+    // The id is re-derived on every edit, so an op is what exercises it.
+    ed.specNow().name = "Scrap Hound Mk II";
+    ed.select("root");
+    ed.op("add", "child");
+    t.eq("enemy-designer: a saved entry keeps its id when renamed", ed.specNow().id, "scrap_hound");
+    const again = ed.save();
+    t.ok("enemy-designer: re-saving a renamed entry updates it", again.ok && !again.added);
+    t.eq("enemy-designer: so there is still one added enemy", ed.roster().length, 8);
+
+    // …but an UNPINNED spec (a template, a chat landing) still follows its name,
+    // or a fresh design would be stuck with the template's id.
+    ed.load({ ...hound, name: "Fresh Thing" });
+    ed.select("root");
+    ed.op("add", "child");
+    t.eq("enemy-designer: an unloaded spec's id follows its name", ed.specNow().id, "fresh_thing");
+
+    // The switch covers what the build ships, and cannot empty the roster.
+    t.ok("enemy-designer: a shipped enemy can be switched off", ed.toggleRoster("husk_charger", false).ok);
+    t.ok("enemy-designer: which the list reflects", ed.roster().find((e) => e.id === "husk_charger").inMissions === false);
+    for (const e of ed.roster()) if (e.inMissions && !e.boss && e.id !== "scrap_hound") ed.toggleRoster(e.id, false);
+    const refusedOff = ed.toggleRoster("scrap_hound", false);
+    t.ok("enemy-designer: emptying the roster is refused, with a reason", !refusedOff.ok && !!refusedOff.error);
+    const refusedBoss = ed.toggleRoster("iron_moth", false);
+    t.ok("enemy-designer: and so is switching off the last boss", !refusedBoss.ok && !!refusedBoss.error);
+
+    ed.dispose();
+    es.resetEnemyList();
+  }
+
+  // ---- Enemy Designer: the Enemies screen (E7) ----------------------------
+  // The list is the tool's front door, so what belongs HERE is that it opens on
+  // it, that every row verb reaches the store, that ＋New and Duplicate produce
+  // enemies whose ids follow their names, and that Export/Import round-trips.
+  {
+    installDom();
+    const es = await import("../src/game/enemyspecs.js");
+    es.resetEnemyList();
+
+    const ed = createEnemyDesigner(makeEl(), () => {});
+    t.eq("enemy-designer: opens on the list, not the workspace", ed.screen(), "list");
+    t.eq("enemy-designer: showing every enemy the build ships", ed.rows().length, 7);
+
+    // Open is what crosses to the workspace, and it pins the id so Save
+    // overwrites rather than minting a second enemy.
+    t.ok("enemy-designer: Open loads the enemy", !!ed.open("lurk_gunner"));
+    t.eq("enemy-designer: and shows the workspace", ed.screen(), "work");
+    t.eq("enemy-designer: with that enemy in hand", ed.specNow().id, "lurk_gunner");
+    t.eq("enemy-designer: and its placement hint beside it", ed.placement(), "shooter");
+    t.eq("enemy-designer: ← Enemies goes back", ed.show("list"), "list");
+
+    // Duplicate is the ONLY way to a new id (approximation 17): the copy is
+    // unpinned, so its id follows the name it is given.
+    ed.duplicate("lurk_gunner");
+    ed.select("root");
+    ed.op("add", "child");
+    t.ok("enemy-designer: a duplicate takes a new id", ed.specNow().id !== "lurk_gunner");
+    t.ok("enemy-designer: derived from its new name", ed.specNow().id.includes("copy"));
+    t.eq("enemy-designer: and inherits the placement hint", ed.placement(), "shooter");
+    t.ok("enemy-designer: saving it adds an eighth enemy", ed.save().ok && ed.roster().length === 8);
+
+    // ＋New: blank and template, both unpinned.
+    ed.create("blank");
+    t.eq("enemy-designer: ＋New blank starts from nothing named", ed.specNow().name, "New Enemy");
+    ed.specNow().name = "Bulwark Drone";
+    ed.select("root");
+    ed.op("add", "child");
+    t.eq("enemy-designer: its id follows the name you give it", ed.specNow().id, "bulwark_drone");
+    ed.create("template", "tpl_shooter");
+    ed.specNow().name = "Perch Thing";
+    ed.select("root");
+    ed.op("add", "child");
+    t.eq("enemy-designer: a template copy does not keep the template's id", ed.specNow().id, "perch_thing");
+
+    // The Placement control writes record state, never the spec.
+    ed.open("husk_charger");
+    t.eq("enemy-designer: placement reads off the record", ed.placement(), "charger");
+    ed.setPlacement("turret");
+    t.ok("enemy-designer: and is not written into the spec", ed.specNow().behavior === undefined);
+    ed.save();
+    t.eq("enemy-designer: it lands with Save",
+      ed.roster().find((e) => e.id === "husk_charger").behavior, "turret");
+    ed.show("list");
+
+    // Filter and the tabs are views of the same list.
+    t.eq("enemy-designer: the filter matches on name and id", ed.filter("husk").length, 1);
+    t.eq("enemy-designer: an empty filter is everything", ed.filter("").length, 8);
+    t.ok("enemy-designer: the Changed tab shows only local entries",
+      ed.tab("changed").length === 2 && ed.tab("changed").includes("husk_charger"));
+    t.eq("enemy-designer: the In-missions tab excludes the new ones", ed.tab("missions").length, 7);
+    ed.tab("all");
+
+    // Export → Import round trip, and a bad spec is skipped and NAMED.
+    const dump = ed.exportList();
+    t.ok("enemy-designer: Export is parseable and carries every enemy",
+      JSON.parse(dump).enemies.length === 8);
+    es.resetEnemyList();
+    ed.show("list");
+    t.eq("enemy-designer: reset is back to the file", ed.rows().length, 7);
+    const back = ed.importList(dump, { seconds: 2 });
+    t.ok("enemy-designer: Import merges it back in", back.ok && back.added === 8);
+    t.eq("enemy-designer: without duplicating the shipped entries", ed.rows().length, 8);
+    // Import must not walk past the mission gate — but re-importing your own
+    // export must not switch the shipped enemies off either.
+    t.ok("enemy-designer: a re-imported shipped enemy keeps its place",
+      ed.roster().find((e) => e.id === "husk_charger").inMissions === true);
+    t.ok("enemy-designer: while an imported NEW enemy arrives out of missions",
+      ed.roster().find((e) => e.id.includes("copy")).inMissions === false);
+
+    const bad = JSON.stringify({ v: 1, enemies: [{ spec: { v: 1, id: "bad_moth", name: "Bad Moth", root: { motion: { type: "no_such_motion" } } } }] });
+    const skip = ed.importList(bad, { seconds: 2 });
+    t.ok("enemy-designer: an unacceptable spec is skipped and named",
+      !skip.ok && skip.skipped.length === 1 && skip.skipped[0].id === "bad_moth");
+    t.ok("enemy-designer: junk is refused without throwing", !ed.importList("not json").ok);
+
+    ed.resetList();
+    t.eq("enemy-designer: Reset my changes drops everything local", ed.rows().length, 7);
+
+    ed.dispose();
+    es.resetEnemyList();
+  }
+
+  // With a local enemy in the list, both tools still mount (the Firing Room
+  // lists it under "Enemy"; the Designer shows its row).
+  {
+    const es = await import("../src/game/enemyspecs.js");
+    const { TEMPLATE_BY_ID } = await import("../src/game/enemyspec/templates.js");
+    es.saveEnemyToList(JSON.parse(JSON.stringify(TEMPLATE_BY_ID.tpl_shooter)));
+    mountable(t, "enemy-designer (with a local enemy)", createEnemyDesigner);
+    mountable(t, "firing-room (with a local enemy)", createFiringRoom);
+    es.resetEnemyList();
   }
 
   // Real AI: an EnemySpec shooter telegraphs then fires (the preview's building

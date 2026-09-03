@@ -19,7 +19,7 @@
 // (doc §10.4: the engine enforces limits regardless).
 // ---------------------------------------------------------------------------
 
-import { overlaps, Projectile } from "../entities.js";
+import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
 import { routeRequest, holdPoint, abortRoute } from "../navigation.js";
 import { tickBrain } from "./brain.js";
@@ -198,8 +198,9 @@ function updateTree(root, ent, dt, scene, ctx) {
         if (!s.alive || !overlaps(ent, s)) continue;
         ctx.damage(s, con.damage, root);
         if (con.knockback) {
-          s.vx += Math.sign(s.x - ent.x) * con.knockback;
-          s.vy -= con.knockback * 0.35;
+          // Same 0–1 unit the weapon effect uses — one word, one meaning.
+          const v = Math.max(0, Math.min(1, con.knockback)) * KNOCKBACK_MAX_V;
+          shoveActor(s, Math.sign(s.x - ent.x) * v, -v * KNOCKBACK_LIFT);
         }
         ent.contactCooldown = con.cooldown;
         if (con.destroySelf) {

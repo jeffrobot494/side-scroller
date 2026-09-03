@@ -131,6 +131,15 @@ export function ctx2d() {
   );
 }
 
+// Window listeners currently installed, by type. Cleared by each installDom().
+const windowListeners = new Map();
+
+// How many handlers are attached to `window` for this event type right now.
+export function windowListenerCount(type) {
+  const set = windowListeners.get(type);
+  return set ? set.size : 0;
+}
+
 // ---- global install -------------------------------------------------------
 // Idempotent; safe to call once per suite. requestAnimationFrame is a noop that
 // returns a handle, so a tool's animation loop draws once at mount and then
@@ -139,9 +148,21 @@ export function ctx2d() {
 export function installDom() {
   globalThis.window = globalThis.window || globalThis;
   // MissionInput binds key handlers on window; provide no-op listeners so tools
-  // that use it mount/dispose cleanly under node.
-  if (!globalThis.addEventListener) globalThis.addEventListener = () => {};
-  if (!globalThis.removeEventListener) globalThis.removeEventListener = () => {};
+  // that use it mount/dispose cleanly under node. They also RECORD, so a suite
+  // can assert that a tool released the keyboard (see windowListeners) — a leak
+  // there is invisible in the browser until the next tool starts twitching.
+  windowListeners.clear();
+  if (!globalThis.addEventListener) {
+    globalThis.addEventListener = (type, fn) => {
+      const set = windowListeners.get(type) || new Set();
+      set.add(fn);
+      windowListeners.set(type, set);
+    };
+    globalThis.removeEventListener = (type, fn) => {
+      const set = windowListeners.get(type);
+      if (set) set.delete(fn);
+    };
+  }
   globalThis.document = { createElement: makeEl, getElementById: () => makeEl(), body: makeEl() };
   globalThis.requestAnimationFrame = () => 1;
   globalThis.cancelAnimationFrame = () => {};

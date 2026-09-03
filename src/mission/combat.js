@@ -22,7 +22,7 @@
 // pierce + homing are read off the projectile here.
 // ---------------------------------------------------------------------------
 
-import { overlaps, STAND_H, CROUCH_H } from "./entities.js";
+import { overlaps, STAND_H, CROUCH_H, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT } from "./entities.js";
 import { config } from "../game/config.js";
 
 function centerOf(a) {
@@ -228,10 +228,14 @@ export function applyEffects(scene, target, effects, owner, ctx, at = {}) {
       case "slow":
         target.slow = { factor: clampNum(fx.factor ?? 1, 0, 1), time: fx.duration };
         break;
-      case "knockback":
-        target.vx += dir * (fx.force || 0);
-        target.vy -= (fx.force || 0) * 0.35;
+      case "knockback": {
+        // `force` is 0–1 of the maximum impulse, NOT a velocity and NOT a
+        // distance: shoveActor divides by the target's mass, so what the weapon
+        // says is what the weapon does, whatever it hits.
+        const v = clampNum(fx.force || 0, 0, 1) * KNOCKBACK_MAX_V;
+        shoveActor(target, dir * v, -v * KNOCKBACK_LIFT);
         break;
+      }
       case "explode": {
         ctx.burst && ctx.burst(cx, cy, "#ff9b4a", 14, 220);
         scene.sound && scene.sound("impact.explode", { x: cx, y: cy });

@@ -122,7 +122,11 @@ gets punished for existing. The trigger is the tech spec's `status`:
 
 One case where another system's spec blocks yours: a spec that is `building` and
 whose `needs:` names a system with a missing or incomplete spec. That is the
-dependency the field exists to express.
+dependency the field exists to express. **A `built` prerequisite is exempt** —
+its code is running, so there is nothing left to be blocked on, and its spec is a
+record rather than a plan anyone is about to follow. Without that exemption every
+spec written after this rule would be held hostage by the age of the specs it
+depends on.
 
 **What a tech spec should not contain:** file-by-file structure, function
 signatures, pseudocode. They read as authority and go stale the moment the

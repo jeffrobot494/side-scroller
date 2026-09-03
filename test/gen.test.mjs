@@ -166,4 +166,109 @@ export default async function run(t) {
   t.eq("gen: the boss lead carries one too", boss.mission.difficulty, "extreme");
   t.eq("gen: the label is derived from the id", ec.labelFor("high"), "High");
   t.eq("gen: an unknown id labels like it budgets — the first band", ec.labelFor("nonsense"), "Low");
+
+  // ---- the enemy list merge (tech/enemy-designer.md, E6) ------------------
+  // The custom-roster case above passes an explicit roster, so it never touches
+  // the merge. THIS is the case that does: nothing is passed, so generateLevel
+  // goes through missionRoster() and whatever the delta store says.
+  {
+    const store = await import("../src/game/enemystore.js");
+    const es = await import("../src/game/enemyspecs.js");
+    es.resetEnemyList();
+
+    // An untouched store is exactly the file — which is what keeps the golden
+    // level file frozen.
+    t.eq("list: a clean store is the six placeable file entries", missionRoster().length, 6);
+    t.ok("list: and every entry came from the file",
+      es.enemyEntries().every((e) => e.origin === "file"));
+    t.eq("list: the file's boss is in the list too", es.enemyEntries().length, 7);
+
+    const mite = () => ({
+      v: 1, id: "rust_mite", name: "Rust Mite", threat: 40, role: "charger", tier: 1, intelligence: 1,
+      root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [22, 20], color: "#a0a0a0" },
+        health: { max: 18 }, motion: { type: "chase", speed: 240 }, contact: { damage: 8 } },
+    });
+
+    // ---- an addition arrives OUT of missions -----------------------------
+    // Save is not the mission gate any more (E6a); the switch is. A brand-new
+    // enemy must therefore not change what generates until it is switched on.
+    const added = es.saveEnemyToList(mite());
+    t.ok("list: a new enemy is added under its own id", added.ok && added.id === "rust_mite" && added.added);
+    t.eq("list: the list grew by one", es.enemyEntries().length, 8);
+    t.eq("list: but the generator roster did not", missionRoster().length, 6);
+    t.ok("list: because it arrived switched off",
+      es.enemyEntries().find((e) => e.id === "rust_mite").inMissions === false);
+    t.ok("list: its placement hint is seeded from its role",
+      es.enemyEntries().find((e) => e.id === "rust_mite").behavior === "charger");
+
+    // ---- the switch is the gate, and it is harsher than Save --------------
+    const broken = mite();
+    broken.id = "broken_mite";
+    broken.root.motion = { type: "no_such_motion" };
+    es.saveEnemyToList(broken); // saving a bad spec is the tool's problem, not the store's
+    const refused = es.setEnemyEnabled("broken_mite", true, { seconds: 2 });
+    t.ok("list: a spec the engine rejects cannot be switched into missions",
+      !refused.ok && !!refused.error);
+    t.eq("list: so the generator roster is unchanged", missionRoster().length, 6);
+    es.deleteEnemy("broken_mite");
+
+    const on = es.setEnemyEnabled("rust_mite", true, { seconds: 2 });
+    t.ok("list: a valid spec passes the mission dry run", on.ok && on.enabled);
+    t.eq("list: and the roster grew by one", missionRoster().length, 7);
+    t.ok("list: applyEnemyRoster installs it for the loader",
+      es.applyEnemyRoster().includes("rust_mite") && !!missionSpecById.rust_mite);
+
+    // A roster of ONLY the custom enemy must actually place it — the proof the
+    // merge reaches generation and not just the list.
+    for (const e of missionRoster()) if (e.id !== "rust_mite") es.setEnemyEnabled(e.id, false);
+    const only = generateLevel({ seed: 31, difficulty: "high" });
+    t.ok("list: a generated mission places the custom enemy",
+      only.level.enemies.length > 0 && only.level.enemies.every((e) => e.type === "rust_mite"));
+    t.ok("list: and every placed type still resolves to a spec", only.level.enemies.every((e) => missionSpecById[e.type]));
+
+    // ---- the roster is never empty ---------------------------------------
+    const last = es.setEnemyEnabled("rust_mite", false);
+    t.ok("list: switching off the last placeable entry is refused, with a reason", !last.ok && !!last.error);
+    t.ok("list: so the roster still has something in it", missionRoster().length >= 1);
+    const lastBoss = es.setEnemyEnabled("iron_moth", false);
+    t.ok("list: and switching off the last boss is refused too", !lastBoss.ok && !!lastBoss.error);
+
+    // ---- editing a FILE entry, and taking it back ------------------------
+    const tougher = structuredClone(es.ENEMY_FILE.find((r) => r.spec.id === "husk_charger").spec);
+    tougher.threat = 999;
+    es.saveEnemyToList(tougher);
+    const edited = es.enemyEntries().find((e) => e.id === "husk_charger");
+    t.ok("list: editing a shipped enemy marks it edited, not duplicated",
+      edited.origin === "edited" && edited.threat === 999 && es.enemyEntries().length === 8);
+    t.ok("list: the file's own export is untouched by the edit",
+      es.ENEMY_FILE.find((r) => r.spec.id === "husk_charger").spec.threat === 50);
+    es.revertEnemy("husk_charger");
+    t.ok("list: revert puts the shipped version back",
+      es.enemyEntries().find((e) => e.id === "husk_charger").origin === "file");
+    // An edit that no longer DIFFERS is dropped on read, so the mark clears
+    // itself once the file catches up.
+    es.saveEnemyToList(structuredClone(es.ENEMY_FILE[0].spec));
+    t.ok("list: an edit identical to the file reads as the file again",
+      es.enemyEntries().find((e) => e.id === "husk_charger").origin === "file");
+
+    // ---- deleting a file entry, and the loader's fallback ----------------
+    es.setEnemyEnabled("husk_charger", true, { seconds: 2 });
+    t.ok("list: the shipped fallback enemy can be deleted", es.deleteEnemy("husk_charger").ok);
+    t.ok("list: and is gone from the list", !es.enemyEntries().some((e) => e.id === "husk_charger"));
+    t.ok("list: so loadMission's fallback is a surviving enemy",
+      !!es.cheapestMissionSpec() && es.cheapestMissionSpec().id !== "husk_charger");
+
+    // ---- everything off falls back to the file ---------------------------
+    // setEnemyEnabled refuses to get here, so this is a store written by hand:
+    // the fallback must hold anyway, or missions generate with no enemies.
+    es.deleteEnemy("rust_mite");
+    for (const e of es.enemyEntries()) store.setInMissions(e.id, false);
+    t.eq("list: an all-off store falls back to the file's placeable entries", missionRoster().length, 6);
+    t.ok("list: which still generates enemies", generateLevel({ seed: 32, difficulty: "high" }).level.enemies.length > 0);
+
+    es.resetEnemyList();
+    t.eq("list: reset is back to the untouched six", missionRoster().length, 6);
+    t.ok("list: and nothing local is left", es.enemyEntries().every((e) => e.origin === "file"));
+    t.eq("list: with an empty delta store", Object.keys(store.readDeltas().records).length, 0);
+  }
 }

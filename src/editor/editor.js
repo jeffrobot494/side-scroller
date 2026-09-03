@@ -23,6 +23,7 @@ import { createBehaviorLab } from "./tools/behavior-lab.js";
 import { createControlsMapper } from "./tools/controls-mapper.js";
 import { createSoundPage } from "./sound-page.js";
 import { applyWeaponOverrides } from "../game/weaponoverrides.js";
+import { applyEnemyRoster } from "../game/enemyspecs.js";
 import { audio } from "../audio/engine.js";
 
 // Built-in weapons the Weapon Designer has overridden. The editor page needs
@@ -30,6 +31,11 @@ import { audio } from "../audio/engine.js";
 // ARSENAL straight from arsenal.js, so without this the tool that authored an
 // override would sit on a page that doesn't show it.
 applyWeaponOverrides();
+
+// And the enemy roster, for the same reason: the Level Generator previews
+// placements without ever building a game state, so without this the tool that
+// admitted an enemy would sit on a page that never places it.
+applyEnemyRoster();
 
 const root = document.getElementById("editor");
 let tab = "settings";

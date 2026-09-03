@@ -43,7 +43,7 @@ const RAW = [
     effects: [{ kind: "damage", amount: 10 }, { kind: "pierce", count: 1 }] },
   { id: "bulldog", name: "Bulldog", tier: 1, fireRate: 2, auto: false, spread: 0.01, magazine: 8, reloadTime: 1.8,
     projectile: { speed: 880, w: 16, h: 6, color: "#ffd36a", life: 0.9, shape: "bullet" },
-    effects: [{ kind: "damage", amount: 26 }, { kind: "knockback", force: 200 }] },
+    effects: [{ kind: "damage", amount: 26 }, { kind: "knockback", force: 0.3 }] },
 
   // ---- Tier II · Advanced (≤180) ----------------------------------------
   { id: "burst_rifle", name: "Burst Rifle", tier: 2, fireRate: 8, auto: true, spread: 0.03, magazine: 30, reloadTime: 1.9,
@@ -51,7 +51,7 @@ const RAW = [
     effects: [{ kind: "damage", amount: 16 }] },
   { id: "combat_shotgun", name: "Combat Shotgun", tier: 2, fireRate: 1.5, auto: false, spread: 0.06, magazine: 8, reloadTime: 2.4,
     projectile: { speed: 860, w: 8, h: 5, color: "#ffc060", life: 0.55, shape: "pellet" },
-    effects: [{ kind: "damage", amount: 9 }, { kind: "knockback", force: 150 }, { kind: "pellets", count: 6, spread: 0.14 }] },
+    effects: [{ kind: "damage", amount: 9 }, { kind: "knockback", force: 0.2 }, { kind: "pellets", count: 6, spread: 0.14 }] },
   { id: "incinerator", name: "Incinerator", tier: 2, fireRate: 5, auto: true, spread: 0.02, magazine: 50, reloadTime: 2.2,
     projectile: { speed: 820, w: 14, h: 6, color: "#ff8a3a", life: 0.9, gravity: 0.2, shape: "wave" },
     effects: [{ kind: "damage", amount: 8 }, { kind: "burn", dps: 6, duration: 3 }] },
@@ -69,9 +69,9 @@ const RAW = [
   // wrong for how the weapon FIRES.
   { id: "concussion_gun", name: "Concussion Gun", tier: 2, fireRate: 2.5, auto: false, spread: 0.02, magazine: 6, reloadTime: 2.2,
     projectile: { speed: 820, w: 18, h: 8, color: "#ffd0a0", life: 0.9, gravity: 0.2, shape: "wave" },
-    // "wave" is a light stream hiss; a 380-knockback slug needs to thump.
+    // "wave" is a light stream hiss; the heaviest slug in the arsenal needs to thump.
     sounds: { fire: "weapon.fire.pellet" },
-    effects: [{ kind: "damage", amount: 30 }, { kind: "knockback", force: 380 }] },
+    effects: [{ kind: "damage", amount: 30 }, { kind: "knockback", force: 0.5 }] },
   { id: "hornet_smg", name: "Hornet SMG", tier: 2, fireRate: 9, auto: true, spread: 0.05, magazine: 28, reloadTime: 1.9,
     projectile: { speed: 760, w: 9, h: 5, color: "#d0ff8a", life: 1.4, shape: "missile" },
     // Shaped "missile" because it homes, but it empties 9 rounds a second — the
@@ -103,7 +103,7 @@ const RAW = [
     effects: [{ kind: "damage", amount: 12 }, { kind: "explode", amount: 55, radius: 170 }, { kind: "homing", turn: 3 }] },
   { id: "devastator", name: "Devastator", tier: 3, fireRate: 1.5, auto: false, spread: 0.01, magazine: 5, reloadTime: 2.6,
     projectile: { speed: 1200, w: 20, h: 8, color: "#ffbf3a", life: 1.1, shape: "bolt" },
-    effects: [{ kind: "damage", amount: 70 }, { kind: "knockback", force: 250 }, { kind: "pierce", count: 2 }] },
+    effects: [{ kind: "damage", amount: 70 }, { kind: "knockback", force: 0.4 }, { kind: "pierce", count: 2 }] },
 ];
 
 // ---- Enemy weapons ---------------------------------------------------------
