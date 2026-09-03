@@ -53,6 +53,24 @@ export default async function run(t) {
     const cyclic = { a: 1 };
     cyclic.self = cyclic;
     t.ok("wire: a cycle is refused rather than hanging", threw(() => assertData(cyclic)));
+    // ...and a SHARED reference is not a cycle, which is the distinction the
+    // cycle check missed until a real round hit it. `resolveWeapon` hands every
+    // soldier the same armory object, so the first two-soldier squad carrying
+    // one weapon put that object at two places in the round and the walk — which
+    // remembered every object it had ever seen, not just this branch's ancestors
+    // — called the second one a cycle and refused the deploy. It stringifies
+    // fine; the copy simply has two of them.
+    const shared = { id: "carbine" };
+    t.ok("wire: one object at two places is data, not a cycle",
+      !threw(() => assertData([{ weapon: shared }, { weapon: shared }], "round")));
+    const twice = toWire([{ weapon: shared }, { weapon: shared }]);
+    t.ok("...and each reference arrives as its own copy", twice[0].weapon !== twice[1].weapon);
+    // The DAG above shares a leaf; this shares a subtree with a cycle INSIDE it,
+    // so "seen it before" and "it is its own ancestor" cannot be conflated.
+    const loop = { name: "level" };
+    loop.back = loop;
+    t.ok("wire: a shared subtree that really does loop is still refused",
+      threw(() => assertData([{ level: loop }, { level: loop }])));
 
     t.ok("wire: plain data passes", !threw(() => assertData({ a: [1, "x", null, true], b: { c: {} } })));
     // The error names the field, because which one it was is the useful half.
