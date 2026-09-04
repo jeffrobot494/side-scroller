@@ -163,13 +163,45 @@ function broadcast() {
   const s = snapshot(world);
   const events = pendingEvents;
   pendingEvents = [];
+  const hb = healthReport();
   for (const c of clients.values()) {
     // Each client gets its OWN ack, so the snapshot is per-recipient even
     // though the world half of it is identical for everybody. Nobody is sent a
     // filtered view: with one screen-sized arena there is nothing to hide, and
     // interest management would be a second variable in a latency experiment.
-    c.conn.send(encode({ t: "snap", tick, st, ack: c.ack, ...s, events }));
+    c.conn.send(encode({ t: "snap", tick, st, ack: c.ack, ...s, events, hp: hb }));
   }
+}
+
+// --- tick health -----------------------------------------------------------
+//
+// A shared-CPU host deschedules processes. When that happens the sim falls
+// behind, the hitch reaches the client, and it looks exactly like a network
+// problem — so on a deployed run the FIRST thing to rule out is the host, not
+// the path. These three numbers ride along in every snapshot for that reason.
+//
+//   late  worst milliseconds a step ran behind its deadline, this window
+//   sat   times the catch-up hit its 5-step ceiling and gave up (a real stall)
+//   hz    steps actually executed per second, against a target of TICK_HZ
+//
+// The client prints them next to RTT. If `late` is small and RTT is ugly, the
+// network is the story. If `late` is large, nothing else in the readout means
+// anything yet.
+let health = { late: 0, sat: 0, steps: 0, since: Date.now(), hz: TICK_HZ };
+
+function healthReport() {
+  const now = Date.now();
+  const dt = (now - health.since) / 1000;
+  if (dt >= 1) {
+    health.hz = health.steps / dt;
+    health.steps = 0;
+    health.since = now;
+    // Decay rather than reset: a stall two seconds ago is still worth seeing
+    // while you are reading the number that it caused.
+    health.late *= 0.5;
+    health.sat = 0;
+  }
+  return { late: Math.round(health.late), sat: health.sat, hz: Math.round(health.hz * 10) / 10 };
 }
 
 // A deadline-corrected fixed step. If the process is descheduled we catch up,
@@ -181,11 +213,16 @@ let sinceSnapshot = 0;
 
 function loop() {
   const now = Date.now();
+  // How far past its deadline this step is. On an idle machine it is under a
+  // millisecond; on a busy container it is the whole story.
+  const late = now - next;
+  if (late > health.late) health.late = late;
   let steps = 0;
   while (now >= next && steps < 5) {
     step();
     next += STEP_MS;
     steps++;
+    health.steps++;
     sinceSnapshot++;
     const every = Math.max(1, Math.round(TICK_HZ / snapshotHz));
     if (sinceSnapshot >= every) {
@@ -193,11 +230,32 @@ function loop() {
       broadcast();
     }
   }
-  if (steps === 5) next = Date.now(); // gave up catching up; resync
+  if (steps === 5) {
+    health.sat++;
+    next = Date.now(); // gave up catching up; resync
+  }
   setTimeout(loop, Math.max(0, next - Date.now()));
 }
 
 const server = createServer(async (req, res) => {
+  // One JSON line about this process, so several deployments can be compared
+  // with curl rather than by opening a tab at each one and squinting.
+  if ((req.url || "").split("?")[0] === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        clients: clients.size,
+        fliers: world.enemyCount,
+        tick,
+        snapshotHz,
+        ...healthReport(),
+        uptime: Math.round(process.uptime()),
+      }),
+    );
+    return;
+  }
+
   const abs = resolve(req.url || "/");
   if (!abs) {
     res.writeHead(403).end("forbidden");

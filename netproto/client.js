@@ -20,26 +20,45 @@ const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
 const $ = (id) => document.getElementById(id);
 
-const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
+// `?server=wss://host` points this page at another deployment, so one tab can
+// compare regions without redeploying the client. Default is wherever the page
+// was served from.
+const params = new URLSearchParams(location.search);
+const url =
+  params.get("server") ||
+  `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
 const net = createNet(url);
+
+// Is the path we are measuring a real one? Loopback means the only latency in
+// the room is the one the sliders invent, so they start at a realistic 60ms.
+// Anywhere else the network is already the experiment, and simulated lag on top
+// of real lag is a number that means nothing — so the sliders start at zero and
+// have to be raised on purpose.
+const REAL_PATH = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) &&
+  !url.includes("localhost") &&
+  !url.includes("127.0.0.1");
 
 // --- knobs, persisted so a session survives a reload ------------------------
 
 const KNOBS = [
-  ["lag", "k-lag", "o-lag", (v) => `${v}ms`],
-  ["jitter", "k-jit", "o-jit", (v) => `${v}ms`],
-  ["loss", "k-loss", "o-loss", (v) => `${v}%`],
+  ["lag", "k-lag", "o-lag", (v) => `${v}ms`, 60],
+  ["jitter", "k-jit", "o-jit", (v) => `${v}ms`, 10],
+  ["loss", "k-loss", "o-loss", (v) => `${v}%`, 0],
 ];
 
-for (const [key, input, out, fmt] of KNOBS) {
+for (const [key, input, out, fmt, localDefault] of KNOBS) {
   const el = $(input);
-  const saved = localStorage.getItem(`netproto.${key}`);
+  el.value = String(REAL_PATH ? 0 : localDefault);
+  // A stored value is a deliberate choice and outranks either default — but
+  // only within the same kind of path, so yesterday's 60ms on localhost cannot
+  // silently poison a measurement against a server in Frankfurt.
+  const saved = localStorage.getItem(`netproto.${REAL_PATH ? "wan." : ""}${key}`);
   if (saved !== null) el.value = saved;
   const apply = () => {
     const v = Number(el.value);
     net[key] = v;
     $(out).textContent = fmt(v);
-    localStorage.setItem(`netproto.${key}`, String(v));
+    localStorage.setItem(`netproto.${REAL_PATH ? "wan." : ""}${key}`, String(v));
   };
   el.addEventListener("input", apply);
   apply();
@@ -68,6 +87,11 @@ foesEl.addEventListener("input", () => {
   net.send({ t: "cfg", enemies: v });
 });
 $("o-foes").textContent = foesEl.value;
+
+$("host").textContent = REAL_PATH ? new URL(url).host : "localhost";
+$("pathnote").textContent = REAL_PATH
+  ? "Real path — the sliders start at zero, because simulated lag on top of real lag is a number that means nothing. Raise them only to test something worse than what you have. "
+  : "Loopback — the only latency here is what these sliders invent. ";
 
 // --- input ------------------------------------------------------------------
 
@@ -182,6 +206,12 @@ setInterval(() => {
   $("down").textContent = `${(((net.downBytes - lastDown) / dt) / 1024).toFixed(1)} KB/s`;
   $("up").textContent = `${(((net.upBytes - lastUp) / dt) / 1024).toFixed(1)} KB/s`;
   $("drop").textContent = String(net.dropped);
+  const hp = snap?.hp;
+  $("hz").textContent = hp ? `${hp.hz} Hz` : "—";
+  $("late").textContent = hp ? `${hp.late} ms${hp.sat ? `  ·  ${hp.sat} stalls` : ""}` : "—";
+  // A host that cannot hold its own clock invalidates every number above it,
+  // so it is called out rather than left as one row among twelve.
+  $("late").style.color = hp && (hp.late > 30 || hp.sat) ? "#eb5757" : "";
   lastUp = net.upBytes;
   lastDown = net.downBytes;
 }, 500);

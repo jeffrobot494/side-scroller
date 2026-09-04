@@ -116,6 +116,51 @@ are the kind that get blamed on "the network" later.
 | **Events died between broadcasts** | `world.events` is cleared every 60Hz step, but snapshots go out at 20Hz — two of every three hits and kills were dropped before anyone saw them. The server now accumulates events across the gap and flushes them with the send |
 | **Disconnects leaked players** | `Conn.close()` set `open = false`, and the socket's own `close` handler then returned early without firing `onclose`. Every closed tab left a ghost rectangle standing in the arena forever. `open` (may write) and `notified` (owner told) are now two flags |
 
+## Deploying it (P4)
+
+The point of a deploy is to replace the simulated path with a real one. Three
+things make that measurement honest, and they are already in:
+
+| | |
+|---|---|
+| The lag sliders start at **zero** off localhost | Simulated lag on top of real lag is a number that means nothing. They also persist under a separate key per path kind, so yesterday's 60ms on localhost cannot poison a run against Frankfurt |
+| Every snapshot carries **host health** | `hz`, `late` and `sat` — the server's own loop, not the network. Shared-CPU hosts deschedule processes, and a hitch from that looks exactly like a network problem. **If `late` is large, nothing else in the readout means anything yet.** The HUD turns it red |
+| `?server=wss://host` | Points one page at another deployment, so regions can be compared without redeploying the client |
+
+`GET /health` returns one JSON line — clients, tick, `hz`/`late`/`sat`, uptime —
+so several deployments can be compared with curl instead of a tab each.
+
+### Railway
+
+`netproto/` carries its own `package.json` and no dependencies, so:
+
+1. **New service** in the Railway project, from this repo, on the `netproto`
+   branch.
+2. **Root Directory** → `netproto`. That is the whole configuration — nixpacks
+   finds `package.json`, `npm start` runs `node server.mjs`, and `$PORT` is
+   already honoured.
+3. Pick a **region** deliberately, and note which one. It is the dominant term
+   in every number you are about to read.
+
+It must be its **own service**: the repo root's `npm start` is the game's room
+service (`tech/multiplayer-service.md`), and only one process can hold `$PORT`.
+
+`wss://` needs no work — the client derives the scheme from `location.protocol`,
+and Railway terminates TLS and proxies the upgrade.
+
+### Reading a cross-region run
+
+| Watch for | Because |
+|---|---|
+| `host late` first, always | Rule the host out before believing anything about the path |
+| `rtt min` vs `rtt max` | The min is the physical floor; the spread is the proxy, the wifi and the queue |
+| `input→pixels` against `rtt` | The difference is the snapshot wait. At 20Hz it is up to 50ms of pure architecture, and it is the part a faster network cannot fix |
+| `snap gap max` | A proxy that buffers shows up here and nowhere else |
+
+The one comparison worth making deliberately: **the same region at 20Hz and at
+60Hz**. Latency you cannot change; the snapshot wait you can, and it is the
+cheapest lever in the whole design.
+
 ## Status
 
 | | |
@@ -125,4 +170,5 @@ are the kind that get blamed on "the network" later.
 | P2 | Mouse aim, bullets, damage, death, respawn. **Built** |
 | P3 | Multiple players, join/leave, scoreboard. **Built** |
 | P3.5 | Flying enemies — patrol, bob, shoot back; a live count knob that doubles as a bandwidth-vs-entity-count dial. **Built** |
-| P4 | Snapshot-rate sweep, optional remote interpolation toggle, written findings against the lockstep plan. **Not started** |
+| P4 | **Real deployment.** Honest defaults off localhost, host-health instrumentation, `?server=` override, `/health`, own `package.json`. **Built — the deploy itself is Bo's to run** |
+| P5 | Optional remote interpolation toggle, and the written findings against the lockstep plan. Deliberately after a real run: what the numbers show should decide what P5 measures |

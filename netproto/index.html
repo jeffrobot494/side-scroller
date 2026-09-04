@@ -40,6 +40,7 @@
   <div class="panel">
     <h1>Link</h1>
     <div class="row"><span>status</span><span id="status" class="status">…</span></div>
+    <div class="row"><span>server</span><span id="host">—</span></div>
     <div class="row"><span>you are</span><span id="me">—</span></div>
     <div class="row"><span>rtt (avg)</span><span id="rtt">—</span></div>
     <div class="row"><span>rtt (min/max)</span><span id="rttmm">—</span></div>
@@ -55,6 +56,14 @@
     <div class="row"><span>down</span><span id="down">—</span></div>
     <div class="row"><span>up</span><span id="up">—</span></div>
     <div class="row"><span>dropped</span><span id="drop">—</span></div>
+    <hr>
+    <div class="row"><span>host sim</span><span id="hz">—</span></div>
+    <div class="row"><span>host late</span><span id="late">—</span></div>
+    <p class="note">
+      Host health, not network. If <b>late</b> is large the server's own loop is
+      being descheduled and nothing above it means anything yet — rule the host
+      out before reading the path.
+    </p>
   </div>
 
   <div class="panel">
@@ -85,6 +94,7 @@
       <output id="o-foes">3</output>
     </div>
     <p class="note">
+      <b id="pathnote"></b>
       Lag is ONE WAY — 60ms here is a 120ms round trip. Snap&nbsp;Hz and
       fliers are the <b>server's</b>, so they change for everyone; lag, jitter
       and loss are yours alone.
