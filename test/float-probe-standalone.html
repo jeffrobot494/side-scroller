@@ -1,0 +1,108 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Float probe (standalone)</title>
+<!--
+  STANDALONE FLOAT PROBE  (tech/multiplayer-missions.md, J0's second half)
+
+  test/float-probe.html runs the real mission and therefore needs the whole repo
+  served over HTTP. This one is a single file with no imports: it opens from a
+  file:// path, from an email attachment, from anywhere, on any browser.
+
+  It does not simulate anything. It exercises the ONLY thing that can make two
+  engines disagree about this game: the math library. IEEE-754 arithmetic --
+  + - * / and Math.sqrt -- is exactly specified and identical on every conforming
+  engine, so the exposure is entirely Math.sin, cos, atan2 and hypot, which are
+  implementation-approximated. Those four are what the mission's locomotion,
+  aiming, combat and perception call.
+
+  So: drive them over a deterministic sequence built from integer arithmetic
+  alone, fold every result's full 64 bits into one fingerprint, and print it.
+  Same fingerprint on two engines means the mission will agree too. A different
+  one means it cannot, and the per-function rows say which call is responsible.
+-->
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 28px; background: #0e1116; color: #d7dde5;
+         font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  h1 { font-size: 17px; margin: 0 0 4px; color: #fff; }
+  p.sub { margin: 0 0 22px; color: #8b95a3; max-width: 60ch; }
+  .fp { font-size: 34px; letter-spacing: .06em; color: #7dd3a0; margin: 10px 0 2px; user-select: all; }
+  .label { color: #8b95a3; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  table { border-collapse: collapse; margin-top: 18px; }
+  th, td { text-align: left; padding: 3px 22px 3px 0; white-space: nowrap; }
+  th { color: #8b95a3; font-weight: 500; border-bottom: 1px solid #232a34; }
+  td.n { color: #b8c2cf; }
+  .env { margin-top: 22px; padding-top: 14px; border-top: 1px solid #232a34; color: #8b95a3; }
+  .env b { color: #d7dde5; font-weight: 500; }
+</style>
+
+<h1>Float probe <span style="color:#8b95a3;font-size:13px">standalone</span></h1>
+<p class="sub">Compare the fingerprint against another browser. Same number means the two engines
+compute identical floating-point results and can run a shared simulation. Different means they cannot.</p>
+
+<div class="label">Fingerprint</div>
+<div class="fp" id="fp">…</div>
+<div class="label" id="count"></div>
+
+<div id="out"></div>
+<div class="env" id="env"></div>
+
+<script>
+// Fold a double's full 64 bits, so a difference in the last place cannot hide.
+const buf = new DataView(new ArrayBuffer(8));
+function fold(acc, x) {
+  buf.setFloat64(0, x);
+  for (const half of [buf.getUint32(0), buf.getUint32(4)]) {
+    acc = (acc ^ half) >>> 0;
+    acc = Math.imul(acc, 0x01000193) >>> 0;
+  }
+  return acc;
+}
+const hex = (n) => (n >>> 0).toString(16).padStart(8, "0").toUpperCase();
+
+// The inputs are built from integers and exact division only, so the SEQUENCE is
+// identical on every engine by specification. Any disagreement in the output is
+// therefore the function, never the argument.
+const N = 4096;
+function drive(fn) {
+  let acc = 0x811c9dc5;
+  for (let i = 0; i < N; i++) acc = fold(acc, fn(i));
+  return acc;
+}
+
+const CASES = [
+  ["Math.sin",   (i) => Math.sin(i / 97)],
+  ["Math.cos",   (i) => Math.cos(i / 89)],
+  ["Math.atan2", (i) => Math.atan2((i % 71) - 35, (i % 53) - 26 || 1)],
+  ["Math.hypot", (i) => Math.hypot((i % 401) / 7, (i % 307) / 11)],
+  ["Math.tan",   (i) => Math.tan(i / 211)],
+  ["Math.sqrt",  (i) => Math.sqrt(i * 1.5 + 0.25)],   // exactly specified — a control
+  ["arithmetic", (i) => (i * 1.1 + 0.3) / 7.7 - i / 13], // exactly specified — a control
+];
+
+let total = 0x811c9dc5;
+const rows = CASES.map(([name, fn]) => {
+  const h = drive(fn);
+  total = fold(total, h);
+  return `<tr><td class="n">${name}</td><td class="n">${hex(h)}</td><td class="n">${fn(1)}</td></tr>`;
+}).join("");
+
+document.getElementById("fp").textContent = hex(total);
+document.getElementById("count").textContent = `${CASES.length} functions × ${N} values`;
+document.getElementById("out").innerHTML =
+  `<table><tr><th>function</th><th>fingerprint</th><th>value at i=1</th></tr>${rows}</table>`;
+
+// The last two rows are CONTROLS. sqrt and plain arithmetic are exactly
+// specified, so if either of those differs between two engines, something is
+// wrong with the comparison itself rather than with the math library.
+const ua = navigator.userAgent;
+const engine = ua.includes("Firefox") ? "SpiderMonkey"
+  : (ua.includes("Safari") && !ua.includes("Chrome") && !ua.includes("Chromium")) ? "JavaScriptCore"
+  : "V8";
+document.getElementById("env").innerHTML = [
+  `<b>engine</b> ${engine} &nbsp; <b>platform</b> ${navigator.platform || "?"}`,
+  `<b>agent</b> ${ua}`,
+  `<b>sin(1)</b> ${Math.sin(1)} &nbsp; <b>cos(1)</b> ${Math.cos(1)}`,
+  `<b>atan2(1,3)</b> ${Math.atan2(1, 3)} &nbsp; <b>hypot(3,4.7)</b> ${Math.hypot(3, 4.7)}`,
+].join("<br>");
+</script>
