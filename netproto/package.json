@@ -1,0 +1,10 @@
+{
+  "name": "netproto",
+  "private": true,
+  "type": "module",
+  "description": "Server-authoritative latency prototype. Its own package.json so a host can deploy THIS FOLDER alone: point the service's root directory at netproto/ and `npm start` is the whole build. Carries no dependencies, like the repo it sits in.",
+  "scripts": {
+    "start": "node server.mjs",
+    "smoke": "node smoke.mjs"
+  }
+}
