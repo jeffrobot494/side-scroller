@@ -23,25 +23,42 @@ Open the page in two browser windows. `python3 -m http.server` will **not** work
 here — unlike the game, this needs the process.
 
 ```
-node netproto/smoke.mjs [port]      # drives two headless clients over the wire
+node netproto/smoke.mjs             # starts its own server, drives two clients
 ```
 
 The smoke test is deliberately **not** in `node test/run.mjs`. This is a probe,
 not a subsystem, and the repo's bar should not grow a dependency on a folder
 meant to be thrown away. It found both real bugs in the first build.
 
+It starts its **own** server on its own port. An earlier version reused
+whatever was on 8100 and collided with a live session — a human in the arena
+shooting things is indistinguishable from a broken assertion, so a test that
+can be joined is a test that lies.
+
 ## Controls
 
 `A`/`D` or arrows run · `Space`/`W` jumps · mouse aims · hold click fires.
-100 HP, 10 damage a bullet, 2s respawn. Kills/deaths in the side panel.
+100 HP, 10 damage a bullet, 2s respawn. Kills / deaths · fliers downed in the
+side panel.
+
+**Fliers** are the red diamonds: 30 HP, patrolling one lane and bobbing on a
+sine, shooting the nearest player in range with a little spread so they miss.
+Their rounds are red and larger than yours. Platforms stop them, so cover
+works. The count is a live server-wide knob, 0 to 12.
+
+They are in here because a duel between two rectangles never tests the half of
+the real game that matters most to this question: **dodging fire you can see
+coming is where predicting nothing costs the most**, since the dodge does not
+begin until the server has heard about it. Two axes of motion at once also
+makes them awkward to lead, which is the other thing latency ruins.
 
 ## The loop
 
 | | |
 |---|---|
 | Client | Samples keys and mouse at a fixed 60Hz — **not** per rendered frame — and sends `{seq, l, r, jump, fire, ax, ay}`. Never its position |
-| Server | Holds the latest input per player, steps the world at a fixed 60Hz, resolves movement, bullets, damage, respawn |
-| Server | Broadcasts a snapshot every N steps (5–60Hz, live knob), carrying every player, every bullet, and each client's own `ack` |
+| Server | Holds the latest input per player, steps the world at a fixed 60Hz, resolves movement, fliers, bullets, damage, respawn |
+| Server | Broadcasts a snapshot every N steps (5–60Hz, live knob), carrying every player, every flier, every bullet, and each client's own `ack` |
 | Client | Draws that snapshot verbatim and nothing else |
 
 Aim crosses the wire as a **point**, not an angle, so the server derives a
@@ -61,7 +78,7 @@ the arena plots.
 | `rtt` | Round trip, from ping/pong. The floor |
 | `input→pixels` | Press to visible result. **The one that matters** — round trip plus the wait for the next snapshot |
 | `snap gap avg / max` | Actual delivery cadence. The gap between avg and max is jitter you can feel |
-| `snap size`, `down`, `up` | Bandwidth. Watch it as players and bullets grow |
+| `snap size`, `down`, `up` | Bandwidth. The flier knob is the fastest way to move it: roughly 260B empty, 520B at 3 fliers, 775B at 12 |
 | `dropped` | Packets the loss knob threw away |
 
 **Lag is one way.** 60ms on the slider is a 120ms round trip. Jitter reorders
@@ -79,6 +96,7 @@ transatlantic ≈ 80–120ms. Try each with snapshots at 20Hz and again at 60Hz.
 | No interpolation | Raw snapshots first, so the architecture's cost is visible before a technique hides it. A toggle comes later, to A/B in one session |
 | No determinism | A single authority never needs two machines to agree. Importing lockstep's cost into the design that exists to avoid it would be self-defeating |
 | One room, no matchmaking | One process, one arena |
+| Fliers do not lead their shots | They aim where you are, not where you are going. Leading would make them harder in a way that says nothing about latency, and being able to outrun a round is the behaviour worth feeling |
 | Latency simulated client-side | Each browser has its own knobs, which is also how you test an unfair match |
 
 ## Two bugs the smoke test found immediately
@@ -99,4 +117,5 @@ are the kind that get blamed on "the network" later.
 | P1 | Server-authoritative movement — run, jump, gravity, platforms. **Built** |
 | P2 | Mouse aim, bullets, damage, death, respawn. **Built** |
 | P3 | Multiple players, join/leave, scoreboard. **Built** |
+| P3.5 | Flying enemies — patrol, bob, shoot back; a live count knob that doubles as a bandwidth-vs-entity-count dial. **Built** |
 | P4 | Snapshot-rate sweep, optional remote interpolation toggle, written findings against the lockstep plan. **Not started** |

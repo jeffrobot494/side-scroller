@@ -56,6 +56,19 @@ snapEl.addEventListener("input", () => {
 });
 $("o-snap").textContent = snapEl.value;
 
+// The flier count is the server's, so the slider is a request and the server's
+// echo is the truth — including when somebody else moves it.
+const foesEl = $("k-foes");
+const savedFoes = localStorage.getItem("netproto.enemies");
+if (savedFoes !== null) foesEl.value = savedFoes;
+foesEl.addEventListener("input", () => {
+  const v = Number(foesEl.value);
+  $("o-foes").textContent = String(v);
+  localStorage.setItem("netproto.enemies", String(v));
+  net.send({ t: "cfg", enemies: v });
+});
+$("o-foes").textContent = foesEl.value;
+
 // --- input ------------------------------------------------------------------
 
 const keys = new Set();
@@ -117,11 +130,21 @@ net.onMessage = (m) => {
         if (ev.e === "shot") fx.push({ x: ev.x, y: ev.y, t: 0.08, c: "#fff2cc", r: 5 });
         else if (ev.e === "spark") fx.push({ x: ev.x, y: ev.y, t: 0.12, c: "#8a95a3", r: 4 });
         else if (ev.e === "hit") fx.push({ x: ev.x, y: ev.y, t: 0.25, c: "#eb5757", r: 10 });
+        else if (ev.e === "eshot") fx.push({ x: ev.x, y: ev.y, t: 0.09, c: "#ffb0b0", r: 6 });
+        else if (ev.e === "ehit") fx.push({ x: ev.x, y: ev.y, t: 0.16, c: "#ffe1a8", r: 7 });
+        else if (ev.e === "edie") fx.push({ x: ev.x, y: ev.y, t: 0.35, c: "#ff8f6b", r: 16 });
       }
+    }
+  } else if (m.t === "cfg") {
+    if (typeof m.enemies === "number") {
+      foesEl.value = String(m.enemies);
+      $("o-foes").textContent = String(m.enemies);
     }
   } else if (m.t === "welcome") {
     world = m.world;
     $("me").textContent = `#${m.id}`;
+    foesEl.value = String(m.world.enemies);
+    $("o-foes").textContent = String(m.world.enemies);
     // Push our stored snapshot rate up, so a reload restores the lab.
     net.send({ t: "cfg", snapshotHz: Number(snapEl.value) });
   }
@@ -191,11 +214,55 @@ function drawArena() {
 
   if (!snap) return;
 
+  // Incoming fire is a different colour and slightly larger. A round you have
+  // to dodge is worth reading at a glance, and a shot you cannot distinguish
+  // from your own is a bad test of whether dodging feels possible.
   for (const b of snap.bullets) {
-    ctx.fillStyle = "#ffe1a8";
+    const hostile = b.e === 1;
+    ctx.fillStyle = hostile ? "#ff6b6b" : "#ffe1a8";
     ctx.beginPath();
-    ctx.arc(b.x, b.y, 3, 0, Math.PI * 2);
+    ctx.arc(b.x, b.y, hostile ? 4 : 3, 0, Math.PI * 2);
     ctx.fill();
+    if (hostile) {
+      ctx.strokeStyle = "rgba(255,107,107,.35)";
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // Fliers. A diamond rather than a box, so they never read as a player at a
+  // glance — the arena is small and both are moving.
+  for (const e of snap.enemies || []) {
+    if (e.k) continue;
+    const cx = e.x + world.ew / 2;
+    const cy = e.y + world.eh / 2;
+    const rx = world.ew / 2 + 2;
+    const ry = world.eh / 2 + 3;
+
+    ctx.fillStyle = "#c94f4f";
+    ctx.strokeStyle = "#7d2b2b";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - ry);
+    ctx.lineTo(cx + rx, cy);
+    ctx.lineTo(cx, cy + ry);
+    ctx.lineTo(cx - rx, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = "#ffd9d9";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Damage only shows once taken — 12 undamaged health bars is clutter.
+    if (e.h < 30) {
+      ctx.fillStyle = "#000a";
+      ctx.fillRect(cx - 10, cy - ry - 7, 20, 3);
+      ctx.fillStyle = "#ff8f6b";
+      ctx.fillRect(cx - 10, cy - ry - 7, 20 * (e.h / 30), 3);
+    }
   }
 
   const COLORS = ["#ffb454", "#6fcf97", "#56ccf2", "#eb5757", "#bb6bd9", "#f2c94c"];
@@ -347,7 +414,7 @@ function drawScoreboard() {
   el.innerHTML = rows
     .map((p) => {
       const me = p.i === net.id ? " style=\"color:#fff\"" : "";
-      return `<div class="row"${me}><span>${p.n || "p" + p.i}${p.i === net.id ? " (you)" : ""}</span><span>${p.s} / ${p.d}</span></div>`;
+      return `<div class="row"${me}><span>${p.n || "p" + p.i}${p.i === net.id ? " (you)" : ""}</span><span>${p.s} / ${p.d} · ${p.fl || 0}✕</span></div>`;
     })
     .join("");
 }

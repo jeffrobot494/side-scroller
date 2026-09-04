@@ -79,14 +79,20 @@
       <input id="k-snap" type="range" min="5" max="60" step="1" value="20">
       <output id="o-snap">20</output>
     </div>
+    <div class="knob">
+      <label for="k-foes">fliers</label>
+      <input id="k-foes" type="range" min="0" max="12" step="1" value="3">
+      <output id="o-foes">3</output>
+    </div>
     <p class="note">
-      Lag is ONE WAY — 60ms here is a 120ms round trip. Snap&nbsp;Hz is the
-      server's broadcast rate and is shared by everyone in the room.
+      Lag is ONE WAY — 60ms here is a 120ms round trip. Snap&nbsp;Hz and
+      fliers are the <b>server's</b>, so they change for everyone; lag, jitter
+      and loss are yours alone.
     </p>
   </div>
 
   <div class="panel">
-    <h1>Scores <span class="note">(kills / deaths)</span></h1>
+    <h1>Scores <span class="note">(kills / deaths · fliers)</span></h1>
     <div id="scores"><span class="note">waiting for a snapshot…</span></div>
   </div>
 
@@ -95,7 +101,9 @@
     <p class="note">
       <b>A</b>/<b>D</b> or arrows to run · <b>Space</b>/<b>W</b> to jump ·
       <b>mouse</b> to aim · <b>hold click</b> to fire.<br><br>
-      100 HP, 10 damage a bullet, 2s respawn.
+      100 HP, 10 damage a bullet, 2s respawn.<br><br>
+      Red diamonds are fliers: 30 HP, they patrol and bob, and they shoot back.
+      Their rounds are the red ones — and platforms stop them, so cover works.
     </p>
   </div>
 
@@ -106,7 +114,10 @@
       the last snapshot put it. No prediction, no reconciliation, no
       interpolation. The orange crosshair is the only thing that moves without
       asking the server — the gap between it and your aim line <i>is</i> the
-      round trip.
+      round trip.<br><br>
+      The fliers are the harder test. Dodging a shot you can see coming is
+      where predicting nothing costs the most, because the dodge does not begin
+      until the server has heard about it.
     </p>
   </div>
 </aside>

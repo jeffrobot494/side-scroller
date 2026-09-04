@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 import { attachWebSocket } from "./ws.mjs";
 import { decode, encode, TICK_HZ, DEFAULT_SNAPSHOT_HZ, clamp } from "./protocol.mjs";
 import {
-  createWorld, addPlayer, removePlayer, step as stepWorld, snapshot,
-  W, H, PLAYER_W, PLAYER_H, PLATFORMS,
+  createWorld, addPlayer, removePlayer, step as stepWorld, snapshot, setEnemyCount,
+  W, H, PLAYER_W, PLAYER_H, ENEMY_W, ENEMY_H, PLATFORMS,
 } from "./sim.mjs";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
@@ -95,9 +95,19 @@ function addClient(conn) {
         if (p) p.name = c.name;
       }
     } else if (m.t === "cfg") {
+      // Both knobs are server-wide and last-writer-wins. One arena, one set of
+      // rules: two clients simulating different worlds is the failure mode this
+      // architecture exists to make impossible.
       if (typeof m.snapshotHz === "number") {
         snapshotHz = clamp(Math.round(m.snapshotHz), 1, TICK_HZ);
         console.log(`snapshot rate -> ${snapshotHz}Hz`);
+      }
+      if (typeof m.enemies === "number") {
+        setEnemyCount(world, clamp(m.enemies, 0, 12));
+        console.log(`fliers -> ${world.enemyCount}`);
+        for (const other of clients.values()) {
+          other.conn.send(encode({ t: "cfg", enemies: world.enemyCount }));
+        }
       }
     }
   };
@@ -116,7 +126,13 @@ function addClient(conn) {
       id,
       tickHz: TICK_HZ,
       snapshotHz,
-      world: { w: W, h: H, pw: PLAYER_W, ph: PLAYER_H, platforms: PLATFORMS },
+      world: {
+        w: W, h: H,
+        pw: PLAYER_W, ph: PLAYER_H,
+        ew: ENEMY_W, eh: ENEMY_H,
+        platforms: PLATFORMS,
+        enemies: world.enemyCount,
+      },
     }),
   );
   console.log(`+ ${c.name} joined (${clients.size} connected)`);
