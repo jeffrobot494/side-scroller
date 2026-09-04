@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Fly.io deployment, for comparison against Railway.
+#
+#     cd netproto && fly launch --no-deploy --copy-config --name <yours>
+#     fly deploy
+#
+# dfw is Dallas — ~300km from Austin, against Railway's Ashburn at ~2,000km.
+# If the paths are healthy the difference should be roughly 10ms against 40ms,
+# and the run against Railway measured 281ms, so this is also a test of whether
+# a provider's edge is the problem rather than distance.
+# ---------------------------------------------------------------------------
+
+app = "netproto"
+primary_region = "dfw"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # A latency test must never measure a cold start. Machines that stop between
+  # sessions would put a multi-second wake in the first sample of every run.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # WebSockets are long-lived and mostly server->client at 20Hz; nothing here
+  # should be treated as an idle connection.
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 100
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
