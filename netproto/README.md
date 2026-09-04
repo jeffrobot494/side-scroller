@@ -184,6 +184,15 @@ server-authoritative game cannot be scaled horizontally without sticky routing
 or shared state.** One process owns a match. Adding capacity means routing
 players to the right process, not adding processes.
 
+**Shutting it down: `fly scale count 0`, not `fly machine stop`.**
+`auto_stop_machines = "off"` means the machine never sleeps, so it bills until
+something destroys it — and `auto_start_machines = true` means a stopped machine
+is restarted by the *next request*, including a scanner hitting the public
+hostname. A `machine stop` reports success and the app is up again seconds
+later; it was a curl checking the stop had worked that restarted it here.
+Scaling to zero leaves the app, the hostname and this config in place, and
+`fly scale count 1` brings it back.
+
 ### Measured, Austin to each host
 
 Same command, same minute, `curl -w %{time_connect}`:
