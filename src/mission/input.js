@@ -18,11 +18,14 @@ export class MissionInput {
     this.aimStick = { x: 0, y: 0, active: false }; // right-stick unit-ish vector
     this._enabled = false;
     this._canvas = null;
+    this._diag = {}; // one-shot gamepad diagnostics, keyed by message (see _padLog)
     this._onDown = (e) => this._set(e, true);
     this._onUp = (e) => this._set(e, false);
     this._onMove = (e) => this._trackMouse(e);
     this._onMouseDown = (e) => this._mouseButton(e, true);
     this._onMouseUp = (e) => this._mouseButton(e, false);
+    this._onPadConnect = (e) => this._padEvent(e, true);
+    this._onPadDisconnect = (e) => this._padEvent(e, false);
   }
 
   // `canvas` is optional: pass it to enable mouse aim + click-to-fire relative
@@ -31,6 +34,9 @@ export class MissionInput {
     if (this._enabled) return;
     window.addEventListener("keydown", this._onDown);
     window.addEventListener("keyup", this._onUp);
+    window.addEventListener("gamepadconnected", this._onPadConnect);
+    window.addEventListener("gamepaddisconnected", this._onPadDisconnect);
+    this._diag = {}; // report the pad situation once per mission, not once per page
     this._canvas = canvas || null;
     if (this._canvas && this._canvas.addEventListener) {
       this._canvas.addEventListener("mousemove", this._onMove);
@@ -43,6 +49,8 @@ export class MissionInput {
   disable() {
     window.removeEventListener("keydown", this._onDown);
     window.removeEventListener("keyup", this._onUp);
+    window.removeEventListener("gamepadconnected", this._onPadConnect);
+    window.removeEventListener("gamepaddisconnected", this._onPadDisconnect);
     if (this._canvas && this._canvas.removeEventListener) {
       this._canvas.removeEventListener("mousemove", this._onMove);
       this._canvas.removeEventListener("mousedown", this._onMouseDown);
@@ -84,20 +92,61 @@ export class MissionInput {
     this.actions.fire = down;
   }
 
+  // Gamepad silence has four causes that look IDENTICAL from inside the game,
+  // because the poll below no-ops for all four: no Gamepad API (it is
+  // secure-context only, so a LAN http:// origin has none), no pad enumerated
+  // (a connected pad stays hidden until the focused page sees a button press —
+  // and an upstream layer such as Steam Input's desktop layout or a pad in
+  // mouse mode consumes the input so that press never arrives), a pad on a
+  // non-standard mapping whose buttons are not the indices controlmap.js binds,
+  // and a pad that is merely idle. Say which, once each, instead of returning.
+  //
+  // Only while enabled, and once per message per enable(): a poll on a disabled
+  // instance is a test or the Firing Room's auto mode, neither of which has a
+  // player wondering why the stick is dead.
+  _padLog(msg) {
+    if (!this._enabled || this._diag[msg]) return;
+    // Pages only. Headless suites mount tools that enable() a real MissionInput
+    // (the Firing Room does), and node has no Gamepad API either — so without
+    // this the bar reports the missing API once per run, which is true and
+    // useless. `isSecureContext` is the cheapest thing that exists in a browsing
+    // context and not under node, and it is the very fact the first message is
+    // about.
+    if (typeof isSecureContext !== "boolean") return;
+    this._diag[msg] = true;
+    if (typeof console !== "undefined") console.log(`[gamepad] ${msg}`);
+  }
+
+  // A connect/disconnect changes the answer, so clear the ledger and let the
+  // next poll re-report from scratch.
+  _padEvent(e, connected) {
+    const g = e && e.gamepad;
+    if (!g) return;
+    this._diag = {};
+    this._padLog(`${connected ? "connected" : "disconnected"}: index ${g.index}, "${g.id}", mapping "${g.mapping}"`);
+  }
+
   // Poll the gamepad once per frame. Folds button presses into pad held/edge
   // state and reads the sticks. No-op when no Gamepad API / no pad connected.
   pollGamepad() {
     this.padPressed = {};
-    if (typeof navigator === "undefined" || !navigator.getGamepads) return;
+    if (typeof navigator === "undefined" || !navigator.getGamepads) {
+      this._padLog("navigator.getGamepads() is unavailable — the Gamepad API is secure-context only (https:// or localhost).");
+      return;
+    }
     const pads = navigator.getGamepads();
     let pad = null;
     for (const p of pads || []) if (p) { pad = p; break; }
     if (!pad) {
+      this._padLog("no pad enumerated. A connected pad stays hidden until the focused page sees a button press; if pressing one changes nothing, something upstream (Steam Input's desktop layout, a pad in mouse/keyboard mode) is taking the input before the browser does.");
       this._padPrev = {};
       this.padActions = {};
       this.aimStick.active = false;
       return;
     }
+    this._padLog(`polling index ${pad.index}, "${pad.id}", mapping "${pad.mapping}"`);
+    if (pad.mapping !== "standard")
+      this._padLog(`mapping is not "standard" — controlmap.js binds standard indices (dpad = buttons 12-15), so this pad's buttons may sit elsewhere or on a hat axis.`);
 
     const held = {};
     for (const [idx, action] of Object.entries(padBindings.buttons)) {

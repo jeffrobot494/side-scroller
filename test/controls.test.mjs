@@ -1,6 +1,6 @@
 // Control mapping (remap + persistence), MissionInput sources (mouse/gamepad),
 // the shared projectile renderer's shape defaulting, and the Controls tool mount.
-import { installDom, makeEl } from "./harness.mjs";
+import { installDom, makeEl, windowListenerCount } from "./harness.mjs";
 import { keyBindings, DEFAULT_KEYS, setKeyBinding, resetKeys, bindingsForAction,
   padBindings, DEFAULT_PAD, setPadButton, setPadAxis, resetPad, padButtonsForAction,
   ACTIONS, ACTION_LABELS } from "../src/game/controlmap.js";
@@ -99,6 +99,52 @@ export default async function run(t) {
       resetPad(); // leave global pad state clean for other suites
 
       globalThis.navigator = realNav;
+    }
+  }
+
+  // ---- MissionInput: gamepad diagnostics ---------------------------------
+  // The four ways a pad can be dead used to be one silent `return`, so "the dpad
+  // moves the OS cursor and nothing else" looked exactly like "no pad plugged
+  // in" from inside the game. The report is one-shot and only while enabled —
+  // the poll above is the case that must stay silent, or the bar gets noisy.
+  {
+    installDom(); // enable() hangs listeners on window; also resets the ledger
+    const lines = [];
+    const realLog = console.log;
+    console.log = (m) => lines.push(m);
+    try {
+      new MissionInput().pollGamepad(); // never enabled: a test, or the Firing Room's auto mode
+      const quiet = lines.length === 0;
+
+      // A node host is not a page: an enabled poll must stay silent too, or every
+      // suite that mounts the Firing Room prints the missing-API line.
+      const enabledUnderNode = new MissionInput();
+      enabledUnderNode.enable();
+      enabledUnderNode.pollGamepad();
+      enabledUnderNode.disable();
+      const quietHeadless = lines.length === 0;
+
+      globalThis.isSecureContext = true; // now pose as a browsing context
+      const inp = new MissionInput();
+      inp.enable();
+      inp.pollGamepad();
+      inp.pollGamepad();
+      inp.pollGamepad();
+      const held = windowListenerCount("gamepadconnected");
+      inp.disable();
+      const released = windowListenerCount("gamepadconnected");
+
+      delete globalThis.isSecureContext;
+      console.log = realLog;
+      t.ok("gamepad diag: a disabled poll stays silent", quiet);
+      t.ok("gamepad diag: an enabled poll under node stays silent too", quietHeadless);
+      t.eq("gamepad diag: reported once, not once per frame", lines.length, 1);
+      t.ok("gamepad diag: names the cause (no API under node)",
+        /getGamepads\(\) is unavailable/.test(lines[0]));
+      t.ok("gamepad diag: connect listener attached while enabled", held === 1);
+      t.ok("gamepad diag: and released on disable", released === 0);
+    } finally {
+      console.log = realLog;
     }
   }
 
