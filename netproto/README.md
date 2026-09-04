@@ -127,8 +127,17 @@ things make that measurement honest, and they are already in:
 | Every snapshot carries **host health** | `hz`, `late` and `sat` — the server's own loop, not the network. Shared-CPU hosts deschedule processes, and a hitch from that looks exactly like a network problem. **If `late` is large, nothing else in the readout means anything yet.** The HUD turns it red |
 | `?server=wss://host` | Points one page at another deployment, so regions can be compared without redeploying the client |
 
-`GET /health` returns one JSON line — clients, tick, `hz`/`late`/`sat`, uptime —
-so several deployments can be compared with curl instead of a tab each.
+`GET /health` returns one JSON line — clients, tick, `hz`/`late`/`sat`, uptime,
+and the host's own `RAILWAY_*` / `FLY_*` / `RENDER_*` environment (names only,
+credentials filtered) — so several deployments can be compared with curl instead
+of a tab each.
+
+**`host.RAILWAY_REPLICA_REGION` is the one to read first.** A dashboard dropdown
+says what region was *requested*; the container's environment says where it
+actually is, and those have already disagreed once: a run measured from Austin
+against a service believed to be in Virginia showed a 203ms floor, which is a
+Singapore round trip, not a Virginia one. Distance is the dominant term in every
+other number on the page, so confirm it before trusting any of them.
 
 ### Railway
 

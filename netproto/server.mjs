@@ -241,6 +241,16 @@ const server = createServer(async (req, res) => {
   // One JSON line about this process, so several deployments can be compared
   // with curl rather than by opening a tab at each one and squinting.
   if ((req.url || "").split("?")[0] === "/health") {
+    // Where is this process ACTUALLY running? A host's region dropdown says
+    // what was requested; the container's own environment says what happened,
+    // and those disagreed once already. Names only, and never anything that
+    // looks like a credential — /health is public.
+    const host = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (!/^(RAILWAY|FLY|RENDER)_/.test(k)) continue;
+      if (/TOKEN|SECRET|KEY|PASSWORD|PRIVATE/i.test(k)) continue;
+      host[k] = v;
+    }
     res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
     res.end(
       JSON.stringify({
@@ -251,6 +261,7 @@ const server = createServer(async (req, res) => {
         snapshotHz,
         ...healthReport(),
         uptime: Math.round(process.uptime()),
+        host,
       }),
     );
     return;
