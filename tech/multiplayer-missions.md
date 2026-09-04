@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: unbuilt
+status: building
 resolution: sharp
 needs: [multiplayer-state, multiplayer-session, multiplayer-service, mission-determinism]
 related: [multiplayer, multiplayer-state, multiplayer-session, multiplayer-service, mission-determinism, campaign-pacing]
@@ -30,6 +30,34 @@ only one where two people are in the same place at the same time.
 and it decides whether J6 is lockstep at all. J1→J2→J3 is the mission and
 campaign half and is worth having on its own merits. J4, J5 and J6 are the
 network half.
+
+**J0 is built, and it failed — which is the answer it existed to get.**
+`test/mission-divergence.test.mjs` runs one mission twice, changing nothing but
+`m.controlled`, and reports:
+
+| | |
+|---|---|
+| First diverging step | **Frame 1**, at `soldiers[0].x` (120.722 → 119.278) |
+| First diverging draw count | **Frame 1**, 7 draws against 12 |
+
+The second row is the fatal one. The two runs are not merely moving different
+bodies — they have consumed the one mulberry32 a different number of times
+before the first step is over, so from frame 1 every subsequent draw on one
+client is a different number than on the other, and no amount of exchanging
+inputs repairs it. The gap is 5, which is one scattergun trigger pull: the
+player path draws spread per pellet and the soldier under the trace is a
+different soldier with a different weapon.
+
+**Consequence for the phase order: J1 is a prerequisite for lockstep, not only
+for credit.** J6 cannot be "hand both clients the seed and let them run" until
+every player-driven soldier takes the player path on BOTH clients, which is
+exactly what the owner axis buys. The probe stays green after J1 — it drives one
+input source, so the two runs still put different bodies under it; what J1 earns
+is a second probe driving two owners with two traces, and *that* one going quiet
+is the precondition for J6.
+
+**The second half is not built**, on the row's own terms: the cross-machine
+floating-point question is only worth asking once the first half passes.
 
 **J1–J6 supersede the M2, M3 and M4 rows of `tech/multiplayer.md`.** Four
 corrections, all found by reading the code rather than the plan:
@@ -61,7 +89,7 @@ corrections, all found by reading the code rather than the plan:
 
 | Path | Change |
 |---|---|
-| `src/mission/checksum.js` (new) | J0. A pure function from a scene to a number over a **named** sample list, plus the list. Its own module because a suite, a lockstep loop and a bug report all read it and none should reach into the mission scene. **The list already exists in another form**: `test/mission.golden.json` is the set of gameplay fields the repo has already decided are the mission's real state, chosen for exactly this reason — everything cosmetic is excluded because it is unseeded on purpose. Start there rather than inventing a list, and where the two drift apart, that is a fact worth knowing about one of them |
+| `src/mission/checksum.js` (new) | J0. A pure function from a scene to a number over a **named** sample list, plus the list. Its own module because a suite, a lockstep loop and a bug report all read it and none should reach into the mission scene. **The list already exists in another form**: `test/mission.golden.json` is the set of gameplay fields the repo has already decided are the mission's real state, chosen for exactly this reason — everything cosmetic is excluded because it is unseeded on purpose. Start there rather than inventing a list, and where the two drift apart, that is a fact worth knowing about one of them | **As built:** the list is `sample()` from the golden with four drifts, all widening, because a fold costs no fixture bytes — EVERY projectile rather than the front three, each loot drop's own `y` and collected flag rather than the two counts, `scene.artifact` (the golden's 41 samples never resolve, so it never had a reason to look), and a root's brain state folded as a string rather than compared as one. The drift that runs the other way is not in the list: a checksum cannot carry the golden's 2e-3 tolerance, so values are quantized to 1e-3 and two runs that straddle a quantum read as divergence. Same process, that never fires; two machines, it is the thing to remember
 | `test/mission-divergence.test.mjs` (new) | J0. One scene, two runs, different soldier controlled, checksums compared per step. **Per step, not at the end**: what a builder needs is the FIRST step at which the two diverge, because the frame number is what identifies which draw site did it — the same reason `test/mission-golden.test.mjs` names the first differing field rather than reporting a mismatch |
 | `src/mission/entities.js` | J1. `Soldier` takes an owner; `loadMission`'s squad contract gains it. The spawn offset is `playerSpawn.x + i * 44` across one flat list, so two squads land on top of each other until this changes |
 | `src/mission/mission.js` | J1 and J2. The eleven sites in Background, the departed flag, per-owner `_resolve`, and the HUD |

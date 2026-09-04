@@ -37,10 +37,17 @@ import { makeEl } from "./harness.mjs";
 import { resetConfig, config } from "../src/game/config.js";
 
 const GOLDEN = fileURLToPath(new URL("./mission.golden.json", import.meta.url));
-const STEP = 1 / 60;
-const SECONDS = 8;
 const SAMPLE_EVERY = 12; // frames between snapshots (0.2s)
-const SEED = 20260824;
+
+// The fixed-step harness — the step, the length, the seed, the squad and the
+// input trace — is exported because test/mission-divergence.test.mjs runs the
+// SAME mission twice with a different soldier controlled
+// (tech/multiplayer-missions.md, J0). Two probes of one mission should not be
+// asking about two different missions, and the trace guarded here is the one
+// worth probing. Exports only; no assertion moves.
+export const STEP = 1 / 60;
+export const SECONDS = 8;
+export const SEED = 20260824;
 
 // ---- the squad ------------------------------------------------------------
 // Weapon literals, not ARSENAL entries: `applyWeaponOverrides` mutates the
@@ -63,7 +70,7 @@ const SCATTER = {
 
 // Stats spread across Aim (spread width) and Speed (the duck roll's chance and
 // latency), so both stat-driven draws vary between squadmates.
-const SQUAD = [
+export const SQUAD = [
   { data: { id: "s1", name: "Rook", callsign: "RK", stats: { health: 7, aim: 8, speed: 4 } }, weapon: AUTO_RIFLE },
   { data: { id: "s2", name: "Vale", callsign: "VL", stats: { health: 6, aim: 4, speed: 9 } }, weapon: SCATTER },
   { data: { id: "s3", name: "Pike", callsign: "PK", stats: { health: 8, aim: 6, speed: 6 } }, weapon: AUTO_RIFLE },
@@ -94,7 +101,7 @@ function scriptAt(f) {
 
 // A MissionInput stand-in. `aimSource` answers a stick whatever the aim mode is,
 // so the trace is independent of config.aimMode, the camera and the zoom.
-function scriptedInput() {
+export function scriptedInput() {
   let held = {};
   let edges = {};
   let aim = null;
