@@ -41,6 +41,13 @@ can be joined is a test that lies.
 100 HP, 10 damage a bullet, 2s respawn. Kills / deaths · fliers downed in the
 side panel.
 
+**Getting around.** A jump rises 136px, which clears the floor-to-shelf step
+(120px) and the shelf-to-middle step (100px). The two `y=190` shelves sit 190px
+above anything below them and **cannot be reached** — they are flier territory,
+not a route. Platforms are solid rather than one-way, so a jump taken too close
+to a shelf bonks its underside: the landing window on the lowest shelf is a
+running jump started 88–140px before the edge.
+
 **Fliers** are the red diamonds: 30 HP, patrolling one lane and bobbing on a
 sine, shooting the nearest player in range with a little spread so they miss.
 Their rounds are red and larger than yours. Platforms stop them, so cover

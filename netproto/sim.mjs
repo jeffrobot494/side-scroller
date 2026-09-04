@@ -24,7 +24,12 @@ export const PLAYER_H = 34;
 
 const GRAVITY = 2000;
 const RUN_SPEED = 260;
-const JUMP_VEL = 620;
+// 756 rather than a round number because the level sets the requirement: the
+// floor-to-first-platform step is 120px, and at the old 620 the apex was 91px,
+// so nothing above the ground was reachable at all. This is a 50% taller jump
+// (91px -> 136px), measured through the same semi-implicit step the sim runs
+// rather than off v^2/2g, which is a few px optimistic at 60Hz.
+const JUMP_VEL = 756;
 const MAX_FALL = 1200;
 
 const BULLET_SPEED = 620;
