@@ -1,0 +1,147 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Float probe — does this machine agree?</title>
+<!--
+  THE CROSS-MACHINE FLOAT PROBE  (tech/multiplayer-missions.md, J0's second half)
+
+  J0's first half asked whether two clients consume one seeded stream in the same
+  ORDER. They do not, and that is our code's fault and our code can fix it.
+
+  This asks the other question, which is the engine's and which no refactor
+  reaches: given the same seed, the same level, the same squad and the same input
+  trace at a fixed step, does THIS browser on THIS machine compute the same
+  numbers as another one? IEEE-754 arithmetic is exactly specified, so +-*/ and
+  sqrt agree everywhere. Math.sin, cos, atan2 and hypot are implementation-
+  approximated and are the whole of the exposure.
+
+  HOW TO USE IT: open this page on two machines (or two browsers) and compare the
+  fingerprints. Same number = lockstep is viable on that pair. Different = the
+  pair cannot run lockstep without replacing the transcendentals.
+
+  It runs the SAME mission the golden and the divergence probe run — one trace,
+  from test/mission-trace.mjs — so a disagreement here is about the machine and
+  not about which mission was asked.
+
+  Two things it deliberately does NOT do:
+   - it never writes storage. `resetConfig()` would wipe your editor settings, so
+     defaults are rebuilt from SCHEMA and assigned to the live config in memory.
+     Reload and your settings are back, untouched.
+   - it cannot separate a disagreement in the INPUT trace from one in the
+     simulation: scriptAt() itself calls Math.sin/cos. The per-checkpoint column
+     is what localises that — a fingerprint that differs from frame 0 is the
+     trace, one that diverges later is the simulation.
+-->
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 28px; background: #0e1116; color: #d7dde5;
+         font: 14px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  h1 { font-size: 17px; margin: 0 0 4px; color: #fff; letter-spacing: .01em; }
+  p.sub { margin: 0 0 22px; color: #8b95a3; }
+  .fp { font-size: 34px; letter-spacing: .06em; color: #7dd3a0; margin: 10px 0 2px;
+        user-select: all; word-break: break-all; }
+  .fp.bad { color: #e8815a; }
+  .label { color: #8b95a3; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  table { border-collapse: collapse; margin-top: 18px; }
+  th, td { text-align: left; padding: 3px 20px 3px 0; }
+  th { color: #8b95a3; font-weight: 500; border-bottom: 1px solid #232a34; }
+  td.n { color: #b8c2cf; }
+  .env { margin-top: 22px; padding-top: 14px; border-top: 1px solid #232a34; color: #8b95a3; }
+  .env b { color: #d7dde5; font-weight: 500; }
+  .err { color: #e8815a; white-space: pre-wrap; }
+  canvas { display: none; }
+</style>
+
+<h1>Float probe</h1>
+<p class="sub">One fixed-step mission, one seed, one input trace. Open this on two machines and compare.</p>
+
+<div class="label">Fingerprint</div>
+<div class="fp" id="fp">running…</div>
+<div class="label" id="steps"></div>
+
+<div id="out"></div>
+
+<div class="env" id="env"></div>
+
+<canvas id="c" width="960" height="540"></canvas>
+
+<script type="module">
+import { Mission } from "../src/mission/mission.js";
+import { generateLevel } from "../src/game/gen/levelgen.js";
+import { config, SCHEMA } from "../src/game/config.js";
+import { checksum } from "../src/mission/checksum.js";
+import { STEP, SECONDS, SEED, SQUAD, scriptedInput } from "./mission-trace.mjs";
+
+const $ = (id) => document.getElementById(id);
+
+// Defaults in MEMORY only. resetConfig() also writes the store, which would
+// throw away whatever the person has set in the editor — this page is a probe,
+// not a reset button.
+function pinConfig() {
+  for (const group of SCHEMA) for (const item of group.items) config[item.key] = item.default;
+}
+
+// Fold the per-step checksums into one number, so two machines compare one
+// value rather than 480. Same mixing the checksum module uses.
+function fold(acc, v) {
+  acc = (acc ^ v) >>> 0;
+  acc = Math.imul(acc, 0x01000193) >>> 0;
+  return acc;
+}
+const hex = (n) => (n >>> 0).toString(16).padStart(8, "0").toUpperCase();
+
+try {
+  pinConfig();
+
+  const { level, mission } = generateLevel({ seed: SEED, difficulty: "high" });
+  const m = new Mission($("c"), () => {});
+  m.start(mission, level, SQUAD);
+  // start() armed the real rAF loop; from here the frames are ours, at a fixed
+  // step, off the trace instead of a device. Set synchronously, so the loop it
+  // armed never runs a frame of its own.
+  m.running = false;
+  m.input = scriptedInput();
+  // The mission installs a sound hook at start(); silence it rather than making
+  // the person listen to eight seconds of a firefight they cannot see.
+  m.scene.sound = () => {};
+
+  const frames = Math.round(SECONDS / STEP);
+  const CHECKPOINT = 60;
+  const marks = [];
+  let acc = 0x811c9dc5;
+
+  for (let f = 0; f <= frames; f++) {
+    const c = checksum(m.scene);
+    acc = fold(acc, c);
+    if (f % CHECKPOINT === 0) marks.push({ f, c, acc });
+    m.input.advance(f);
+    m.update(STEP);
+  }
+
+  $("fp").textContent = hex(acc);
+  $("steps").textContent = `${frames} steps · seed ${SEED} · step 1/${Math.round(1 / STEP)}`;
+
+  // Per-checkpoint, so a mismatch says WHERE. A fingerprint that differs at
+  // frame 0 is the input trace or the generated level; one that agrees early and
+  // parts later is the simulation, and the checkpoint names roughly when.
+  const rows = marks.map((r) =>
+    `<tr><td class="n">${r.f}</td><td class="n">${hex(r.c)}</td><td class="n">${hex(r.acc)}</td></tr>`
+  ).join("");
+  $("out").innerHTML =
+    `<table><tr><th>step</th><th>scene</th><th>running</th></tr>${rows}</table>`;
+} catch (e) {
+  $("fp").textContent = "failed";
+  $("fp").className = "fp bad";
+  $("out").innerHTML = `<div class="err">${String(e && e.stack || e)}</div>`;
+}
+
+const ua = navigator.userAgent;
+$("env").innerHTML = [
+  `<b>engine</b> ${ua.includes("Firefox") ? "SpiderMonkey" : ua.includes("Safari") && !ua.includes("Chrome") ? "JavaScriptCore" : "V8"}`,
+  `<b>agent</b> ${ua}`,
+  `<b>platform</b> ${navigator.platform || "?"} · <b>cores</b> ${navigator.hardwareConcurrency || "?"}`,
+  // Three transcendentals at full precision. If the fingerprints differ, these
+  // usually say so on their own, and in one line rather than eight seconds.
+  `<b>Math.sin(1)</b> ${Math.sin(1)} · <b>Math.cos(1)</b> ${Math.cos(1)}`,
+  `<b>Math.atan2(1,3)</b> ${Math.atan2(1, 3)} · <b>Math.hypot(3,4.7)</b> ${Math.hypot(3, 4.7)}`,
+].join("<br>");
+</script>

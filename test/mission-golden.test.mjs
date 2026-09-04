@@ -40,90 +40,15 @@ const GOLDEN = fileURLToPath(new URL("./mission.golden.json", import.meta.url));
 const SAMPLE_EVERY = 12; // frames between snapshots (0.2s)
 
 // The fixed-step harness — the step, the length, the seed, the squad and the
-// input trace — is exported because test/mission-divergence.test.mjs runs the
-// SAME mission twice with a different soldier controlled
-// (tech/multiplayer-missions.md, J0). Two probes of one mission should not be
-// asking about two different missions, and the trace guarded here is the one
-// worth probing. Exports only; no assertion moves.
-export const STEP = 1 / 60;
-export const SECONDS = 8;
-export const SEED = 20260824;
-
-// ---- the squad ------------------------------------------------------------
-// Weapon literals, not ARSENAL entries: `applyWeaponOverrides` mutates the
-// shipped weapon objects in place from localStorage, so a golden built on them
-// would depend on which suite ran before this one. Between them they cover the
-// spread draw twice over — one shot per pull, and one pull that draws per pellet.
-
-const AUTO_RIFLE = {
-  id: "gold_rifle", name: "Trace Rifle", fireRate: 6, auto: true, spread: 0.03,
-  magazine: 24, reloadTime: 1.6,
-  projectile: { speed: 900, w: 12, h: 4, color: "#ffd8a0", life: 1.4, shape: "bolt" },
-  effects: [{ kind: "damage", amount: 6 }],
-};
-const SCATTER = {
-  id: "gold_scatter", name: "Trace Scattergun", fireRate: 1.8, auto: false, spread: 0.05,
-  magazine: 6, reloadTime: 2.2,
-  projectile: { speed: 720, w: 8, h: 8, color: "#ffe0b0", life: 0.6, shape: "pellet" },
-  effects: [{ kind: "damage", amount: 4 }, { kind: "pellets", count: 5, spread: 0.16 }],
-};
-
-// Stats spread across Aim (spread width) and Speed (the duck roll's chance and
-// latency), so both stat-driven draws vary between squadmates.
-export const SQUAD = [
-  { data: { id: "s1", name: "Rook", callsign: "RK", stats: { health: 7, aim: 8, speed: 4 } }, weapon: AUTO_RIFLE },
-  { data: { id: "s2", name: "Vale", callsign: "VL", stats: { health: 6, aim: 4, speed: 9 } }, weapon: SCATTER },
-  { data: { id: "s3", name: "Pike", callsign: "PK", stats: { health: 8, aim: 6, speed: 6 } }, weapon: AUTO_RIFLE },
-];
-
-// ---- the input trace ------------------------------------------------------
-// A recorded trace, expressed as a pure function of the frame index. This is the
-// "fixed input at a fixed step" the whole spec is qualified on: no wall clock,
-// no polling, and identical on every run and every machine.
-
-function scriptAt(f) {
-  const held = {};
-  // advance right, except for two stretches where the player holds position
-  if (!(f >= 220 && f < 280) && !(f >= 400 && f < 430)) held.right = true;
-  if (f >= 250 && f < 268) held.left = true; // back up under fire
-  if (f % 90 < 6) held.jump = true;
-  if (f >= 300 && f < 360) held.crouch = true; // kneel, then stand back up
-  if (f > 40) held.fire = true; // auto weapons fire on hold
-  const pressed = {};
-  if (f % 11 === 0) pressed.fire = true; // and semi-autos on the edge
-  if (f === 420) pressed.reload = true;
-  if (f === 480) pressed.swap = true; // hand control to a squadmate mid-fight
-  // A stick aim that sweeps, so the spread draw is not always about the same
-  // axis and the muzzle direction changes every frame.
-  const a = Math.sin(f / 37) * 0.7;
-  return { held, pressed, aim: { x: Math.cos(a), y: Math.sin(a) } };
-}
-
-// A MissionInput stand-in. `aimSource` answers a stick whatever the aim mode is,
-// so the trace is independent of config.aimMode, the camera and the zoom.
-export function scriptedInput() {
-  let held = {};
-  let edges = {};
-  let aim = null;
-  return {
-    advance(f) {
-      const s = scriptAt(f);
-      held = s.held;
-      edges = { ...s.pressed };
-      aim = s.aim;
-    },
-    isDown: (a) => held[a] === true,
-    justPressed(a) {
-      if (!edges[a]) return false;
-      edges[a] = false;
-      return true;
-    },
-    aimSource: () => (aim ? { type: "stick", x: aim.x, y: aim.y } : null),
-    pollGamepad() {},
-    enable() {},
-    disable() {},
-  };
-}
+// input trace — now lives in `test/mission-trace.mjs` and is re-exported here.
+// THREE things drive this one mission and none of them may drift from the
+// others: this golden, `test/mission-divergence.test.mjs` (which imports these
+// names from here), and `test/float-probe.html`, which is a browser page and
+// therefore cannot import anything that reaches `node:fs` — which this file
+// does, on line one. That is why the trace moved out rather than growing a
+// third importer. Exports only; no assertion moved.
+export { STEP, SECONDS, SEED, SQUAD, scriptedInput } from "./mission-trace.mjs";
+import { STEP, SECONDS, SEED, SQUAD, scriptedInput } from "./mission-trace.mjs";
 
 // ---- one run --------------------------------------------------------------
 
