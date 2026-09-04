@@ -220,6 +220,91 @@ The one comparison worth making deliberately: **the same region at 20Hz and at
 60Hz**. Latency you cannot change; the snapshot wait you can, and it is the
 cheapest lever in the whole design.
 
+## Findings
+
+What the prototype actually established, as evidence rather than conclusions.
+The decision between this architecture and the repo's lockstep plan is Bo's and
+is not made here.
+
+### The cost of predicting nothing
+
+    input -> pixels  =  RTT  +  ~8ms server step wait  +  half a snapshot interval
+
+The middle and right terms are the architecture's own contribution; RTT is the
+network's. At 20Hz the design costs **~33ms**, at 60Hz **~16ms**. Everything
+else is the path.
+
+Measured in play on Fly `dfw` at ~35ms RTT: input->pixels lands around **60ms at
+20Hz** and it plays well. At Railway's 210ms RTT the same build measured 245ms
+and was not playable. So the architecture is viable *on a good path* and the
+question it cannot survive is a bad one.
+
+### The 245ms hunt, and what it eliminated
+
+A first deploy read 245ms. Five suspects were eliminated by measurement, in this
+order, and the order is the point — each was cheaper than the next:
+
+| Suspect | Ruled out by |
+|---|---|
+| The simulated lag knobs | Slider read 0ms; `afddbee` had already zeroed them off localhost |
+| The server's own loop | `late: 2ms`, `sat: 0`, `hz: 59.2` in `/health` |
+| The container's region | `/health` reported `us-east4-eqdc4a`, exactly as configured |
+| The deployed build | `RAILWAY_GIT_COMMIT_SHA` matched HEAD |
+| The client code | `curl -w %{time_connect}` — a TCP handshake with none of it involved — showed the same 200ms |
+
+What remained was the provider's edge: Railway 186ms against AWS 56ms **in the
+same metro**. A 130ms gap that distance cannot explain.
+
+**The lesson worth keeping is about inference.** Reasoning from "203ms floor" to
+"the container must be in Singapore" was wrong, and it was wrong because it
+assumed packets travel from player to container. On a PaaS they enter the
+provider's edge and are backhauled. A correct region and a terrible RTT are not
+in conflict, so a region check confirms a variable rather than explaining a
+number.
+
+Bo's own link also measured ~25ms above expectation (38ms to Cloudflare anycast,
+which should be ~10ms), so the floor available from Austin is ~30-40ms rather
+than ~15ms.
+
+### Why a shared store does not buy horizontal scaling
+
+The obvious escape from "one process owns a match" is to put the world in a
+database. Latency is **not** what stops this, and the first version of this note
+said it was. Measured, loopback TCP, 1KB — about one world snapshot:
+
+    p50 0.020ms   p95 0.069ms   p99 0.262ms   max 2.97ms
+    two round trips = 0.04ms = 0.2% of a 16.67ms tick budget
+
+Even a cross-AZ store at 1ms is ~12% of budget. It fits.
+
+What does not fit is **contention**. A tick is read-whole-world, compute,
+write-whole-world. Two processes doing that against one shared world both read
+the same state, each apply only their own players' inputs, and the second write
+destroys the first. Correctness needs a lock around the whole tick — and that
+lock serialises the processes, so one advances the world at a time. Single
+ownership is rebuilt, now with a network hop and a distributed lock inside it.
+
+And nothing is gained: everyone in a match must see the same world at the same
+tick, so spreading them across processes buys no throughput. The bottleneck was
+never connections per box; it is that one world has one writer.
+
+| | |
+|---|---|
+| What a store DOES buy | **Durability.** Async snapshots off the critical path survive a crash or a deploy. `tech/multiplayer-service.md` approximation 1 already flags "a campaign dies with the process" as a live hazard |
+| The one real exception | **Spatial sharding** — processes own regions of a large world and hand entities off at boundaries, as MMOs do. It needs interactions to be local. A 960x540 arena where anyone can shoot anyone has no seam to cut, and neither does a mission level |
+| The number that would matter | **p99 and max, not median.** Every tick is on the critical path, so a 10ms p99 blows 60% of budget on 1% of ticks — a visible hitch every ~1.7s at 60Hz |
+
+### The trade, as measured rather than argued
+
+| | Server-authoritative (this) | Lockstep (`tech/multiplayer-missions.md`) |
+|---|---|---|
+| Input latency | Full round trip, always | Local-immediate, gated by input delay |
+| Determinism | Irrelevant | Required — and J0 measured that it does not hold today |
+| Cheating | Server decides | Trivially exploitable |
+| A player drops | Others play on | Everyone stalls (service approximation 10) |
+| Ops | Fleet + matchmaker + per-match capacity | A relay |
+| Floating point across machines | Does not matter | Must agree; J0 verified only same-browser-build |
+
 ## Status
 
 | | |
@@ -230,4 +315,4 @@ cheapest lever in the whole design.
 | P3 | Multiple players, join/leave, scoreboard. **Built** |
 | P3.5 | Flying enemies — patrol, bob, shoot back; a live count knob that doubles as a bandwidth-vs-entity-count dial. **Built** |
 | P4 | **Real deployment.** Honest defaults off localhost, host-health instrumentation, `?server=` override, `/health`, own `package.json`. **Built — the deploy itself is Bo's to run** |
-| P5 | Optional remote interpolation toggle, and the written findings against the lockstep plan. Deliberately after a real run: what the numbers show should decide what P5 measures |
+| P5 | Optional remote interpolation toggle. The written findings landed early, as **Findings** above, because a real deploy produced them before the interpolation work started |
