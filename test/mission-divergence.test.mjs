@@ -16,7 +16,8 @@
 //     the brain's on the other.
 //
 // So this suite runs the SAME mission — same seed, same level, same squad, same
-// input trace, same fixed step — twice, changing nothing but `m.controlled`,
+// input trace, same fixed step — twice, changing nothing but which soldier this
+// client's commander is driving,
 // and compares src/mission/checksum.js per step. Per step, not at the end: the
 // useful output is the FIRST diverging frame, because the frame number is what
 // identifies the draw site, and the checksum's sample list then names the field.
@@ -61,7 +62,7 @@ function probe(controlled) {
   m.start(mission, level, SQUAD);
   m.running = false; // the frames are ours from here, at a fixed step
   m.input = scriptedInput();
-  m.controlled = controlled;
+  m.control.set(m.owner, controlled); // the one knob this probe turns
 
   // Count draws off the mission's stream. The wrapper goes on the scene AND on
   // every root, because loadMission handed each root the same function and the

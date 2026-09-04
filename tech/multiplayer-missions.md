@@ -56,8 +56,31 @@ input source, so the two runs still put different bodies under it; what J1 earns
 is a second probe driving two owners with two traces, and *that* one going quiet
 is the precondition for J6.
 
-**The second half is not built**, on the row's own terms: the cross-machine
-floating-point question is only worth asking once the first half passes.
+**The second half is built as a pair of pages and it passes.**
+`test/float-probe.html` runs the real mission off the extracted trace
+(`test/mission-trace.mjs`) and prints one fingerprint; `test/float-probe-standalone.html`
+drives `Math.sin`/`cos`/`atan2`/`hypot` alone, from `file://`, with no imports.
+Neither is in `node test/run.mjs` — they are browsers, and the bar is node.
+**Measured: two machines on the same version of Chrome agree.** That is the
+claim, and it is narrower than "floating point is fine": nothing says two
+different Chrome versions agree, and nothing says two different browsers do. So
+approximation 2 narrows rather than disappearing — lockstep is sound between
+clients on the same browser build, and what J6 has to decide is whether it
+detects a mismatched build or simply diverges on one.
+
+**J1 as built, in four places the plan said something narrower.**
+
+| What the plan said | What shipped, and why |
+|---|---|
+| `this.controlled` is an index, partitioned | It became `this.control`, a Map of **owner → index**, so EVERY commander has a leader rather than only the local one. The leader is what an AI squadmate escorts, so a squad whose commander has no leader is a squad the two clients step differently — the exact failure J0 measured. `_handleControl`'s auto-swap off a casualty runs for every owner for the same reason, and `Mission.start` gained a trailing `owner` naming the commander at this keyboard (default: the owner of the first soldier deployed, i.e. `null` in single-player) |
+| Two squads land on top of each other until the spawn offset changes | The line-up keeps the 44px pitch and opens a **two-slot gap wherever the owner changes**, walking the flat list once. It is a function of the list as given, never of "mine versus theirs", so both clients build the identical line-up. At one owner there is no gap and the offset is exactly `i * 44`, which is what keeps the golden still |
+| `loot` and `kills` are J1's actual work | They are, and the shape is `scene.collected` becoming `{ item, owner, by }` — eager on the scene now, since the HUD and `_resolve` both read it every mission. `_resolve` took an `owner` argument and builds the whole result for one commander; the payload's shape is unchanged, so `state.js` and the results screen never learn owners exist. **J2 therefore only has to decide WHEN each result fires, not what is in it** |
+| A commander's leader is player-driven | Only the LOCAL one is. Another commander's leader is stepped by the companion brain anchored to itself until J6 gives it an input stream — which is also, exactly, the shape approximation 6 describes for a commander who walks away |
+
+`_checkOutcome` is otherwise untouched and still ends the mission for everybody:
+J2 owns that. The one line J1 changed in it is the artifact grant, which now
+records the soldier who tripped the exit, making approximation 4 true as written.
+`this.squadIds` was deleted rather than partitioned, as the Background says.
 
 **J1–J6 supersede the M2, M3 and M4 rows of `tech/multiplayer.md`.** Four
 corrections, all found by reading the code rather than the plan:
@@ -91,6 +114,8 @@ corrections, all found by reading the code rather than the plan:
 |---|---|
 | `src/mission/checksum.js` (new) | J0. A pure function from a scene to a number over a **named** sample list, plus the list. Its own module because a suite, a lockstep loop and a bug report all read it and none should reach into the mission scene. **The list already exists in another form**: `test/mission.golden.json` is the set of gameplay fields the repo has already decided are the mission's real state, chosen for exactly this reason — everything cosmetic is excluded because it is unseeded on purpose. Start there rather than inventing a list, and where the two drift apart, that is a fact worth knowing about one of them | **As built:** the list is `sample()` from the golden with four drifts, all widening, because a fold costs no fixture bytes — EVERY projectile rather than the front three, each loot drop's own `y` and collected flag rather than the two counts, `scene.artifact` (the golden's 41 samples never resolve, so it never had a reason to look), and a root's brain state folded as a string rather than compared as one. The drift that runs the other way is not in the list: a checksum cannot carry the golden's 2e-3 tolerance, so values are quantized to 1e-3 and two runs that straddle a quantum read as divergence. Same process, that never fires; two machines, it is the thing to remember
 | `test/mission-divergence.test.mjs` (new) | J0. One scene, two runs, different soldier controlled, checksums compared per step. **Per step, not at the end**: what a builder needs is the FIRST step at which the two diverge, because the frame number is what identifies which draw site did it — the same reason `test/mission-golden.test.mjs` names the first differing field rather than reporting a mismatch |
+| `test/mission-trace.mjs` (new) | J0. The seed, squad, step and input trace, extracted rather than copied, because three things now drive one mission: the golden, the divergence probe, and a browser page that cannot import anything reaching `node:fs`. The golden re-exports the names it used to own |
+| `test/float-probe.html`, `test/float-probe-standalone.html` (new) | J0's second half. Two pages, run by hand on two machines: the first fingerprints the real mission over 480 steps off the extracted trace, the second drives `Math.sin`/`cos`/`atan2`/`hypot` alone from `file://` with no imports, so it can be handed to somebody with no repo. Not in the node bar — the question is about a browser engine |
 | `src/mission/entities.js` | J1. `Soldier` takes an owner; `loadMission`'s squad contract gains it. The spawn offset is `playerSpawn.x + i * 44` across one flat list, so two squads land on top of each other until this changes |
 | `src/mission/mission.js` | J1 and J2. The eleven sites in Background, the departed flag, per-owner `_resolve`, and the HUD |
 | `src/game/state.js` | J3. `applyMissionResult` stops assuming it is the only report for its lead |
@@ -152,7 +177,7 @@ frame rate**, because the golden already lives in the world J4 creates.
 | # | Where it is not exact | What catches the failure |
 |---|---|---|
 | 1 | **Two humans cannot drive two squads on one machine, so J1 and J2 are not playable before J6.** The Mission holds one `MissionInput` and one `controlled`, and `src/main.js` disables seat swapping mid-mission. Hot-seat gives one commander plus AI escorts wearing another owner's colours — useful for looking at, worthless as proof of feel. The headless suites are the real guard, and the first time a joint mission is *played* is J6 | Nothing. Stated because "we can try it in hot-seat first" is the assumption a builder would otherwise make, and it is false |
-| 2 | **Lockstep needs a floating-point claim this repo has declined to make.** `tech/mission-determinism.md` compares its golden with a 2e-3 tolerance because `Math.sin`/`cos`/`atan2` are implementation-defined, and its approximation 6 says two machines agreeing needs identical results across browsers and CPUs. J0's second half is where that gets tested — after its first half, which is likely to fail sooner and cheaper | J0. If either half fails, J6 is not lockstep and is replaced rather than adjusted |
+| 2 | **Lockstep needs a floating-point claim this repo has declined to make.** `tech/mission-determinism.md` compares its golden with a 2e-3 tolerance because `Math.sin`/`cos`/`atan2` are implementation-defined, and its approximation 6 says two machines agreeing needs identical results across browsers and CPUs. J0's second half is where that gets tested — after its first half, which is likely to fail sooner and cheaper **As built:** measured with the two probe pages, and it holds between two machines on the SAME Chrome version. Different versions and different browsers are untested, so the claim J6 gets to lean on is "same browser build", not "any two clients" | J0's first half failed and J1 is what answers it. The second half is `test/float-probe.html` and `test/float-probe-standalone.html`, run by hand on two machines — neither is in the node bar, and the narrowed claim has no continuous guard |
 | 3 | **J4 can change how the game feels, in single-player, for nobody's benefit.** Moving input sampling from once per rendered frame to once per step changes when a press is observed relative to a step boundary. It is a fraction of a frame, it is the correct behaviour, and it is the kind of thing a player notices as "heavier" without being able to name it | Playing it. The golden cannot see it |
 | 4 | **The artifact is an indivisible reward and J2 hands it to whoever extracts first, automatically.** Every generated level carries one (`src/game/gen/levelgen.js`), and `_checkOutcome` grants it to whoever trips the exit and nulls it. `design/multiplayer.md` explicitly wants the case where two players who cooperated end with something only one can hold — so the outcome is right and the *mechanism* is an extraction race rather than a pickup race, which is not what "first to reach it" describes | Nothing here. Named because it is a design-visible rule being set by an implementation detail, and Bo should know it is being set |
 | 5 | **Friendly fire is a per-browser setting and both clients read their own.** `config.friendlyFire` is localStorage, read per shot through the mission's `_ctx` getter and again in `duckableShot`. `tech/multiplayer-service.md` approximation 11 already records that a room runs on per-browser config; in a joint mission that stops being a tuning inconvenience and becomes two clients simulating different rules — a guaranteed lockstep break that has nothing to do with input | J0's checksum would catch it as divergence without explaining it. Whether mission rules should come from the room rather than the browser is the question this raises and does not answer |
@@ -170,11 +195,11 @@ Read off `src/mission/mission.js`, because the list is the size of J1.
 
 | Site | What it assumes |
 |---|---|
-| `this.controlled` | An index into `scene.soldiers`. The one that lets a commander drive somebody else's soldier |
+| `this.controlled` | An index into `scene.soldiers`. The one that lets a commander drive somebody else's soldier. **As built:** a Map of owner → index, one entry per commander |
 | `_swapControl` | Cycles the whole array, wrapping into the other squad |
 | `_handleControl` | Auto-swaps off a dead soldier into anyone |
 | `currentSoldier` / `livingSoldiers` | "The squad" is the array |
-| **`_updateSoldiers`'s `leader`** | `leader = this.currentSoldier()`, handed to every companion. Decides who is player-driven AND who each AI squadmate escorts. **The biggest one, and it is not in the phase map** |
+| **`_updateSoldiers`'s `leader`** | `leader = this.currentSoldier()`, handed to every companion. Decides who is player-driven AND who each AI squadmate escorts. **The biggest one, and it is not in the phase map**. **As built:** one leader per owner, resolved before the walk; player-driven is the local owner's leader alone, escort is the soldier's own commander's |
 | `_checkOutcome` | Any living soldier at the exit wins for everybody; all dead loses for everybody |
 | `_checkOutcome`'s artifact grant | One `scene.artifact`, taken by whoever extracts first |
 | `_resolve` | Survivors, casualties, kills and wounds over the whole array, into one result, with a flat `scene.collected` and a scalar kill total |
@@ -182,9 +207,9 @@ Read off `src/mission/mission.js`, because the list is the size of J1.
 | `_updateCamera`, the damage flash, `_drawSoldier` | All keyed to `currentSoldier()` |
 | `_squadGraph` / `_drawSquadPaths` / `_drawHUD` | Draws the array as one force, including a scene-wide loot count |
 
-`this.squadIds` is assigned in `start()` and read nowhere in `src/` or `test/`.
-It is a twelfth assumption and it is dead; J1 should delete it rather than
-partition it.
+`this.squadIds` was assigned in `start()` and read nowhere in `src/` or `test/`.
+It was a twelfth assumption and it was dead; J1 deleted it rather than
+partitioning it.
 
 ### Why the probe comes first
 

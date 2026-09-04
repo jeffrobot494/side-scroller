@@ -186,15 +186,28 @@ const SOLDIER_TUNING = {
 export const STAND_H = 46;
 export const CROUCH_H = 22;
 
+// Empty 44px slots left between one commander's squad and the next at the
+// spawn line (J1). Two, so the gap reads as a gap rather than as a wide squad.
+const SQUAD_GAP = 2;
+
 export class Soldier {
   // `data` is a roster soldier (id, name, stats, ...); `weapon` is a WEAPONS entry.
-  constructor(data, weapon, x, y) {
+  // `owner` is the commander who INPUTS for this soldier and is credited for it
+  // (tech/multiplayer-missions.md, J1) — a second axis over the squad, and
+  // deliberately not the team axis: two commanders' squads are mutually
+  // non-hostile and stay that way, because `opponents()` switches on a
+  // projectile's team and `hostilesFor` returns `scene.soldiers` whole. Owner is
+  // never authority: every client simulates every soldier. One commander (every
+  // single-player mission) leaves it null on all of them, and every partition
+  // by it is then the whole array.
+  constructor(data, weapon, x, y, owner = null) {
     this.kind = "soldier";
     this.data = data;
     this.id = data.id;
     this.name = data.name;
     this.callsign = data.callsign;
     this.weapon = weapon;
+    this.owner = owner;
 
     this.x = x;
     this.y = y;
@@ -400,9 +413,25 @@ const FLY_ALTITUDE = 140;
 export function loadMission(level, squad, seed) {
   const rng = seed === undefined || seed === null ? null : makeRng(seed);
 
-  const soldiers = squad.map((s, i) =>
-    new Soldier(s.data, s.weapon, level.playerSpawn.x + i * 44, level.playerSpawn.y)
-  );
+  // A squad entry is { data, weapon, owner? } — the owner is what a joint
+  // dispatch will carry (J5) and is null for every single-player deploy.
+  //
+  // The line-up walks the flat list on the SAME 44px pitch it always did, and
+  // opens a two-slot gap wherever the owner changes, so two squads arrive as two
+  // groups instead of interleaved on one spot. It is a pure function of the list
+  // as given, not of "mine versus theirs": both clients build the identical
+  // line-up from the identical list, which is the only property lockstep needs
+  // from it. At one owner there is no gap and the offset is exactly `i * 44`.
+  let slot = 0;
+  let prevOwner;
+  const soldiers = squad.map((s, i) => {
+    const owner = s.owner ?? null;
+    if (i > 0 && owner !== prevOwner) slot += SQUAD_GAP;
+    prevOwner = owner;
+    const sol = new Soldier(s.data, s.weapon, level.playerSpawn.x + slot * 44, level.playerSpawn.y, owner);
+    slot += 1;
+    return sol;
+  });
 
   // Every mission enemy is an EnemySpec instance. A placement { type, x, y }
   // resolves through missionSpecById; a type this browser no longer has (an
@@ -432,6 +461,10 @@ export function loadMission(level, squad, seed) {
     exit: { ...level.exit },
     artifact: level.artifact ? { ...level.artifact } : null,
     soldiers,
+    // What the squad has picked up, as { item, owner, by } — the item is the
+    // payload the campaign gets, the other two are who gets credited for it
+    // (J1). Eager, because both the HUD and _resolve read it every mission.
+    collected: [],
     specRoots,
     enemies: specRoots.flatMap((r) => collidables(r)),
     projectiles: [],

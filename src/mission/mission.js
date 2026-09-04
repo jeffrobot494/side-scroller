@@ -39,15 +39,32 @@ export class Mission {
   }
 
   // `mission` = MISSIONS entry, `level` = the resolved LEVELS entry,
-  // `squad` = [{ data, weapon }] chosen in the deploy screen.
-  start(mission, level, squad) {
+  // `squad` = [{ data, weapon, owner? }] chosen in the deploy screen, and
+  // `owner` = the commander at THIS keyboard (tech/multiplayer-missions.md, J1).
+  // Given none, it is the owner of the first soldier deployed, which is null for
+  // every single-player mission and makes every partition below the whole array.
+  start(mission, level, squad, owner = null) {
     this.mission = mission;
     // The mission's seed is the mission's stream: every gameplay draw in the
     // scene comes off it (tech/mission-determinism.md, D2). A mission without
     // one still loads — it is simply not reproducible.
     this.scene = loadMission(level, squad, mission ? mission.seed : null);
-    this.squadIds = this.scene.soldiers.map((s) => s.id);
-    this.controlled = 0;
+    // ---- the owner axis (J1) ----
+    // `owner` is who INPUTS and who is CREDITED; it is never authority, since
+    // this client simulates every soldier on the level whoever owns them.
+    this.owner = owner ?? (this.scene.soldiers[0] ? this.scene.soldiers[0].owner : null);
+    // Distinct owners in spawn order, fixed for the mission: nothing joins or
+    // leaves scene.soldiers once it is built.
+    this._owners = [];
+    for (const s of this.scene.soldiers)
+      if (!this._owners.includes(s.owner)) this._owners.push(s.owner);
+    // Which soldier each commander is driving, as an index into scene.soldiers.
+    // EVERY owner has one, not just this client's: a leader is what a squad
+    // escorts, so a squad with no leader is a squad the two clients would step
+    // differently. Each starts on its own first soldier.
+    this.control = new Map();
+    for (const o of this._owners)
+      this.control.set(o, this.scene.soldiers.findIndex((s) => s.owner === o));
     this.camera = { x: 0, y: 0 };
     this.introTimer = 2.2;
     this.endBanner = null; // { success, timer } once the mission resolves
@@ -124,12 +141,37 @@ export class Mission {
     requestAnimationFrame(this._frame);
   }
 
-  currentSoldier() {
-    return this.scene.soldiers[this.controlled];
+  // ---- the squad, per commander (J1) --------------------------------------
+  // "The squad" stopped meaning scene.soldiers: it means one owner's slice of
+  // it. Every one of these defaults to THIS client's owner, so a single-player
+  // mission reads exactly as it did — one owner, and the slice is the array.
+
+  owners() {
+    return this._owners;
   }
 
-  livingSoldiers() {
-    return this.scene.soldiers.filter((s) => s.alive);
+  soldiersOf(owner = this.owner) {
+    return this.scene.soldiers.filter((s) => s.owner === owner);
+  }
+
+  // The soldier `owner` is driving. For this client's owner that is the one
+  // under the input device; for anyone else it is the one their AI squad
+  // escorts, and the one their own client is inputting for.
+  currentSoldier(owner = this.owner) {
+    const i = this.control.get(owner);
+    return i === undefined ? undefined : this.scene.soldiers[i];
+  }
+
+  livingSoldiers(owner = this.owner) {
+    return this.scene.soldiers.filter((s) => s.alive && s.owner === owner);
+  }
+
+  // What this commander's squad has recovered, as the plain items the campaign
+  // takes. scene.collected carries the credit; the result and the HUD both read
+  // it through here, so neither can leak what the other commander carried out
+  // (approximation 7).
+  collectedBy(owner = this.owner) {
+    return (this.scene.collected || []).filter((c) => c.owner === owner).map((c) => c.item);
   }
 
   // ---- simulation ---------------------------------------------------------
@@ -168,10 +210,17 @@ export class Mission {
   }
 
   _handleControl() {
-    // Manual swap to the next living soldier.
+    // Manual swap to the next living soldier — THIS commander's, never into
+    // somebody else's squad.
     if (this.input.justPressed("swap")) this._swapControl(1);
-    // Auto-swap off a dead soldier.
-    if (!this.currentSoldier().alive) this._swapControl(1);
+    // Auto-swap off a dead soldier, for every commander rather than only this
+    // one: a leader is what a squad escorts, so leaving a dead one in place
+    // strands that squad, and running it for one owner only would have the two
+    // clients stepping a squad neither of them is inputting for differently.
+    for (const o of this._owners) {
+      const cur = this.currentSoldier(o);
+      if (!cur || !cur.alive) this._swapControl(1, o);
+    }
     // Debug overlays. The keys are always bound; the config gate is what keeps
     // them out of a build handed to somebody else. Edge-triggered, so holding
     // the key does not strobe.
@@ -204,20 +253,31 @@ export class Mission {
   // recomputed. A view that repathed to draw would show a fresher route than the
   // one being walked, which is the thing you turn this on to catch.
   _drawSquadPaths(ctx, graph) {
+    const leaders = this._owners.map((o) => this.currentSoldier(o));
     for (const s of this.scene.soldiers) {
-      if (!s.alive || s === this.currentSoldier()) continue; // the player holds no route
+      if (!s.alive || leaders.includes(s)) continue; // a leader holds no route
       const nav = s.agent && s.agent.nav;
       if (!nav || !nav.path || !nav.path.length) continue;
       drawNavPath(ctx, graph, nav.path, { halfW: s.w / 2, color: s.color });
     }
   }
 
-  _swapControl(dir) {
-    const n = this.scene.soldiers.length;
+  // Cycle `owner`'s control to their next living soldier. The wrap is over that
+  // commander's own indices, so a swap can never hand somebody else's soldier to
+  // the wrong keyboard — at one owner the ring is the whole array and this is
+  // the cycle it always was.
+  _swapControl(dir, owner = this.owner) {
+    const own = [];
+    for (let i = 0; i < this.scene.soldiers.length; i++)
+      if (this.scene.soldiers[i].owner === owner) own.push(i);
+    if (!own.length) return;
+    const at = own.indexOf(this.control.get(owner));
+    if (at < 0) { this.control.set(owner, own[0]); return; }
+    const n = own.length;
     for (let i = 1; i <= n; i++) {
-      const idx = (this.controlled + dir * i + n * i) % n;
+      const idx = own[(((at + dir * i) % n) + n) % n];
       if (this.scene.soldiers[idx].alive) {
-        this.controlled = idx;
+        this.control.set(owner, idx);
         return;
       }
     }
@@ -225,14 +285,24 @@ export class Mission {
 
   _updateSoldiers(dt) {
     const scene = this.scene;
-    const leader = this.currentSoldier();
+    // ONE LEADER PER COMMANDER (J1), and it decides two different things that
+    // used to be one: who is player-driven — only this client's leader, the one
+    // soldier on the level with an input device attached — and who each AI
+    // squadmate escorts, which is its OWN commander's leader and never the other
+    // squad's. Another commander's leader is stepped by the same companion brain
+    // as everyone else, anchored to itself, until J6 gives it an input stream;
+    // that is also the shape a commander who walks away leaves behind.
+    const leaders = new Map();
+    for (const o of this._owners) leaders.set(o, this.currentSoldier(o));
+    const piloted = leaders.get(this.owner);
 
     for (const s of scene.soldiers) {
       if (!s.alive) continue;
+      const leader = leaders.get(s.owner) || s;
       // Jump/land are read from the ground-contact transition around the physics
       // step, so entities.js stays free of presentation concerns.
       const wasGround = s.onGround;
-      if (s === leader) {
+      if (s === piloted) {
         // Player control.
         s.setCrouch(this.input.isDown("crouch"));
         const move =
@@ -392,11 +462,12 @@ export class Mission {
         }
       }
       l.bob += dt * 4;
+      // First to touch it takes it — the `break` IS the contested pickup, and
+      // all J1 adds is that the item now knows whose hands it landed in.
       for (const s of scene.soldiers) {
         if (s.alive && overlaps(l, s)) {
           l.collected = true;
-          scene.collected = scene.collected || [];
-          scene.collected.push(l.item);
+          scene.collected.push({ item: l.item, owner: s.owner, by: s.id });
           scene.sound("loot.pickup", { x: l.x, y: l.y });
           break;
         }
@@ -416,10 +487,13 @@ export class Mission {
     }
     for (const s of living) {
       if (overlaps(s, scene.exit)) {
-        // Grab the guaranteed artifact on extraction.
+        // Grab the guaranteed artifact on extraction. There is one and it is
+        // indivisible, so tagging it with the soldier who tripped the exit makes
+        // extraction a race rather than a shared prize — the outcome
+        // design/multiplayer.md asks for, arrived at by a mechanism it does not
+        // describe (approximation 4).
         if (scene.artifact) {
-          scene.collected = scene.collected || [];
-          scene.collected.push(scene.artifact);
+          scene.collected.push({ item: scene.artifact, owner: s.owner, by: s.id });
           scene.artifact = null;
         }
         this._resolve(true);
@@ -428,12 +502,20 @@ export class Mission {
     }
   }
 
-  _resolve(success) {
+  // The result of the mission FOR ONE COMMANDER (J1). Survivors, casualties,
+  // wounds and kills-by-soldier were already id-keyed and only needed the walk
+  // narrowing; `loot` and `kills` were the two that were not — a flat
+  // scene.collected with no soldier on it and a scalar total over everybody —
+  // and they are what this slice actually had to build. The payload's shape is
+  // unchanged, so state.js and the results screen never learn about owners.
+  // Ending the mission is still scene-wide; J2 is what makes ends independent.
+  _resolve(success, owner = this.owner) {
     if (this.endBanner) return;
-    const survivors = this.scene.soldiers.filter((s) => s.alive).map((s) => s.id);
-    const casualties = this.scene.soldiers.filter((s) => !s.alive).map((s) => s.id);
-    const kills = this.scene.soldiers.reduce((n, s) => n + s.kills, 0);
-    const killsBySoldier = this.scene.soldiers.map((s) => ({ id: s.id, kills: s.kills }));
+    const squad = this.soldiersOf(owner);
+    const survivors = squad.filter((s) => s.alive).map((s) => s.id);
+    const casualties = squad.filter((s) => !s.alive).map((s) => s.id);
+    const kills = squad.reduce((n, s) => n + s.kills, 0);
+    const killsBySoldier = squad.map((s) => ({ id: s.id, kills: s.kills }));
     this.result = {
       success,
       missionId: this.mission.id,
@@ -441,11 +523,11 @@ export class Mission {
       survivors,
       casualties,
       killsBySoldier,
-      woundsBySoldier: this.scene.soldiers.map((s) => ({
+      woundsBySoldier: squad.map((s) => ({
         id: s.id,
         wounds: Math.max(0, Math.round(s.maxHealth - s.health)),
       })),
-      loot: success ? this.scene.collected || [] : [],
+      loot: success ? this.collectedBy(owner) : [],
       kills,
     };
     this.endBanner = { success, timer: 1.6 };
@@ -483,9 +565,11 @@ export class Mission {
   }
 
   _updateCamera() {
+    const cur = this.currentSoldier();
+    if (!cur) return; // a commander with no soldiers on this level holds the camera where it is
     const z = this._zoom();
     const viewW = this.canvas.width / z;
-    const c = solveCamera(this.currentSoldier(), viewW, this.canvas.height / z, this.scene.world);
+    const c = solveCamera(cur, viewW, this.canvas.height / z, this.scene.world);
     this.camera.x = c.x;
     this.camera.y = c.y;
     // Pan + distance falloff are measured from the middle of the viewport, and
@@ -920,12 +1004,14 @@ export class Mission {
     ctx.scale(k, k);
     const W = this.canvas.width / k, H = DESIGN_H;
 
-    // squad cards (top-left)
+    // Squad cards (top-left) — THIS commander's squad. The other one is on the
+    // level and drawn there; its roster, its health and what it recovered are
+    // not this commander's to read (approximation 7).
     let y = 12;
     const cardW = 200, cardH = 42;
-    for (let i = 0; i < this.scene.soldiers.length; i++) {
-      const s = this.scene.soldiers[i];
-      const controlled = i === this.controlled && s.alive;
+    const cur = this.currentSoldier();
+    for (const s of this.soldiersOf()) {
+      const controlled = s === cur && s.alive;
       ctx.fillStyle = "rgba(9,14,23,0.8)";
       this._roundRect(ctx, 12, y, cardW, cardH, 6);
       ctx.fill();
@@ -973,7 +1059,7 @@ export class Mission {
     // objective + loot (top-right). The FPS meter takes the corner when it's
     // on and the gameplay stack slides down; with it off `top` is 26 and the
     // layout is exactly what it always was.
-    const lootCount = (this.scene.collected || []).length;
+    const lootCount = this.collectedBy().length;
     ctx.textAlign = "right";
 
     const top = config.showFps ? 44 : 26;
@@ -993,7 +1079,6 @@ export class Mission {
     ctx.fillText(`◈  Loot recovered: ${lootCount}`, W - 16, top + 20);
 
     // ammo / reload readout for the controlled soldier (only for magazine guns)
-    const cur = this.currentSoldier();
     if (cur && cur.alive && cur.weapon && cur.weapon.magazine) {
       ctx.font = "bold 14px system-ui, sans-serif";
       if (cur.reloading > 0) {
