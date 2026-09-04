@@ -61,8 +61,8 @@ corrections, all found by reading the code rather than the plan:
 
 | Path | Change |
 |---|---|
-| `src/mission/checksum.js` (new) | J0. A pure function from a scene to a number over a **named** sample list, plus the list. Its own module because a suite, a lockstep loop and a bug report all read it and none should reach into the mission scene |
-| `test/mission-divergence.test.mjs` (new) | J0. One scene, two runs, different soldier controlled, checksums compared. The result of this suite is the answer the rest of the plan waits on |
+| `src/mission/checksum.js` (new) | J0. A pure function from a scene to a number over a **named** sample list, plus the list. Its own module because a suite, a lockstep loop and a bug report all read it and none should reach into the mission scene. **The list already exists in another form**: `test/mission.golden.json` is the set of gameplay fields the repo has already decided are the mission's real state, chosen for exactly this reason — everything cosmetic is excluded because it is unseeded on purpose. Start there rather than inventing a list, and where the two drift apart, that is a fact worth knowing about one of them |
+| `test/mission-divergence.test.mjs` (new) | J0. One scene, two runs, different soldier controlled, checksums compared per step. **Per step, not at the end**: what a builder needs is the FIRST step at which the two diverge, because the frame number is what identifies which draw site did it — the same reason `test/mission-golden.test.mjs` names the first differing field rather than reporting a mismatch |
 | `src/mission/entities.js` | J1. `Soldier` takes an owner; `loadMission`'s squad contract gains it. The spawn offset is `playerSpawn.x + i * 44` across one flat list, so two squads land on top of each other until this changes |
 | `src/mission/mission.js` | J1 and J2. The eleven sites in Background, the departed flag, per-owner `_resolve`, and the HUD |
 | `src/game/state.js` | J3. `applyMissionResult` stops assuming it is the only report for its lead |
