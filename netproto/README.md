@@ -132,12 +132,17 @@ and the host's own `RAILWAY_*` / `FLY_*` / `RENDER_*` environment (names only,
 credentials filtered) — so several deployments can be compared with curl instead
 of a tab each.
 
-**`host.RAILWAY_REPLICA_REGION` is the one to read first.** A dashboard dropdown
-says what region was *requested*; the container's environment says where it
-actually is, and those have already disagreed once: a run measured from Austin
-against a service believed to be in Virginia showed a 203ms floor, which is a
-Singapore round trip, not a Virginia one. Distance is the dominant term in every
-other number on the page, so confirm it before trusting any of them.
+**`host.RAILWAY_REPLICA_REGION` is the one to read first**, because distance is
+the dominant term in every other number on the page.
+
+It is also a standing correction. A first run from Austin against
+`us-east4-eqdc4a` (Ashburn) measured a **203ms RTT floor** where the physical
+path is ~2,000km and should floor near 40ms. The obvious inference — that the
+container was not really in Virginia — was **wrong**, and the endpoint above is
+what disproved it. The inference assumed packets travel from the player to the
+container, and on a PaaS they do not: traffic enters the provider's edge and is
+backhauled. A correct region and a 200ms RTT are not in conflict, so a region
+check confirms one variable rather than explaining a number.
 
 ### Railway
 
