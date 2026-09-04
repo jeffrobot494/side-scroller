@@ -162,6 +162,42 @@ service (`tech/multiplayer-service.md`), and only one process can hold `$PORT`.
 `wss://` needs no work — the client derives the scheme from `location.protocol`,
 and Railway terminates TLS and proxies the upgrade.
 
+### Fly
+
+`fly.toml` and `Dockerfile` are in this folder; the same image runs on both
+hosts so a build difference cannot get inside the comparison.
+
+    cd netproto
+    fly apps create <name> --org personal
+    fly deploy --remote-only
+    fly scale count 1          # SEE BELOW
+
+**One machine, always.** The world lives in the process's memory, so a second
+machine is a second arena — two players get balanced onto different hosts, each
+sees an empty room, and they never meet. Fly's first deploy creates an HA pair
+by default and it has to be scaled back down. `min_machines_running = 0` in
+`fly.toml` stops it recurring, and `auto_stop_machines = "off"` is what keeps
+the single machine alive.
+
+This is worth reading as a finding rather than a config note: **a
+server-authoritative game cannot be scaled horizontally without sticky routing
+or shared state.** One process owns a match. Adding capacity means routing
+players to the right process, not adding processes.
+
+### Measured, Austin to each host
+
+Same command, same minute, `curl -w %{time_connect}`:
+
+| Host | Region | connect |
+|---|---|---|
+| Fly | `dfw` Dallas | **26ms** |
+| AWS (control) | `us-east-1` Ashburn | 56ms |
+| Railway | `us-east4` Ashburn | **186ms** |
+
+Railway and AWS are in the same metro and differ by 130ms, so that gap is the
+provider's edge rather than distance. The container's region was confirmed
+correct via `/health` before this was concluded.
+
 ### Reading a cross-region run
 
 | Watch for | Because |
