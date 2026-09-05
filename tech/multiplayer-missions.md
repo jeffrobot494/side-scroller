@@ -20,7 +20,7 @@ only one where two people are in the same place at the same time.
 |---|---|---|
 | **J0** | **The divergence probe, and it answers a cheaper question than the plan asked.** Two clients running one lockstep mission must consume the mission's single seeded stream in the same order — and they cannot today, for a reason that is nothing to do with floating point: `scene.rng` is drawn by weapon spread and the duck roll in `src/mission/ai.js` and by every lazily-built companion agent, the controlled soldier takes none of those paths, and **which soldier is controlled differs per client by construction**. That is testable **headlessly, in one process**: run one scene twice with a different soldier controlled and compare. Only if that passes is the cross-machine floating-point question worth asking. A rolling checksum is the instrument for both | No — it observes |
 | **J1** | **A soldier has an owner, and "the squad" stops meaning `scene.soldiers`.** One field, from the dispatch that put it there, and then eleven sites partition by it — listed in Background, because the list IS the slice. The one that is not obvious: `_updateSoldiers` picks `leader = this.currentSoldier()` and hands it to every companion, so ownership decides who is player-driven and who each AI squadmate escorts. At one owner every partition is the whole array | No. One owner is today's game, and `test/mission-golden.test.mjs` is what says so |
-| **J2** | **Ends are independent, and an extracted squad LEAVES the scene.** Reaching the exit resolves **that owner's** mission and their soldiers are spliced out of `scene.soldiers`; the scene keeps running for everyone still on it. Removal is the mechanism, not a flag: "the squad leaves" means it does not fire, does not collide, does not win `_updateLoot`'s race, is not drawn and is not a target, and taking it out of the array is all five at once rather than five guards to write and one to forget. **The blocker is `this.control`, which maps owner → INDEX** (`src/mission/mission.js`), so a splice shifts every other commander's control onto the wrong soldier — it keys by soldier id instead, which is what an index into a mutable array should have been anyway. `_swapControl` already rescans for its owner each call and needs only the same change. **It also fixes the losing branch J1 narrowed** — see below — and a resolved owner must be skipped by `_checkOutcome`, whose `livingSoldiers(owner)` would otherwise read an empty squad as wiped. **A commander who finishes returns to base** (Bo): their `onComplete` fires, they get their results screen, and they wait for nobody. `src/main.js` fires `onComplete` per owner; who keeps stepping the scene afterwards is J8's, because before J8 there is no simulation anywhere but this page | Yes, visibly: a mission no longer ends when the first soldier reaches the exit while somebody else is still fighting |
+| **J2** | **Ends are independent, and an extracted squad LEAVES the scene.** Reaching the exit resolves **that owner's** mission and their soldiers are spliced out of `scene.soldiers`; the scene keeps running for everyone still on it. **Ending is scene-wide today in five places, and the splice is the smallest of them** — the list is under "What ends a mission" and it IS the slice. Removal is the mechanism for departure, not a flag: "the squad leaves" means it does not fire, does not collide, does not win `_updateLoot`'s race, is not drawn and is not a target, and taking it out of the array is all five at once rather than five guards to write and one to forget. **A commander who finishes returns to base** (Bo): their `onComplete` fires, they get their results screen, and they wait for nobody | Yes, visibly: a mission no longer ends when the first soldier reaches the exit while somebody else is still fighting |
 | **J3** | **The campaign accepts two results for one lead, under one rule: the MISSION decides world consequences, not the commander, and there is only one mission.** (Bo, transcribed.) So a joint clear pays `threatReward` once, a joint failure charges doom once, and `cleared` increments once — while everything a commander earns stays per-commander. The table under "What is per mission and what is per commander" is that rule applied field by field. Today the code gets it wrong in both directions at once, which is why neither current behaviour is evidence of intent. The mechanics are unambiguous even where the rule is not, and this is not a joint-mission nicety — it is a live corruption. Two dispatches on one lead carry the same `missionId`; `applyMissionResult` removes the lead from the shared board on the first report, so the second finds no `mission` and silently gets no `threatReward`, no log line, no `highWins`, no `winsCampaign`, and on a failure neither the health penalty nor `outcome = "lost"` — while `state.cleared` increments **twice**, because that line is not guarded by the lookup | Yes, and it fixes a bug that already exists whenever two commanders pick the same lead |
 | **J4** | **Input sampling leaves the frame rate.** `_frame` polls input once per *rendered* frame then steps the sim a variable number of times, so the same physical inputs at a different frame rate are a different mission. `tech/mission-determinism.md` approximation 1, named there as "its own change and is not in this spec" | Yes, and it is the one slice that could change how the game feels to a solo player. See Approximations |
 | **J5** | **A dispatch knows it is joint, and carries an owner.** Two commanders on one lead produce two dispatches that never learn of each other: `closeRound` emits them independently and `src/net/rooms.js` pushes each only to its own seat. The pairing crosses the seam — and so does the **owner**, which `projectDispatch` does not emit today, so a joint dispatch's soldiers would arrive owner-less and every J1 partition would collapse back to one squad. Turn-boundary only; no mission code | Yes — a room can pair two dispatches. Nothing plays jointly |
@@ -98,6 +98,30 @@ repo controls, on a schedule nobody here sets, with no way to test the version
 that has not shipped. That is not a bug to fix — it is a dependency on a third
 party's release notes.
 
+## What ends a mission (J2)
+
+Every one of these is scene-wide today, and each was verified by driving a
+two-owner `Mission` rather than by reading it. The splice is the last row, not
+the first.
+
+| Site | Today | What J2 needs |
+|---|---|---|
+| `update()`'s early return | `if (this.endBanner) { … return; }` — one owner resolving **freezes the level for everybody**. Measured: the other commander's soldiers do not move for 30 steps | The banner is per owner and the step is not gated on it |
+| `_resolve`'s guard | `if (this.endBanner) return` — the second owner's resolve is **silently dropped** | Per owner. `this.endBanner` and `this.result` both become per-owner |
+| `_finish` | Calls `this.stop()`, which ends the mission for everybody, and fires `onComplete` once | Fires per owner, and does not stop the scene. **It also needs an idempotence guard**: `stop()` killing the rAF loop is its only protection today, and with the loop alive it fired `onComplete` **104 times** |
+| `_checkOutcome` | Calls `this.livingSoldiers()` with **no argument**, so since J1 it sees only the local owner — it never loops. Both branches narrowed, not just the losing one | Loops every unresolved owner, and skips resolved ones (an empty squad would otherwise read as wiped) |
+| `this.control` | Maps owner → **index** into `scene.soldiers`, so the splice invalidates it. At two owners the departing owner's own entry is the dangerous one: after the splice it resolves to the *other* commander's live soldier, and nothing heals it — the local keyboard ends up driving somebody else's squad | Keys by soldier **id**. `_swapControl` already rescans per call and needs only the same change |
+
+Two more the splice touches that no other row covers: `mission.js`'s own header
+states "nothing joins or leaves `scene.soldiers` once it is built", which J2
+falsifies; and `this._owners` is built once at start, so a resolved commander
+keeps getting a no-op `_swapControl` every frame.
+
+**`test/mission-divergence.test.mjs` is edited by J2, not left alone.** It sets
+control with an index (`m.control.set(m.owner, controlled)`); id-keyed, that
+call drives nobody and the suite's two probe assertions invert. It stays a
+guard — it stops being one for free.
+
 ## Why the network half is not lockstep
 
 J0 was built to find out whether lockstep was possible. Both halves answered,
@@ -148,13 +172,13 @@ demands it, and `netproto/README.md`'s P5 is the place its findings would go.
 | A commander's leader is player-driven | Only the LOCAL one is. Another commander's leader is stepped by the companion brain anchored to itself until J6 gives it an input stream — which is also, exactly, the shape approximation 6 describes for a commander who walks away |
 
 **`_checkOutcome` is NOT untouched, and this is a J1 behaviour change nothing
-tests.** It calls `this.livingSoldiers()`, whose J1 default is *this owner's*
-squad, so the losing branch narrowed from "every soldier down" to "this
-commander's squad down" — verified by killing one owner's two soldiers in a
-two-owner scene and watching `endBanner` and a result appear while the other
-owner still had two alive. `test/mission-ownership.test.mjs`'s 44 assertions do
-not cover it. **J2 owns fixing it; a case belongs in that suite either way.**
-The winning branch is what the sentence below still describes:
+tests — in BOTH branches.** It calls `this.livingSoldiers()` with no argument,
+whose J1 default is *this owner's* squad. So the losing branch narrowed from
+"every soldier down" to "this commander's squad down", and the winning branch
+narrowed the same way: measured, another commander standing in the exit produces
+no banner and does not consume `scene.artifact`, and their squad being wiped
+produces nothing at all. `test/mission-ownership.test.mjs`'s 44 assertions cover
+neither. **J2 owns it**, and the fix is the loop in "What ends a mission".
 J2 owns that. The one line J1 changed in it is the artifact grant, which now
 records the soldier who tripped the exit, making approximation 4 true as written.
 `this.squadIds` was deleted rather than partitioned, as the Background says.
@@ -179,17 +203,27 @@ commander decides what happens to their base.**
 |---|---|---|
 | `threatReward` → `campaignHealth` | World | **Once.** One mission was cleared |
 | The failure penalty and the doom charge | World | **Once.** One mission was failed |
-| `cleared` (board pressure) | World | **Once.** Today it increments per report, which is the double-count |
-| `winsCampaign` → `world.wonBy` | World | **Once**, and it is already first-writer-wins |
-| The mission's log line | World | **Once** |
+| `cleared` (board pressure) | World | **Once.** It is the one field that does NOT hang off the lead lookup — it is guarded by the per-player `completedMissions`, so it increments for each reporter. It needs the opposite change from the rest of this table |
+| `winsCampaign` → `world.wonBy` | World | **Once — and it is NOT first-writer-wins today.** `state.js` assigns unguarded; it only looks safe because the second report never finds the lead, which is the bug J3 removes. Measured: with both reports finding it, `wonBy` goes A → B and A's `outcome` flips from `"won"` to `"ended"` **after A has been shown a win screen**. Guarding it is J3's work, not a freebie |
+| The mission's log line | World | **Once — and it currently leaks.** The text is `"<mission> — success. Recovered N item(s)"`, where N is ONE commander's private loot count, written into `state.log`, which both players read unfiltered. `design/multiplayer.md` never discloses what somebody else recovered. `tech/multiplayer-state.md` accepts a universal log as a debugging aid; it does not cover deriving a shared line from a private result. J3 writes one line per mission, and it must not carry a count |
 | `completedMissions` | Player | **Each.** It is that commander's record of what they were on |
-| `highWins` → the finale gate | Player | **Each.** `design/multiplayer.md`: the finale appears for the player who earns it, and both earned it |
-| Loot, kills, wounds, casualties, `record.missions` | Player | **Each, and already correct** — `applyMissionResult` matches them by id and J1's `_resolve` builds one result per owner |
+| `highWins` → the finale gate | Player | **Each** — and it is broken today, because it DOES hang off the lead lookup (`mission && mission.difficulty === "high"`), so the second reporter gets nothing. Measured: A 1, B 0. A player field with a world-shaped bug |
+| Loot, kills, wounds, casualties | Player | **Each, and already correct** — `applyMissionResult` matches them by id and J1's `_resolve` builds one result per owner |
+| `record.missions` | Player | **Each, and not a result field at all** — it is incremented at deploy in `src/game/session.js` and refunded on stand-down. Listed because it looks like result bookkeeping and is not |
 
 The lead leaves the board once, which is what it does today — `state.leads` is a
-world field and the first report filters it. What has to change is that the five
-world consequences stop hanging off `state.leads.find(...)` succeeding, since the
-second report will not find it.
+world field and the first report filters it. Everything else splits three ways
+rather than one: **`threatReward`, the failure penalty and doom, the log line and
+`winsCampaign` stop hanging off `state.leads.find(...)` succeeding** (the second
+report will not find it); **`highWins` does too, and it is a player field**; and
+**`cleared` needs the opposite fix**, because it is guarded by `completedMissions`
+and so fires per reporter.
+
+**One case the rule does not settle, and it is now the ordinary one.** J2 makes
+mixed outcomes normal: one squad extracts, the other is wiped. Measured with
+both reports landing, that pays `threatReward` **and** charges the failure
+penalty, and writes both "success" and "failed" into one shared log for one
+mission. "There is only one mission" does not say which end is the mission's.
 
 ## Reuses
 
@@ -227,7 +261,7 @@ second report will not find it.
 | `src/mission/mission.js`, `src/mission/input.js` | J6 and J7. A host-free construction path (no `input.enable`, no rAF), and input that arrives per owner rather than from one device. `_applyAim` takes aim already in **world** coordinates, because a server holding one scene cannot resolve two viewers' cameras |
 | `src/net/mission-socket.js` (new) | J8, browser half. Opens the socket, sends input at a fixed rate, drops a snapshot older than the one on screen. Beside `src/net/remote.js` rather than inside it: that file is the turn-boundary client and its three names are pinned |
 | `src/mission/input.js` | J4. Sampling per step and a frame index. The read API is `isDown` / `justPressed` / `aimSource` and should not move |
-| `src/main.js` | J2 and J6. Per-owner `onComplete` and a canvas that outlives the first result (J2); joint missions starting together rather than in a queue (J6) |
+| `src/main.js` | J2 and J8. Per-owner `onComplete`, and **the `owner` argument `mission.start` is never passed** — `start(current.mission, current.level, current.squad)` has no fourth argument, so J1's default makes the local commander whoever spawned first, which is wrong for one of two seats (J2). Joint missions starting together rather than in a queue (J8) |
 | `src/net/mission-wire.js` (new) | J8. The input packet and the snapshot — the one place a scene is narrowed for the wire, **per recipient**. `netproto` sends everyone the same snapshot because a one-screen arena has nothing to hide; this game does: `design/multiplayer.md` never discloses what another commander recovered, and `sampleScene` in `src/mission/checksum.js` — the honest starting list — carries exactly that |
 | `src/mission/render.js`, `src/mission/mission.js` | J8, browser half. A page in a joint mission draws a snapshot. **"Keep rendering, stop updating" does not work as stated**: `_updateCamera` is the last call in `update()`, and `this.time`, the particles, the shake, the damage flash and the intro timer all advance there while `render()` reads them. So a viewing page still steps its cosmetic and camera state; what it stops doing is simulating gameplay, and the snapshot replaces the fields `sampleScene` names rather than the whole scene |
 | `test/mission-ownership.test.mjs` | **Exists, committed with J1**, 44 assertions covering the axis, the line-up, control that cannot cross, the dead-leader swap, escort anchoring, loot credit, per-owner `_resolve`, and the team/owner boundary. **None of the J2 content is in it yet**: an exit that ends one mission and not the other, an extracted squad that leaves the array without moving anybody else's control, a resolved owner that `_checkOutcome` skips rather than reading as wiped, and the losing branch J1 narrowed without a case |
@@ -310,7 +344,8 @@ build, and it is deliberately not in `node test/run.mjs` there. J6's equivalent
 | 9 | **"Both missions begin at the same moment" is narrowed to joint ones.** Two commanders on two different leads still play whenever each gets there | Deliberate. Synchronising unrelated missions makes one commander wait on another's reflexes for nothing the design asks for |
 | 10 | **One process owns a match, and that cannot be scaled away.** `netproto/README.md` measured the escape hatch and closed it: a shared store is fast enough (p50 0.02ms on 1KB) and still wrong, because a tick is read-world / compute / write-world and two processes doing that need a lock that serialises them back into one. Sticky routing to the room's process is the only answer, and there is no matchmaker | Nothing at two players in one room. It is the first thing to hit if this ever has more than a handful of simultaneous missions |
 | 11a | **A snapshot must be filtered per recipient, and the model it is copied from is not.** `netproto` broadcasts one payload to everybody because a single-screen arena has nothing to hide. Here `design/multiplayer.md` says what another commander recovered is never disclosed, and the honest starting list (`sampleScene`) carries the collected count and each drop's collected flag. The per-recipient shape exists in `netproto` for one field only — `ack` | `test/service.test.mjs` can assert a seat's snapshot carries no other seat's loot, the same way it already asserts a seat's campaign snapshot carries only its own projection |
-| 11b | **An extracted commander's soldiers are gone from the scene, so their in-flight rounds outlive their shooter.** Removal is what makes "the squad leaves" true in one move, and it removes the stale-scene hazard a departed flag would have created — there is no second version of that squad to read. What it leaves is narrower: a projectile already in the air holds a JS reference to a soldier no longer in `scene.soldiers`, so it still resolves damage and still credits a kill to somebody who has gone home | `test/mission-ownership.test.mjs`. The reference stays valid, so this is a rules question rather than a crash: a round fired before extraction is a round that was fired, and letting it land is the answer that needs no special case |
+| 11b | **The splice does NOT remove the stale-scene hazard, and this row said it did.** An extracted `Soldier` is out of `scene.soldiers` and still reachable from two places that keep mutating it: a projectile in flight (`p.owner`) and a root's `_lastAttacker`. Measured: a round fired before extraction kills a root afterwards and increments `ana1.kills` to 1, while the result already reported says `kills: 0`. So the kill is **lost, not misattributed** — `_resolve` froze `killsBySoldier` at extraction and nothing reads the object again | `test/mission-ownership.test.mjs`. Letting the round land is still the answer that needs no special case; what needs stating is that its kill goes nowhere, and that anything J8 adds which re-reads a soldier object after extraction is reading a squad that went home |
+| 11c | **`sampleScene` identifies soldiers by POSITION, so an extraction renumbers them.** `src/mission/checksum.js` emits `soldiers[i].*` by index; measured, splicing the first owner makes slot `soldiers[0]` stop being `ana1` and start being `bo1`. That is harmless for J0, which compares two runs of one scene — and wrong as the starting shape for J8's snapshot, which this document twice says it is. A wire that identifies a soldier by array position teleports every other soldier the moment somebody extracts | Naming it here. J8 keys by soldier id, and J0's suite is unaffected either way |
 | 11 | **The mission's live scene is bigger than a snapshot, and what gets sent is a judgement call.** `netproto` sends positions rounded to a tenth of a pixel and never sends velocity, deliberately, so a client cannot half-predict. This mission has spec roots with nested parts, brains, statuses and effects — `sampleScene` in `src/mission/checksum.js` is the starting list, but rendering needs fields a checksum does not | The bandwidth readout `netproto` already carries. J6 should print snapshot size from its first day, because the first version that sends the whole scene will work on a LAN and fail on a wire |
 
 ## Background
@@ -326,7 +361,7 @@ Read off `src/mission/mission.js`, because the list is the size of J1.
 | `_handleControl` | Auto-swaps off a dead soldier into anyone |
 | `currentSoldier` / `livingSoldiers` | "The squad" is the array |
 | **`_updateSoldiers`'s `leader`** | `leader = this.currentSoldier()`, handed to every companion. Decides who is player-driven AND who each AI squadmate escorts. **The biggest one, and it is not in the phase map**. **As built:** one leader per owner, resolved before the walk; player-driven is the local owner's leader alone, escort is the soldier's own commander's |
-| `_checkOutcome` | Any living soldier at the exit wins for everybody; all dead loses for everybody |
+| `_checkOutcome` | Read pre-J1. **Since J1 it calls `livingSoldiers()` with no argument, so BOTH branches see only the local owner and it never loops** — another commander's extraction or wipe is not detected at all. Measured. J2 makes it loop |
 | `_checkOutcome`'s artifact grant | One `scene.artifact`, taken by whoever extracts first |
 | `_resolve` | Survivors, casualties, kills and wounds over the whole array, into one result, with a flat `scene.collected` and a scalar kill total |
 | `_updateLoot` | Any soldier collects into one `scene.collected` |
