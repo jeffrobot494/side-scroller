@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>netproto — server-authoritative feel test</title>
+<style>
+  :root {
+    --bg: #12151a; --panel: #1a1f27; --line: #2b323d;
+    --ink: #d6dde6; --dim: #8a95a3; --hot: #ffb454; --good: #6fcf97; --bad: #eb5757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    display: flex; gap: 12px; padding: 12px; align-items: flex-start;
+  }
+  h1 { font-size: 13px; margin: 0 0 8px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  #stage { border: 1px solid var(--line); background: #0d1015; display: block; }
+  aside { width: 300px; flex: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); padding: 10px; margin-bottom: 10px; }
+  .row { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+  .row span:last-child { color: var(--hot); }
+  .knob { display: grid; grid-template-columns: 62px 1fr 46px; gap: 6px; align-items: center; margin: 5px 0; }
+  .knob label { color: var(--dim); }
+  .knob output { text-align: right; color: var(--hot); }
+  input[type=range] { width: 100%; accent-color: var(--hot); }
+  .status { font-weight: bold; }
+  .up { color: var(--good); } .down { color: var(--bad); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
+  .note { color: var(--dim); font-size: 11px; line-height: 1.4; }
+</style>
+</head>
+<body>
+
+<main>
+  <canvas id="stage" width="960" height="540"></canvas>
+</main>
+
+<aside>
+  <div class="panel">
+    <h1>Link</h1>
+    <div class="row"><span>status</span><span id="status" class="status">…</span></div>
+    <div class="row"><span>server</span><span id="host">—</span></div>
+    <div class="row"><span>you are</span><span id="me">—</span></div>
+    <div class="row"><span>rtt (avg)</span><span id="rtt">—</span></div>
+    <div class="row"><span>rtt (min/max)</span><span id="rttmm">—</span></div>
+    <hr>
+    <div class="row"><span>input→pixels</span><span id="lat">—</span></div>
+    <div class="row"><span>&nbsp;&nbsp;min/max</span><span id="latmm">—</span></div>
+    <hr>
+    <div class="row"><span>snapshots/s</span><span id="sps">—</span></div>
+    <div class="row"><span>snap gap avg</span><span id="gap">—</span></div>
+    <div class="row"><span>snap gap max</span><span id="gapmax">—</span></div>
+    <div class="row"><span>snap size</span><span id="snapsize">—</span></div>
+    <hr>
+    <div class="row"><span>down</span><span id="down">—</span></div>
+    <div class="row"><span>up</span><span id="up">—</span></div>
+    <div class="row"><span>dropped</span><span id="drop">—</span></div>
+    <hr>
+    <div class="row"><span>host sim</span><span id="hz">—</span></div>
+    <div class="row"><span>host late</span><span id="late">—</span></div>
+    <p class="note">
+      Host health, not network. If <b>late</b> is large the server's own loop is
+      being descheduled and nothing above it means anything yet — rule the host
+      out before reading the path.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h1>Lag lab</h1>
+    <div class="knob">
+      <label for="k-lag">lag</label>
+      <input id="k-lag" type="range" min="0" max="300" step="5" value="60">
+      <output id="o-lag">60ms</output>
+    </div>
+    <div class="knob">
+      <label for="k-jit">jitter</label>
+      <input id="k-jit" type="range" min="0" max="120" step="1" value="10">
+      <output id="o-jit">10ms</output>
+    </div>
+    <div class="knob">
+      <label for="k-loss">loss</label>
+      <input id="k-loss" type="range" min="0" max="25" step="0.5" value="0">
+      <output id="o-loss">0%</output>
+    </div>
+    <div class="knob">
+      <label for="k-snap">snap Hz</label>
+      <input id="k-snap" type="range" min="5" max="60" step="1" value="20">
+      <output id="o-snap">20</output>
+    </div>
+    <div class="knob">
+      <label for="k-foes">fliers</label>
+      <input id="k-foes" type="range" min="0" max="12" step="1" value="3">
+      <output id="o-foes">3</output>
+    </div>
+    <p class="note">
+      <b id="pathnote"></b>
+      Lag is ONE WAY — 60ms here is a 120ms round trip. Snap&nbsp;Hz and
+      fliers are the <b>server's</b>, so they change for everyone; lag, jitter
+      and loss are yours alone.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h1>Scores <span class="note">(kills / deaths · fliers)</span></h1>
+    <div id="scores"><span class="note">waiting for a snapshot…</span></div>
+  </div>
+
+  <div class="panel">
+    <h1>Controls</h1>
+    <p class="note">
+      <b>A</b>/<b>D</b> or arrows to run · <b>Space</b>/<b>W</b> to jump ·
+      <b>mouse</b> to aim · <b>hold click</b> to fire.<br><br>
+      100 HP, 10 damage a bullet, 2s respawn.<br><br>
+      Red diamonds are fliers: 30 HP, they patrol and bob, and they shoot back.
+      Their rounds are the red ones — and platforms stop them, so cover works.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h1>What you're looking at</h1>
+    <p class="note">
+      Every rectangle on screen, <b>including yours</b>, is drawn exactly where
+      the last snapshot put it. No prediction, no reconciliation, no
+      interpolation. The orange crosshair is the only thing that moves without
+      asking the server — the gap between it and your aim line <i>is</i> the
+      round trip.<br><br>
+      The fliers are the harder test. Dodging a shot you can see coming is
+      where predicting nothing costs the most, because the dodge does not begin
+      until the server has heard about it.
+    </p>
+  </div>
+</aside>
+
+<script type="module" src="./client.js"></script>
+</body>
+</html>
