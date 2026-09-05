@@ -21,7 +21,7 @@ only one where two people are in the same place at the same time.
 | **J0** | **The divergence probe, and it answers a cheaper question than the plan asked.** Two clients running one lockstep mission must consume the mission's single seeded stream in the same order — and they cannot today, for a reason that is nothing to do with floating point: `scene.rng` is drawn by weapon spread and the duck roll in `src/mission/ai.js` and by every lazily-built companion agent, the controlled soldier takes none of those paths, and **which soldier is controlled differs per client by construction**. That is testable **headlessly, in one process**: run one scene twice with a different soldier controlled and compare. Only if that passes is the cross-machine floating-point question worth asking. A rolling checksum is the instrument for both | No — it observes |
 | **J1** | **A soldier has an owner, and "the squad" stops meaning `scene.soldiers`.** One field, from the dispatch that put it there, and then eleven sites partition by it — listed in Background, because the list IS the slice. The one that is not obvious: `_updateSoldiers` picks `leader = this.currentSoldier()` and hands it to every companion, so ownership decides who is player-driven and who each AI squadmate escorts. At one owner every partition is the whole array | No. One owner is today's game, and `test/mission-golden.test.mjs` is what says so |
 | **J2** | **Ends are independent, and an extracted squad LEAVES the scene.** Reaching the exit resolves **that owner's** mission and their soldiers are spliced out of `scene.soldiers`; the scene keeps running for everyone still on it. **Ending is scene-wide today in five places, and the splice is the smallest of them** — the list is under "What ends a mission" and it IS the slice. Removal is the mechanism for departure, not a flag: "the squad leaves" means it does not fire, does not collide, does not win `_updateLoot`'s race, is not drawn and is not a target, and taking it out of the array is all five at once rather than five guards to write and one to forget. **A commander who finishes returns to base** (Bo): their `onComplete` fires, they get their results screen, and they wait for nobody | Yes, visibly: a mission no longer ends when the first soldier reaches the exit while somebody else is still fighting |
-| **J3** | **The campaign accepts two results for one lead, under one rule: the MISSION decides world consequences, not the commander, and there is only one mission.** (Bo, transcribed.) So a joint clear pays `threatReward` once, a joint failure charges doom once, and `cleared` increments once — while everything a commander earns stays per-commander. The table under "What is per mission and what is per commander" is that rule applied field by field. Today the code gets it wrong in both directions at once, which is why neither current behaviour is evidence of intent. The mechanics are unambiguous even where the rule is not, and this is not a joint-mission nicety — it is a live corruption. Two dispatches on one lead carry the same `missionId`; `applyMissionResult` removes the lead from the shared board on the first report, so the second finds no `mission` and silently gets no `threatReward`, no log line, no `highWins`, no `winsCampaign`, and on a failure neither the health penalty nor `outcome = "lost"` — while `state.cleared` increments **twice**, because that line is not guarded by the lookup | Yes, and it fixes a bug that already exists whenever two commanders pick the same lead |
+| **J3** | **The campaign accepts two results for one lead, under two rules from Bo: the MISSION decides world consequences, not the commander, and there is only one mission; and if anyone extracts, the mission is a success.** The second makes the reward and the penalty branches of one decision applied on the last report, and it is why the outcome cannot be settled by whoever reports first. So a joint clear pays `threatReward` once, a joint failure charges doom once, and `cleared` increments once — while everything a commander earns stays per-commander. The table under "What is per mission and what is per commander" is that rule applied field by field. Today the code gets it wrong in both directions at once, which is why neither current behaviour is evidence of intent. The mechanics are unambiguous even where the rule is not, and this is not a joint-mission nicety — it is a live corruption. Two dispatches on one lead carry the same `missionId`; `applyMissionResult` removes the lead from the shared board on the first report, so the second finds no `mission` and silently gets no `threatReward`, no log line, no `highWins`, no `winsCampaign`, and on a failure neither the health penalty nor `outcome = "lost"` — while `state.cleared` increments **twice**, because that line is not guarded by the lookup | Yes, and it fixes a bug that already exists whenever two commanders pick the same lead |
 | **J4** | **Input sampling leaves the frame rate.** `_frame` polls input once per *rendered* frame then steps the sim a variable number of times, so the same physical inputs at a different frame rate are a different mission. `tech/mission-determinism.md` approximation 1, named there as "its own change and is not in this spec" | Yes, and it is the one slice that could change how the game feels to a solo player. See Approximations |
 | **J5** | **A dispatch knows it is joint, and carries an owner.** Two commanders on one lead produce two dispatches that never learn of each other: `closeRound` emits them independently and `src/net/rooms.js` pushes each only to its own seat. The pairing crosses the seam — and so does the **owner**, which `projectDispatch` does not emit today, so a joint dispatch's soldiers would arrive owner-less and every J1 partition would collapse back to one squad. Turn-boundary only; no mission code | Yes — a room can pair two dispatches. Nothing plays jointly |
 | **J6** | **The mission runs without a browser.** `Mission.start()` calls `this.input.enable(canvas)` and `requestAnimationFrame`, both unguarded, so in bare node it throws `window is not defined` — the golden only works because `test/run.mjs` calls `installDom()` globally before any suite. A host-free construction path: no DOM globals, no rAF loop, input injected rather than device-bound. Verified by a suite that constructs a Mission **with the harness deliberately not installed** | No. The browser path is unchanged; this is the door the server needs |
@@ -201,11 +201,11 @@ commander decides what happens to their base.**
 
 | Field | Where it lives | Joint lead |
 |---|---|---|
-| `threatReward` → `campaignHealth` | World | **Once.** One mission was cleared |
-| The failure penalty and the doom charge | World | **Once.** One mission was failed |
+| `threatReward` → `campaignHealth` | World | **Once, if ANYONE extracted**, applied on the last report |
+| The failure penalty and the doom charge | World | **Once, and only if NOBODY extracted.** The other branch of the same decision, never both |
 | `cleared` (board pressure) | World | **Once.** It is the one field that does NOT hang off the lead lookup — it is guarded by the per-player `completedMissions`, so it increments for each reporter. It needs the opposite change from the rest of this table |
 | `winsCampaign` → `world.wonBy` | World | **Once — and it is NOT first-writer-wins today.** `state.js` assigns unguarded; it only looks safe because the second report never finds the lead, which is the bug J3 removes. Measured: with both reports finding it, `wonBy` goes A → B and A's `outcome` flips from `"won"` to `"ended"` **after A has been shown a win screen**. Guarding it is J3's work, not a freebie |
-| The mission's log line | World | **Once — and it currently leaks.** The text is `"<mission> — success. Recovered N item(s)"`, where N is ONE commander's private loot count, written into `state.log`, which both players read unfiltered. `design/multiplayer.md` never discloses what somebody else recovered. `tech/multiplayer-state.md` accepts a universal log as a debugging aid; it does not cover deriving a shared line from a private result. J3 writes one line per mission, and it must not carry a count |
+| The mission's log line | **Player** (Bo) | **Each, and it moves.** Today it is `"<mission> — success. Recovered N item(s)"` written into the world `log`, so one commander's private haul is read by both. It becomes a line in the reporting commander's own log, saying what *they* recovered. `log` is a world field, so this is the first player-scoped entry and J3 is where that shape arrives |
 | `completedMissions` | Player | **Each.** It is that commander's record of what they were on |
 | `highWins` → the finale gate | Player | **Each** — and it is broken today, because it DOES hang off the lead lookup (`mission && mission.difficulty === "high"`), so the second reporter gets nothing. Measured: A 1, B 0. A player field with a world-shaped bug |
 | Loot, kills, wounds, casualties | Player | **Each, and already correct** — `applyMissionResult` matches them by id and J1's `_resolve` builds one result per owner |
@@ -219,11 +219,29 @@ report will not find it); **`highWins` does too, and it is a player field**; and
 **`cleared` needs the opposite fix**, because it is guarded by `completedMissions`
 and so fires per reporter.
 
-**One case the rule does not settle, and it is now the ordinary one.** J2 makes
-mixed outcomes normal: one squad extracts, the other is wiped. Measured with
-both reports landing, that pays `threatReward` **and** charges the failure
-penalty, and writes both "success" and "failed" into one shared log for one
-mission. "There is only one mission" does not say which end is the mission's.
+**The mixed outcome, settled (Bo): if anyone extracts, the mission is a
+success.** One squad out and one wiped is a success — the same rule the mission
+already applies inside a squad, where a partial wipe still succeeds, raised one
+level. Failure is nobody extracting.
+
+That makes the reward and the penalty two branches of one decision rather than
+two independent rows, and it fixes **when** they are applied:
+
+| | |
+|---|---|
+| The outcome is the union of the reports | Success if any report says success; failure only if none does |
+| It is applied when the **last** report lands, not the first | Otherwise order decides it. A extracts at 30s and B is wiped at 90s pays then charges; B wiped at 30s and A out at 90s charges then pays. Both are wrong, and neither is what "there is only one mission" means |
+| The session already knows when that is | `round.flight.outstanding` is a Set of dispatch ids and empties on the last report — the hook exists and J3 does not need a new one |
+| A commander's own consequences still land on their own report | Loot, wounds, casualties, kills, `completedMissions` and `highWins` are theirs and are applied when they report, not held for anyone |
+
+**And the log line is per commander, not per world (Bo): it reports what THAT
+player recovered.** Which is a real change of shape, because `log` is a world
+field (`WORLD_FIELDS` in `src/game/state.js`) and `note()` writes there. So J3
+carries the first player-scoped log entry in the game: the mission's own line —
+outcome and that commander's haul — lands in the reporting commander's log, and
+the world log gets nothing that names a count. This is what makes the privacy
+rule ("never disclosed: what they recovered") true of the log as well as the
+HUD, and it is a slice-sized addition rather than a wording change.
 
 ## Reuses
 
