@@ -528,6 +528,19 @@ industry-standard one and is what the `cause` field is for: the predicting clien
 plays its own feedback locally at input time, through `applyFeedback`, and is
 excluded from the broadcast of it.
 
+**One thing J8 did not break but did EXPOSE: a renderer that mutated what it
+drew.** A spec entity's `muzzleFlash` was set by the runtime and decayed
+nowhere but inside `drawEntity` — `e.muzzleFlash -= 1/60`, once per draw call.
+That is invisible while stepping and drawing are one loop at one rate, and it
+fails in two directions once they are not. A room steps and never draws, so
+every enemy that had ever fired kept a permanent orange glow in front of its
+face, re-sent 20 times a second. And a per-DRAW decrement is frame-rate
+coupled, so the flash was already 2.4x shorter at 144fps than at 60 — a bug
+that predates this phase and that nothing was going to find, because no suite
+draws. The timer moved into `updateTree` beside `telegraph` and
+`contactCooldown`, where it always belonged; `test/mission-enemyspec.test.mjs`
+guards it, because the defect is the runtime's and not the wire's.
+
 **A viewer stops halfway through `update()`, and both halves are deliberate.**
 Everything above the early return is state the client owns outright — the clock,
 the shake, the particles, the intro and the banner countdown — and `_updateCamera`

@@ -47,6 +47,31 @@ export default async function run(t) {
   const moved = scene.specRoots.some((r, i) => Math.abs(r.x - start[i].x) > 1 || Math.abs(r.y - start[i].y) > 1);
   t.ok("runtime: enemies act (some move and/or fire)", moved || anyFired);
 
+  // ---- the muzzle flash is a TIMER, and the RUNTIME owns it ----------------
+  // It used to be decayed by the renderer — `e.muzzleFlash -= 1/60` inside
+  // drawEntity — which was invisible while drawing and stepping were one loop.
+  // Two things broke it: a room steps and never draws (every enemy that had
+  // fired kept a permanent orange glow in front of its face), and a per-DRAW
+  // decrement is frame-rate coupled, so the flash was 2.4x shorter at 144fps.
+  // Nothing above catches it, because nothing above draws.
+  {
+    const shooter = scene.specRoots.find((r) => r.alive) || scene.specRoots[0];
+    shooter.muzzleFlash = 0.055; // what a fire() sets
+    updateSpecEnemy(shooter, 1 / 60, scene, ctx);
+    t.ok("flash: stepping decays the muzzle flash", shooter.muzzleFlash < 0.055);
+    for (let i = 0; i < 10; i++) updateSpecEnemy(shooter, 1 / 60, scene, ctx);
+    t.ok("flash: ...and it burns out without anything drawing it", shooter.muzzleFlash <= 0);
+
+    // Frame-rate independence is the half a room does not exercise but a
+    // 144Hz monitor does: the same wall-clock decays the same amount.
+    shooter.muzzleFlash = 0.055;
+    for (let i = 0; i < 2; i++) updateSpecEnemy(shooter, 1 / 120, scene, ctx);
+    const half = shooter.muzzleFlash;
+    shooter.muzzleFlash = 0.055;
+    updateSpecEnemy(shooter, 1 / 60, scene, ctx);
+    t.ok("flash: one step at 60 decays as much as two at 120", Math.abs(half - shooter.muzzleFlash) < 1e-9);
+  }
+
   // ---- a soldier's shot kills a root; collidables + scene.enemies drop it ----
   const victim = scene.specRoots.find((r) => r.alive);
   const before = scene.enemies.length;

@@ -80,8 +80,10 @@ function drawEntity(ctx, e, time, scale = 1) {
     ctx.fill();
   }
 
+  // Draw only — the timer is decayed by updateTree in the runtime, where the
+  // telegraph and the contact cooldown already were. This function used to
+  // advance it as a side effect of drawing it.
   if (e.muzzleFlash > 0) {
-    e.muzzleFlash -= 1 / 60;
     glow(ctx, cx + e.facing * (e.w / 2 + 6), cy, 12, hexAlpha(e.muzzleColor || "#ff8a5a", 0.8));
   }
 

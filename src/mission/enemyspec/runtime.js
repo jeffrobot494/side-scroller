@@ -170,6 +170,14 @@ function updateTree(root, ent, dt, scene, ctx) {
   ent.aliveTime += dt;
   if (ent.telegraph > 0) ent.telegraph -= dt;
   if (ent.contactCooldown > 0) ent.contactCooldown -= dt;
+  // The muzzle flash is a TIMER and belongs here with the other two. It used to
+  // be decayed by the renderer instead (`e.muzzleFlash -= 1/60` inside
+  // drawEntity), which was invisible while drawing and stepping were the same
+  // loop and broke in two ways once they were not: a room steps and never
+  // draws, so every enemy that had ever fired kept a permanent glow in front of
+  // its face; and `1/60` per DRAW is frame-rate coupled, so the flash was 2.4x
+  // shorter at 144fps than at 60. A renderer must not mutate what it renders.
+  if (ent.muzzleFlash > 0) ent.muzzleFlash -= dt;
 
   if (!ent.disabled) {
     moveEntity(root, ent, dt, scene);
