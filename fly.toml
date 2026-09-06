@@ -1,0 +1,66 @@
+# ---------------------------------------------------------------------------
+# Fly deployment for the game's own server.
+#
+#     fly apps create <yours> --org personal   # the name is created HERE
+#     # ...then set `app` below to that name
+#     fly deploy                               # reads the name out of this file
+#     fly scale count 1                        # SEE min_machines_running BELOW
+#
+# `fly apps create` rather than `fly launch`, because this file is hand-written
+# and launch wants to scan the project and rewrite it.
+#
+# This is a SEPARATE app from netproto's: that folder is a prototype with its
+# own fly.toml, and only one process can hold a port.
+#
+# dfw is Dallas. netproto measured 26ms from Austin here against 186ms to
+# Railway's Ashburn, and distance is the dominant term in every latency number
+# a player will feel — so pick the region nearest the people who will play,
+# not the nearest to you alone. With two players far apart, the point between
+# them beats either doorstep: a server on your own desk gives you ~0ms and
+# hands your opponent the entire round trip.
+# ---------------------------------------------------------------------------
+
+# Created 2026-09 in org `jim-wizer` → https://xcom-side-scroller.fly.dev
+# Fly app names are globally unique across every account, because the name
+# becomes <name>.fly.dev.
+app = "xcom-side-scroller"
+primary_region = "dfw"
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # A campaign lives in this process's memory (tech/multiplayer-service.md,
+  # approximation 1). A machine that stops between sessions takes the campaign
+  # with it, so this stays "off" — the cost of it being on is not a cold start,
+  # it is somebody's half-finished war.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+
+  # ZERO, and it must stay zero. One process owns a room: its campaign, its
+  # rooms registry and its 60Hz mission loop are all in-memory, so a second
+  # machine is a second world. Two players balanced onto different hosts would
+  # each see an empty room and never meet. Fly's first deploy creates an HA
+  # pair by default and it has to be scaled back down — `fly scale count 1`.
+  #
+  # This is a property of the architecture, not of this file: a
+  # server-authoritative game cannot be scaled horizontally without sticky
+  # routing, and netproto/README.md measured why a shared store does not fix it.
+  min_machines_running = 0
+
+  # A mission socket is long-lived and mostly server->client at the snapshot
+  # rate. Nothing here is an idle connection to be reaped.
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 200
+    soft_limit = 100
+
+# The mission loop is a real 60Hz simulation — the enemyspec runtime,
+# navigation and combat, not two rectangles. If missions feel hitchy on a
+# shared CPU, this is the line to change before suspecting the network.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

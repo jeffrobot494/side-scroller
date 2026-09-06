@@ -1,0 +1,11 @@
+# The build context is the repo. These are not part of the running game.
+.git
+node_modules
+
+# netproto is its own service with its own Dockerfile and its own deploy. It
+# imports nothing from src/ and nothing imports it; shipping it inside this
+# image would just be a second server nobody starts.
+netproto
+
+# Screenshots are documentation.
+screen-shots
