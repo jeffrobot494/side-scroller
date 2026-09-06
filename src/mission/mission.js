@@ -5,6 +5,11 @@
 // simulation (soldiers, companions, enemies, projectiles, loot), the HUD, and
 // the win/lose conditions. When the mission ends it hands a result payload back
 // to the app via the onComplete callback; it never touches game state directly.
+//
+// THE CANVAS IS OPTIONAL (tech/multiplayer-missions.md, J6). It decides three
+// things and only three — the input device, the rAF loop, and the drawing — so
+// `new Mission(null, onComplete)` is the same simulation with none of them,
+// stepped by whoever built it. Nothing in `update()` reads a host.
 // ---------------------------------------------------------------------------
 
 import { MissionInput } from "./input.js";
@@ -28,9 +33,22 @@ import { specSound } from "../audio/cues.js";
 const STEP = 1 / 60;
 
 export class Mission {
+  // `canvas` is the HOST, and it is optional (tech/multiplayer-missions.md,
+  // J6). Given one, this is the browser's mission: it binds the keyboard and
+  // the mouse to that canvas, drives itself off requestAnimationFrame, and
+  // draws. Given null it is host-free — no DOM globals are read, no loop is
+  // started, and whoever constructed it owns the step. That is the door the
+  // room needs (J8), and it is the same simulation either way: the ONLY things
+  // the canvas decides are the device, the loop and the drawing.
+  //
+  // A host-free mission still needs a VIEWPORT, because `_updateCamera` reads
+  // one every step and the camera is part of update(). It gets a plain object
+  // that `_applyCanvasSize` then sizes from the config preset exactly as it
+  // sizes a real canvas — so the two paths solve the same camera.
   constructor(canvas, onComplete) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext("2d");
+    this.hosted = !!canvas;
+    this.canvas = canvas || { width: DESIGN_W, height: DESIGN_H };
+    this.ctx = canvas ? canvas.getContext("2d") : null;
     this.onComplete = onComplete;
     this.input = new MissionInput();
     this.running = false;
@@ -136,12 +154,19 @@ export class Mission {
     );
     this.damageFlash = 0; // red vignette pulse when the controlled soldier is hit
 
-    this.input.enable(this.canvas); // pass canvas for mouse aim + click-to-fire
     this.running = true;
     this.accumulator = 0;
     this.fps.reset(); // don't carry a rate in from the previous deploy
-    this.lastTime = performance.now();
-    requestAnimationFrame(this._frame);
+    // The device and the loop, and NOTHING else, are what a host has (J6).
+    // `running` is set either way: since J2 it means "the scene has not ended",
+    // which is a fact about the mission rather than about who is stepping it.
+    if (this.hosted) {
+      this.input.enable(this.canvas); // pass canvas for mouse aim + click-to-fire
+      this.lastTime = performance.now();
+      requestAnimationFrame(this._frame);
+    } else {
+      this.input.reset(); // enable()'s per-mission half, without the window half
+    }
   }
 
   stop() {
@@ -720,6 +745,11 @@ export class Mission {
   // ---- rendering ----------------------------------------------------------
 
   render() {
+    // A host-free mission has no context and cannot draw (J6). One guard here
+    // rather than a `hosted` check at every call site: drawing is the one thing
+    // in this class that is genuinely impossible without a canvas, so it should
+    // fail as "nothing happened" rather than somewhere deep in a path shape.
+    if (!this.ctx) return;
     const ctx = this.ctx;
     const scene = this.scene;
     const W = this.canvas.width;

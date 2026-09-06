@@ -111,5 +111,10 @@ export function scriptedInput() {
     pollGamepad() {},
     enable() {},
     disable() {},
+    // J6: `Mission.start` calls this instead of `enable()` when it has no host,
+    // so the stand-in carries it for the same reason it carries the other two.
+    // It zeroes `count` because that is what reset means on the real thing —
+    // input frames are numbered from a mission's start.
+    reset() { this.count = 0; },
   };
 }

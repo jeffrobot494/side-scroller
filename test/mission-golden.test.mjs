@@ -37,11 +37,13 @@
 // ---------------------------------------------------------------------------
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { makeEl } from "./harness.mjs";
 import { resetConfig, config } from "../src/game/config.js";
+import { sampleScene, firstSampleDiff } from "../src/mission/checksum.js";
 
 const GOLDEN = fileURLToPath(new URL("./mission.golden.json", import.meta.url));
 const SAMPLE_EVERY = 12; // frames between snapshots (0.2s)
@@ -238,6 +240,104 @@ export default async function run(t) {
       const d = firstDiff(base, run, "frame");
       const exact = JSON.stringify(base) === JSON.stringify(run);
       t.ok(`frame rate: ${fps}fps plays the same mission as a bare step loop${d ? ` — ${d}` : ""}`, exact && !d);
+    }
+  }
+
+  // (5) the mission runs without a browser (tech/multiplayer-missions.md, J6)
+  //
+  // The half that can be asserted in here: a Mission built with no canvas is
+  // the SAME mission as one built with a canvas. Host-free is a claim about
+  // the door, not about the simulation, and a door that quietly changed the
+  // physics would be worse than one that threw.
+  const HOSTFREE_STEPS = 240;
+  const hostFree = (canvas) => {
+    const g = generateLevel({ seed: SEED, difficulty: "high" });
+    const m = new Mission(canvas, () => {});
+    m.input = scriptedInput(); // before start(): the host-free path resets it
+    m.start(g.mission, g.level, SQUAD);
+    m.running = false; // the frames are ours in both cases
+    const rows = [];
+    while (m.input.count < HOSTFREE_STEPS) {
+      if (m.input.count % 40 === 0) rows.push(sampleScene(m.scene));
+      m.input.sample();
+      m.update(STEP);
+    }
+    rows.push(sampleScene(m.scene));
+    return { m, rows };
+  };
+  {
+    const hosted = hostFree(makeEl("canvas"));
+    // Reported, not thrown: before the slice this is where it dies, and a suite
+    // that dies here says nothing about the child-process block below it.
+    let bare = null, buildErr = "";
+    try { bare = hostFree(null); } catch (e) { buildErr = String(e && e.message); }
+    t.ok(`host-free: a Mission with no canvas constructs and starts${buildErr ? ` — ${buildErr}` : ""}`,
+      bare !== null && bare.m.hosted === false && bare.m.scene.soldiers.length === 3);
+    if (bare) {
+    t.ok("host-free: it is the mission a hosted one plays", firstSampleDiff(hosted.rows.at(-1), bare.rows.at(-1)) === null);
+    t.ok("host-free: ...at every sampled step", hosted.rows.every((r, i) => firstSampleDiff(r, bare.rows[i]) === null));
+    // The viewport is the config preset, not the canvas that was not passed —
+    // `_updateCamera` runs every step and a server has to solve the same camera.
+    t.eq("host-free: the viewport comes off the config preset", `${bare.m.canvas.width}x${bare.m.canvas.height}`, config.missionCanvas);
+    t.ok("host-free: it has no drawing context", bare.m.ctx === null);
+    t.ok("host-free: and render() is a no-op rather than a crash", (() => { bare.m.render(); return true; })());
+    t.ok("host-free: stop() releases an input that never bound a device", (() => { bare.m.stop(); return bare.m.running === false; })());
+    }
+  }
+
+  // The half that CANNOT be asserted in here: test/run.mjs installs the DOM
+  // before any suite, so every global J6 is about is present in this process.
+  // Deleting them would only prove this process can be made to look bare — not
+  // that the module graph never reached a host on the way in, which is an
+  // import-time question and the one that actually bit. So the claim is put to
+  // a child node process with no harness at all, which is also exactly the
+  // process the room will be (J8). It reports rather than throws, so a failure
+  // arrives as a message instead of as a dead runner.
+  {
+    const url = (rel) => JSON.stringify(new URL(rel, import.meta.url).href);
+    const src = [
+      'const out = { steps: ' + HOSTFREE_STEPS + ' };',
+      'out.globals = ["window", "document", "requestAnimationFrame", "localStorage"]',
+      '  .filter((g) => typeof globalThis[g] !== "undefined");',
+      'try {',
+      '  const { Mission } = await import(' + url("../src/mission/mission.js") + ');',
+      '  const { generateLevel } = await import(' + url("../src/game/gen/levelgen.js") + ');',
+      '  const { sampleScene } = await import(' + url("../src/mission/checksum.js") + ');',
+      '  const T = await import(' + url("./mission-trace.mjs") + ');',
+      '  const g = generateLevel({ seed: T.SEED, difficulty: "high" });',
+      '  const m = new Mission(null, () => {});',
+      '  m.input = T.scriptedInput();',
+      '  m.start(g.mission, g.level, T.SQUAD);',
+      '  m.running = false;',
+      '  out.rows = [];',
+      '  while (m.input.count < out.steps) {',
+      '    if (m.input.count % 40 === 0) out.rows.push(sampleScene(m.scene));',
+      '    m.input.sample(); m.update(1 / 60);',
+      '  }',
+      '  out.rows.push(sampleScene(m.scene));',
+      '  m.stop();',
+      '  out.ok = true;',
+      '} catch (e) { out.ok = false; out.error = (e && e.stack) || String(e); }',
+      'console.log(JSON.stringify(out));',
+    ].join("\n");
+
+    let bare = null, spawnErr = "";
+    try {
+      bare = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", src], { encoding: "utf8" }));
+    } catch (e) {
+      spawnErr = String((e && e.stderr) || e);
+    }
+    t.ok(`bare node: the child ran${spawnErr ? ` — ${spawnErr.slice(0, 300)}` : ""}`, bare !== null);
+    if (bare) {
+      // If node ever ships one of these, the child stops being the test it
+      // claims to be — say so here rather than passing for the wrong reason.
+      t.eq("bare node: no host globals were defined", bare.globals.join(","), "");
+      t.ok(`bare node: a Mission started and stepped with no browser at all${bare.error ? ` — ${bare.error.split("\n")[0]}` : ""}`, bare.ok === true);
+      if (bare.ok) {
+        const mine = hostFree(makeEl("canvas")).rows;
+        const d = firstSampleDiff(mine.at(-1), bare.rows.at(-1));
+        t.ok(`bare node: and it is the mission this process plays${d ? ` — ${d}` : ""}`, d === null);
+      }
     }
   }
 }

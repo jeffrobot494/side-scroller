@@ -58,17 +58,30 @@ export class MissionInput {
     this._onPadDisconnect = (e) => this._padEvent(e, false);
   }
 
+  // Per-mission state, and the ONLY half of enable() a host-free mission wants
+  // (tech/multiplayer-missions.md, J6). A mission that binds no device still
+  // numbers its input frames from its own start, because `frame` is the step
+  // index J4 defined and a server stepping a scene has steps like anyone else.
+  reset() {
+    this._diag = {}; // report the pad situation once per mission, not once per page
+    this.frame = 0; // a mission's input frames are numbered from its own start
+    this._sample = blankSample();
+  }
+
   // `canvas` is optional: pass it to enable mouse aim + click-to-fire relative
   // to that canvas. Without it, keyboard + gamepad still work.
+  //
+  // This is the DEVICE half, and it is the half that needs a browser. Nothing
+  // below `sample()` does, which is what lets a host-free mission hold a
+  // MissionInput it never enables and read blank frames off it until something
+  // injects them (J7).
   enable(canvas) {
     if (this._enabled) return;
     window.addEventListener("keydown", this._onDown);
     window.addEventListener("keyup", this._onUp);
     window.addEventListener("gamepadconnected", this._onPadConnect);
     window.addEventListener("gamepaddisconnected", this._onPadDisconnect);
-    this._diag = {}; // report the pad situation once per mission, not once per page
-    this.frame = 0; // a mission's input frames are numbered from its own start
-    this._sample = blankSample();
+    this.reset();
     this._canvas = canvas || null;
     if (this._canvas && this._canvas.addEventListener) {
       this._canvas.addEventListener("mousemove", this._onMove);
@@ -79,6 +92,11 @@ export class MissionInput {
   }
 
   disable() {
+    // Symmetric with enable()'s guard, and load-bearing for J6: an input that
+    // never bound a device must be releasable without one, because `stop()`
+    // calls this unconditionally and a host-free mission has no `window` to
+    // remove a listener from.
+    if (!this._enabled) return;
     window.removeEventListener("keydown", this._onDown);
     window.removeEventListener("keyup", this._onUp);
     window.removeEventListener("gamepadconnected", this._onPadConnect);
