@@ -50,6 +50,9 @@ export class Mission {
     this.canvas = canvas || { width: DESIGN_W, height: DESIGN_H };
     this.ctx = canvas ? canvas.getContext("2d") : null;
     this.onComplete = onComplete;
+    // THE DEVICE AT THIS KEYBOARD, and since J7 that is all it is: one entry in
+    // a per-commander set rather than "the mission's input". It belongs to
+    // `this.owner`; every other commander's input is handed in with setInput().
     this.input = new MissionInput();
     this.running = false;
     this.fps = createFpsSampler(); // outlives a single mission; reset in start()
@@ -118,6 +121,11 @@ export class Mission {
     // survivors are off the array and the HUD still has a banner's worth of
     // frames to draw.
     this.ends = new Map();
+    // Inputs are PER COMMANDER (J7): owner -> anything answering isDown /
+    // justPressed / aimSource. Empty here on purpose — `this.input` is the
+    // local device and `inputFor()` falls back to it for `this.owner`, so a
+    // browser mission needs no entry and a room fills one per seat (J8).
+    this.inputs = new Map();
     // Nav debug overlays, off every deploy. Toggled by the debugGraph/debugPath
     // actions and only while config.debugOverlays is on.
     this.debug = { graph: false, path: false };
@@ -194,7 +202,8 @@ export class Mission {
       // presses and the rest of them silence — which made the same physical
       // inputs a different mission at a different frame rate. Every driver of
       // update() owes it this call: the headless suites take it themselves.
-      this.input.sample();
+      // Since J7 it is every commander's input, not one — hence the verb.
+      this.sampleInputs();
       this.update(STEP);
       this.accumulator -= STEP;
     }
@@ -209,6 +218,41 @@ export class Mission {
 
   owners() {
     return this._owners;
+  }
+
+  // ---- input, per commander (J7) ------------------------------------------
+
+  // The input driving `owner`, or null if nobody is inputting for them — which
+  // is not an error: a commander who has gone home, and (until J8 fills them)
+  // every seat but this one, are exactly that, and their squad falls to the
+  // companion brain.
+  //
+  // `this.input` is the FALLBACK for `this.owner` rather than a map entry, so
+  // that replacing it after start() still takes effect. Three suites do that
+  // and no production code does; a map entry captured at start() would silently
+  // ignore them.
+  inputFor(owner = this.owner) {
+    const inp = this.inputs.get(owner);
+    if (inp) return inp;
+    return owner === this.owner ? this.input : null;
+  }
+
+  // Hand `owner` an input of their own. Anything answering the three read names
+  // will do — a MissionInput, a scripted trace, or a seat's latest wire packet
+  // (J8). Passing null takes their input away, which is what a commander
+  // dropping out looks like.
+  setInput(owner, input) {
+    if (input) this.inputs.set(owner, input);
+    else this.inputs.delete(owner);
+  }
+
+  // One sample per input per step (J4's contract, J7's plural). Whoever steps
+  // this mission calls it — `_frame` does, a headless driver does its own.
+  // `this.input` is sampled whether or not anybody is on it: it is the device,
+  // and a device that nobody is driving still has edges to clear.
+  sampleInputs() {
+    this.input.sample();
+    for (const inp of this.inputs.values()) if (inp !== this.input) inp.sample();
   }
 
   soldiersOf(owner = this.owner) {
@@ -287,21 +331,31 @@ export class Mission {
   }
 
   _handleControl() {
-    // Manual swap to the next living soldier — THIS commander's, never into
-    // somebody else's squad.
-    if (this.input.justPressed("swap")) this._swapControl(1);
-    // Auto-swap off a dead soldier, for every commander rather than only this
-    // one: a leader is what a squad escorts, so leaving a dead one in place
-    // strands that squad, and running it for one owner only would have the two
-    // clients stepping a squad neither of them is inputting for differently.
+    // ONE PASS PER COMMANDER (J7). The manual swap used to sit above this loop
+    // reading the single mission input; now each commander reads their own, so
+    // a press on one seat can never move another seat's leader — the ring
+    // _swapControl walks was already that commander's own squad, and this is
+    // the other half of the same guarantee.
     for (const o of this._owners) {
       if (this.ends.has(o)) continue; // resolved: their mission is over, and there is nobody left to swap to
+      const inp = this.inputFor(o);
+      // Manual swap to the next living soldier — THIS commander's, never into
+      // somebody else's squad.
+      if (inp && inp.justPressed("swap")) this._swapControl(1, o);
+      // Auto-swap off a dead soldier, for every commander INCLUDING ones nobody
+      // is inputting for: a leader is what a squad escorts, so leaving a dead
+      // one in place strands that squad, and running it only where there is an
+      // input would leave an AI squad following a corpse.
       const cur = this.currentSoldier(o);
       if (!cur || !cur.alive) this._swapControl(1, o);
     }
     // Debug overlays. The keys are always bound; the config gate is what keeps
     // them out of a build handed to somebody else. Edge-triggered, so holding
     // the key does not strobe.
+    //
+    // Deliberately on `this.input` and not per commander: an overlay is what
+    // the person LOOKING at this canvas wants to see, not something a commander
+    // owns. A room's mission draws nothing, so nothing reads these there.
     if (config.debugOverlays) {
       if (this.input.justPressed("debugGraph")) this.debug.graph = !this.debug.graph;
       if (this.input.justPressed("debugPath")) this.debug.path = !this.debug.path;
@@ -362,15 +416,24 @@ export class Mission {
   _updateSoldiers(dt) {
     const scene = this.scene;
     // ONE LEADER PER COMMANDER (J1), and it decides two different things that
-    // used to be one: who is player-driven — only this client's leader, the one
-    // soldier on the level with an input device attached — and who each AI
-    // squadmate escorts, which is its OWN commander's leader and never the other
-    // squad's. Another commander's leader is stepped by the same companion brain
-    // as everyone else, anchored to itself, until J6 gives it an input stream;
-    // that is also the shape a commander who walks away leaves behind.
+    // used to be one: who is player-driven and who each AI squadmate escorts,
+    // which is its OWN commander's leader and never the other squad's.
     const leaders = new Map();
     for (const o of this._owners) leaders.set(o, this.currentSoldier(o));
-    const piloted = leaders.get(this.owner);
+
+    // WHO IS PILOTED, AND BY WHAT (J7): leader -> the input driving it. It used
+    // to be one soldier, `leaders.get(this.owner)`, because a Mission had one
+    // input — so every commander but this one was stepped by the companion
+    // brain anchored to itself whether or not a person was behind them. A
+    // commander with no input still is, and that is not a special case here:
+    // they are simply absent from this map. It is also, exactly, what a
+    // commander who walks away leaves behind.
+    const pilots = new Map();
+    for (const o of this._owners) {
+      const lead = leaders.get(o);
+      const inp = this.inputFor(o);
+      if (lead && inp) pilots.set(lead, inp);
+    }
 
     for (const s of scene.soldiers) {
       if (!s.alive) continue;
@@ -378,17 +441,18 @@ export class Mission {
       // Jump/land are read from the ground-contact transition around the physics
       // step, so entities.js stays free of presentation concerns.
       const wasGround = s.onGround;
-      if (s === piloted) {
-        // Player control.
-        s.setCrouch(this.input.isDown("crouch"));
+      const inp = pilots.get(s);
+      if (inp) {
+        // Player control, off THIS soldier's commander's input (J7).
+        s.setCrouch(inp.isDown("crouch"));
         const move =
-          (this.input.isDown("right") ? 1 : 0) - (this.input.isDown("left") ? 1 : 0);
-        this._applyAim(s);
-        s.applyMovement(dt, move, this.input.isDown("jump"));
-        if (this.input.justPressed("reload")) startReload(s, scene);
+          (inp.isDown("right") ? 1 : 0) - (inp.isDown("left") ? 1 : 0);
+        this._applyAim(s, inp);
+        s.applyMovement(dt, move, inp.isDown("jump"));
+        if (inp.justPressed("reload")) startReload(s, scene);
         const wantFire = s.weapon.auto
-          ? this.input.isDown("fire")
-          : this.input.justPressed("fire");
+          ? inp.isDown("fire")
+          : inp.justPressed("fire");
         const acc = aimAccuracy(s.data.stats.aim);
         if (wantFire && fire(scene, s, s.fireDir(), "player", dt, acc)) this.shake = Math.min(0.5, this.shake + 0.12);
       } else {
@@ -416,26 +480,38 @@ export class Mission {
     }
   }
 
-  // Resolve how the controlled soldier `s` aims this frame from config.aimMode.
+  // Resolve how the piloted soldier `s` aims this frame from config.aimMode,
+  // off `inp` — its own commander's input (J7).
   // keyboard: the legacy up/forward scheme. mouse/gamepad/auto: a free aimVec.
-  _applyAim(s) {
+  //
+  // THREE SOURCE SHAPES, and the split is about who owns a camera. `stick` is a
+  // direction and needs none. `mouse` is canvas pixels and needs THIS page's
+  // camera — it is the local device's shape and nothing else may report it,
+  // because a room holds one scene for two viewers and `this.camera` is only
+  // ever one of them. `world` is an absolute world point, already resolved by
+  // whoever owns the camera it came from, and is the shape that crosses a wire.
+  _applyAim(s, inp) {
     const mode = config.aimMode;
     if (mode === "keyboard") {
       s.aimVec = null;
-      s.aimUp = this.input.isDown("aimUp") && !s.crouched;
+      s.aimUp = inp.isDown("aimUp") && !s.crouched;
       return;
     }
     s.aimUp = false;
-    const src = this.input.aimSource(mode);
+    const src = inp.aimSource(mode);
     if (!src) { s.aimVec = null; return; }
     let dx, dy;
+    const mx = s.x + s.w / 2, my = s.y + s.h * 0.42;
     if (src.type === "stick") {
       dx = src.x; dy = src.y;
+    } else if (src.type === "world") {
+      // Already world: aim at the point, from the muzzle. No camera, no zoom.
+      dx = src.x - mx;
+      dy = src.y - my;
     } else {
       // mouse: canvas px → world (÷ zoom, + camera) → direction from the muzzle.
       // input.js already divided out any CSS scaling of the element.
       const z = this._zoom();
-      const mx = s.x + s.w / 2, my = s.y + s.h * 0.42;
       dx = src.x / z + this.camera.x - mx;
       dy = src.y / z + this.camera.y - my;
     }

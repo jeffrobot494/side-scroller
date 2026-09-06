@@ -57,11 +57,16 @@ const SOLO = [member("solo1", null), member("solo2", null), member("solo3", null
 // process runs — which is how this shape reaches a live mission.
 const UNDECLARED = SOLO.map(({ owner, ...rest }) => rest);
 
-// A MissionInput stand-in that presses nothing until told to.
+// A MissionInput stand-in that presses nothing until told to. `aim` is whatever
+// `aimSource()` should report — null, a `stick` direction, a `mouse` point in
+// canvas pixels, or a `world` point (J7). `samples` counts sample() calls, so a
+// driver that forgets one commander's input is visible rather than merely quiet.
 function stubInput() {
   const held = new Set();
   const edges = new Set();
   return {
+    aim: null,
+    samples: 0,
     hold: (a) => held.add(a),
     release: (a) => held.delete(a),
     press: (a) => edges.add(a),
@@ -71,7 +76,9 @@ function stubInput() {
       edges.delete(a);
       return true;
     },
-    aimSource: () => null,
+    aimSource() { return this.aim; },
+    sample() { this.samples++; },
+    reset() { this.samples = 0; },
     pollGamepad() {}, enable() {}, disable() {},
   };
 }
@@ -199,6 +206,139 @@ export default async function run(t) {
     t.ok("escort: her squadmate follows her leader", near(anchorOf(m.scene.soldiers[1]), centre(anaLead)));
     t.ok("escort: his squadmate follows HIS leader, not hers", near(anchorOf(m.scene.soldiers[3]), centre(boLead)));
     t.ok("escort: and his leader is not anchored to her", !near(anchorOf(boLead), centre(anaLead)));
+  }
+
+  // ---- input is per commander (J7) ----------------------------------------
+  //
+  // Until J7 a Mission had ONE input and one piloted soldier, so the section
+  // above is the whole story only while nobody is behind the other commander.
+  // These are the assertions that stop being trivially true the moment a room
+  // fills a second seat: two people on one scene, each moving their own leader
+  // and nobody else's.
+  {
+    const m = play(JOINT, "ana");
+    const bo = stubInput();
+    t.ok("input: this commander's is the local device, by fallback rather than by entry", m.inputFor("ana") === m.input);
+    t.ok("input: and nobody is inputting for the other one yet", m.inputFor("bo") === null);
+
+    m.setInput("bo", bo);
+    t.ok("input: setInput hands him one", m.inputFor("bo") === bo);
+
+    const anaLead = m.currentSoldier("ana"), boLead = m.currentSoldier("bo");
+    m.input.hold("right");
+    for (let i = 0; i < 8; i++) m.update(STEP);
+    t.ok("input: her key moves HER leader", anaLead.vx > 0);
+    t.ok("input: and his leader, whose own input is holding nothing, stands still", boLead.vx === 0);
+    t.ok("input: neither leader was handed to the companion brain", !anaLead.agent && !boLead.agent);
+
+    m.input.release("right");
+    bo.hold("left");
+    for (let i = 0; i < 8; i++) m.update(STEP);
+    t.ok("input: his key moves HIS leader", boLead.vx < 0);
+    t.ok("input: ...and hers, now holding nothing, stops", anaLead.vx === 0);
+  }
+
+  // A swap is read off the pressing commander's own input, which is the half of
+  // "control cannot cross" that the single-input version could not have been
+  // wrong about — there was only one keyboard to press it on.
+  {
+    const m = play(JOINT, "ana");
+    const bo = stubInput();
+    m.setInput("bo", bo);
+
+    bo.press("swap");
+    m.update(STEP);
+    t.eq("swap: his press moves his leader", m.currentSoldier("bo").id, "bo2");
+    t.eq("swap: and does not touch hers", m.currentSoldier("ana").id, "ana1");
+
+    m.input.press("swap");
+    m.update(STEP);
+    t.eq("swap: her press moves hers", m.currentSoldier("ana").id, "ana2");
+    t.eq("swap: and leaves his where he put it", m.currentSoldier("bo").id, "bo2");
+  }
+
+  // A commander with no input is not an error state — it is a seat nobody has
+  // filled, a commander who has gone home, and (before J8) every seat but this
+  // one. All three look the same from in here: the companion brain.
+  {
+    const m = play(JOINT, "ana");
+    const bo = stubInput();
+    m.setInput("bo", bo);
+    for (let i = 0; i < 4; i++) m.update(STEP);
+    const boLead = m.currentSoldier("bo");
+    t.ok("input: a piloted leader never builds a companion agent", !boLead.agent);
+
+    m.setInput("bo", null); // he drops out
+    t.ok("input: setInput(null) takes it away", m.inputFor("bo") === null);
+    for (let i = 0; i < 4; i++) m.update(STEP);
+    t.ok("input: and his leader falls to the companion brain", !!boLead.agent);
+    t.ok("input: while hers is still hers", !m.currentSoldier("ana").agent);
+  }
+
+  // Sampling is per input and per step (J4's contract, J7's plural). A driver
+  // that samples `m.input` alone leaves the other seat reading one frozen frame
+  // forever, which is a bug that looks like lag rather than like a crash.
+  {
+    const m = play(JOINT, "ana");
+    const bo = stubInput();
+    m.setInput("bo", bo);
+    m.input.samples = 0;
+    for (let i = 0; i < 3; i++) m.sampleInputs();
+    t.eq("sample: the local device is sampled once per step", m.input.samples, 3);
+    t.eq("sample: and so is the other commander's input", bo.samples, 3);
+
+    // The local device is in the map by fallback, not by entry — sampling must
+    // not double it if somebody sets it explicitly anyway.
+    m.setInput("ana", m.input);
+    m.input.samples = 0;
+    m.sampleInputs();
+    t.eq("sample: an input set for two commanders is still sampled once", m.input.samples, 1);
+  }
+
+  // ---- aim arrives in WORLD coordinates (J7) ------------------------------
+  //
+  // `_applyAim` used to resolve every aim against `this.camera` and `this._zoom()`
+  // — one viewer's frame. A room holds ONE scene for two viewers and cannot
+  // resolve either camera, so the page that owns a camera owns the conversion
+  // and sends a world point. `mouse` stays the local device's shape and keeps
+  // the old maths; `world` is the shape that crosses a wire.
+  {
+    const prevMode = config.aimMode;
+    config.aimMode = "mouse";
+    const m = play(JOINT, "ana");
+    const s = m.currentSoldier("ana");
+    const mx = s.x + s.w / 2, my = s.y + s.h * 0.42;
+
+    m.input.aim = { type: "world", x: mx + 100, y: my - 100 };
+    m.camera.x = 0;
+    m._applyAim(s, m.input);
+    const at0 = { ...s.aimVec };
+    t.ok("aim: a world point aims from the muzzle toward it", at0.x > 0 && at0.y < 0);
+
+    m.camera.x = 4000; // the viewer scrolls a long way away
+    m._applyAim(s, m.input);
+    t.ok("aim: and the camera does not move it", Math.abs(s.aimVec.x - at0.x) < 1e-12 && Math.abs(s.aimVec.y - at0.y) < 1e-12);
+
+    // The control: the local device's own shape still IS camera-relative, which
+    // is exactly why it cannot be the one that crosses a wire.
+    m.input.aim = { type: "mouse", x: 100, y: 100 };
+    m.camera.x = 0;
+    m._applyAim(s, m.input);
+    const mouse0 = { ...s.aimVec };
+    m.camera.x = 4000;
+    m._applyAim(s, m.input);
+    t.ok("aim: a mouse point DOES move with the camera", Math.abs(s.aimVec.x - mouse0.x) > 1e-6);
+
+    // Two commanders, one scene, two aims, no camera in either.
+    const bo = stubInput();
+    m.setInput("bo", bo);
+    const his = m.currentSoldier("bo");
+    m.input.aim = { type: "world", x: s.x + 500, y: s.y };       // she aims right
+    bo.aim = { type: "world", x: his.x - 500, y: his.y };        // he aims left
+    m.update(STEP);
+    t.ok("aim: her soldier aims right", s.aimVec.x > 0 && s.facing === 1);
+    t.ok("aim: and his aims left, in the same step and the same scene", his.aimVec.x < 0 && his.facing === -1);
+    config.aimMode = prevMode;
   }
 
   // ---- loot is credited to whoever touched it -----------------------------
