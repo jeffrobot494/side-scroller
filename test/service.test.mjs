@@ -252,6 +252,61 @@ export default async function run(t) {
     t.ok("...and the round is over", rooms.command(mine.token, { type: "ready" }).ok === true);
   }
 
+  // ---- J5: two seats on one lead are one mission, and the room says so ----
+  // The pairing is the session's (test/session.test.mjs drives it directly);
+  // what lands HERE is that it survives the routing and the wire. Each seat
+  // still gets its own dispatch and no other's — "J5 changes what a seat is
+  // sent, not how" — and the thing it now carries is who else is coming, never
+  // what they brought.
+  //
+  // leadVisibility pinned to 1 for the room's construction: which seats see a
+  // lead is a coin flip, and a joint deploy needs one lead two commanders can
+  // both see. It is the config the room reads, not a stub.
+  {
+    const vis = config.leadVisibility;
+    config.leadVisibility = 1;
+    const rooms = createRooms();
+    const { seats } = rooms.createRoom({ players: 2 });
+    config.leadVisibility = vis;
+    const [a, b] = seats;
+    const la = listener();
+    const lb = listener();
+    rooms.attach(a.token, la.send);
+    rooms.attach(b.token, lb.send);
+
+    const leadId = rooms.snapshot(a.token).leads[0].id;
+    t.ok("both commanders can see the lead", rooms.snapshot(b.token).leads.some((l) => l.id === leadId));
+    for (const seat of [a, b]) {
+      rooms.command(seat.token, { type: "hire", recruitId: rooms.snapshot(seat.token).recruits[0].id });
+      const view = rooms.snapshot(seat.token);
+      rooms.command(seat.token, { type: "deploy", leadId, soldierIds: [view.roster[0].id] });
+    }
+    rooms.command(a.token, { type: "ready" });
+    rooms.command(b.token, { type: "ready" });
+
+    t.eq("each seat is handed one dispatch", [la.of("dispatch").length, lb.of("dispatch").length], [1, 1]);
+    const da = la.last("dispatch").data;
+    const db = lb.last("dispatch").data;
+    t.ok("both are data", !threw(() => assertData(da, "dispatch a")) && !threw(() => assertData(db, "dispatch b")));
+    t.eq("...naming one lead between them", da.mission.id, db.mission.id);
+    t.ok("...and each routed to its own commander", da.playerId === a.playerId && db.playerId === b.playerId);
+
+    t.ok("a joint dispatch reaches both seats marked joint", da.joint.length === 2 && db.joint.length === 2);
+    t.eq(
+      "...naming the same commanders in the same order at both ends",
+      da.joint.map((c) => c.playerId),
+      db.joint.map((c) => c.playerId)
+    );
+    t.eq("...which are the room's own seats", da.joint.map((c) => c.playerId).slice().sort(), [a.playerId, b.playerId].sort());
+    // The rule the whole phase rests on: a seat gets its own squad and no other.
+    // Being on one level together does not widen it — under J8 the room builds
+    // the scene, so a browser never needs another commander's soldiers.
+    t.ok("...and neither seat is sent the other's squad",
+      da.squad.every((sq) => sq.owner === a.playerId) && db.squad.every((sq) => sq.owner === b.playerId));
+    t.ok("...nor anything about it on the pairing",
+      da.joint.every((c) => Object.keys(c).sort().join(",") === "name,playerId"));
+  }
+
   // ---- a dispatch with nowhere to go is held, not dropped ----------------
   // The one thing a room has that a page never did: a seat can be listening to
   // nothing. What happens to a dispatch that was ALREADY delivered to a browser

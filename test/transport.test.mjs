@@ -341,6 +341,15 @@ export default async function run(t) {
     );
     t.ok("round: with the whole weapon", !!d.squad[0].weapon && typeof d.squad[0].weapon.name === "string");
     t.ok("round: and the routing the page sequences on", typeof d.dispatchId === "string" && d.playerId === "p1");
+    // J5. The owner is what the mission partitions by (J1) and it rides on the
+    // squad entry rather than inside `data`, which is the soldier's own record
+    // and not a fact about who commands them.
+    t.ok("round: each soldier names the commander it answers to", d.squad.every((sq) => sq.owner === "p1"));
+    // Pinned as a SET, like `data` and `mission` above it, because the squad
+    // entry is where a widening would leak: everything a commander brought
+    // hangs off this object, and J5 is the slice that gave it a second reader.
+    t.eq("round: and the squad entry is those three things", Object.keys(d.squad[0]).sort(), ["data", "owner", "weapon"]);
+    t.ok("round: a lone commander's dispatch is not marked joint", d.joint === undefined);
   }
 
   resetConfig();

@@ -278,6 +278,13 @@ export default async function run(t) {
       ["callsign", "id", "name", "stats", "wounds"]
     );
     t.ok("...and not the soldier's career record", disp("lead_1").squad[0].data.record === undefined);
+    // J5: and WHO COMMANDS IT. The mission has partitioned by owner since J1;
+    // an owner-less squad makes every partition the whole array, which is right
+    // for one commander and silently wrong for two. On every dispatch, not only
+    // joint ones — a soldier is owned whether or not anyone else is on the
+    // level, and at one owner the partitions are the array either way.
+    t.ok("...and the commander it answers to", round.every((d) => d.squad.every((sq) => sq.owner === d.playerId)));
+    t.ok("a solo dispatch says nothing about being joint", round.every((d) => d.joint === undefined));
     // The weapon is still passed by reference, and so is the level: projecting
     // is about WHAT crosses, and copying is the wire's job (src/net/wire.js).
     // weaponId defaults to "carbine" at hire, so the fallback chain is only
@@ -699,11 +706,13 @@ export default async function run(t) {
     t.ok("the round still closed", usa.taskForce.every((p) => !p.ready) && china.pending.length === 0);
   }
 
-  // ---- J3: the round works out which report is the LAST for a lead --------
-  // state.js splits a result into the commander's half and the mission's half
-  // (test/wiring.test.mjs drives that split directly). What is the SESSION's is
-  // the one bit it is handed: whether this report is the last one for this
-  // lead. It is read off the flight, per lead and not per round.
+  // ---- J3/J5: two commanders on one lead -----------------------------------
+  // The round is the only thing that ever sees both of their dispatches at
+  // once, and two slices need that: J3 asks which report is the LAST for a lead
+  // (state.js splits the result itself — test/wiring.test.mjs drives that split
+  // directly), and J5 asks the round to SAY the two are one mission, since
+  // neither page can see the other's dispatch. One setup answers both: a solo
+  // mission flying beside a joint one.
   {
     const world = createWorld();
     const s = createSession({ world, players: ["usa", "china"] });
@@ -728,6 +737,31 @@ export default async function run(t) {
     s.command("china", { type: "ready" });
     const round = s.takeRound();
     t.eq("three dispatches, two of them naming one lead", round.length, 3);
+
+    // ---- J5: the pairing crosses the seam ---------------------------------
+    // A page holds one dispatch and can see nothing of the other, so "you are
+    // not alone on this one" has to be ON the payload. Both ends get the SAME
+    // array in the SAME order: a joint mission is stepped once (J8) and its two
+    // seats have to name the same commanders in the same order.
+    const shared = round.filter((d) => d.mission.id === "shared");
+    const alone = round.find((d) => d.mission.id === "solo");
+    t.ok("a joint dispatch says it is joint", shared.every((d) => Array.isArray(d.joint) && d.joint.length === 2));
+    t.ok("...and the one flying beside it does not", alone.joint === undefined);
+    t.eq(
+      "both ends name the same commanders in the same order",
+      shared[0].joint.map((c) => c.playerId),
+      shared[1].joint.map((c) => c.playerId)
+    );
+    t.ok("...self included, so a page counts rather than adds one", shared.every((d) => d.joint.some((c) => c.playerId === d.playerId)));
+    t.ok("...with the name a page prints beside it", shared[0].joint.every((c) => typeof c.name === "string" && c.name.length > 0));
+    // The privacy line the pairing must not cross: who is there, never what
+    // they brought. The other commander's squad is not disclosed on a joint
+    // lead any more than on a solo one — under J8 the room builds the scene, so
+    // a browser never needs it (design/multiplayer.md).
+    t.ok("a joint dispatch names commanders, not their squads",
+      shared.every((d) => d.joint.every((c) => Object.keys(c).sort().join(",") === "name,playerId")));
+    t.ok("...and still carries only its own squad", shared.every((d) => d.squad.every((sq) => sq.owner === d.playerId)));
+    t.ok("...owned by two different commanders between them", shared[0].squad[0].owner !== shared[1].squad[0].owner);
 
     const report = (d, success) =>
       s.command(d.playerId, {

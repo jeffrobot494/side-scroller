@@ -134,8 +134,25 @@ function projectLead(lead, playerId, nameOf) {
 // commander has no use for it), and a mission handed no seed installs no random
 // stream and plays on — so dropping it here would un-seed every mission and
 // nothing would go red. tech/mission-determinism.md hangs off this one number.
-function projectDispatch(d) {
-  return {
+//
+// TWO FIELDS ARE J5'S (tech/multiplayer-missions.md). Both are about a mission
+// two commanders are on, and both had to cross this seam because a page holds
+// one dispatch and can see nothing of the other one:
+//
+//   `squad[].owner` — who COMMANDS this soldier. The mission has partitioned by
+//     it since J1 and `loadMission` reads `s.owner ?? null`, so an owner-less
+//     joint squad collapses back into one squad under one commander. Written on
+//     every dispatch, not only joint ones: a soldier is owned whether or not
+//     anyone else is on the level, and at one owner every partition is the whole
+//     array, which is what keeps single-player and hot-seat unchanged.
+//   `joint` — the commanders on this MISSION, self included, when there is more
+//     than one. Absent otherwise, so a solo dispatch's shape does not change.
+//     It carries a playerId and a name and nothing else: the other commander's
+//     SQUAD is never disclosed (design/multiplayer.md), and under the
+//     server-authoritative architecture a browser never needs it — the room
+//     builds the scene.
+function projectDispatch(d, joint) {
+  const out = {
     dispatchId: d.dispatchId,
     playerId: d.playerId,
     mission: { id: d.mission.id, name: d.mission.name, seed: d.mission.seed },
@@ -144,6 +161,9 @@ function projectDispatch(d) {
     // Approximation 7.
     level: d.level,
     squad: d.squad.map((s) => ({
+      // The commander this soldier answers to, which is the dispatch's own:
+      // a squad is committed by one commander and crosses to that one seat.
+      owner: d.playerId,
       // The weapon whole: the reload path, the sound layer and every effect in
       // combat.js read it.
       weapon: s.weapon,
@@ -162,6 +182,10 @@ function projectDispatch(d) {
       },
     })),
   };
+  // Absent, not null: a commander flying alone is handed the shape they have
+  // always been handed, and `joint` in a payload MEANS somebody else is there.
+  if (joint) out.joint = joint;
+  return out;
 }
 
 function makeView(campaign, player, players, round) {
@@ -497,7 +521,33 @@ export function createSession(opts = {}) {
     // of one commander's choices (dayPerDeploy off) now enters the second
     // mission at the wounds they had when the round locked, rather than the
     // wounds the first mission gave them mid-round.
-    const outbound = dispatches.map(projectDispatch);
+
+    // TWO COMMANDERS ON ONE LEAD ARE ONE MISSION (J5), and this is the only
+    // moment anything can see that: `closeRound` holds every dispatch of the
+    // round at once, while each seat is about to be handed exactly one. So the
+    // pairing is worked out here and travels ON the dispatches — a page cannot
+    // derive it, because the dispatch it is missing is another commander's.
+    //
+    // One entry per commander, in dispatch order, and the SAME array on both
+    // ends: a joint mission is stepped once (J8) and its two seats have to name
+    // the same commanders in the same order. Deploying twice to one lead
+    // replaces the choice rather than stacking it (S5), so a lead's list is
+    // already one dispatch per commander.
+    const byLead = new Map();
+    for (const d of dispatches) {
+      const on = byLead.get(d.mission.id);
+      if (on) on.push(d);
+      else byLead.set(d.mission.id, [d]);
+    }
+    const jointOf = new Map();
+    for (const [leadId, on] of byLead) {
+      if (on.length < 2) continue;
+      // `players.get` cannot miss: every dispatch above was built walking this
+      // very map. The name is what a page prints beside "with"; it discloses
+      // nothing new, since the view already names every seat in `taskForce`.
+      jointOf.set(leadId, on.map((d) => ({ playerId: d.playerId, name: players.get(d.playerId).name })));
+    }
+    const outbound = dispatches.map((d) => projectDispatch(d, jointOf.get(d.mission.id)));
     round.flight = { dispatches: outbound, outstanding: new Set(outbound.map((d) => d.dispatchId)), taken: false };
     // After the flight exists, never before: a report arriving during the
     // announcement has to find one.
