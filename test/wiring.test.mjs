@@ -319,4 +319,152 @@ export default async function run(t) {
       config.doomPerDay = doom;
     }
   }
+
+  // ---- J3: two results for ONE lead ---------------------------------------
+  // Everything above files exactly one result per lead, which is why none of it
+  // could see the bug: two commanders who take the same lead file two results
+  // carrying one `missionId`, the board is filtered on the first, and every
+  // consequence hanging off that lookup silently stopped for the second.
+  //
+  // The rule under test is one sentence — the MISSION decides what happens to
+  // the world and the COMMANDER decides what happens to their base — plus its
+  // corollary, that if anyone extracted the mission is a success. The world
+  // half is therefore applied on the LAST report, which is what `last: false`
+  // says here and what src/game/session.js works out from the round.
+  {
+    // Two bases over one world, the shape createSession builds. `st.createState`
+    // cannot be used: it is one campaign with no owner, and the private log
+    // half and `wonBy` both key off having one.
+    const two = (leads) => {
+      const world = st.createWorld(["usa", "china"]);
+      world.leads = leads;
+      return [world, st.createPlayerState(world, [], "usa"), st.createPlayerState(world, [], "china")];
+    };
+    const joint = (id, extra) => ({ ...winResult(id, extra) });
+    const lost = (id) => ({ success: false, missionId: id, casualties: [], survivors: [], loot: [], killsBySoldier: [] });
+
+    // (1) A JOINT CLEAR PAYS ONCE. Both extracted; the reward, the board tally
+    // and the lead's departure are the mission's and happen once between them.
+    {
+      const [world, usa, china] = two([{ ...fakeLead("j1", "medium"), threatReward: 12 }]);
+      const health = world.campaignHealth;
+      st.applyMissionResult(usa, joint("j1"), { last: false });
+      t.eq("joint clear: the first report pays nothing yet", world.campaignHealth, health);
+      t.ok("...but the lead is off the board immediately", !world.leads.some((l) => l.id === "j1"));
+      t.eq("...and nothing has been counted", world.cleared, 0);
+      st.applyMissionResult(china, joint("j1"), { last: true });
+      t.eq("joint clear: threatReward is paid once, on the last report", world.campaignHealth, health + 12);
+      t.eq("...and `cleared` counts one lead, not one report", world.cleared, 1);
+      // The half that is theirs is theirs, on their own report.
+      t.eq("...while each commander records the mission", [usa.completedMissions, china.completedMissions], [["j1"], ["j1"]]);
+      t.eq("...and the ledger entry is spent", world.reports.size, 0);
+    }
+
+    // (2) IF ANYONE EXTRACTS, THE MISSION IS A SUCCESS — in BOTH orders. The
+    // outcome is the union of the reports, which is the whole reason it cannot
+    // be settled by whoever gets home first: settled on arrival, one order pays
+    // then charges and the other charges then pays.
+    for (const [label, first, second] of [
+      ["out first, wiped second", "usa", "china"],
+      ["wiped first, out second", "china", "usa"],
+    ]) {
+      const [world, usa, china] = two([{ ...fakeLead("j2", "medium"), threatReward: 12 }]);
+      const by = { usa, china };
+      const health = world.campaignHealth;
+      // usa extracts, china is wiped — the reports arrive in the order named.
+      st.applyMissionResult(by[first], first === "usa" ? joint("j2") : lost("j2"), { last: false });
+      st.applyMissionResult(by[second], second === "usa" ? joint("j2") : lost("j2"), { last: true });
+      t.eq(`mixed (${label}): the mission succeeded, so it pays`, world.campaignHealth, health + 12);
+      t.eq(`mixed (${label}): ...and never also charges`, world.outcome, null);
+      t.eq(`mixed (${label}): ...one clear on the board tally`, world.cleared, 1);
+      t.eq(`mixed (${label}): ...banked by the commander who walked out`, usa.completedMissions, ["j2"]);
+      t.eq(`mixed (${label}): ...and not by the one who did not`, china.completedMissions, []);
+    }
+
+    // (3) NOBODY EXTRACTED IS THE ONLY FAILURE, and it charges once. The other
+    // branch of the same decision — never both, never twice.
+    {
+      const [world, usa, china] = two([fakeLead("j3", "medium")]);
+      const health = world.campaignHealth;
+      st.applyMissionResult(usa, lost("j3"), { last: false });
+      t.eq("joint wipe: the first report charges nothing yet", world.campaignHealth, health);
+      st.applyMissionResult(china, lost("j3"), { last: true });
+      t.eq("joint wipe: doom is charged once, not per squad", world.campaignHealth, health - config.doomPerFailure);
+      t.eq("...and nothing was cleared", world.cleared, 0);
+    }
+
+    // (4) THE FINALE GATE IS A PLAYER FIELD AND BOTH REPORTERS EARN IT. It read
+    // the lead's advertised difficulty off the board, so the second reporter of
+    // a joint High lead used to get nothing — measured as usa 1, china 0.
+    {
+      const [, usa, china] = two([fakeLead("j4", "high")]);
+      st.applyMissionResult(usa, joint("j4"), { last: false });
+      st.applyMissionResult(china, joint("j4"), { last: true });
+      t.eq("a joint High clear counts toward BOTH finale gates", [usa.highWins, china.highWins], [1, 1]);
+    }
+
+    // (5) THE MISSION'S LINE IS THE COMMANDER'S. It names what THEY recovered,
+    // and on a mixed outcome the two lines contradict each other — which is
+    // exactly why it cannot be one entry in a shared log.
+    {
+      const [world, usa, china] = two([fakeLead("j5", "medium")]);
+      // A world entry to merge against, written the way note() writes one: the
+      // private half must ADD to the shared log, not replace it.
+      world.log.unshift({ day: world.day, text: "the sector holds" });
+      const worldLines = world.log.length;
+      st.applyMissionResult(usa, joint("j5", { loot: [{ name: "X", value: 1 }] }), { last: false });
+      st.applyMissionResult(china, lost("j5"), { last: true });
+      t.ok("the winner reads their own haul", usa.log.some((e) => /j5 — success\. Recovered 1 item/.test(e.text)));
+      t.ok("...and the other commander cannot", !china.log.some((e) => /Recovered/.test(e.text)));
+      t.ok("the loser reads their own wipe", china.log.some((e) => /j5 — failed/.test(e.text)));
+      t.ok("...and it is not told to the squad that walked out", !usa.log.some((e) => /failed/.test(e.text)));
+      t.eq("the shared log gains no mission line at all", world.log.length, worldLines);
+      // A merge, not a replacement: the world's half is still in both.
+      t.ok(
+        "...and both still read the world's own entries",
+        usa.log.some((e) => e.text === "the sector holds") && china.log.some((e) => e.text === "the sector holds")
+      );
+      t.eq("each commander's log is the world's plus their own one line", [usa.log.length, china.log.length], [2, 2]);
+    }
+
+    // (6) VICTORY IS INDIVIDUAL AND GOES TO THE FIRST COMMANDER WHO CLEARS IT.
+    // The assignment was unguarded and only looked safe because the second
+    // report never found the lead: with both finding it, `wonBy` moved and the
+    // first commander's `outcome` flipped from "won" to "ended" after they had
+    // been shown a win screen.
+    {
+      const [world, usa, china] = two([{ ...fakeLead("hive", "high"), winsCampaign: true, daysLeft: null }]);
+      st.applyMissionResult(usa, joint("hive"), { last: false });
+      t.eq("the first commander to clear the hive won", usa.outcome, "won");
+      st.applyMissionResult(china, joint("hive"), { last: true });
+      t.eq("...and a second report does not take it off them", usa.outcome, "won");
+      t.eq("...the other one neither won nor lost", china.outcome, "ended");
+      t.eq("...and the world records one winner", world.wonBy, "usa");
+    }
+
+    // (7) A STRAY SECOND REPORT ON A SPENT LEAD IS A NO-OP. The ledger entry is
+    // deleted by the report that spends it and the lead is off the board, so
+    // there is nothing left to pay out twice — which is what used to make
+    // `cleared` the one field that incremented per reporter.
+    {
+      const [world, usa] = two([{ ...fakeLead("j7", "medium"), threatReward: 12 }]);
+      st.applyMissionResult(usa, joint("j7"), { last: true });
+      const health = world.campaignHealth;
+      st.applyMissionResult(usa, joint("j7"), { last: true });
+      t.eq("a repeat report pays nothing", world.campaignHealth, health);
+      t.eq("...and counts nothing", world.cleared, 1);
+      t.eq("...and leaves no ledger entry behind", world.reports.size, 0);
+    }
+
+    // (8) SOLO IS UNCHANGED, and this is the row the rule narrows least: one
+    // commander's wipe on a lead they took alone still charges the shared clock,
+    // because campaignHealth is the world's. `last` defaults true, which is what
+    // every call above this block relies on.
+    {
+      const [world, usa] = two([fakeLead("j8", "medium")]);
+      const health = world.campaignHealth;
+      st.applyMissionResult(usa, lost("j8"));
+      t.eq("a solo wipe still costs everybody", world.campaignHealth, health - config.doomPerFailure);
+    }
+  }
 }

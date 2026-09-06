@@ -374,6 +374,16 @@ export default async function run(t) {
 
   // ---- a day is spent by everybody, whoever asked for it ------------------
   {
+    // FLAKE FIX (found by J3's bar, not caused by it). This block passes five
+    // days to watch a 3-day fabrication finish, and the doom clock runs the
+    // whole time: 60 health against 6 a day plus whatever the randomly-rolled
+    // leads charge on expiry reaches 0 roughly one run in thirty, and then
+    // advanceDay refuses and every assertion below reads `undefined`. What is
+    // under test is fabrication and healing, so the clock is pinned off — the
+    // clock has its own block.
+    const DOOM = ["doomPerDay", "doomPerExpiryLow", "doomPerExpiryMedium", "doomPerExpiryHigh", "doomPerExpiryExtreme"];
+    const doom = DOOM.map((k) => config[k]);
+    for (const k of DOOM) config[k] = 0;
     const world = createWorld();
     const s = createSession({ world, players: ["usa", "china", "brazil"] });
     const usa = s.view("usa"), china = s.view("china");
@@ -404,6 +414,7 @@ export default async function run(t) {
     const quiet = turnDay(s, ["usa", "china", "brazil"]);
     t.eq("a turned day names only the LAST readier's jobs", quiet.finished, []);
     t.ok("...even though other bases finished theirs", usa.building.length === 0 && usa.armory.length > 1);
+    DOOM.forEach((k, i) => { config[k] = doom[i]; });
   }
 
   // ---- a mission result belongs to one base, its day to all of them -------
@@ -686,6 +697,65 @@ export default async function run(t) {
     // The coherent end state: half-cleared is not a shape anything else here
     // is written against.
     t.ok("the round still closed", usa.taskForce.every((p) => !p.ready) && china.pending.length === 0);
+  }
+
+  // ---- J3: the round works out which report is the LAST for a lead --------
+  // state.js splits a result into the commander's half and the mission's half
+  // (test/wiring.test.mjs drives that split directly). What is the SESSION's is
+  // the one bit it is handed: whether this report is the last one for this
+  // lead. It is read off the flight, per lead and not per round.
+  {
+    const world = createWorld();
+    const s = createSession({ world, players: ["usa", "china"] });
+    const [usa, china] = ["usa", "china"].map((id) => s.view(id));
+    for (const id of ["usa", "china"]) s.command(id, { type: "hire", recruitId: s.view(id).recruits[0].id });
+    // The last report of a round turns the day inside the same command, so
+    // every doom source is pinned off — what is under test is the payout, not
+    // the tick or what rotted under it.
+    const DOOM = ["doomPerDay", "doomPerExpiryLow", "doomPerExpiryMedium", "doomPerExpiryHigh", "doomPerExpiryExtreme"];
+    const doom = DOOM.map((k) => config[k]);
+    for (const k of DOOM) config[k] = 0;
+    // One lead, and a second for the solo mission flying beside it.
+    world.leads.push({ ...fakeLead("shared"), threatReward: 12 }, { ...fakeLead("solo"), threatReward: 7 });
+    s.command("usa", { type: "deploy", leadId: "shared", soldierIds: [usa.roster[0].id] });
+    s.command("china", { type: "deploy", leadId: "shared", soldierIds: [china.roster[0].id] });
+    // dayPerDeploy off so usa can hold two choices in one round.
+    const cap = config.dayPerDeploy;
+    config.dayPerDeploy = false;
+    s.command("usa", { type: "deploy", leadId: "solo", soldierIds: [usa.roster[0].id] });
+    config.dayPerDeploy = cap;
+    s.command("usa", { type: "ready" });
+    s.command("china", { type: "ready" });
+    const round = s.takeRound();
+    t.eq("three dispatches, two of them naming one lead", round.length, 3);
+
+    const report = (d, success) =>
+      s.command(d.playerId, {
+        type: "missionResult",
+        dispatchId: d.dispatchId,
+        result: { success, missionId: d.mission.id, casualties: [], survivors: [], loot: [], killsBySoldier: [] },
+      });
+    const byLead = (id) => round.filter((d) => d.mission.id === id);
+    const health = world.campaignHealth;
+
+    // The SOLO mission reports first and is paid immediately: the flag is per
+    // lead, so an unrelated mission still flying beside it holds nothing back.
+    // (An `outstanding`-empties test would have deferred this one too, which is
+    // the reason that hook is not what J3 reads.)
+    report(byLead("solo")[0], true);
+    t.eq("a solo mission is paid on its own report, whatever else is in flight", world.campaignHealth, health + 7);
+    t.eq("...and counted", world.cleared, 1);
+
+    // The joint one is not, until its second report.
+    report(byLead("shared")[0], true);
+    t.eq("the first report of a joint lead pays nothing", world.campaignHealth, health + 7);
+    t.eq("...and counts nothing", world.cleared, 1);
+    const turned = report(byLead("shared")[1], false);
+    t.eq("the last one pays, once, because somebody extracted", world.campaignHealth, health + 7 + 12);
+    t.eq("...and the joint lead counts once between them", world.cleared, 2);
+    t.ok("...and the round's own day still turns on the last report of all", turned.dayTurned === true);
+    t.eq("...leaving no unspent ledger entry", world.reports.size, 0);
+    DOOM.forEach((k, i) => { config[k] = doom[i]; });
   }
 
   // ---- a finished campaign cannot turn another day ------------------------

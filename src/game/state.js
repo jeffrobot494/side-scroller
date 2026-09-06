@@ -75,6 +75,19 @@ export function createWorld(commanders = []) {
     // which stops having one answer the moment there are two of them. Equal to
     // that length in single-player, which is what it replaced there.
     cleared: 0,
+
+    // Leads that have been REPORTED ON but are not finished with (J3). Two
+    // commanders on one lead file two results, and the lead leaves the board on
+    // the first of them — so every world consequence that used to be read off
+    // `state.leads.find(...)` would silently do nothing for the second. The
+    // first report copies the four fields resolution reads in here, beside a
+    // running outcome, and the LAST one spends the entry and deletes it.
+    //
+    // Empty except between the two reports of one joint mission. A dispatch
+    // that never reports leaves an entry behind; it is four fields per lead
+    // that ever existed, and it is what makes a stray repeat report a no-op
+    // rather than a second payout.
+    reports: new Map(),
   };
   seedBoard(world);
   return world;
@@ -127,6 +140,8 @@ export function createPlayerState(world, recruits = null, ownerId = null) {
   };
 
   for (const key of WORLD_FIELDS) {
+    // `log` has two halves since J3 and is defined below instead.
+    if (key === "log") continue;
     Object.defineProperty(state, key, {
       get: () => world[key],
       set: (v) => { world[key] = v; },
@@ -134,6 +149,26 @@ export function createPlayerState(world, recruits = null, ownerId = null) {
       configurable: true,
     });
   }
+
+  // THE LOG HAS TWO HALVES (J3). The world's, shared by everyone, and this
+  // commander's own — today exactly the mission's report line, which names what
+  // THEY recovered and must not be readable from the other base
+  // (design/multiplayer.md never discloses what somebody else carried out).
+  // Merged newest-first on read, so the hub and the view keep reading one list
+  // and neither learns there are two.
+  //
+  // Non-enumerable, like `world` and `owner`: nothing walking a campaign's
+  // fields should find the private half separately from the merge.
+  Object.defineProperty(state, "ownLog", { value: [], enumerable: false });
+  Object.defineProperty(state, "log", {
+    // No private half means the world's list ITSELF, identity and all — which
+    // is every single-player campaign, since noteOwn falls back to the world
+    // log when there is no owner to keep it from.
+    get: () => (state.ownLog.length ? mergeLog(world.log, state.ownLog) : world.log),
+    set: (v) => { world.log = v; },
+    enumerable: true,
+    configurable: true,
+  });
   // A campaign's own answer to how the campaign ended (S7), computed from the
   // world's two facts rather than aliasing either. Read-only — the one entry in
   // the field split that is — and the writers stay in this module, one per
@@ -403,9 +438,38 @@ function arriveLeads(state) {
 
 // ---- helpers --------------------------------------------------------------
 
+function pushLog(list, entry) {
+  list.unshift(entry);
+  if (list.length > 40) list.pop();
+}
+
+// The world's log: what happened to the sector. Written through worldOf rather
+// than through `state.log`, which is a merge of two lists since J3 and would
+// take an unshift into a temporary.
 function note(state, text) {
-  state.log.unshift({ day: state.day, text });
-  if (state.log.length > 40) state.log.pop();
+  pushLog(worldOf(state).log, { day: state.day, text });
+}
+
+// The reporting commander's own log (J3). A campaign with no owner has no
+// private half and no other base to keep it from, so single-player writes the
+// world log here and its log is unchanged line for line.
+function noteOwn(state, text) {
+  pushLog(state.owner ? state.ownLog : worldOf(state).log, { day: state.day, text });
+}
+
+// Two newest-first logs into one. Entries carry a day and no finer clock, so
+// within a day the order between the halves is arbitrary and the world's goes
+// first — the day's arrivals and expiries above the mission that happened in
+// it. Capped like each half is.
+function mergeLog(worldLog, ownLog) {
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (i < worldLog.length || j < ownLog.length) {
+    const takeWorld = j >= ownLog.length || (i < worldLog.length && worldLog[i].day >= ownLog[j].day);
+    out.push(takeWorld ? worldLog[i++] : ownLog[j++]);
+  }
+  return out.slice(0, 40);
 }
 
 export function livingRoster(state) {
@@ -595,9 +659,49 @@ export function advanceDay(state) {
 // the outcome back. `result` shape (from the mission scene):
 //   { success, missionId, casualties: [soldierId], survivors: [soldierId],
 //     woundsBySoldier: [{id, wounds}], loot: [{name,value}], kills }
+//
+// ONE LEAD CAN BE REPORTED TWICE (J3). Two commanders who take the same lead
+// produce two dispatches carrying one `missionId`, and the split is one rule:
+// **the mission decides what happens to the world, the commander decides what
+// happens to their base.** So the roster, the loot, `completedMissions`,
+// `highWins` and the report line land on each commander's own report, and
+// `threatReward`, the doom charge, `cleared` and the hive are the mission's and
+// land once. `last` is the caller saying this is the final report for this
+// lead — src/game/session.js reads it off `round.flight`. It defaults TRUE,
+// which is single-player and every suite that calls this directly.
+//
+// The outcome is the UNION of the reports: **if anyone extracted, the mission
+// is a success**, the same rule the mission already applies inside a squad
+// where a partial wipe still succeeds. That is why the world half waits for the
+// last report rather than being settled by whoever gets home first.
+// See tech/multiplayer-missions.md, "What is per mission and what is per
+// commander".
 
-export function applyMissionResult(state, result) {
-  const mission = state.leads.find((l) => l.id === result.missionId);
+// The mission a result is reporting on, or null once the lead is spent. The
+// FIRST report finds the lead on the board and copies what resolution reads;
+// every later one finds the copy, because the board was filtered on the way out
+// of that first call.
+function missionOf(state, missionId) {
+  const world = worldOf(state);
+  let entry = world.reports.get(missionId);
+  if (entry) return entry;
+  const lead = state.leads.find((l) => l.id === missionId);
+  if (!lead) return null;
+  entry = {
+    name: lead.name,
+    difficulty: lead.difficulty,
+    threatReward: lead.threatReward,
+    winsCampaign: !!lead.winsCampaign,
+    success: false, // set by any report that succeeded
+  };
+  world.reports.set(missionId, entry);
+  return entry;
+}
+
+export function applyMissionResult(state, result, { last = true } = {}) {
+  const world = worldOf(state);
+  const mission = missionOf(state, result.missionId);
+  if (mission && result.success) mission.success = true;
 
   // Permadeath: anyone who fell is gone from the roster for good.
   for (const id of result.casualties) {
@@ -622,42 +726,72 @@ export function applyMissionResult(state, result) {
   // Drop the dead from the roster entirely.
   state.roster = state.roster.filter((s) => s.status !== "dead");
 
+  // ---- this commander's half, on their own report -------------------------
   if (result.success) {
     for (const item of result.loot) state.stores.push(item);
     if (!state.completedMissions.includes(result.missionId)) {
       state.completedMissions.push(result.missionId);
-      // ...and the world's tally, which is what board pressure scales off. A
-      // reader with no writer freezes the board at day-one difficulty and
-      // nothing fails loudly, so these two lines stay together.
-      state.cleared += 1;
       // The gate reads the lead's ADVERTISED threat — what the player agreed to
-      // take on — not what the mission turned out to be.
+      // take on — not what the mission turned out to be. A PLAYER field that
+      // used to hang off the board lookup, so the second reporter of a joint
+      // High lead earned nothing toward their own finale; it reads the ledger
+      // now and both earn it.
       if (mission && mission.difficulty === "high") state.highWins += 1;
     }
-    if (mission) {
-      state.campaignHealth = Math.min(100, state.campaignHealth + mission.threatReward);
-      note(
-        state,
-        `${mission.name} — success. Recovered ${result.loot.length} item(s).`
-      );
-      if (mission.winsCampaign) {
-        // Victory is individual: the world records WHO ended it, and every
-        // other commander's campaign computes the third outcome from that. No
-        // owner (single-player) records `true` and reads it back as a win.
-        worldOf(state).wonBy = state.owner || true;
-        note(state, "The hive command node is destroyed. The sector is saved.");
-      }
-    }
-  } else if (mission) {
-    // A failed insertion emboldens the enemy. The 10 was hardcoded until the
-    // clock grew a second source and every rate became a knob.
-    note(state, `${mission.name} — failed. The squad was wiped.`);
-    chargeDoom(state, config.doomPerFailure);
+  }
+  // The mission's line is the REPORTING COMMANDER'S, not the world's: it names
+  // what they recovered, and on a joint lead one squad can walk out while the
+  // other is wiped, so neither line is true of both bases. The first
+  // player-scoped log entry in the game.
+  if (mission) {
+    noteOwn(
+      state,
+      result.success
+        ? `${mission.name} — success. Recovered ${result.loot.length} item(s).`
+        : `${mission.name} — failed. The squad was wiped.`
+    );
+  }
+  if (mission && mission.winsCampaign && result.success && !world.wonBy) {
+    // Victory is individual: the world records WHO ended it, and every other
+    // commander's campaign computes the third outcome from that. No owner
+    // (single-player) records `true` and reads it back as a win.
+    //
+    // GUARDED since J3, and it is not a freebie — the guard is what makes it
+    // first-successful-reporter-wins rather than last-writer-wins. Unguarded,
+    // a second report on one hive moved `wonBy` and flipped the first
+    // commander's `outcome` from "won" to "ended" after they had been shown a
+    // win screen. It only ever looked safe because the second report could not
+    // find the lead.
+    world.wonBy = state.owner || true;
+    note(state, "The hive command node is destroyed. The sector is saved.");
   }
 
-  // The lead is spent whether or not the squad survived. Nothing refills the
-  // board — only a day advance brings work in, and resolving a mission is no
-  // longer one (S4).
+  // ---- the mission's half, on the LAST report for this lead ---------------
+  // Reward and penalty are two branches of ONE decision over the union of the
+  // reports, which is why neither can be applied by whoever files first: A out
+  // at 30s and B wiped at 90s would pay then charge, and the same mission in
+  // the other order would charge then pay.
+  if (mission && last) {
+    world.reports.delete(result.missionId);
+    if (mission.success) {
+      state.campaignHealth = Math.min(100, state.campaignHealth + mission.threatReward);
+      // The world's tally, which is what board pressure scales off — ONE per
+      // lead however many commanders were on it. It used to sit under the
+      // `completedMissions` guard, which is per player, so a joint clear
+      // counted the same lead twice.
+      state.cleared += 1;
+    } else {
+      // A failed insertion emboldens the enemy. The 10 was hardcoded until the
+      // clock grew a second source and every rate became a knob. Nobody
+      // extracted, or this branch would not be running.
+      chargeDoom(state, config.doomPerFailure);
+    }
+  }
+
+  // The lead is spent whether or not the squad survived, and it leaves the
+  // board on the FIRST report — a lead still listed is a lead a third commander
+  // could deploy against. Nothing refills the board — only a day advance brings
+  // work in, and resolving a mission is no longer one (S4).
   state.leads = state.leads.filter((l) => l.id !== result.missionId);
 
   // NO DAY IS CHARGED HERE. Until S4 this ended with `if (config.dayPerDeploy)

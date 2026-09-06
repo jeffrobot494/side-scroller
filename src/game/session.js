@@ -614,9 +614,33 @@ export function createSession(opts = {}) {
         return { ok: true, released: true, pending: player.pending.length };
       }
       case "missionResult": {
+        // TWO DISPATCHES CAN NAME ONE LEAD (J3), and the world half of a
+        // result — the reward or the doom charge, `cleared`, the hive — belongs
+        // to the mission rather than to either commander. So it is applied on
+        // the LAST report for THAT LEAD, and the round is what knows when that
+        // is: this dispatch is still outstanding here (the delete is below), so
+        // the question is whether any OTHER outstanding dispatch names the same
+        // mission.
+        //
+        // Per lead, not per round. `outstanding` emptying is the round's
+        // signal and is already used for the day; using it here as well would
+        // hold one commander's solo reward behind an unrelated mission that
+        // happened to be flying beside it.
+        //
+        // No flight at all is a bare result outside a round, which several
+        // suites send and which single-player is: last, by default.
+        const flight = round.flight;
+        const last =
+          !flight ||
+          !flight.dispatches.some(
+            (d) =>
+              d.dispatchId !== cmd.dispatchId &&
+              d.mission.id === cmd.result.missionId &&
+              flight.outstanding.has(d.dispatchId)
+          );
         // applyMissionResult returns the state object itself; returning that
         // would hand the campaign back through the seam we just built.
-        applyMissionResult(campaign, cmd.result);
+        applyMissionResult(campaign, cmd.result, { last });
 
         // ...and this is where the day comes from since S5. A round owes one
         // day, and it is spent when the LAST of that round's missions has
@@ -628,7 +652,6 @@ export function createSession(opts = {}) {
         // An unknown or missing dispatch id is applied and otherwise ignored:
         // a second report for the same dispatch cannot drive the count past
         // zero, and a bare result outside a round is what several suites send.
-        const flight = round.flight;
         if (!flight || !flight.outstanding.delete(cmd.dispatchId)) return { ok: true };
         if (flight.outstanding.size) return { ok: true };
 
