@@ -20,6 +20,13 @@
 // shake and the loot bob all still call Math.random and none of them is sampled
 // here (tech/mission-determinism.md, approximation 2).
 //
+// Section (4) is the exception to "driven by update() directly": it drives the
+// REAL rAF loop off a synthetic clock at four frame rates and asserts they all
+// play the mission a bare step loop plays (tech/multiplayer-missions.md, J4).
+// It shares this file because it is the same claim one argument wider — same
+// seed, same trace, and now any frame rate — and because the trace, the level
+// and the sampler are already here.
+//
 // Delete `mission.golden.json` and re-run to reseed — a deliberate act that
 // shows up in a diff.
 //
@@ -169,4 +176,68 @@ export default async function run(t) {
   t.ok("floor: the controlled soldier covered ground", Math.abs(last.soldiers[0][0] - first.soldiers[0][0]) > 60);
   t.ok("floor: shots were in flight", a.some((s) => s.proj[0] > 0));
   t.ok("floor: somebody took damage", a.some((s) => s.roots.some((r, i) => r[5] < first.roots[i][5] || r[4] === 0)));
+
+  // (4) frame-rate independence (tech/multiplayer-missions.md, J4)
+  //
+  // Everything above drives `m.update(STEP)` directly and never runs the rAF
+  // loop, which is why the spec recorded J4 as unguardable — the golden already
+  // lives in the world J4 creates. It is guardable through `_frame`: the loop
+  // is a pure function of a clock, the clock is an argument, and rAF is a no-op
+  // under the harness, so four frame rates can be driven in one process off one
+  // trace. What fails here before J4 is the slice's whole claim: input sampled
+  // per rendered frame gives the first step of a frame the presses and the rest
+  // of them silence, so 20fps and 144fps play different missions.
+  //
+  // `direct()` is also the shape a server steps a mission in (J6/J8) — no
+  // frames at all — so the same block says the loop adds nothing.
+  {
+    const build = () => {
+      const g = generateLevel({ seed: SEED, difficulty: "high" });
+      const m = new Mission(makeEl("canvas"), () => {});
+      m.start(g.mission, g.level, SQUAD);
+      m.input = scriptedInput(); // its sample() walks the trace one step at a time
+      m.render = () => {}; // what a frame DRAWS is not what this asks about
+      m.running = true;
+      m.accumulator = 0;
+      m.lastTime = 0;
+      return m;
+    };
+
+    // No loop: one sample, one step, the contract stated bare.
+    const direct = (steps) => {
+      const m = build();
+      while (m.input.count < steps) { m.input.sample(); m.update(STEP); }
+      return sample(m);
+    };
+
+    // The REAL loop, off a synthetic clock. The last frame is trimmed rather
+    // than overshot, because two rates compared after a different number of
+    // steps say nothing — and a 20fps frame carries three steps, so overshoot
+    // is the normal case, not an edge one.
+    const atRate = (fps, steps) => {
+      const m = build();
+      const frameMs = 1000 / fps;
+      let now = 0;
+      while (m.input.count < steps) {
+        const fits = Math.floor((m.accumulator + frameMs / 1000) / STEP);
+        if (m.input.count + fits > steps) {
+          while (m.input.count < steps) { m.input.sample(); m.update(STEP); }
+          break;
+        }
+        now += frameMs;
+        m._frame(now);
+      }
+      return sample(m);
+    };
+
+    const STEPS = 240; // 4s of mission: past the first contact, well into the fight
+    const base = direct(STEPS);
+    t.ok("frame rate: the bare step loop reached the fight", base.proj[0] > 0 || base.roots.some((r) => r[4] === 0));
+    for (const fps of [20, 30, 60, 144]) {
+      const run = atRate(fps, STEPS);
+      const d = firstDiff(base, run, "frame");
+      const exact = JSON.stringify(base) === JSON.stringify(run);
+      t.ok(`frame rate: ${fps}fps plays the same mission as a bare step loop${d ? ` — ${d}` : ""}`, exact && !d);
+    }
+  }
 }

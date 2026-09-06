@@ -50,13 +50,69 @@ export default async function run(t) {
   t.ok("pad reset: persistence cleared", (typeof localStorage !== "undefined") && localStorage.getItem("sidescroller.pad.v1") === null);
 
   // ---- MissionInput: keyboard reads live bindings ------------------------
+  // Since J4 a read answers the last SAMPLE rather than the device, so a press
+  // is latched by sample() before anything can see it.
   {
     const inp = new MissionInput();
     inp.enable();
     inp._set({ code: "KeyR", preventDefault() {} }, true);
+    inp.sample();
     t.ok("input: R → reload (new action)", inp.isDown("reload"));
     t.ok("input: reload justPressed edge", inp.justPressed("reload"));
     t.ok("input: edge self-clears", !inp.justPressed("reload"));
+    inp.disable();
+  }
+
+  // ---- MissionInput: the per-step sample (J4) -----------------------------
+  // The device writes whenever the browser says so; a read answers one latched
+  // input frame. That line is what makes a mission a function of its input
+  // trace rather than of how many steps fell inside a rendered frame — the
+  // whole of tech/multiplayer-missions.md J4. The mission-side proof (the same
+  // trace at four frame rates) is in test/mission-golden.test.mjs; these are
+  // the latch's own rules.
+  {
+    const key = (code) => ({ code, preventDefault() {} });
+    const inp = new MissionInput();
+    inp.enable();
+
+    // (a) a read before the first sample is silent, not a crash. Every headless
+    // host that never samples (dryRunSpec, a tool mid-mount) lands here.
+    inp._set(key("KeyD"), true);
+    t.ok("sample: unsampled device reads as nothing", !inp.isDown("right") && !inp.justPressed("right"));
+
+    // (b) the sample is frozen: the device moving under it changes nothing
+    // until the next one. This is the property the whole slice rests on — two
+    // steps inside one rendered frame must not disagree about the input.
+    inp.sample();
+    const heldAfterSample = inp.isDown("right");
+    inp._set(key("KeyD"), false);
+    t.ok("sample: a release after the sample is invisible to it", heldAfterSample && inp.isDown("right"));
+    inp.sample();
+    t.ok("sample: the next sample sees it", !inp.isDown("right"));
+
+    // (c) an edge that arrives while NO step ran is not lost. At 144Hz most
+    // frames step nothing at all, so a tap that begins and ends between two
+    // samples has to survive on the device until one is taken.
+    inp._set(key("KeyR"), true);
+    inp._set(key("KeyR"), false);
+    inp.sample();
+    t.ok("sample: a press between samples survives to the next one", inp.justPressed("reload"));
+
+    // (d) …and belongs to exactly that step. Unread, it must NOT be latched
+    // again, or one tap re-fires every step until something consumes it.
+    inp._set(key("KeyR"), true);
+    inp.sample(); // this step's press, deliberately not read
+    inp.sample();
+    t.ok("sample: an unread edge does not survive its step", !inp.justPressed("reload"));
+
+    // (e) the frame index is the step index, and a mission numbers its own.
+    const before = inp.frame;
+    inp.sample(); inp.sample();
+    t.eq("sample: the frame index counts samples", inp.frame, before + 2);
+    inp.disable();
+    inp.enable();
+    t.eq("sample: enable restarts the index", inp.frame, 0);
+    t.ok("sample: enable clears the latch", !inp.isDown("right"));
     inp.disable();
   }
 
@@ -64,10 +120,12 @@ export default async function run(t) {
   {
     const inp = new MissionInput();
     inp.mouse = { x: 120, y: 40, active: true };
+    inp.sample();
     const src = inp.aimSource("mouse");
     t.ok("aim: mouse source returned", src && src.type === "mouse" && src.x === 120);
     t.ok("aim: keyboard mode yields no manual source", inp.aimSource("keyboard") === null);
     inp.mouse.active = false;
+    inp.sample();
     t.ok("aim: inactive mouse → null", inp.aimSource("mouse") === null);
   }
 
@@ -76,7 +134,7 @@ export default async function run(t) {
     const inp = new MissionInput();
     // No Gamepad API present → safe no-op.
     let threw = false;
-    try { inp.pollGamepad(); } catch { threw = true; }
+    try { inp.sample(); } catch { threw = true; }
     t.ok("gamepad: pollGamepad no-op without API", !threw && !inp.isDown("jump"));
 
     // Stub a connected pad: A (btn0) pressed, left stick pushed right, right stick aimed down.
@@ -86,15 +144,22 @@ export default async function run(t) {
       globalThis.navigator = { getGamepads: () => [{ buttons: [{ pressed: true }], axes: [0.9, 0, 0, 0.8] }] };
     } catch { stubbed = false; }
     if (stubbed) {
-      inp.pollGamepad();
+      inp.sample(); // sample() is what polls the pad now
       t.ok("gamepad: button 0 → jump held", inp.isDown("jump"));
+      // One sample folds both sources, and a pad HOLDING an action outranks a
+      // keyboard reporting it up — `actions` stores the release as `false`, so
+      // the merge order in sample() is what keeps isDown an OR.
+      inp._set({ code: "Space", preventDefault() {} }, true);
+      inp._set({ code: "Space", preventDefault() {} }, false);
+      inp.sample();
+      t.ok("gamepad: a pad hold outranks a released key", inp.isDown("jump"));
       t.ok("gamepad: left stick → right", inp.isDown("right"));
       t.ok("gamepad: right stick → aim active", inp.aimStick.active && inp.aimSource("gamepad").type === "stick");
 
       // Rebind button 0 to swap; the same stubbed press should now drive swap.
       setPadButton(0, "swap");
       const inp2 = new MissionInput();
-      inp2.pollGamepad();
+      inp2.sample();
       t.ok("gamepad: rebound button 0 → swap", inp2.isDown("swap") && !inp2.isDown("jump"));
       resetPad(); // leave global pad state clean for other suites
 

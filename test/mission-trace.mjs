@@ -81,17 +81,26 @@ export function scriptAt(f) {
 
 // A MissionInput stand-in. `aimSource` answers a stick whatever the aim mode is,
 // so the trace is independent of config.aimMode, the camera and the zoom.
+//
+// It has the real thing's J4 seam: `sample()` takes the NEXT frame of the trace
+// and counts it, which is the only call a driver needs. `advance(f)` stays for
+// the golden, which numbers its own frames and asserts on that index — the two
+// are the same operation, and `count` follows either way so a driver that never
+// touches `advance` still knows which step it is on.
 export function scriptedInput() {
   let held = {};
   let edges = {};
   let aim = null;
   return {
+    count: 0, // input frames taken, i.e. the step index (MissionInput.frame)
     advance(f) {
       const s = scriptAt(f);
       held = s.held;
       edges = { ...s.pressed };
       aim = s.aim;
+      this.count = f + 1;
     },
+    sample() { this.advance(this.count); },
     isDown: (a) => held[a] === true,
     justPressed(a) {
       if (!edges[a]) return false;

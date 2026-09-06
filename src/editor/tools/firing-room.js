@@ -257,7 +257,9 @@ export function createFiringRoom(container, onBack) {
   // ---- simulation --------------------------------------------------------
   function step(dt) {
     stats.elapsed += dt;
-    input.pollGamepad();
+    // One input sample per step, the mission's contract (J4). This preview is a
+    // variable-step loop, so its step IS its frame — the call is the same.
+    input.sample();
     if (shooter.fireCooldown > 0) shooter.fireCooldown -= dt;
     if (shooter.muzzleFlash > 0) shooter.muzzleFlash -= dt;
     tickReload(shooter, dt, scene);

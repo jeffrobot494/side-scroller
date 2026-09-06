@@ -1589,7 +1589,7 @@ export function createEnemyDesigner(container, onBack) {
 
   // ---- preview loop -------------------------------------------------------
   function step(dt) {
-    input.pollGamepad();
+    input.sample(); // one sample per step, the mission's contract (J4)
 
     // ---- the player -------------------------------------------------------
     if (shooter.fireCooldown > 0) shooter.fireCooldown -= dt;

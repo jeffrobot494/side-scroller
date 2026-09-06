@@ -1,21 +1,51 @@
 // Input for the action layer. Folds three sources into one logical action state
 // (held + edge-triggered): remappable keyboard and gamepad (both via
-// controlmap.js — buttons + axes; polled each frame), and mouse (position for
-// aim + left button for fire). The mission scene owns an instance and enables/
-// disables it on enter/exit so handling never leaks into the hub DOM.
+// controlmap.js — buttons + axes), and mouse (position for aim + left button
+// for fire). The mission scene owns an instance and enables/disables it on
+// enter/exit so handling never leaks into the hub DOM.
+//
+// TWO HALVES, and the line between them is the whole of J4
+// (tech/multiplayer-missions.md). Above `sample()` is the DEVICE: window
+// handlers and a gamepad poll write `actions`/`pressed`/`padActions`/`mouse`/
+// `aimStick` whenever the browser says so, at a rate nothing in the game
+// controls. Below it is the SAMPLE: one latched, frozen copy of all three
+// sources, taken once per SIMULATION STEP, which is what `isDown`,
+// `justPressed` and `aimSource` answer from. A mission is then a function of
+// its input trace rather than of how many steps happened to fall inside a
+// rendered frame — the same reason the golden's scripted stand-in advances per
+// step and not per frame.
+//
+// The contract is the caller's: whoever steps a mission takes one sample per
+// step, before `update()`. `Mission._frame` does it inside its accumulator
+// loop; a headless driver does it in its own.
 
 import { keyBindings, padBindings } from "../game/controlmap.js";
 import { config } from "../game/config.js";
 
+// One input frame: what all three sources said at the instant it was taken.
+// `held` and `pressed` are the folded keyboard+gamepad sets; `stick` and
+// `mouse` carry their own active flags because a source that is not reporting
+// is not the same as one reporting zero.
+function blankSample() {
+  return {
+    held: {}, pressed: {},
+    mouse: { x: 0, y: 0, active: false },
+    stick: { x: 0, y: 0, active: false },
+    frame: 0,
+  };
+}
+
 export class MissionInput {
   constructor() {
     this.actions = {}; // keyboard held
-    this.pressed = {}; // keyboard edge: true for one poll after a fresh keydown
+    this.pressed = {}; // keyboard edge: pending presses, consumed by sample()
     this.padActions = {}; // gamepad held (refreshed each pollGamepad)
     this.padPressed = {}; // gamepad edge
-    this._padPrev = {}; // previous frame's pad button held state (for edges)
+    this._padPrev = {}; // previous poll's pad button held state (for edges)
     this.mouse = { x: 0, y: 0, active: false }; // canvas-local cursor
     this.aimStick = { x: 0, y: 0, active: false }; // right-stick unit-ish vector
+    this.frame = 0; // samples taken: the step index of the input, not of a rAF
+    this._sample = blankSample(); // reads before the first sample see nothing
     this._enabled = false;
     this._canvas = null;
     this._diag = {}; // one-shot gamepad diagnostics, keyed by message (see _padLog)
@@ -37,6 +67,8 @@ export class MissionInput {
     window.addEventListener("gamepadconnected", this._onPadConnect);
     window.addEventListener("gamepaddisconnected", this._onPadDisconnect);
     this._diag = {}; // report the pad situation once per mission, not once per page
+    this.frame = 0; // a mission's input frames are numbered from its own start
+    this._sample = blankSample();
     this._canvas = canvas || null;
     if (this._canvas && this._canvas.addEventListener) {
       this._canvas.addEventListener("mousemove", this._onMove);
@@ -64,6 +96,7 @@ export class MissionInput {
     this._padPrev = {};
     this.mouse.active = false;
     this.aimStick.active = false;
+    this._sample = blankSample(); // or a held key survives the mission it was in
     this._enabled = false;
   }
 
@@ -126,8 +159,11 @@ export class MissionInput {
     this._padLog(`${connected ? "connected" : "disconnected"}: index ${g.index}, "${g.id}", mapping "${g.mapping}"`);
   }
 
-  // Poll the gamepad once per frame. Folds button presses into pad held/edge
+  // Read the pad into the device half: folds button presses into pad held/edge
   // state and reads the sticks. No-op when no Gamepad API / no pad connected.
+  // Called by sample(), i.e. once per simulation step, and nowhere else in the
+  // game — it is public because `test/controls.test.mjs` asks the pad's own
+  // questions (the four ways it can be dead) without a sample in the way.
   pollGamepad() {
     this.padPressed = {};
     if (typeof navigator === "undefined" || !navigator.getGamepads) {
@@ -160,7 +196,7 @@ export class MissionInput {
     if (mx > dz) held.right = true;
     else if (mx < -dz) held.left = true;
 
-    // Edge detection from the previous frame's held set.
+    // Edge detection from the previous poll's held set.
     for (const action in held) if (!this._padPrev[action]) this.padPressed[action] = true;
     this._padPrev = held;
     this.padActions = held;
@@ -177,30 +213,62 @@ export class MissionInput {
     }
   }
 
-  isDown(a) {
-    return this.actions[a] === true || this.padActions[a] === true;
+  // ---- the sample ---------------------------------------------------------
+
+  // Latch the device into one input frame and hand it the next step index.
+  // Called ONCE PER SIMULATION STEP, before update(), by whoever is stepping —
+  // never once per rendered frame, which is the bug J4 exists to remove: the
+  // sim steps a variable number of times per frame, so per-frame sampling gave
+  // the first step of a frame a press and the rest of them silence.
+  //
+  // The gamepad is polled here rather than beside the render, so all three
+  // sources speak for the same instant. On a page rendering faster than 60Hz
+  // that drops the pad's poll rate to the step rate; on one rendering slower it
+  // raises it, and the repeat polls inside one frame see identical hardware
+  // state, so an edge still fires exactly once.
+  sample() {
+    this.pollGamepad();
+    this._sample = {
+      // Pad last: a held pad button must win over a keyboard key reported up.
+      held: { ...this.actions, ...this.padActions },
+      pressed: { ...this.pressed, ...this.padPressed },
+      mouse: { x: this.mouse.x, y: this.mouse.y, active: this.mouse.active },
+      stick: { x: this.aimStick.x, y: this.aimStick.y, active: this.aimStick.active },
+      frame: ++this.frame,
+    };
+    // An edge belongs to the step that sampled it. Presses that arrived while
+    // no step ran are latched here (nothing is lost between frames); presses
+    // this step never read are dropped, or one tap would re-fire every step
+    // until something happened to consume it.
+    this.pressed = {};
+    return this._sample;
   }
 
-  // True once per physical press (keyboard or gamepad); clears itself.
+  isDown(a) {
+    return this._sample.held[a] === true;
+  }
+
+  // True once per physical press (keyboard or gamepad), within the step that
+  // sampled it; clears itself so two call sites cannot both claim one press.
   justPressed(a) {
-    if (this.pressed[a] || this.padPressed[a]) {
-      this.pressed[a] = false;
-      this.padPressed[a] = false;
+    if (this._sample.pressed[a]) {
+      this._sample.pressed[a] = false;
       return true;
     }
     return false;
   }
 
-  // Resolve the current manual-aim source for the given aim `mode`. Returns
+  // Resolve the sampled manual-aim source for the given aim `mode`. Returns
   // { type:"stick"|"mouse", x, y } or null (no manual aim available). For
   // "stick" x/y is a direction; for "mouse" x/y is a canvas-space point the
   // caller turns into a direction from the muzzle.
   aimSource(mode) {
-    if (mode === "gamepad" || (mode === "auto" && this.aimStick.active)) {
-      return this.aimStick.active ? { type: "stick", x: this.aimStick.x, y: this.aimStick.y } : null;
+    const { mouse, stick } = this._sample;
+    if (mode === "gamepad" || (mode === "auto" && stick.active)) {
+      return stick.active ? { type: "stick", x: stick.x, y: stick.y } : null;
     }
     if (mode === "mouse" || mode === "auto") {
-      return this.mouse.active ? { type: "mouse", x: this.mouse.x, y: this.mouse.y } : null;
+      return mouse.active ? { type: "mouse", x: mouse.x, y: mouse.y } : null;
     }
     return null;
   }

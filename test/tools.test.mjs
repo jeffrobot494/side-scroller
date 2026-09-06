@@ -412,6 +412,7 @@ export default async function run(t) {
     inp.enable(); // harness provides no-op window listeners
     inp._set({ code: "KeyD", preventDefault() {} }, true);
     inp._set({ code: "KeyS", preventDefault() {} }, true);
+    inp.sample(); // reads answer the last per-step sample since J4
     t.ok("input: D → right", inp.isDown("right"));
     t.ok("input: S → crouch", inp.isDown("crouch"));
     inp.disable();

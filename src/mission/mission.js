@@ -144,10 +144,15 @@ export class Mission {
     this.lastTime = now;
     if (ft > 0.25) ft = 0.25;
 
-    this.input.pollGamepad(); // once per rendered frame, before the sim steps
-
     this.accumulator += ft;
     while (this.accumulator >= STEP) {
+      // ONE input sample per step, never one per rendered frame
+      // (tech/multiplayer-missions.md, J4). This loop runs a variable number of
+      // times per frame, so sampling above it gave the frame's first step the
+      // presses and the rest of them silence — which made the same physical
+      // inputs a different mission at a different frame rate. Every driver of
+      // update() owes it this call: the headless suites take it themselves.
+      this.input.sample();
       this.update(STEP);
       this.accumulator -= STEP;
     }
