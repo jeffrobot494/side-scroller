@@ -34,6 +34,7 @@
 import { createSession } from "./game/session.js";
 import { createLoopback } from "./net/loopback.js";
 import { createRemote, openRoom, seatLink } from "./net/remote.js";
+import { createMissionSocket } from "./net/mission-socket.js";
 import { connect } from "./net/client.js";
 import { createHotSeat } from "./hub/hotseat.js";
 import { createLobby } from "./hub/lobby.js";
@@ -105,6 +106,14 @@ let inRoom = false;
 let you = null;
 let client = null;
 
+// This seat's token, kept because the mission socket is addressed by it exactly
+// as the campaign's three routes are (J8). Null outside a room, where nothing
+// opens one.
+let seatToken = null;
+// The socket for the mission currently on screen, or null. One at a time: a
+// page holds one dispatch and plays one mission.
+let netSocket = null;
+
 // The mission scene calls back here when it resolves. No view and no seat, so
 // it is still built up front.
 const mission = new Mission(canvas, onMissionComplete);
@@ -147,6 +156,7 @@ async function boot() {
 
   if (token) {
     inRoom = true;
+    seatToken = token;
     transport = await createRemote(token);
     // The seat and its name come off the snapshot, because a room's roster is
     // the server's to state. This page holds ONE commander and never learns of
@@ -243,6 +253,11 @@ function mount() {
   // which is why this is worth a comment rather than a reordering nobody
   // understands later.
   if (transport.onDispatch) transport.onDispatch(playPushed);
+  // A ROOM'S MISSION ENDS HERE, NOT IN THE MISSION (J8). A hosted mission is
+  // stepped in the server and this page filed no result, so the results screen
+  // is pushed rather than returned — see onMissionComplete for the local half,
+  // which is unchanged and is still what single-player and hot-seat use.
+  if (transport.onMissionEnd) transport.onMissionEnd(showPushedResults);
 }
 
 // FOUR bindings move on a swap, not three. The round dispatcher calls this
@@ -315,13 +330,37 @@ function playNext() {
   if (current.playerId !== you) swapTo(current.playerId);
   hub.noteDispatch(current.squad);
   showScene("mission");
+  // THE ROOM MAY BE HOLDING THIS ONE (J8), and `hosted` is the only thing the
+  // page forks on. With it, a socket is opened and the mission plays viewer:
+  // it builds the same scene from the same level and seed so it has bodies to
+  // draw, then every gameplay field is overwritten from the room and none of
+  // them is computed here. Without it — single-player, hot-seat, and a room
+  // whose server declines to hold missions — nothing below changes.
+  //
+  // The socket is opened BEFORE start() because start() takes the driver, and
+  // `listen` is installed after for the same reason: a snapshot arriving in
+  // between has no scene to land on.
+  netSocket = current.hosted ? createMissionSocket(seatToken) : null;
   // The commander at THIS keyboard (J1/J2), named unconditionally since J5:
   // every dispatch's squad now carries its owner, so this seat always commands
   // somebody and the mission's partitions are never keyed to a commander who
   // owns nobody. On a joint lead it is one of two, which is the case J1's
   // "first soldier deployed" default gets wrong — and it is a dispatch, so a
   // squad that declared no owner cannot reach here.
-  mission.start(current.mission, current.level, current.squad, current.playerId);
+  mission.start(current.mission, current.level, current.squad, current.playerId, netSocket);
+  if (netSocket) netSocket.listen(mission);
+}
+
+// The room's answer to a mission it held. `turn` is the missionResult command's
+// return value — the day summary the results screen prints (S5) — which this
+// page never saw because it never sent the command.
+function showPushedResults({ result, turn }) {
+  current = null;
+  if (netSocket) netSocket.close();
+  netSocket = null;
+  mission.stop();
+  showScene("hub");
+  hub.showResults(result, turn);
 }
 
 // `owner` is which commander finished; the mission fires this once per

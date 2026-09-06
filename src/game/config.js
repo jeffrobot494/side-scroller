@@ -576,6 +576,17 @@ export const SCHEMA = [
           "Multiplayer only. The chance a new lead is ROLLED onto one commander's board — not the share they end up seeing, since a lead no one rolls is given to someone at random. At 1 every board is identical and sharing does nothing; at 0 every lead belongs to exactly one commander and sharing is the only overlap there is. Single-player ignores this.",
       },
       {
+        key: "missionSnapshotHz",
+        label: "Mission snapshot rate",
+        type: "range",
+        default: 20,
+        min: 5,
+        max: 60,
+        step: 5,
+        help:
+          "Multiplayer only. How many times a second a room sends each seat the state of the mission it is holding (tech/multiplayer-missions.md, J8). The simulation always steps at 60Hz; this is only how often a viewer is told about it, so lowering it costs smoothness and saves bandwidth. Half a snapshot interval is added to input latency. Single-player never sends one. NOTE: a room reads built-in defaults — it has no localStorage — so changing this in the editor moves your own view of nothing (approximation 5).",
+      },
+      {
         key: "leadLifeMin",
         label: "Lead lifespan — shortest",
         type: "range",

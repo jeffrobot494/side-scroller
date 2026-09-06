@@ -49,6 +49,11 @@ export function createRemote(token, opts = {}) {
   let handle = null;
   let watcher = null;
   let play = null;
+  let finish = null;
+  // A mission end that arrived before the page installed its handler. Same
+  // shape and same reason as `held` below: a room pushes when it has the news,
+  // not when a listener happens to exist.
+  const ended = [];
   // Dispatches that arrived before the page installed its player. In practice
   // one: the page mounts on the first snapshot and installs immediately, and a
   // dispatch cannot precede a snapshot because the server routes the round
@@ -144,6 +149,19 @@ export function createRemote(token, opts = {}) {
       while (held.length) play(held.shift());
     },
 
+    // A MISSION THE ROOM HELD, FINISHED (tech/multiplayer-missions.md, J8).
+    // This seat played no simulation and filed no result: the room stepped the
+    // scene, computed this commander's result and sent the `missionResult`
+    // command on their behalf, so the results screen — and the day summary
+    // that is that command's answer — can only reach the page by being pushed.
+    // Turn-boundary, so it rides this stream and not the mission socket, which
+    // dies with the mission it belonged to.
+    onMissionEnd(fn) {
+      finish = typeof fn === "function" ? fn : null;
+      if (!finish) return;
+      while (ended.length) finish(ended.shift());
+    },
+
     playerIds: () => [snapshot.playerId],
 
     // The seat, by name, for anything that has to print WHO this page is
@@ -183,6 +201,12 @@ export function createRemote(token, opts = {}) {
       const d = JSON.parse(e.data);
       if (play) play(d);
       else held.push(d);
+    });
+
+    es.addEventListener("missionEnd", (e) => {
+      const m = JSON.parse(e.data);
+      if (finish) finish(m);
+      else ended.push(m);
     });
 
     // EventSource retries a dropped connection by itself, and a reconnect costs

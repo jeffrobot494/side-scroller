@@ -300,11 +300,24 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   room, over three `/api` routes (open a room, send a command, open a seat's SSE
   stream). **Open one at `index.html?room=2`** (V3) — that page prints one link
   per seat, and following a link (`index.html?seat=<token>`) is that commander's
-  end of the campaign. Single-player is unaffected and still needs no process —
-  it is static files and `python3 -m http.server` serves a playable game. Nothing in `src/`
-  imports `server.mjs`, and no suite does either: it binds a port on load, so
-  the routes are guarded by curling them while the rules underneath them are
-  guarded by `test/service.test.mjs`.
+  end of the campaign. **And since `tech/multiplayer-missions.md` J8 it holds
+  the MISSION too** — two commanders on one lead land on one level, and the
+  simulation is here rather than in either tab: `startMission` builds the
+  canvas-less `Mission` (J6), gives every commander a wire input (J7), steps
+  every live flight at a fixed 60Hz (catch up at most 5, then resync), and sends
+  each seat its own snapshot over a WebSocket at `/mission?token=…`
+  (`src/net/ws.mjs`, a dependency-free RFC 6455 copy of `netproto/ws.mjs`).
+  **Two channels split by cadence**: `/api/*` stays turn-boundary JSON, the
+  socket is 60Hz and dies with the mission. A page in a room draws what comes
+  back and simulates nothing — `src/net/mission-wire.js` is the one place a
+  scene is narrowed for the wire (per recipient: another commander's squad is
+  visible, their haul is not), `src/net/mission-socket.js` is the browser end,
+  and the ROOM files both `missionResult`s and pushes each commander their own
+  day summary. Single-player is unaffected and still needs no process — it is
+  static files and `python3 -m http.server` serves a playable game. Nothing in
+  `src/` imports `server.mjs`; `test/mission-net.test.mjs` spawns it on its own
+  port and drives two seats through it, which is the only guard the loop and the
+  socket have.
 - Write suites as `test/<name>.test.mjs` exporting `export default async
   function run(t) { … }` and assert with `t.ok(name, cond)` / `t.eq(name,
   actual, expected)`. Import the game via `../src/...`.

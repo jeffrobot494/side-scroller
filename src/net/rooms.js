@@ -28,6 +28,13 @@
 //      owns it, and no other seat can be handed one.
 //   3. A SEAT CAN BE LISTENING TO NOTHING. Between a browser closing and one
 //      opening, a dispatch has nowhere to go, so it is held.
+//   4. A ROOM CAN BE HOLDING A MISSION (J8). Beside the campaign, a FLIGHT:
+//      the seats on one level, the dispatch each of them is flying, and the
+//      driver stepping it. This module does NOT construct the `Mission` and
+//      does not hold the loop — `server.mjs` does both, through the
+//      `startMission` hook, because a Mission reaches the whole of src/mission/
+//      and the source scan in test/session.test.mjs is what keeps this file
+//      DOM-free. A room refers to a mission; it does not build one.
 //
 // DOM-free and storage-free, inherited from `src/game/session.js` and pinned by
 // the source scan in `test/session.test.mjs` — the suite runs under a globally
@@ -69,7 +76,12 @@ function rosterFor(players) {
   }));
 }
 
-export function createRooms() {
+// `startMission(flight)` is how a HOST offers to hold the mission (J8). Given
+// one that returns a driver, the round's dispatches are marked `hosted` and the
+// browsers that receive them become viewers of a scene stepped here; given none
+// — every suite, and any deployment that only wants the campaign — nothing
+// changes and each page plays its own dispatch exactly as it did.
+export function createRooms({ startMission = null } = {}) {
   // Both keyed by a string the caller supplies, and both unbounded: a room with
   // nobody in it stays here until the process restarts (Approximation 4).
   const rooms = new Map();
@@ -77,7 +89,7 @@ export function createRooms() {
 
   function createRoom(spec = {}) {
     const roster = rosterFor(spec.players);
-    const room = { id: newToken(), seats: new Map(), session: null, announced: [] };
+    const room = { id: newToken(), seats: new Map(), session: null, announced: [], flights: new Map() };
 
     for (const s of roster) {
       const seat = {
@@ -149,14 +161,99 @@ export function createRooms() {
   function routeRound(room) {
     const round = room.announced;
     room.announced = [];
+    // Before the push, not after: a seat has to be TOLD its mission is being
+    // held elsewhere, and the only place to say so is on the dispatch it is
+    // about to be handed.
+    const hosted = openFlights(room, round);
     for (const d of round) {
       const seat = room.seats.get(d.playerId);
       // A dispatch for a seat this room does not have cannot happen — the
       // session's players ARE these seats — and is dropped rather than thrown,
       // because the alternative is one bad dispatch killing a live campaign.
-      if (seat) seat.pending.push(toWire(d, `dispatch ${d.dispatchId}`));
+      if (!seat) continue;
+      const wire = toWire(d, `dispatch ${d.dispatchId}`);
+      // The page forks on this and on nothing else: with it, open a socket and
+      // draw what comes back; without it, play the mission locally as ever.
+      if (hosted.has(d.dispatchId)) wire.hosted = true;
+      seat.pending.push(wire);
     }
     for (const seat of room.seats.values()) drain(seat);
+  }
+
+  // ---- flights (J8) -------------------------------------------------------
+  //
+  // ONE FLIGHT PER MISSION, NOT PER DISPATCH. Two commanders on one lead are on
+  // one level and in one simulation — that is the whole phase — so the round's
+  // dispatches are grouped by `mission.id` and each group becomes one flight
+  // with one squad, concatenated IN ROUND ORDER so both ends build the same
+  // line-up (entities.js opens its two-slot gap wherever the owner changes).
+  //
+  // A solo dispatch is a group of one, and takes exactly the same path: a room
+  // holds a single commander's mission for the same reason it holds a joint
+  // one, and "the page keeps simulating when it is alone" would be a second
+  // architecture to maintain for no gain.
+  function openFlights(room, round) {
+    const hosted = new Set();
+    if (!startMission) return hosted;
+
+    const byMission = new Map();
+    for (const d of round) {
+      if (!room.seats.has(d.playerId)) continue;
+      const g = byMission.get(d.mission.id);
+      if (g) g.push(d);
+      else byMission.set(d.mission.id, [d]);
+    }
+
+    for (const [id, group] of byMission) {
+      const flight = {
+        id,
+        roomId: room.id,
+        mission: group[0].mission,
+        level: group[0].level,
+        squad: group.flatMap((d) => d.squad),
+        // `owner` IS the seat id: J1's owner axis is the commander, and a room's
+        // commander is its seat. Nothing translates between the two.
+        seats: group.map((d) => ({ owner: d.playerId, dispatchId: d.dispatchId, token: room.seats.get(d.playerId).token })),
+        driver: null,
+        reported: new Set(),
+      };
+      // The report a commander owes the campaign, filed BY THE ROOM (J8) —
+      // the room holds the mission, so the room is what has the result. It is
+      // an ordinary command through the ordinary path, one per dispatch id, so
+      // `round.flight.outstanding` empties and the day turns exactly as it does
+      // when a page files it.
+      flight.report = (owner, result) => {
+        const at = flight.seats.find((x) => x.owner === owner);
+        if (!at || flight.reported.has(owner)) return null;
+        flight.reported.add(owner);
+        const answer = api.command(at.token, { type: "missionResult", result, dispatchId: at.dispatchId });
+        // The answer is the commander's results screen — the day summary lands
+        // on it (S5) — and it has nowhere else to go: a page that simulated
+        // nothing never sent the command whose return value this is. It rides
+        // the seat's own turn-boundary stream rather than the mission socket,
+        // because it is a turn-boundary value and the socket dies with the
+        // mission.
+        sendTo(room.seats.get(owner), "missionEnd", toWire({ result, turn: answer }, "missionEnd"));
+        if (flight.reported.size >= flight.seats.length) room.flights.delete(id);
+        return answer;
+      };
+
+      const driver = startMission(flight);
+      if (!driver) continue;
+      flight.driver = driver;
+      room.flights.set(id, flight);
+      for (const d of group) hosted.add(d.dispatchId);
+    }
+    return hosted;
+  }
+
+  // One event at one seat, right now. Unlike a dispatch, nothing is HELD for a
+  // seat that is not listening: a mission end is only meaningful to a browser
+  // that was watching the mission, and a page that reconnects gets the campaign
+  // it actually has back in its first snapshot.
+  function sendTo(seat, event, data) {
+    if (!seat) return;
+    for (const send of seat.listeners) send(event, data);
   }
 
   // Hand a seat's held dispatches to its open streams. Nothing listening means
@@ -168,8 +265,28 @@ export function createRooms() {
     for (const d of queue) for (const send of seat.listeners) send("dispatch", d);
   }
 
-  return {
+  const api = {
     createRoom,
+
+    // The flight this seat is in, or null. `server.mjs`'s socket asks it once
+    // per connection: a token is a seat, a seat is in at most one mission, and
+    // that is the whole of the authorisation on the mission socket — the same
+    // rule as every other route here.
+    flightFor(token) {
+      const seat = byToken.get(token);
+      if (!seat) return null;
+      for (const f of seat.room.flights.values()) {
+        if (f.seats.some((x) => x.owner === seat.id)) return f;
+      }
+      return null;
+    },
+
+    // Every flight this registry is holding. The host's loop walks it.
+    flights() {
+      const out = [];
+      for (const room of rooms.values()) for (const f of room.flights.values()) out.push(f);
+      return out;
+    },
 
     // Who a token is, or null. The routes ask this first so an unknown token is
     // a 404 rather than a thrown command — the token is the credential, and a
@@ -231,4 +348,6 @@ export function createRooms() {
     hasRoom: (roomId) => rooms.has(roomId),
     roomCount: () => rooms.size,
   };
+
+  return api;
 }

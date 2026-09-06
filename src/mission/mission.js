@@ -64,7 +64,14 @@ export class Mission {
   // `owner` = the commander at THIS keyboard (tech/multiplayer-missions.md, J1).
   // Given none, it is the owner of the first soldier deployed, which is null for
   // every single-player mission and makes every partition below the whole array.
-  start(mission, level, squad, owner = null) {
+  //
+  // `net` is the ROOM'S END OF THIS MISSION (J8), and it is what makes this
+  // page a viewer rather than a simulator: given one, update() stops resolving
+  // gameplay and every field src/net/mission-wire.js names is overwritten from
+  // the room instead. It answers one verb, `step(mission)`, called once per
+  // fixed step beside sampleInputs() — the same cadence, because an input frame
+  // and a simulation step are the same instant.
+  start(mission, level, squad, owner = null, net = null) {
     this.mission = mission;
     // The mission's seed is the mission's stream: every gameplay draw in the
     // scene comes off it (tech/mission-determinism.md, D2). A mission without
@@ -126,6 +133,27 @@ export class Mission {
     // local device and `inputFor()` falls back to it for `this.owner`, so a
     // browser mission needs no entry and a room fills one per seat (J8).
     this.inputs = new Map();
+    // THE ROOM'S MISSION, SEEN FROM A SEAT (J8). `remote` is derived from the
+    // driver exactly as `hosted` is derived from the canvas — a flag beside a
+    // driver that says otherwise is two sources for one fact. Everything below
+    // it is snapshot state: the count of what this commander recovered (the
+    // only part of scene.collected that crosses), which soldier the room has
+    // this seat driving, and the outcome the room reached.
+    //
+    // `netAck` is the last input seq a step had consumed when the snapshot was
+    // built. NOTHING READS IT YET, and it is kept because it is the only honest
+    // way to measure input→pixels — the number approximation 2b is about, and
+    // the one thing in this phase that can only be learned by playing. Halving
+    // RTT is the guess it exists to replace.
+    this.net = net;
+    this.remote = !!net;
+    this.netStep = 0;
+    this.netCollected = 0;
+    this.netEnd = null;
+    this.netAck = 0;
+    // This commander's own soldiers as of the last snapshot that still had
+    // them. The banner's squad cards, frozen at the moment they left.
+    this.netSquad = null;
     // Nav debug overlays, off every deploy. Toggled by the debugGraph/debugPath
     // actions and only while config.debugOverlays is on.
     this.debug = { graph: false, path: false };
@@ -204,6 +232,10 @@ export class Mission {
       // update() owes it this call: the headless suites take it themselves.
       // Since J7 it is every commander's input, not one — hence the verb.
       this.sampleInputs();
+      // The seat's input goes up at the STEP rate, not the frame rate, for the
+      // same reason the sample is taken here (J4): a 144Hz monitor must not
+      // flood the room and a 30Hz one must not starve it.
+      if (this.net) this.net.step(this);
       this.update(STEP);
       this.accumulator -= STEP;
     }
@@ -291,6 +323,24 @@ export class Mission {
     return (this.scene.collected || []).filter((c) => c.owner === owner).map((c) => c.item);
   }
 
+  // What this commander has recovered, as the number the HUD prints. On a
+  // room's mission `scene.collected` is the ROOM's and this page's is empty —
+  // the count is the only part of it that crosses, because what the other
+  // commander carried out is never disclosed (approximation 11a).
+  lootCount() {
+    return this.remote ? this.netCollected : this.collectedBy().length;
+  }
+
+  // Canvas pixels → world, off THIS page's camera and zoom. The inverse of
+  // render()'s transform, and the one thing a seat must do before its aim can
+  // cross a wire: the room holds one scene for two viewers and can resolve
+  // neither one's camera, so `mouse` is converted here and `world` is what is
+  // sent (J7's three shapes).
+  toWorld(px, py) {
+    const z = this._zoom();
+    return { x: px / z + this.camera.x, y: py / z + this.camera.y };
+  }
+
   // ---- simulation ---------------------------------------------------------
 
   update(dt) {
@@ -310,6 +360,32 @@ export class Mission {
       if (end.done) continue;
       end.timer -= dt;
       if (end.timer <= 0) this._finish(end.owner);
+    }
+
+    this._handleOverlays();
+
+    // A VIEWER STOPS HERE (J8). Everything above this line is cosmetic state
+    // the client owns outright — the clock, the shake, the motes, the intro
+    // and the banner countdown — and `_updateCamera` below it is the same: a
+    // camera is a fact about who is looking, and the room holds one scene for
+    // two viewers. What is skipped is the eight gameplay calls between them,
+    // because the room has already run them and the snapshot has already
+    // overwritten what they would have produced.
+    if (this.remote) {
+      // The outcome is the ROOM's and arrives as a flag. The record is built
+      // here rather than in the wire module so the banner, the frozen squad
+      // cards and the timer are the same three things they are locally — the
+      // one field it cannot fill is `result`, which the room computes and
+      // reports on this seat's behalf and which never reaches this page as
+      // anything but a results screen.
+      if (this.netEnd !== null && !this.ends.has(this.owner)) {
+        this.ends.set(this.owner, {
+          owner: this.owner, success: !!this.netEnd, timer: 1.6,
+          result: null, squad: this.netSquad || this.soldiersOf(), done: false,
+        });
+      }
+      this._updateCamera();
+      return;
     }
 
     // Central fire-cooldown tick for every shooter (so semi-auto stays honest).
@@ -349,17 +425,23 @@ export class Mission {
       const cur = this.currentSoldier(o);
       if (!cur || !cur.alive) this._swapControl(1, o);
     }
-    // Debug overlays. The keys are always bound; the config gate is what keeps
-    // them out of a build handed to somebody else. Edge-triggered, so holding
-    // the key does not strobe.
-    //
-    // Deliberately on `this.input` and not per commander: an overlay is what
-    // the person LOOKING at this canvas wants to see, not something a commander
-    // owns. A room's mission draws nothing, so nothing reads these there.
-    if (config.debugOverlays) {
-      if (this.input.justPressed("debugGraph")) this.debug.graph = !this.debug.graph;
-      if (this.input.justPressed("debugPath")) this.debug.path = !this.debug.path;
-    }
+  }
+
+  // Debug overlays. The keys are always bound; the config gate is what keeps
+  // them out of a build handed to somebody else. Edge-triggered, so holding the
+  // key does not strobe.
+  //
+  // Deliberately on `this.input` and not per commander: an overlay is what the
+  // person LOOKING at this canvas wants to see, not something a commander owns.
+  // Which is also why it sits ABOVE the viewer's early return (J8) rather than
+  // inside _handleControl where it used to live — a page watching a room's
+  // mission is still a person looking at a canvas, and a toggle that went
+  // silently dead there would be a dev tool lost to a slice that had no reason
+  // to touch it.
+  _handleOverlays() {
+    if (!config.debugOverlays) return;
+    if (this.input.justPressed("debugGraph")) this.debug.graph = !this.debug.graph;
+    if (this.input.justPressed("debugPath")) this.debug.path = !this.debug.path;
   }
 
   // The graph the SQUAD routes on. Soldier bodies all share one profile — the
@@ -735,6 +817,14 @@ export class Mission {
     const end = this.ends.get(owner);
     if (!end || end.done) return;
     end.done = true;
+    // A ROOM'S MISSION IS NOT FINISHED BY THE PAGE WATCHING IT (J8). The banner
+    // is the whole of what this timer owns on a viewer: the result was computed
+    // in the room, the room files the missionResult for this seat, and the
+    // answer to it comes back down the seat's own turn-boundary stream — which
+    // is also what takes the screen off the canvas. Calling onComplete here
+    // would file a second report from a page that simulated nothing. The scene
+    // is left running so the banner keeps drawing until that push lands.
+    if (this.remote) return;
     const all = this._owners.every((o) => {
       const e = this.ends.get(o);
       return e && e.done;
@@ -1277,7 +1367,7 @@ export class Mission {
     // objective + loot (top-right). The FPS meter takes the corner when it's
     // on and the gameplay stack slides down; with it off `top` is 26 and the
     // layout is exactly what it always was.
-    const lootCount = this.collectedBy().length;
+    const lootCount = this.lootCount();
     ctx.textAlign = "right";
 
     const top = config.showFps ? 44 : 26;
