@@ -35,6 +35,13 @@ architecture; J1, J2 and J3 are built. J4→J8 is the network half, and J4 is no
 shared ground rather than a lockstep prerequisite — a server stepping a mission needs
 input decoupled from a frame rate for the same reason a peer did.
 
+**The slice numbers in the prose below are the CURRENT ones.** Inserting J6
+and J7 pushed the room's mission loop from J6 to J8, and eleven passages written
+against the old cut were renumbered rather than left to be re-derived: the
+architecture is J5–J8, the simulation slice — the room holding the mission and
+broadcasting it — is **J8**, and the slice that gives another commander's leader
+an input of its own is **J7**.
+
 **J6 and J7 were not in the previous draft at all.** It claimed the server-side
 simulation was free because `test/mission-golden.test.mjs` already drives a real
 `Mission` headlessly. It does — but only under `installDom()`, which
@@ -65,12 +72,12 @@ different soldier with a different weapon.
 **Consequence for the phase order, as recorded when lockstep was still the
 plan: J1 is a prerequisite for it, not only for credit.** Kept because it is why
 J1 shipped when it did, and because the owner axis it argued for turned out to be
-needed under the architecture that replaced it too. J6 cannot be "hand both clients the seed and let them run" until
+needed under the architecture that replaced it too. J8 cannot be "hand both clients the seed and let them run" until
 every player-driven soldier takes the player path on BOTH clients, which is
 exactly what the owner axis buys. The probe stays green after J1 — it drives one
 input source, so the two runs still put different bodies under it; what J1 earns
 is a second probe driving two owners with two traces, and *that* one going quiet
-is the precondition for J6.
+is the precondition for J8.
 
 **The second half is built as a pair of pages, and its result is what ended
 lockstep.** `test/float-probe.html` runs the real mission off the extracted
@@ -173,7 +180,7 @@ choice: Dallas measured 26ms against Railway's 186ms **in the same metro**.
 
 So the trade was made on measurement rather than taste:
 
-| | Server-authoritative (J5–J6) | Lockstep (superseded) |
+| | Server-authoritative (J5–J8) | Lockstep (superseded) |
 |---|---|---|
 | Determinism | Irrelevant | Required, and J0 measured that it does not hold across V8 versions |
 | Browser and version | Do not matter | Must match, forever, unverifiably |
@@ -194,7 +201,8 @@ demands it, and `netproto/README.md`'s P5 is the place its findings would go.
 | `this.controlled` is an index, partitioned | It became `this.control`, a Map of **owner → index**, so EVERY commander has a leader rather than only the local one. The leader is what an AI squadmate escorts, so a squad whose commander has no leader is a squad the two clients step differently — the exact failure J0 measured. `_handleControl`'s auto-swap off a casualty runs for every owner for the same reason, and `Mission.start` gained a trailing `owner` naming the commander at this keyboard (default: the owner of the first soldier deployed, i.e. `null` in single-player) |
 | Two squads land on top of each other until the spawn offset changes | The line-up keeps the 44px pitch and opens a **two-slot gap wherever the owner changes**, walking the flat list once. It is a function of the list as given, never of "mine versus theirs", so both clients build the identical line-up. At one owner there is no gap and the offset is exactly `i * 44`, which is what keeps the golden still |
 | `loot` and `kills` are J1's actual work | They are, and the shape is `scene.collected` becoming `{ item, owner, by }` — eager on the scene now, since the HUD and `_resolve` both read it every mission. `_resolve` took an `owner` argument and builds the whole result for one commander; the payload's shape is unchanged, so `state.js` and the results screen never learn owners exist. **J2 therefore only has to decide WHEN each result fires, not what is in it** |
-| A commander's leader is player-driven | Only the LOCAL one is. Another commander's leader is stepped by the companion brain anchored to itself until J6 gives it an input stream — which is also, exactly, the shape approximation 6 describes for a commander who walks away |
+| A commander's leader is player-driven | Only the LOCAL one is. Another commander's leader is stepped by the companion brain anchored to itself until J7 gives it an input of its own and J8 fills it —
+which is also, exactly, the shape approximation 6 describes for a commander who walks away |
 
 **`_checkOutcome` is NOT untouched, and this is a J1 behaviour change nothing
 tests — in BOTH branches.** It calls `this.livingSoldiers()` with no argument,
@@ -208,7 +216,7 @@ J2 owns that. The one line J1 changed in it is the artifact grant, which now
 records the soldier who tripped the exit, making approximation 4 true as written.
 `this.squadIds` was deleted rather than partitioned, as the Background says.
 
-**J1–J6 supersede the M2, M3 and M4 rows of `tech/multiplayer.md`.** Four
+**J1–J8 supersede the M2, M3 and M4 rows of `tech/multiplayer.md`.** Four
 corrections, all found by reading the code rather than the plan:
 
 | | |
@@ -300,7 +308,7 @@ change the day it is wanted.
 | `updateCompanionSpec` | `src/mission/ai.js` | Every unpiloted soldier is already AI-driven, anchored to a leader. Two owners need a leader each, not a new brain — and this is also why a departed commander's squad fighting on as AI is nearly free, not a Phase-3-sized problem |
 | The dispatch, its `playerId`, and `projectDispatch` | `src/game/session.js` | A soldier's owner already reaches the client that plays it, and the projection is the one decision point for what a commander may hold. J5 pairs two dispatches there rather than inventing a channel. **It no longer has to carry the other squad**: the server builds the scene, so a browser never needs another commander's soldiers — which returns board privacy to exactly where S6 left it |
 | The seat-addressed round push | `src/net/rooms.js` | Each dispatch already goes to its own seat and no other. J5 changes what a seat is sent, not how |
-| **The whole prototype** | `netproto/` | Not imported — measured, then read. The loop shape (deadline-corrected fixed step, catch up at most 5, resync rather than teleport), the wire format (`{seq, l, r, jump, fire, ax, ay}` in, snapshot plus per-recipient `ack` out), the dependency-free RFC 6455 server, `setNoDelay`, and the two bugs its smoke test caught — events cleared per step but sent per broadcast, and a closed socket leaking a player — are the design J6 copies. It stays standalone: **nothing in `src/` imports it and it imports nothing from `src/`** |
+| **The whole prototype** | `netproto/` | Not imported — measured, then read. The loop shape (deadline-corrected fixed step, catch up at most 5, resync rather than teleport), the wire format (`{seq, l, r, jump, fire, ax, ay}` in, snapshot plus per-recipient `ack` out), the dependency-free RFC 6455 server, `setNoDelay`, and the two bugs its smoke test caught — events cleared per step but sent per broadcast, and a closed socket leaking a player — are the design J8 copies. It stays standalone: **nothing in `src/` imports it and it imports nothing from `src/`** |
 | The headless mission | `test/mission-golden.test.mjs` | `new Mission(makeEl("canvas"), …)`, `m.running = false`, `m.update(STEP)` in a loop, `render()` never called. **The server-side simulation is not a refactor — it is what the bar already does on every run** |
 | `sampleScene` | `src/mission/checksum.js` | J0's named field list is the honest starting point for what a snapshot carries: it is already the set of gameplay state this repo decided is real, and already excludes the cosmetic |
 | `installDom`, `makeEl`, `ctx2d` | `test/harness.mjs` | The mission mounts headlessly already, which is what makes J0, J1 and J2 testable at all |
@@ -369,7 +377,7 @@ which is what keeps the risky half small.
 | Suite | What it guards |
 |---|---|
 | `test/mission-golden.test.mjs` | **The load-bearing one.** A mission replays from its seed at a fixed step, at one owner. A re-baselined golden here is the bug, not the fix. Two things it did NOT guard, which is why it is not sufficient: it drives `m.update(STEP)` directly and never runs `_frame`, so **J4 is invisible to it**; and its 41 samples never resolve, so it says nothing about `_checkOutcome` or `_resolve`. **As built (J4): the first of those is no longer true.** Section (4) drives the real `_frame` off a synthetic clock at 20, 30, 60 and 144fps and asserts all four play the mission a bare `sample()`/`update(STEP)` loop plays. The golden's own 41 samples and its baseline did not move — the new block builds its own missions and shares the file for the trace, the level and the sampler. It also asserts what J6 and J8 will stand on: **a mission stepped with no frames at all is the same mission** |
-| `test/session.test.mjs` | The round, the gate, the visibility rules — and it pins the dispatch's key sets (`mission` is exactly `id`, `name`, `seed`) and reads `src/main.js` as text, matching `runRound` and the round-drain ordering. **J5 and J6 edit those assertions in their own commits**; the spec that says a suite changes nothing here would be wrong. **J3 added 9 and edited none**: three dispatches, two of them on one lead, driven through the real command path — the solo one paid on its own report while the joint one is still flying, which is the assertion that says `last` is per lead rather than per round |
+| `test/session.test.mjs` | The round, the gate, the visibility rules — and it pins the dispatch's key sets (`mission` is exactly `id`, `name`, `seed`) and reads `src/main.js` as text, matching `runRound` and the round-drain ordering. **J5 and J8 edit those assertions in their own commits**; the spec that says a suite changes nothing here would be wrong. **J3 added 9 and edited none**: three dispatches, two of them on one lead, driven through the real command path — the solo one paid on its own report while the joint one is still flying, which is the assertion that says `last` is per lead rather than per round |
 | `test/transport.test.mjs` | The wire and the client's three names, and it pins the dispatch projection too. J5 adds the pairing to that projection and edits it deliberately. **What it must keep pinning is that a dispatch carries only its own seat's squad** — the server-authoritative design means that never has to widen, and a slice that widens it has leaked another commander's board for no reason |
 | `test/service.test.mjs` | The room and its per-seat push; J5's pairing lands here. **It cannot see `server.mjs`** — its own header says so, because that file binds a port on load — so J8's loop is guarded by a headless two-seat drive instead, not by this suite |
 | `test/controls.test.mjs` | The control map and `MissionInput`'s three sources — **and, since J4, the latch itself**: a read before any sample is silent rather than a crash, a sample is frozen against the device moving under it, a press that arrives while no step ran survives to the next sample, an unread edge does NOT survive its step, a pad hold outranks a key reported up, and the frame index counts samples and restarts with `enable()`. Six cases here and the mission-side proof in the golden, because the latch and the loop fail differently |
@@ -381,7 +389,7 @@ which is what keeps the risky half small.
 | `test/docs.test.mjs` | Citations and the seven parts |
 
 **Where the bar cannot see this.** `src/main.js` and `server.mjs` are imported
-by no suite; J2 and J6 both land in them, and `src/main.js` is guarded only by a
+by no suite; J2 and J8 both land in them, and `src/main.js` is guarded only by a
 source regex in `test/session.test.mjs` and by playing. **J4's only guard is
 playing single-player at a bad frame rate**, because the golden already lives in
 the world J4 creates. **As built: wrong, and J4 shipped the guard.** The rAF
@@ -392,18 +400,18 @@ arithmetic in the same order. Verified by reverting the slice: sampling once per
 rendered frame reddens all four rates, 60fps included, because a float clock
 makes even a nominal 60fps frame carry two steps or none. What stays true is the
 narrower claim underneath it: **how the change FEELS is still only measurable by
-playing** (approximation 3). **J6's loop is guarded by a headless two-seat drive** —
+playing** (approximation 3). **J8's loop is guarded by a headless two-seat drive** —
 `netproto/smoke.mjs` is the shape: start a server on its own port, connect two
 clients, drive them, assert. It found both real bugs in that prototype's first
-build, and it is deliberately not in `node test/run.mjs` there. J6's equivalent
+build, and it is deliberately not in `node test/run.mjs` there. J8's equivalent
 **should** be, because by then it is a subsystem rather than a probe.
 
 ## Approximations
 
 | # | Where it is not exact | What catches the failure |
 |---|---|---|
-| 1 | **Two humans cannot drive two squads on one machine, so J1 and J2 are not playable before J6.** The Mission holds one `MissionInput` and one `controlled`, and `src/main.js` disables seat swapping mid-mission. Hot-seat gives one commander plus AI escorts wearing another owner's colours — useful for looking at, worthless as proof of feel. The headless suites are the real guard, and the first time a joint mission is *played* is J6 | Nothing. Stated because "we can try it in hot-seat first" is the assumption a builder would otherwise make, and it is false |
-| 2 | **Floating point stopped being a risk by being designed around.** J0's second half measured Chrome 151 and 152 agreeing and node's older V8 disagreeing on four transcendentals, which is what moved the network half to one authoritative simulation. Under J5–J6 nothing about the client's engine, version or CPU can affect gameplay state, because the client computes none of it | Nothing needed, and that is the point. The probe pages stay in the tree as the record of why, and as the instrument if the question ever returns |
+| 1 | **Two humans cannot drive two squads on one machine, so J1 and J2 are not playable before J8.** The Mission holds one `MissionInput` and one `controlled`, and `src/main.js` disables seat swapping mid-mission. Hot-seat gives one commander plus AI escorts wearing another owner's colours — useful for looking at, worthless as proof of feel. The headless suites are the real guard, and the first time a joint mission is *played* is J8 | Nothing. Stated because "we can try it in hot-seat first" is the assumption a builder would otherwise make, and it is false |
+| 2 | **Floating point stopped being a risk by being designed around.** J0's second half measured Chrome 151 and 152 agreeing and node's older V8 disagreeing on four transcendentals, which is what moved the network half to one authoritative simulation. Under J5–J8 nothing about the client's engine, version or CPU can affect gameplay state, because the client computes none of it | Nothing needed, and that is the point. The probe pages stay in the tree as the record of why, and as the instrument if the question ever returns |
 | 2b | **Full round-trip input latency is the price, and it is not hidden.** No prediction, no interpolation. `netproto/` measured the floor: ~60ms input→pixels at ~35ms RTT and 20Hz snapshots, which plays well, and 245ms at 210ms RTT, which does not. A distant player has a worse game than a near one, permanently | Nothing in the bar can see this. It is measured by playing, and the numbers to beat are in `netproto/README.md`. Prediction is the known remedy and is deliberately not in this plan |
 | 3 | **J4 can change how the game feels, in single-player, for nobody's benefit.** Moving input sampling from once per rendered frame to once per step changes when a press is observed relative to a step boundary. It is a fraction of a frame, it is the correct behaviour, and it is the kind of thing a player notices as "heavier" without being able to name it. **As built, one thing to eyeball beyond that: the GAMEPAD is now polled per step rather than per rendered frame**, because `sample()` reads all three sources at one instant. Above 60Hz that lowers its poll rate to 60Hz, so a pad button held for less than one step can be missed where before it had to be shorter than one frame. A press is tens of milliseconds and a step is 16.7, so this is a theoretical loss rather than an observed one — but it is the only thing J4 made strictly worse | Playing it, with a pad. The golden sees the mission, not the feel |
 | 4 | **The artifact is an indivisible reward and J2 hands it to whoever extracts first, automatically.** Every generated level carries one (`src/game/gen/levelgen.js`), and `_checkOutcome` grants it to whoever trips the exit and nulls it. `design/multiplayer.md` explicitly wants the case where two players who cooperated end with something only one can hold — so the outcome is right and the *mechanism* is an extraction race rather than a pickup race, which is not what "first to reach it" describes | Nothing here. Named because it is a design-visible rule being set by an implementation detail, and Bo should know it is being set |
@@ -416,7 +424,7 @@ build, and it is deliberately not in `node test/run.mjs` there. J6's equivalent
 | 11a | **A snapshot must be filtered per recipient, and the model it is copied from is not.** `netproto` broadcasts one payload to everybody because a single-screen arena has nothing to hide. Here `design/multiplayer.md` says what another commander recovered is never disclosed, and the honest starting list (`sampleScene`) carries the collected count and each drop's collected flag. The per-recipient shape exists in `netproto` for one field only — `ack` | `test/service.test.mjs` can assert a seat's snapshot carries no other seat's loot, the same way it already asserts a seat's campaign snapshot carries only its own projection |
 | 11b | **The splice does NOT remove the stale-scene hazard, and this row said it did.** An extracted `Soldier` is out of `scene.soldiers` and still reachable from two places that keep mutating it: a projectile in flight (`p.owner`) and a root's `_lastAttacker`. Measured: a round fired before extraction kills a root afterwards and increments `ana1.kills` to 1, while the result already reported says `kills: 0`. So the kill is **lost, not misattributed** — `_resolve` froze `killsBySoldier` at extraction and nothing reads the object again | `test/mission-ownership.test.mjs`. Letting the round land is still the answer that needs no special case; what needs stating is that its kill goes nowhere, and that anything J8 adds which re-reads a soldier object after extraction is reading a squad that went home |
 | 11c | **`sampleScene` identifies soldiers by POSITION, so an extraction renumbers them.** `src/mission/checksum.js` emits `soldiers[i].*` by index; measured, splicing the first owner makes slot `soldiers[0]` stop being `ana1` and start being `bo1`. That is harmless for J0, which compares two runs of one scene — and wrong as the starting shape for J8's snapshot, which this document twice says it is. A wire that identifies a soldier by array position teleports every other soldier the moment somebody extracts | Naming it here. J8 keys by soldier id, and J0's suite is unaffected either way |
-| 11 | **The mission's live scene is bigger than a snapshot, and what gets sent is a judgement call.** `netproto` sends positions rounded to a tenth of a pixel and never sends velocity, deliberately, so a client cannot half-predict. This mission has spec roots with nested parts, brains, statuses and effects — `sampleScene` in `src/mission/checksum.js` is the starting list, but rendering needs fields a checksum does not | The bandwidth readout `netproto` already carries. J6 should print snapshot size from its first day, because the first version that sends the whole scene will work on a LAN and fail on a wire |
+| 11 | **The mission's live scene is bigger than a snapshot, and what gets sent is a judgement call.** `netproto` sends positions rounded to a tenth of a pixel and never sends velocity, deliberately, so a client cannot half-predict. This mission has spec roots with nested parts, brains, statuses and effects — `sampleScene` in `src/mission/checksum.js` is the starting list, but rendering needs fields a checksum does not | The bandwidth readout `netproto` already carries. J8 should print snapshot size from its first day, because the first version that sends the whole scene will work on a LAN and fail on a wire |
 
 ## Background
 
@@ -449,7 +457,7 @@ invalidate the shape of the network half, it needed neither of the halves that
 follow it, and its first half needed no second machine.
 
 It cost two small modules and two pages, and it changed the architecture. Both
-answers arrived before J5 or J6 existed: the stream-order failure named work
+answers arrived before any of J5–J8 existed: the stream-order failure named work
 (J1, which shipped and is useful regardless), and the V8-version disagreement
 named a dependency that could not be worked around. Had the probe run last, as
 the phase map had it, the finding would have arrived with two input streams, a
