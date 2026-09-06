@@ -52,7 +52,24 @@ export class Mission {
     // ---- the owner axis (J1) ----
     // `owner` is who INPUTS and who is CREDITED; it is never authority, since
     // this client simulates every soldier on the level whoever owns them.
-    this.owner = owner ?? (this.scene.soldiers[0] ? this.scene.soldiers[0].owner : null);
+    //
+    // THE NAMED COMMANDER HAS TO OWN SOMEBODY, and a scene that declares no
+    // owners at all is the case that check exists for: `piloted` in
+    // _updateSoldiers is `leaders.get(this.owner)`, so a seat that owns nobody
+    // pilots nobody and EVERY soldier falls to the companion brain — silently,
+    // and including the one under the keyboard. J2 guarded it in `src/main.js`
+    // off the squad; J5 deleted that guard when projectDispatch started
+    // emitting owners, which is true of a dispatch built by THIS version and
+    // not of one built by another. A page is static files and reloads; a room's
+    // campaign lives in the server process and does not, so the two halves can
+    // legitimately be of different versions for as long as that process runs.
+    //
+    // Only for a scene with NO owners, never for one that has them and not
+    // this commander: that is a routing bug, and handing this keyboard another
+    // commander's squad is a worse answer than handing it nobody.
+    const declared = this.scene.soldiers.some((s) => s.owner != null);
+    this.owner = (declared ? owner : null) ??
+      (this.scene.soldiers[0] ? this.scene.soldiers[0].owner : null);
     // Distinct owners in spawn order, fixed for the mission. Soldiers are NOT:
     // since J2 an extracting squad walks out of scene.soldiers, so this list
     // outlives the bodies in it and a commander on it may have nobody left on

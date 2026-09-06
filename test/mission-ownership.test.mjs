@@ -51,6 +51,11 @@ const member = (id, owner) => ({
 // joint dispatch will hand both clients (J5).
 const JOINT = [member("ana1", "ana"), member("ana2", "ana"), member("bo1", "bo"), member("bo2", "bo")];
 const SOLO = [member("solo1", null), member("solo2", null), member("solo3", null)];
+// The pre-J5 dispatch shape: no `owner` KEY at all. A room's campaign lives in
+// the server process and a page is static files, so a page of this version can
+// legitimately be handed a squad built by an older one for as long as that
+// process runs — which is how this shape reaches a live mission.
+const UNDECLARED = SOLO.map(({ owner, ...rest }) => rest);
 
 // A MissionInput stand-in that presses nothing until told to.
 function stubInput() {
@@ -111,6 +116,29 @@ export default async function run(t) {
     t.ok("line-up: one commander is still spawn.x + i * 44", xs[1] - xs[0] === 44 && xs[2] - xs[1] === 44);
     t.eq("solo: every partition is the whole array", m.soldiersOf().length, 3);
     t.eq("solo: an undeclared owner is null, not a name", m.owner, null);
+  }
+  {
+    // A NAMED COMMANDER WHO OWNS NOBODY, which is the one way this axis fails
+    // catastrophically and in silence: `piloted` is `leaders.get(this.owner)`,
+    // so a seat that owns nobody pilots NOBODY and every soldier — the one
+    // under the keyboard included — falls to the companion brain. Reported
+    // from a live room as "my soldier is AI-controlled".
+    //
+    // J2 guarded it in src/main.js off the squad; J5 deleted the guard when the
+    // projection began emitting owners, which is a fact about the version that
+    // BUILT the dispatch and not about the page playing it. Now checked in
+    // start(), where the scene is.
+    const m = play(UNDECLARED, "p1");
+    t.eq("skew: a commander nobody on the level answers to is not this mission's", m.owner, null);
+    t.ok("skew: ...so somebody is still piloted", !!m.currentSoldier());
+    for (let i = 0; i < 4; i++) m.update(STEP);
+    t.ok("skew: ...and it is the keyboard's soldier, not a companion", !m.currentSoldier().agent);
+    // The narrow half of the same rule: a scene that DOES declare owners and
+    // not this one is a routing bug, and handing this keyboard another
+    // commander's squad would be a worse answer than handing it nobody.
+    const wrong = play(JOINT, "carol");
+    t.eq("skew: a seat missing from a scene that names owners is not reassigned", wrong.owner, "carol");
+    t.ok("skew: ...and pilots nobody rather than somebody else's squad", !wrong.currentSoldier());
   }
 
   // ---- control cannot cross ----------------------------------------------
