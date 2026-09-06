@@ -282,11 +282,32 @@ function applySoldier(s, w) {
   s.kills = w.k;
 }
 
-// The scene as ONE seat may see it. `owner` is that seat's commander, and
-// `ack` the last input seq of theirs a step had consumed when this was built —
-// per recipient, exactly as netproto's is, and the only field here that differs
-// between two seats for a reason that is not privacy.
-export function projectScene(mission, owner, ack = 0) {
+// FEEDBACK, NARROWED FOR ONE SEAT. The room logs `[kind, cause, own, ...args]`
+// (src/mission/mission.js `_feedback`); what crosses is `[kind, ...args]`,
+// because the two filter fields are the ROOM's business and a viewer only ever
+// plays what it is handed.
+//
+// One rule today and a second one waiting: `own` means only the commander who
+// caused it perceives it (your recoil, your damage flash). When prediction
+// lands, the `all` branch below becomes "all but the cause" — a predicting
+// client has already played its own bang at input time, and sending it back
+// would be the same sound twice, a round trip apart. That is a filter change
+// here and nothing else, which is the whole reason `cause` is carried on events
+// everybody hears.
+function feedbackFor(feed, owner) {
+  const out = [];
+  for (const e of feed) {
+    const own = e[2];
+    if (own && e[1] !== owner) continue;
+    out.push([e[0], ...e.slice(3)]);
+  }
+  return out;
+}
+
+// The scene as ONE seat may see it. `owner` is that seat's commander, `ack` the
+// last input seq of theirs a step had consumed when this was built, and `feed`
+// the room's feedback log since the previous snapshot.
+export function projectScene(mission, owner, ack = 0, feed = []) {
   const scene = mission.scene;
   const end = mission.endFor(owner);
   return {
@@ -309,6 +330,12 @@ export function projectScene(mission, owner, ack = 0) {
     // it back for two things that are the viewer's own: the camera follows it,
     // and the ring under it is how you find yourself on a crowded level.
     k: mission.control.get(owner) ?? null,
+    // What HAPPENED since the last snapshot, as against what is true now.
+    // Accumulated across steps and flushed per broadcast by whoever drains the
+    // log — a 60Hz sim behind a 20Hz snapshot means a log cleared per step
+    // drops two thirds of every firefight, which is one of the two bugs
+    // netproto/smoke.mjs caught on its first run.
+    v: feedbackFor(feed, owner),
   };
 }
 
@@ -366,6 +393,10 @@ export function applySnapshot(mission, snap) {
     scene.loot[i].y = y;
     scene.loot[i].collected = !!c;
   }
+
+  // Feedback last: a burst belongs on top of the state that explains it, and a
+  // cue is panned against the camera the step below is about to solve.
+  for (const e of snap.v || []) mission.applyFeedback(e[0], e.slice(1));
 
   scene.artifact = snap.f ? scene.artifact || { name: "Artifact", value: 0 } : null;
   mission.netCollected = snap.c;

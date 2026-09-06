@@ -295,6 +295,14 @@ function startMission(flight) {
     mission.setInput(s.owner, inp);
   }
 
+  // THE ROOM LOGS FEEDBACK INSTEAD OF PLAYING IT (J8). Sound, sparks, bursts,
+  // shake and the damage flash are produced by the simulation, and the
+  // simulation is here — where `audio.play` is a silent no-op and nothing is
+  // drawn. Assigning the log flips every one of them from "do it" to "record
+  // it", and stops the room allocating a particle array sixty times a second
+  // that nobody will ever look at.
+  mission.feed = [];
+
   const driver = { mission, inputs, sockets, since: 0, bytes: 0 };
   flight.driver = driver;
   live.add(flight);
@@ -323,10 +331,19 @@ function broadcast(flight) {
     }
     const conn = d.sockets.get(s.owner);
     if (!conn) continue;
-    const text = JSON.stringify({ t: "snap", ...projectScene(d.mission, s.owner, d.inputs.get(s.owner).ack()) });
+    const text = JSON.stringify({
+      t: "snap",
+      ...projectScene(d.mission, s.owner, d.inputs.get(s.owner).ack(), d.mission.feed),
+    });
     d.bytes += text.length;
     conn.send(text);
   }
+  // CLEARED ONCE THE LOG HAS GONE TO EVERY SEAT — not per seat (the second one
+  // would hear nothing) and not per step (the sim runs three steps to each
+  // snapshot, so two thirds of every firefight would be dropped). The second of
+  // those is a bug netproto's smoke test caught on its first run, and it is
+  // named in this spec's Reuses table for exactly this moment.
+  d.mission.feed.length = 0;
 }
 
 // A deadline-corrected fixed step, copied from netproto/server.mjs: catch up at

@@ -418,8 +418,8 @@ of one and is held identically: "the page keeps simulating when it is alone" wou
 be a second architecture to maintain for nothing.
 
 **The snapshot is `sampleScene`'s list, widened by what rendering needs and
-narrowed by what privacy forbids.** Measured at **570 bytes** on a Low lead —
-~11 KB/s per seat at the default 20Hz — which is the number approximation 11
+narrowed by what privacy forbids.** Measured at **691 bytes** on a Low lead —
+~14 KB/s per seat at the default 20Hz, of which ~120B is feedback — which is the number approximation 11
 asked to see from day one, and `test/mission-net.test.mjs` asserts a ceiling on
 it rather than trusting that it stays small.
 
@@ -430,6 +430,103 @@ it rather than trusting that it stays small.
 | **`collected` crosses as a COUNT and never as an item** | Approximation 11a. Not just the other commander's — this seat's own haul is a count too, because the campaign gets the items from the room's `_resolve` and the HUD only ever prints a number |
 | **Entities the simulation CREATES mid-mission carry their def id** | The one thing a mirror cannot derive. `root.spawned` grows when the Iron Moth's wings launch seekers, and a viewer that cannot build them is a viewer being shot at by something invisible. The client rebuilds them through the runtime's own `spawnFromDef` rather than through a second entity format, clearing the rate window first because the ROOM has already applied the limit and this is a mirror, not a second simulation |
 | **The pre-attack telegraph crosses; the cosmetic randomness does not** | A telegraph is how a player reads "this is about to hit you" and is gameplay by any useful definition. Motes, sparks, shake, trail jitter and the loot bob stay on `Math.random` at both ends and are never sampled — nothing reads them back |
+
+### Feedback is not state, and J8 shipped without it
+
+**The bug, found by playing: a joint mission was silent.** And silence was one
+of five — a snapshot projects the world at an instant, but `update()` also emits
+things that HAPPEN between two instants and leave no trace to project. Sending
+only the state gives a viewer a silent, still, flash-less mission.
+
+| Feedback | Producer | Before this fix |
+|---|---|---|
+| Sound cues | `scene.sound(cue, {x, y, gain})` — 18 sites, **one hook** | silent |
+| Impact sparks | `_ctx.spark` — `combat.js` ×3, `runtime.js` ×1 | none |
+| Death bursts | `_ctx.burst` — `combat.js`, `runtime.js`, `mission.js` ×2 | none |
+| Screen shake | `this.shake += …` — four direct writes | no recoil, no kick |
+| Damage flash | `this.damageFlash = 0.4` — one direct write | no red vignette |
+
+`hitFlash`, `muzzleFlash` and `telegraph` were never affected: they are decaying
+FIELDS, so they are state and were already in the snapshot. The line is
+**does the cause survive between two snapshots** — and half of the list above
+does not, which is also why the client cannot derive it. A fire cue is chosen by
+`weaponSound(weapon, …)` from a weapon a seat is deliberately never sent; an
+impact's cue names a projectile that no longer exists; and `muzzleFlash` lasts
+about three steps while a snapshot arrives every three, so edge-detecting it at
+20Hz misses roughly half the shots.
+
+**One funnel, five kinds, and not one call site moved.** `scene.sound` was
+already the single hook `tech/sound.md` insisted on and `_ctx.spark`/`_ctx.burst`
+were already `combat.js`'s cosmetics bridge — the wire attaches to the funnel, so
+a cue added anywhere in a later slice crosses automatically. That is the argument
+against deriving feedback from state on the client: derivation is a second,
+inferential copy of a rule that lives at 26 call sites with real conditions in it
+(`soldier.land` only above 260px of fall; a part dying is silent but a root dying
+is not), and the two would drift with nothing to catch it.
+
+| Verb | |
+|---|---|
+| `mission.feed` | `null` to play feedback here, an array to collect it instead. A host that is not looking at the mission assigns one; **null everywhere else**, so single-player, hot-seat, the editor tools and every suite are on the path they were |
+| `_feedback(kind, args, cause, own)` | **Log or play, never both.** The room stopped allocating a particle array sixty times a second that nobody would look at |
+| `applyFeedback(kind, args)` | The ONLY implementation of "do the thing". A local mission reaches it through `_feedback`, a viewer off the wire — so what a room's player perceives is what single-player produces by construction, not by two paths agreeing |
+
+**`cause` is who MADE IT HAPPEN, not who perceives it, and it is carried even
+when everybody perceives it.** Today it drives one filter: `own` means only the
+cause perceives it, which is true of exactly two sites — your gun's recoil and
+the flash of being hit — because those are reactions to your own soldier rather
+than facts about the level. **The second filter is why the field is on world
+events too.** When prediction lands (approximation 2b), a predicting client has
+already played its own bang at input time, so the room must stop sending that
+commander their own feedback back or they hear the shot twice, a round trip
+apart. `all` becomes **`all but the cause`** — a filter change and one enum
+value, rather than a redesign. Without the cause on the event there is nothing to
+withhold.
+
+**The cause is AMBIENT, not an argument.** `scene.sound` takes a cue and a place
+and has no idea who is reloading; threading an owner through it would mean
+editing 18 call sites in `ai.js`, `combat.js`, `entities.js` and the enemyspec
+runtime — modules the Firing Room and the Behavior Lab share, and which "Must not
+touch" forbids wiring the network into. Instead `this._cause` is set by the loops
+that already walk one actor at a time. The stepper is single-threaded, which is
+the whole reason it works, and it reaches sites nobody was thinking about:
+`soldier.land` is credited to whoever landed without that call site knowing
+owners exist.
+
+| Cause | Sites |
+|---|---|
+| A commander | their soldier's gun, jump, landing, reload, loot pickup |
+| `null` — the world's own | enemy fire, impacts, explosions, chains, a root or a soldier dying |
+
+A projectile impact is the world's today even when your own round caused it.
+That is the honest line at zero prediction, and it is the first thing to revisit
+when a client starts predicting its own shots.
+
+**Accumulated across steps, flushed per broadcast, capped at 64.** The sim runs
+at 60Hz and the snapshot at 20, so a log cleared per STEP drops two thirds of
+every firefight — one of exactly two bugs `netproto/smoke.mjs` caught on its
+first run, named in the Reuses table above, and the mutation that reproduces it
+reddens the two-seat drive with `0 cues`: the original bug report's own words.
+
+**The win/lose sting does not cross**, and is the one cue that is not about the
+level. `_resolve` plays it through `audio.play` directly and asks whether the
+commander is the one at this keyboard — which in the room is nobody. A viewer
+building its own end record is the moment that question becomes answerable again,
+so it plays there.
+
+**Cost: 570B → 691B** on a Low lead in normal fighting, ~14 KB/s per seat at
+20Hz. If that ever bites, deriving the durable half — deaths, pickups, reloads,
+the damage flash, all of which ARE recoverable from state the client already has
+— is the known optimisation, recorded here rather than pretended away.
+
+**A note on latency, because it is about to stop being true.** At zero prediction
+there is no audio-visual desync at all: the flash, the recoil, the projectile and
+the bang are equally late, so the event arrives coherent. The desync appears the
+instant the picture is predicted and the sound is not, and self-caused audio has
+a much tighter tolerance than film-style AV sync — perceptible around 20–30ms,
+clearly wrong past ~50, against netproto's *good* case of 60ms. The remedy is the
+industry-standard one and is what the `cause` field is for: the predicting client
+plays its own feedback locally at input time, through `applyFeedback`, and is
+excluded from the broadcast of it.
 
 **A viewer stops halfway through `update()`, and both halves are deliberate.**
 Everything above the early return is state the client owns outright — the clock,
@@ -560,7 +657,7 @@ which is what keeps the risky half small.
 | `test/controls.test.mjs` | The control map and `MissionInput`'s three sources — **and, since J4, the latch itself**: a read before any sample is silent rather than a crash, a sample is frozen against the device moving under it, a press that arrives while no step ran survives to the next sample, an unread edge does NOT survive its step, a pad hold outranks a key reported up, and the frame index counts samples and restarts with `enable()`. Six cases here and the mission-side proof in the golden, because the latch and the loop fail differently |
 | `test/mission-divergence.test.mjs` | J0's probe. **It stays green and stops being load-bearing**: it now guards that one process replays itself, which is `tech/mission-determinism.md`'s original claim, rather than gating an architecture |
 | `test/wiring.test.mjs` | `applyMissionResult` end to end — and it applies exactly one result per lead and asserts the lead is removed, which is the assumption J3 breaks. J3's new cases go beside it. **As built: 53 → 89**, and not one existing assertion moved, because `last` defaults true and every case above the new block files one result per lead. The 36 are eight blocks — a joint clear paying once, the mixed outcome in BOTH report orders, a joint wipe charging once, the finale gate reaching both reporters, the two report lines contradicting each other in two private logs, `wonBy` surviving the second report, a repeat report on a spent lead paying nothing, and a solo wipe still costing everybody |
-| `test/mission-net.test.mjs` (new, J8) | **78 assertions, and the only new suite the phase added** — a new file because this is a subsystem nothing tested, not a bug in one that was. Four sections, four different questions. (1) The input frame, pure: holds and EDGES both cross and the edges are OR-ed across coalesced packets, an older packet never overwrites a newer hold but its tap is still taken, and a mouse point is resolved to world before it crosses while a stick is not. (2) The snapshot, driven by two REAL Missions — one playing room and one playing seat, off the same level and seed — including the other commander's soldier arriving as a body with no weapon and no roster record, an extraction that renumbers nobody, the Iron Moth's launched seekers mirrored one for one, a viewer that runs no gravity and no brains, and one that calls `onComplete` zero times over 200 steps. (3) The flight, against the real registry: two dispatches on one lead open ONE flight, both are marked hosted, the ROOM files both results, the day turns on the second, and each commander is pushed a day summary no page could have seen. (4) The two-seat drive — `netproto/smoke.mjs`'s shape, in the bar: spawn the real `server.mjs` on its own port, open rooms until two commanders share a lead, deploy both, connect two mission sockets, and hold `right` on one of them. Verified by mutation: dropping the `hosted` marker, sharing one input between two seats, deleting the viewer's `_finish` guard, keying soldiers by position, and not sending `spawned` redden 2, 2, 1, 2 and 2 by name |
+| `test/mission-net.test.mjs` (new, J8) | **99 assertions, and the only new suite the phase added** — a new file because this is a subsystem nothing tested, not a bug in one that was. Four sections, four different questions. (1) The input frame, pure: holds and EDGES both cross and the edges are OR-ed across coalesced packets, an older packet never overwrites a newer hold but its tap is still taken, and a mouse point is resolved to world before it crosses while a stick is not. (2) The snapshot, driven by two REAL Missions — one playing room and one playing seat, off the same level and seed — including the other commander's soldier arriving as a body with no weapon and no roster record, an extraction that renumbers nobody, the Iron Moth's launched seekers mirrored one for one, a viewer that runs no gravity and no brains, and one that calls `onComplete` zero times over 200 steps. (3) The flight, against the real registry: two dispatches on one lead open ONE flight, both are marked hosted, the ROOM files both results, the day turns on the second, and each commander is pushed a day summary no page could have seen. (4) The two-seat drive — `netproto/smoke.mjs`'s shape, in the bar: spawn the real `server.mjs` on its own port, open rooms until two commanders share a lead, deploy both, connect two mission sockets, and hold `right` on one of them. **Section 2b is the feedback channel**, added after playing found a joint mission silent: a room logs instead of playing and builds no particles, a viewer builds the burst the room only described, the two private kinds reach one commander each, three steps of cues survive to one snapshot, the cap drops the tail, and a landing nobody wired up is credited to whoever landed. Section 4 then holds the trigger over the real socket and asserts both seats hear the gun while only the shooter is shaken. Verified by mutation: dropping the `hosted` marker, sharing one input between two seats, deleting the viewer's `_finish` guard, keying soldiers by position, not sending `spawned`, clearing the feedback log per step, playing feedback in the room, ignoring the `own` filter, and dropping the ambient cause redden 2, 2, 1, 2, 2, 3, 1, 5 and 2 by name — and the per-step one reddens the drive with `0 cues`, the bug report's own words |
 | `test/mission-enemyspec.test.mjs`, `test/enemyspec-targeting.test.mjs` | Enemies hunt the squad — `hostilesFor` returning `scene.soldiers` is an identity assertion. J1 must not narrow what an enemy sees to one owner |
 | `test/combat.test.mjs`, `test/crouch.test.mjs`, `test/companion-aim.test.mjs` | Damage, friendly fire, ducking, companion targeting |
 | `test/locomotion-characterization.test.mjs` | The strictest fixture in the repo. Nothing here should reach the locomotor |

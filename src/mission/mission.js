@@ -32,6 +32,10 @@ import { specSound } from "../audio/cues.js";
 
 const STEP = 1 / 60;
 
+// Feedback events kept per flush. A busy frame loses the tail of its sparks
+// rather than growing the packet (J8) — netproto's own cap, for its reason.
+const MAX_FEEDBACK = 64;
+
 export class Mission {
   // `canvas` is the HOST, and it is optional (tech/multiplayer-missions.md,
   // J6). Given one, this is the browser's mission: it binds the keyboard and
@@ -154,25 +158,45 @@ export class Mission {
     // This commander's own soldiers as of the last snapshot that still had
     // them. The banner's squad cards, frozen at the moment they left.
     this.netSquad = null;
+    // FEEDBACK: null to play it here, an array to collect it instead (J8). A
+    // host that is not looking at this mission assigns one and drains it; see
+    // _feedback. Null everywhere else, so single-player, hot-seat, the editor
+    // tools and every suite are on exactly the path they were.
+    this.feed = null;
+    // Which commander's action is being stepped RIGHT NOW, or null for the
+    // world's own. See _feedback: this is how a cue reaching one funnel from
+    // eighteen call sites still knows who caused it.
+    this._cause = null;
     // Nav debug overlays, off every deploy. Toggled by the debugGraph/debugPath
     // actions and only while config.debugOverlays is on.
     this.debug = { graph: false, path: false };
 
     // Bridge to the shared combat module: rules run in combat.js, cosmetics +
     // bookkeeping stay here. friendlyFire/damageMult read live from config.
+    //
+    // `spark` and `burst` are FEEDBACK and go through the log (J8) — see
+    // _feedback. They were already the right shape for it: a hook per kind,
+    // called from the simulation, doing nothing the simulation reads back.
     this._ctx = {
       get friendlyFire() { return config.friendlyFire; },
       get damageMult() { return config.playerDamageMult; },
       damage: (t, a, o) => this._damage(t, a, o),
       kill: (t, o) => this._kill(t, o),
-      spark: (x, y, c, n, s) => this._sparks(x, y, c, n, s),
-      burst: (x, y, c, n, s) => this._burst(x, y, c, n, s),
+      spark: (x, y, c, n, s) => this._feedback("spk", [x, y, c, n, s]),
+      burst: (x, y, c, n, s) => this._feedback("bst", [x, y, c, n, s]),
     };
 
     // The one sound hook. Installed on the SCENE (not _ctx) because ai.js
     // fire() takes a scene and no ctx — see tech/sound.md. Headless callers of
     // loadMission never set it, so every `scene.sound && …` site stays silent.
-    this.scene.sound = (cue, opts) => audio.play(cue, opts);
+    //
+    // Since J8 it goes through the same log the other four kinds do, which is
+    // the whole reason 18 call sites did not have to move: tech/sound.md built
+    // ONE funnel, and the wire attaches to the funnel.
+    this.scene.sound = (cue, opts = {}) =>
+      this._feedback("snd", opts.gain === undefined || opts.gain === 1
+        ? [cue, opts.x || 0, opts.y || 0]
+        : [cue, opts.x || 0, opts.y || 0, opts.gain]);
     audio.play("mission.start");
 
     // Size the backing store BEFORE anything reads it: the motes below are
@@ -323,6 +347,75 @@ export class Mission {
     return (this.scene.collected || []).filter((c) => c.owner === owner).map((c) => c.item);
   }
 
+  // ---- feedback (J8) ------------------------------------------------------
+  //
+  // FEEDBACK IS NOT STATE. A snapshot projects the world at an instant; these
+  // five kinds are things that HAPPENED between two instants and leave no trace
+  // to project — a cue, a spray of sparks, a burst, a kick of shake, a red
+  // flash. Send only the state and a viewer gets a silent, still, flash-less
+  // mission, which is exactly what J8 shipped before this.
+  //
+  // ONE FUNNEL, FIVE KINDS, and no call site had to move for it. `scene.sound`
+  // was already the single hook tech/sound.md insisted on (18 sites) and
+  // `_ctx.spark`/`_ctx.burst` were already combat.js's cosmetics bridge; the
+  // two that had no hook — shake and the damage flash — get one here.
+  //
+  //   snd  [cue, x, y, gain?]        spk  [x, y, colour, n, speed]
+  //   bst  [x, y, colour, n, speed]  shk  [amount, cap]
+  //   flh  [seconds]
+  //
+  // `cause` is WHO MADE IT HAPPEN, not who perceives it, and it is carried even
+  // when everybody perceives it. Today it drives one filter (`own`); the day
+  // prediction lands it drives the other one — a client that predicted its own
+  // shot has already played the bang, so the room must stop sending that
+  // commander their own feedback back, and "all" becomes "all but the cause".
+  // Without the cause on the event there is nothing to withhold, and that is a
+  // redesign rather than a filter.
+  //
+  // `own` means only the cause perceives it. Two sites use it, and both are
+  // reactions to your own soldier rather than facts about the level: the recoil
+  // of your own gun and the flash of being hit. A commander 800px away should
+  // not have their screen shaken because somebody else pulled a trigger.
+  _feedback(kind, args, cause = this._cause, own = false) {
+    if (this.feed) {
+      // A crowded firefight costs a dropped tick, never an unbounded packet.
+      if (this.feed.length < MAX_FEEDBACK) this.feed.push([kind, cause, own ? 1 : 0, ...args]);
+      return; // LOG OR PLAY, NEVER BOTH: a room draws nothing and hears nothing
+    }
+    this.applyFeedback(kind, args);
+  }
+
+  // The other half, and it is the ONLY implementation: a local mission calls it
+  // through _feedback and a viewer calls it off the wire, so what a room's
+  // player perceives is what a single-player mission produces, by construction
+  // rather than by two code paths agreeing.
+  //
+  // The scatter of a burst stays local on purpose — the event says "18 sparks,
+  // this colour, here", and each viewer's own Math.random throws them. Cosmetic
+  // randomness is unseeded by design (tech/mission-determinism.md) and nothing
+  // reads it back.
+  applyFeedback(kind, args) {
+    switch (kind) {
+      case "snd":
+        audio.play(args[0], { x: args[1], y: args[2], gain: args[3] });
+        break;
+      case "spk":
+        this._sparks(args[0], args[1], args[2], args[3], args[4]);
+        break;
+      case "bst":
+        this._burst(args[0], args[1], args[2], args[3], args[4]);
+        break;
+      case "shk":
+        this.shake = Math.min(args[1], this.shake + args[0]);
+        break;
+      case "flh":
+        this.damageFlash = args[0];
+        break;
+      default:
+        break; // an unknown kind from a newer room is ignored, not a crash
+    }
+  }
+
   // What this commander has recovered, as the number the HUD prints. On a
   // room's mission `scene.collected` is the ROOM's and this page's is empty —
   // the count is the only part of it that crosses, because what the other
@@ -383,6 +476,12 @@ export class Mission {
           owner: this.owner, success: !!this.netEnd, timer: 1.6,
           result: null, squad: this.netSquad || this.soldiersOf(), done: false,
         });
+        // The sting is played HERE rather than crossing as feedback, because
+        // it is the only cue in the game that is not about the level: _resolve
+        // plays it through `audio.play` directly and asks whether the commander
+        // is the one at this keyboard — which in the room is nobody. A viewer
+        // building its own end record is the moment it becomes true again.
+        audio.play(this.netEnd ? "mission.win" : "mission.lose");
       }
       this._updateCamera();
       return;
@@ -393,7 +492,14 @@ export class Mission {
     for (const s of scene.soldiers) {
       if (s.fireCooldown > 0) s.fireCooldown -= dt;
       if (s.muzzleFlash > 0) s.muzzleFlash -= dt;
+      // WHOSE ACTION IS THIS? See _feedback. tickReload speaks through
+      // scene.sound, which takes a cue and a place and has no idea who is
+      // reloading — so the answer is ambient, set by the loop that already
+      // knows. The stepper is single-threaded and walks one actor at a time,
+      // which is the whole reason this works.
+      this._cause = s.owner;
       tickReload(s, dt, scene);
+      this._cause = null;
     }
 
     this._handleControl();
@@ -519,6 +625,9 @@ export class Mission {
 
     for (const s of scene.soldiers) {
       if (!s.alive) continue;
+      // Everything this soldier does — its gun, its jump, its landing — is its
+      // commander's doing, and that is what a predicting client will predict.
+      this._cause = s.owner;
       const leader = leaders.get(s.owner) || s;
       // Jump/land are read from the ground-contact transition around the physics
       // step, so entities.js stays free of presentation concerns.
@@ -536,7 +645,9 @@ export class Mission {
           ? inp.isDown("fire")
           : inp.justPressed("fire");
         const acc = aimAccuracy(s.data.stats.aim);
-        if (wantFire && fire(scene, s, s.fireDir(), "player", dt, acc)) this.shake = Math.min(0.5, this.shake + 0.12);
+        // Recoil is YOURS (J8): `own`, so a commander on the far side of the
+        // level does not have their screen shaken because you pulled a trigger.
+        if (wantFire && fire(scene, s, s.fireDir(), "player", dt, acc)) this._feedback("shk", [0.12, 0.5], s.owner, true);
       } else {
         // "spec" (default) runs the shared agent brain over the soldier
         // locomotor; "legacy" is the original hand-written updateCompanion.
@@ -559,6 +670,7 @@ export class Mission {
       if (wasGround && !s.onGround && s.vy < 0) scene.sound("soldier.jump", { x: sx, y: s.y });
       // Only a real drop thuds — walking off a 20px lip shouldn't.
       else if (!wasGround && s.onGround && fallVy > 260) scene.sound("soldier.land", { x: sx, y: s.y });
+      this._cause = null;
     }
   }
 
@@ -625,7 +737,8 @@ export class Mission {
       const death = specSound(r.specTop, "death");
       scene.sound(death.cue, { x: cx, y: cy, gain: death.gain });
       if (r.loot) scene.loot.push(new Loot(r.loot, cx - 10, r.y));
-      this.shake = Math.min(0.7, this.shake + 0.3);
+      // A big thing blew up on the level you are both standing on: everyone.
+      this._feedback("shk", [0.3, 0.7], null);
     }
 
     // Rebuild the flat damageable set combat.js hits (parts die, seekers spawn).
@@ -651,10 +764,14 @@ export class Mission {
     target.hitFlash = 0.12;
     if (amount > 0 && target.health > 0)
       this.scene.sound("soldier.hurt", { x: target.x + target.w / 2, y: target.y });
-    // A hit on the soldier you're controlling flashes the screen red.
-    if (target === this.currentSoldier()) {
-      this.damageFlash = 0.4;
-      this.shake = Math.min(0.6, this.shake + 0.25);
+    // A hit on the soldier you're driving flashes the screen red — and since
+    // J8 that is asked PER COMMANDER rather than of `this.owner`. In a room
+    // `this.owner` is whichever commander spawned first, so the unqualified
+    // call handed one arbitrary seat everybody's flashes and the other seat
+    // none.
+    if (target.owner !== undefined && target === this.currentSoldier(target.owner)) {
+      this._feedback("flh", [0.4], target.owner, true);
+      this._feedback("shk", [0.25, 0.6], target.owner, true);
     }
     if (target.health <= 0) this._kill(target, owner);
   }
@@ -673,7 +790,7 @@ export class Mission {
     // a soldier falling — a heavier, colder burst (enemies are spec-handled)
     this._burst(cx, cy, "#c9d4e6", 22, 300);
     this.scene.sound("soldier.death", { x: cx, y: cy });
-    this.shake = Math.min(0.9, this.shake + 0.5);
+    this._feedback("shk", [0.5, 0.9], null);
   }
 
   _updateStatuses(dt) {
@@ -702,7 +819,9 @@ export class Mission {
         if (s.alive && overlaps(l, s)) {
           l.collected = true;
           scene.collected.push({ item: l.item, owner: s.owner, by: s.id });
+          this._cause = s.owner;
           scene.sound("loot.pickup", { x: l.x, y: l.y });
+          this._cause = null;
           break;
         }
       }

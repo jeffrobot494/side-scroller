@@ -211,6 +211,117 @@ export default async function run(t) {
     t.eq("end: a viewer never calls onComplete", fired, 0);
   }
 
+  // ======================================================================
+  // 2b. FEEDBACK — the half of a mission that is not state
+  // ======================================================================
+  //
+  // The bug this section exists for: J8 shipped the state and dropped the
+  // feedback, so a joint mission was silent, spark-less and shake-less. Sound
+  // was what got noticed; it was one of five.
+  {
+    const level = generateLevel({ seed: 771, difficulty: "low" }).level;
+    const spec = { id: "m-feed", name: "Feed", seed: 771 };
+    const squad = [...squadFor(["a1"], "A"), ...squadFor(["b1"], "B")];
+
+    const room = new Mission(null, () => {});
+    room.start(spec, level, squad, null);
+    room.feed = []; // what server.mjs assigns: log it, do not play it
+    const seat = new Mission(null, () => {});
+    seat.start(spec, level, squadFor(["a1"], "A"), "A", { step() {} });
+
+    // A ROOM PLAYS NOTHING LOCALLY. The particle array is the visible half of
+    // that: before this, the room allocated bursts sixty times a second that
+    // nobody would ever look at.
+    room._ctx.spark(100, 200, "#fff", 4, 90);
+    room.scene.sound("weapon.fire", { x: 100, y: 200 });
+    t.eq("feedback: a room logs instead of playing", room.feed.length, 2);
+    t.eq("feedback: ...and builds no particles for a canvas it does not have", room.particles.length, 0);
+
+    // ...and a mission with no log plays it, exactly as it always did. This is
+    // the single-player path and it must not have moved.
+    const solo = new Mission(null, () => {});
+    solo.start(spec, level, squadFor(["s1"], null), null);
+    solo._ctx.spark(100, 200, "#fff", 4, 90);
+    t.ok("feedback: a mission with no log plays it locally", solo.particles.length === 4);
+    solo._feedback("shk", [0.3, 0.7], null);
+    t.ok("feedback: ...including shake, which used to be a direct field write", solo.shake > 0.29);
+
+    // THE CAUSE, AND THE TWO FILTERS. `own` is what a commander alone
+    // perceives; everything else is the level they are both standing on.
+    room.feed.length = 0;
+    room._feedback("shk", [0.12, 0.5], "A", true); // A's recoil
+    room._feedback("flh", [0.4], "B", true); // B took a hit
+    room._feedback("snd", ["impact.wall", 10, 20], "A"); // a shot landed
+    const toA = projectScene(room, "A", 0, room.feed).v;
+    const toB = projectScene(room, "B", 0, room.feed).v;
+    t.eq("feedback: a commander gets their own recoil and the world's sound", toA.map((e) => e[0]), ["shk", "snd"]);
+    t.eq("feedback: ...and the other gets their own flash and the same sound", toB.map((e) => e[0]), ["flh", "snd"]);
+    t.ok("feedback: neither is sent the other's private half",
+      !toA.some((e) => e[0] === "flh") && !toB.some((e) => e[0] === "shk"));
+    t.eq("feedback: the filter fields do not cross — a viewer plays what it is handed", toA[1], ["snd", "impact.wall", 10, 20]);
+
+    // AND IT ARRIVES. The client's own audio is a no-op headlessly, so the
+    // proof is the half that is observable: a burst becomes particles.
+    room.feed.length = 0;
+    room._ctx.burst(300, 120, "#e05a5a", 18, 260);
+    room._feedback("shk", [0.3, 0.7], null);
+    applySnapshot(seat, projectScene(room, "A", 0, room.feed));
+    t.eq("feedback: a viewer builds the burst the room only described", seat.particles.length, 18);
+    t.ok("feedback: ...and takes the kick", seat.shake > 0.29);
+
+    // THE ONE THAT WOULD HAVE BEEN REDISCOVERED. The sim runs at 60Hz and the
+    // snapshot at 20, so a log cleared per STEP drops two thirds of every
+    // firefight — one of exactly two bugs netproto/smoke.mjs found on its first
+    // run, and named in this spec for this moment.
+    room.feed.length = 0;
+    for (let i = 0; i < 3; i++) {
+      room.scene.sound("weapon.fire", { x: i, y: 0 });
+      room.sampleInputs();
+      room.update(1 / 60);
+    }
+    const across = projectScene(room, "A", 0, room.feed).v.filter((e) => e[0] === "snd" && e[1] === "weapon.fire");
+    t.eq("feedback: three steps of cues survive to one snapshot", across.length, 3);
+
+    // The cap drops the tail, not the packet.
+    room.feed.length = 0;
+    for (let i = 0; i < 200; i++) room._ctx.spark(i, 0, "#fff", 1, 10);
+    t.ok(`feedback: a crowded frame is capped (${room.feed.length}), not unbounded`, room.feed.length === 64);
+  }
+
+  // A commander's own gun is heard by everybody and shakes only them, and the
+  // cause is ambient rather than threaded through eighteen call sites. Driven
+  // through the REAL fire path so a cue nobody remembered still gets an owner.
+  {
+    const level = generateLevel({ seed: 99001, difficulty: "low" }).level;
+    const spec = { id: "m-cause", name: "Cause", seed: 99001 };
+    const room = new Mission(null, () => {});
+    room.start(spec, level, [...squadFor(["a1"], "A"), ...squadFor(["b1"], "B")], null);
+    room.feed = [];
+    const fireA = createWireInput();
+    room.setInput("A", fireA);
+    room.setInput("B", createWireInput());
+    fireA.receive(packInput(stubInput({ down: { fire: true } }), 1, "gamepad", null));
+    for (let i = 0; i < 30; i++) {
+      room.sampleInputs();
+      room.update(1 / 60);
+    }
+    const shots = room.feed.filter((e) => e[0] === "snd" && String(e[3]).startsWith("weapon.fire"));
+    const recoil = room.feed.filter((e) => e[0] === "shk" && e[2]);
+    t.ok(`cause: firing produced cues (${shots.length})`, shots.length > 0);
+    t.ok("cause: ...credited to the commander who fired, not to nobody", shots.every((e) => e[1] === "A"));
+    t.ok("cause: recoil is A's alone", recoil.length > 0 && recoil.every((e) => e[1] === "A"));
+    t.ok("cause: and B, who pressed nothing, fired nothing",
+      !room.feed.some((e) => e[1] === "B" && String(e[3]).startsWith("weapon.")));
+    // The cause reaches sites nobody was thinking about, which is the whole
+    // argument for an ambient over threading an owner through 18 call sites:
+    // both squads drop onto the ground at spawn, and each thud is credited to
+    // the commander whose soldier landed without `soldier.land` knowing owners
+    // exist.
+    const lands = room.feed.filter((e) => e[3] === "soldier.land");
+    t.eq("cause: a landing nobody wired up is credited to whoever landed",
+      lands.map((e) => e[1]).sort(), ["A", "B"]);
+  }
+
   // The one part of the scene a viewer cannot simply mirror: entities the
   // SIMULATION creates mid-mission. The Iron Moth's wings launch `seeker`s into
   // `root.spawned`, and a viewer that cannot build them is a viewer being shot
@@ -398,6 +509,15 @@ function post(base, path, body) {
 }
 
 async function twoSeatDrive(t) {
+  // A CLIENT SOCKET IS THE ONE THING THIS SUITE NEEDS FROM THE RUNTIME. Global
+  // `WebSocket` landed unflagged in node 22, and the repo has no dependencies to
+  // fall back on — so on an older node this section reports what it could not
+  // do rather than failing, which is a different claim from "the room is
+  // broken". The other three sections are pure and run everywhere.
+  if (typeof WebSocket !== "function") {
+    t.ok(`drive: SKIPPED — node ${process.version} has no global WebSocket (needs 22+)`, true);
+    return;
+  }
   const port = 8400 + Math.floor(Math.random() * 120);
   const base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [SERVER], {
@@ -507,6 +627,26 @@ async function twoSeatDrive(t) {
     t.ok("drive: both seats see the same run, because there is one simulation",
       Math.abs(xOf(socks[1].snap, idA) - x1A) < 60, `${xOf(socks[1].snap, idA)} vs ${x1A}`);
 
+    // FEEDBACK OVER THE REAL WIRE. The bug report this section answers was
+    // "there's no longer any sound" — so the assertion is that holding the
+    // trigger on one seat puts weapon cues on BOTH seats' snapshots, since a
+    // gunshot is a fact about the level and not about who fired.
+    const cuesOf = (c) => (c.snap.v || []).filter((e) => e[0] === "snd").map((e) => e[1]);
+    const heard = { a: [], b: [] };
+    for (let i = 0; i < 90; i++) {
+      socks[0].send({ d: 1 << WIRE_ACTIONS.indexOf("fire"), p: 0, a: null });
+      heard.a.push(...cuesOf(socks[0]));
+      heard.b.push(...cuesOf(socks[1]));
+      await sleep(16);
+    }
+    t.ok(`drive: the shooter hears their own gun (${heard.a.filter((c) => c.startsWith("weapon.")).length} cues)`,
+      heard.a.some((c) => c.startsWith("weapon.")));
+    t.ok("drive: and so does the other commander, standing on the same level",
+      heard.b.some((c) => c.startsWith("weapon.")));
+    t.ok("drive: recoil reaches the commander who fired",
+      (socks[0].seenKinds.has("shk")));
+    t.ok("drive: and not the one who did not", !socks[1].seenKinds.has("shk"));
+
     // Approximation 11: the first format that sends too much works on a LAN and
     // fails on a wire, so the size is asserted rather than assumed.
     const bytes = JSON.stringify(socks[0].snap).length;
@@ -526,7 +666,7 @@ async function twoSeatDrive(t) {
 // One mission socket, as the browser's `src/net/mission-socket.js` opens it.
 function connectMission(base, token) {
   const ws = new WebSocket(`${base.replace("http:", "ws:")}/mission?token=${encodeURIComponent(token)}`);
-  const c = { ws, ready: false, owner: null, snap: null, seq: 0 };
+  const c = { ws, ready: false, owner: null, snap: null, seq: 0, seenKinds: new Set() };
   c.opened = new Promise((resolve) => {
     const t = setTimeout(resolve, 2500);
     ws.onmessage = (e) => {
@@ -538,6 +678,7 @@ function connectMission(base, token) {
         resolve();
       } else if (m.t === "snap") {
         c.snap = m;
+        for (const e of m.v || []) c.seenKinds.add(e[0]);
       }
     };
     ws.onclose = () => {
