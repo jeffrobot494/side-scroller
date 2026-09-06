@@ -95,10 +95,15 @@ export default async function run(t) {
     const group = SCHEMA.find((g) => g.title === "Viewport");
     t.ok("Viewport group exists", !!group);
     const byKey = Object.fromEntries(group.items.map((i) => [i.key, i]));
-    t.eq("canvas default is the classic size", byKey.missionCanvas.default, "960x540");
-    t.eq("zoom default is 1", byKey.missionZoom.default, 1);
+    // The INVARIANT, not the number: the schema's default and the value the
+    // game runs on with no override must agree, and the default must be one of
+    // the sizes the enum offers. Pinned as literals until the viewport defaults
+    // were retuned, which reddened four assertions that were only ever saying
+    // "these two agree" the long way round.
+    t.eq("live config takes the schema's canvas default", config.missionCanvas, byKey.missionCanvas.default);
+    t.eq("live config takes the schema's zoom default", config.missionZoom, byKey.missionZoom.default);
+    t.ok("the canvas default is one of the offered sizes", byKey.missionCanvas.options.includes(byKey.missionCanvas.default));
+    t.ok("the canvas default parses to a real size", parseCanvasSize(byKey.missionCanvas.default).w > 0);
     t.ok("zoom cannot reach 0", byKey.missionZoom.min > 0);
-    t.eq("live config zoom defaults to 1", config.missionZoom, 1);
-    t.eq("live config canvas defaults to the classic size", config.missionCanvas, "960x540");
   }
 }

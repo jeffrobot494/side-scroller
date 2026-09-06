@@ -82,12 +82,27 @@ export default async function run(t) {
   // ---- reload movement penalty -------------------------------------------
   {
     const w = { fireRate: 5, spread: 0, magazine: 5, reloadTime: 2, projectile: { speed: 800, w: 8, h: 4, color: "#fff", life: 1 }, effects: [] };
-    const fast = makeShooter(w);
-    const slow = makeShooter(w);
-    slow.reloading = 1; // mid-reload
-    for (let i = 0; i < 60; i++) { fast.applyMovement(0.016, 1, false); slow.applyMovement(0.016, 1, false); }
-    t.ok("reload: reloading soldier tops out slower", slow.vx < fast.vx);
-    t.ok("reload: ~reloadSpeedMult of full speed", Math.abs(slow.vx - config.runSpeed * config.reloadSpeedMult) < 1);
+    // The knob is pinned rather than inherited: it is "how much of normal run
+    // speed you keep while reloading", and a default of 1 means no penalty at
+    // all — which is a legitimate setting and would otherwise read here as the
+    // mechanism being broken. Both ends asserted, so the knob is what is under
+    // test rather than whatever it currently ships at.
+    const prevReload = config.reloadSpeedMult;
+    const topSpeed = () => {
+      const fast = makeShooter(w);
+      const slow = makeShooter(w);
+      slow.reloading = 1; // mid-reload
+      for (let i = 0; i < 60; i++) { fast.applyMovement(0.016, 1, false); slow.applyMovement(0.016, 1, false); }
+      return [fast.vx, slow.vx];
+    };
+    config.reloadSpeedMult = 0.2;
+    let [fastV, slowV] = topSpeed();
+    t.ok("reload: reloading soldier tops out slower", slowV < fastV);
+    t.ok("reload: ~reloadSpeedMult of full speed", Math.abs(slowV - config.runSpeed * config.reloadSpeedMult) < 1);
+    config.reloadSpeedMult = 1;
+    [fastV, slowV] = topSpeed();
+    t.ok("reload: ...and at ×1 the penalty is off entirely", slowV === fastV);
+    config.reloadSpeedMult = prevReload;
   }
 
   // ---- aim → spread -------------------------------------------------------

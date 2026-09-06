@@ -407,8 +407,11 @@ export default async function run(t) {
     t.eq("profile: a soldier body jumps with config.jumpSpeed, not enemyJump", s.jumpSpeed, config.jumpSpeed);
     t.eq("profile: ...runs at config.runSpeed, not the controller's", s.runSpeed, config.runSpeed);
     t.eq("profile: ...and falls under unscaled world gravity", s.gravity, 2000);
-    t.ok(`profile: so its maxRise is the player's 129.6, not 110.6 (got ${s.envelope.maxRise})`,
-      Math.abs(s.envelope.maxRise - 129.6) < 1e-9);
+    // Derived, not frozen: the rise is v²/2g off whichever jump speed was
+    // used, so this says "the SOLDIER's number, not the enemy's" at any tuning.
+    const riseFrom = (v) => (v * v) / (2 * 2000);
+    t.ok(`profile: so its maxRise is the player's ${riseFrom(config.jumpSpeed)}, not ${riseFrom(config.enemyJump)} (got ${s.envelope.maxRise})`,
+      Math.abs(s.envelope.maxRise - riseFrom(config.jumpSpeed)) < 1e-9);
 
     // and the difference is not cosmetic: a 120px ledge sits BETWEEN the two
     // envelopes, so reading body.* for a companion would deny it a climb it can

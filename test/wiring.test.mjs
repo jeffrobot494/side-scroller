@@ -26,7 +26,11 @@ export default async function run(t) {
   t.ok("all generated enemies instantiate as spec roots", m.specRoots.length === lead.level.enemies.length && m.specRoots.every((r) => r.kind === "spec" && r.alive));
   t.ok("scene.enemies exposes collidable spec parts", m.enemies.length >= m.specRoots.length && m.enemies.every((e) => e.kind === "spec"));
   t.ok("continuous ground slab present", m.platforms[0].x === 0 && m.platforms[0].w === m.world.width);
-  t.eq("soldier hp = base + stat×per-point (10+5×2)", m.soldiers[0].maxHealth, 20);
+  t.eq(
+    `soldier hp = base + stat×per-point (${config.soldierBaseHp}+5×${config.soldierHpPerHealth})`,
+    m.soldiers[0].maxHealth,
+    config.soldierBaseHp + 5 * config.soldierHpPerHealth
+  );
 
   const h0 = g.campaignHealth;
   const board = g.leads.length;

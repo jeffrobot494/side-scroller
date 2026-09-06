@@ -27,9 +27,15 @@ export default async function run(t) {
     after.every((v, i) => v > before[i])
   );
 
+  // Both ends of the knob, off its own floor rather than off whatever the
+  // shipped default happens to be — at a default of 2 (the max) there was
+  // nowhere left to raise it to and this read as broken.
+  config.hubAmbienceDensity = 0.25;
+  amb.step(1 / 30);
+  const sparse = amb.people().length;
   config.hubAmbienceDensity = 2;
   amb.step(1 / 30);
-  t.ok("density knob grows the crew", amb.people().length > seeded);
+  t.ok("density knob grows the crew", amb.people().length > sparse);
 
   config.hubAmbience = false;
   amb.step(1 / 30);
