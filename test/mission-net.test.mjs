@@ -36,6 +36,11 @@ import { config } from "../src/game/config.js";
 import {
   packInput, createWireInput, projectScene, applySnapshot, WIRE_ACTIONS,
 } from "../src/net/mission-wire.js";
+import { ACTIONS } from "../src/game/controlmap.js";
+
+// The exception, restated here on purpose: a test that imported the production
+// list would agree with it by construction and assert nothing.
+const LOCAL = ["debugGraph", "debugPath"];
 
 const SERVER = fileURLToPath(new URL("../server.mjs", import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -70,6 +75,19 @@ export default async function run(t) {
 
     t.eq("input: the eight gameplay actions cross and the two debug ones do not",
       WIRE_ACTIONS.includes("debugGraph"), false);
+    // EVERY action is classified — this is what a new one trips. WIRE_ACTIONS is
+    // derived from ACTIONS minus a named local-only list, so adding "grenade" to
+    // the control map puts it on the wire by default; the failure this guards is
+    // somebody reintroducing a hand-written copy, which drifts silently and
+    // leaves the other commander unable to do the new thing.
+    const unclassified = ACTIONS.filter((a) => !WIRE_ACTIONS.includes(a) && !LOCAL.includes(a));
+    t.ok(`input: every control-map action is on the wire or named local${unclassified.length ? ` — stray: ${unclassified}` : ""}`,
+      unclassified.length === 0);
+    // And the order IS the format: the bit is the index, so appending is safe
+    // and reordering is not. Pinned so a tidy-up of ACTIONS reddens here rather
+    // than turning one commander's jump into a crouch.
+    t.eq("input: the wire order is the control map's order",
+      WIRE_ACTIONS.join(","), "left,right,jump,crouch,aimUp,fire,swap,reload");
     t.ok("input: a packet is four small fields", Object.keys(pkt).sort().join(",") === "a,d,n,p");
 
     inp.receive(pkt);

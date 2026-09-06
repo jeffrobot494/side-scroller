@@ -405,6 +405,19 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   baseline). The game must stay playable at every step.
 - **Guard every `localStorage` access** (`try/catch` + `typeof localStorage`) so
   node imports don't throw.
+- **New gameplay state goes on the wire in the same commit that invents it.**
+  Since J8 a joint mission is simulated in the room and the browser draws a
+  snapshot, so `src/net/mission-wire.js` is a WHITELIST: a field nobody names is
+  simply absent, the client keeps whatever it invented locally, and nothing
+  errors. The bug is invisible to whoever is testing, because their own screen is
+  right by construction — it is the OTHER commander who sees a soldier that is
+  not on fire. Actions are safe by derivation (`WIRE_ACTIONS` comes from
+  `controlmap.js`'s `ACTIONS` minus a named local-only list, and
+  `test/mission-net.test.mjs` pins that the order — which IS the wire format —
+  did not move). Everything else is this rule. Two things that catch nothing:
+  a field only a RULE reads, since nothing draws it; and a one-shot event
+  written as a sticky field rather than into the feedback outbox, which the room
+  produces at 60Hz and sends at the snapshot rate, so most of them vanish.
 - **Git:** work on `main` unless a spec is being built, which gets its own
   branch. **Commit every slice** — a tech spec's slices (N0, N1, …) are the
   commit unit, landed as soon as the slice's bar is green, without being asked.

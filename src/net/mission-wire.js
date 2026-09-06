@@ -32,14 +32,30 @@
 
 import { spawnFromDef } from "../mission/enemyspec/runtime.js";
 import { Loot } from "../mission/entities.js";
+import { ACTIONS } from "../game/controlmap.js";
 
 // ---- the input frame ------------------------------------------------------
 
-// The eight GAMEPLAY actions, in a fixed order — the index is the bit. The
-// control map's other two (debugGraph, debugPath) are deliberately absent: an
-// overlay is what the person looking at a canvas wants to see, not something a
-// commander owns, and a room's mission draws nothing (J7).
-export const WIRE_ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload"];
+// The actions that stay on this machine. An overlay is what the person looking
+// at a canvas wants to see, not something a commander owns, and a room's
+// mission draws nothing (J7).
+//
+// This list is the whole of the exception, and it exists so that leaving an
+// action off the wire is a DECISION rather than an oversight.
+const LOCAL_ONLY = ["debugGraph", "debugPath"];
+
+// The gameplay actions, DERIVED from the control map rather than copied from
+// it. A second hand-written list is a list that drifts: add "grenade" to
+// ACTIONS and everything keeps working — the key binds, the Controls tool shows
+// it, your own soldier throws one — while the bit is never packed and the other
+// commander simply never sees a grenade. Nothing errors. Deriving it means a
+// new action crosses by default and has to be named above to stay home.
+export const WIRE_ACTIONS = ACTIONS.filter((a) => !LOCAL_ONLY.includes(a));
+
+// ORDER IS THE WIRE FORMAT. The bit is the index, so APPENDING to ACTIONS is
+// safe and REORDERING it is not — an old client talking to a new room would
+// read "jump" as "crouch". Both halves ship together today, which is the only
+// reason that is a comment rather than a version field.
 
 const BIT = {};
 for (let i = 0; i < WIRE_ACTIONS.length; i++) BIT[WIRE_ACTIONS[i]] = 1 << i;
