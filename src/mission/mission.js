@@ -53,22 +53,36 @@ export class Mission {
     // `owner` is who INPUTS and who is CREDITED; it is never authority, since
     // this client simulates every soldier on the level whoever owns them.
     this.owner = owner ?? (this.scene.soldiers[0] ? this.scene.soldiers[0].owner : null);
-    // Distinct owners in spawn order, fixed for the mission: nothing joins or
-    // leaves scene.soldiers once it is built.
+    // Distinct owners in spawn order, fixed for the mission. Soldiers are NOT:
+    // since J2 an extracting squad walks out of scene.soldiers, so this list
+    // outlives the bodies in it and a commander on it may have nobody left on
+    // the level.
     this._owners = [];
     for (const s of this.scene.soldiers)
       if (!this._owners.includes(s.owner)) this._owners.push(s.owner);
-    // Which soldier each commander is driving, as an index into scene.soldiers.
+    // Which soldier each commander is driving, by soldier ID — not by index
+    // (J2). The splice renumbers the array, and an index survives it pointing at
+    // whoever moved down into the slot, which for the departing commander is the
+    // OTHER commander's live soldier. An id resolves to nobody instead, which is
+    // the truth.
+    //
     // EVERY owner has one, not just this client's: a leader is what a squad
     // escorts, so a squad with no leader is a squad the two clients would step
     // differently. Each starts on its own first soldier.
     this.control = new Map();
-    for (const o of this._owners)
-      this.control.set(o, this.scene.soldiers.findIndex((s) => s.owner === o));
+    for (const o of this._owners) {
+      const first = this.scene.soldiers.find((s) => s.owner === o);
+      if (first) this.control.set(o, first.id);
+    }
     this.camera = { x: 0, y: 0 };
     this.introTimer = 2.2;
-    this.endBanner = null; // { success, timer } once the mission resolves
-    this.result = null;
+    // Ends are PER COMMANDER (J2): owner -> { success, timer, result, squad,
+    // done }. A commander who resolves counts their own banner down, gets their
+    // own onComplete, and leaves; the level runs on for whoever is still on it.
+    // `squad` is their roster frozen at the moment they left, because the
+    // survivors are off the array and the HUD still has a banner's worth of
+    // frames to draw.
+    this.ends = new Map();
     // Nav debug overlays, off every deploy. Toggled by the debugGraph/debugPath
     // actions and only while config.debugOverlays is on.
     this.debug = { graph: false, path: false };
@@ -158,8 +172,20 @@ export class Mission {
   // under the input device; for anyone else it is the one their AI squad
   // escorts, and the one their own client is inputting for.
   currentSoldier(owner = this.owner) {
-    const i = this.control.get(owner);
-    return i === undefined ? undefined : this.scene.soldiers[i];
+    const id = this.control.get(owner);
+    return id === undefined ? undefined : this.scene.soldiers.find((s) => s.id === id);
+  }
+
+  // Has this commander's mission ended? The record is the whole of their end —
+  // banner, result and the squad that left — and its absence is what "still
+  // fighting" means, everywhere J2 asks.
+  endFor(owner = this.owner) {
+    return this.ends.get(owner) || null;
+  }
+
+  resultFor(owner = this.owner) {
+    const end = this.ends.get(owner);
+    return end ? end.result : null;
   }
 
   livingSoldiers(owner = this.owner) {
@@ -184,11 +210,15 @@ export class Mission {
     this._updateParticles(dt);
     if (this.introTimer > 0) this.introTimer -= dt;
 
-    // Resolve the end banner countdown, then hand back the result.
-    if (this.endBanner) {
-      this.endBanner.timer -= dt;
-      if (this.endBanner.timer <= 0) this._finish();
-      return;
+    // Each resolved commander counts their OWN banner down and then goes back to
+    // base (J2). There is no early return any more: one commander reaching the
+    // exit used to freeze the level for everybody, which is the whole of what
+    // "ends are independent" removes. The step below runs for whoever is left,
+    // and when nobody is, _finish stops the scene.
+    for (const end of this.ends.values()) {
+      if (end.done) continue;
+      end.timer -= dt;
+      if (end.timer <= 0) this._finish(end.owner);
     }
 
     // Central fire-cooldown tick for every shooter (so semi-auto stays honest).
@@ -218,6 +248,7 @@ export class Mission {
     // strands that squad, and running it for one owner only would have the two
     // clients stepping a squad neither of them is inputting for differently.
     for (const o of this._owners) {
+      if (this.ends.has(o)) continue; // resolved: their mission is over, and there is nobody left to swap to
       const cur = this.currentSoldier(o);
       if (!cur || !cur.alive) this._swapControl(1, o);
     }
@@ -267,17 +298,15 @@ export class Mission {
   // the wrong keyboard — at one owner the ring is the whole array and this is
   // the cycle it always was.
   _swapControl(dir, owner = this.owner) {
-    const own = [];
-    for (let i = 0; i < this.scene.soldiers.length; i++)
-      if (this.scene.soldiers[i].owner === owner) own.push(i);
-    if (!own.length) return;
-    const at = own.indexOf(this.control.get(owner));
-    if (at < 0) { this.control.set(owner, own[0]); return; }
+    const own = this.scene.soldiers.filter((s) => s.owner === owner);
+    if (!own.length) return; // an extracted commander has nobody to drive
+    const at = own.findIndex((s) => s.id === this.control.get(owner));
+    if (at < 0) { this.control.set(owner, own[0].id); return; }
     const n = own.length;
     for (let i = 1; i <= n; i++) {
-      const idx = own[(((at + dir * i) % n) + n) % n];
-      if (this.scene.soldiers[idx].alive) {
-        this.control.set(owner, idx);
+      const s = own[(((at + dir * i) % n) + n) % n];
+      if (s.alive) {
+        this.control.set(owner, s.id);
         return;
       }
     }
@@ -475,14 +504,28 @@ export class Mission {
     }
   }
 
-  // Win: any living soldier reaches the exit (partial wipes can still succeed).
-  // Lose: the whole squad is down.
+  // Win: any of a commander's living soldiers reaches the exit (partial wipes
+  // can still succeed). Lose: that commander's whole squad is down.
+  //
+  // ONE PASS PER UNRESOLVED COMMANDER (J2). Since J1 this called
+  // livingSoldiers() with no argument and so asked only about the local owner —
+  // both branches, not just the losing one — which meant another commander could
+  // stand in the exit or be wiped and nothing happened. Resolved commanders are
+  // SKIPPED rather than re-tested: their squad has left the array, so an empty
+  // slice would read as a wipe and overwrite the extraction they just earned.
   _checkOutcome() {
     const scene = this.scene;
-    const living = this.livingSoldiers();
+    for (const o of this._owners) {
+      if (this.ends.has(o)) continue;
+      this._checkOutcomeFor(o, scene);
+    }
+  }
+
+  _checkOutcomeFor(owner, scene) {
+    const living = this.livingSoldiers(owner);
 
     if (living.length === 0) {
-      this._resolve(false);
+      this._resolve(false, owner);
       return;
     }
     for (const s of living) {
@@ -496,7 +539,7 @@ export class Mission {
           scene.collected.push({ item: scene.artifact, owner: s.owner, by: s.id });
           scene.artifact = null;
         }
-        this._resolve(true);
+        this._resolve(true, owner);
         return;
       }
     }
@@ -508,15 +551,25 @@ export class Mission {
   // scene.collected with no soldier on it and a scalar total over everybody —
   // and they are what this slice actually had to build. The payload's shape is
   // unchanged, so state.js and the results screen never learn about owners.
-  // Ending the mission is still scene-wide; J2 is what makes ends independent.
+  //
+  // J2 made the END independent too, and the mechanism is REMOVAL: this
+  // commander's survivors come out of scene.soldiers. That is one line for five
+  // properties — a departed squad does not fire, does not collide, does not win
+  // _updateLoot's race, is not drawn and is not a target — rather than five
+  // guards to write and one to forget. Two things it does NOT remove, and
+  // neither needs a special case: a projectile already in flight still carries
+  // its shooter (`p.owner`) and a root still carries `_lastAttacker`, so a round
+  // fired before extraction can land afterwards and increment a soldier nobody
+  // will read again. The kill is lost rather than misattributed, because the
+  // result below froze killsBySoldier as the squad left.
   _resolve(success, owner = this.owner) {
-    if (this.endBanner) return;
+    if (this.ends.has(owner)) return; // this commander's mission ended once
     const squad = this.soldiersOf(owner);
     const survivors = squad.filter((s) => s.alive).map((s) => s.id);
     const casualties = squad.filter((s) => !s.alive).map((s) => s.id);
     const kills = squad.reduce((n, s) => n + s.kills, 0);
     const killsBySoldier = squad.map((s) => ({ id: s.id, kills: s.kills }));
-    this.result = {
+    const result = {
       success,
       missionId: this.mission.id,
       missionName: this.mission.name,
@@ -530,13 +583,41 @@ export class Mission {
       loot: success ? this.collectedBy(owner) : [],
       kills,
     };
-    this.endBanner = { success, timer: 1.6 };
-    audio.play(success ? "mission.win" : "mission.lose");
+    // The record IS the end: banner, result, and the roster frozen as it left,
+    // which the HUD draws for the banner's remaining frames because the bodies
+    // are about to be off the array.
+    this.ends.set(owner, { owner, success, timer: 1.6, result, squad, done: false });
+    // The squad leaves the level — the LIVING half of it. Whoever walked out is
+    // gone; whoever did not stays where they fell, because a corpse has not left
+    // anywhere and removing it would empty the ground under a commander who is
+    // still fighting over it. On a wipe nothing is alive, so nothing is spliced
+    // and this is not a second branch. Spliced in place rather than reassigned,
+    // so nothing holding scene.soldiers keeps stepping a squad that went home.
+    for (let i = this.scene.soldiers.length - 1; i >= 0; i--) {
+      const s = this.scene.soldiers[i];
+      if (s.owner === owner && s.alive) this.scene.soldiers.splice(i, 1);
+    }
+    // Only this keyboard's commander is told, in sound: the other one's
+    // extraction is their news, on their machine.
+    if (owner === this.owner) audio.play(success ? "mission.win" : "mission.lose");
   }
 
-  _finish() {
-    this.stop();
-    this.onComplete(this.result);
+  // Per commander, and idempotent (J2). `stop()` killing the rAF loop used to be
+  // the only thing stopping this firing again; with the loop alive for the
+  // commanders still on the level it fired every frame, so the guard is the flag
+  // rather than the loop. The scene stops when NOBODY is left on it — a page
+  // whose own commander has gone home keeps stepping until then, which is
+  // exactly the job J8 moves off the page and into the room.
+  _finish(owner = this.owner) {
+    const end = this.ends.get(owner);
+    if (!end || end.done) return;
+    end.done = true;
+    const all = this._owners.every((o) => {
+      const e = this.ends.get(o);
+      return e && e.done;
+    });
+    if (all) this.stop();
+    this.onComplete(end.result, owner);
   }
 
   // ---- viewport ------------------------------------------------------------
@@ -663,7 +744,8 @@ export class Mission {
     for (const l of scene.loot) this._drawLoot(ctx, l);
     for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z);
     for (const p of scene.projectiles) this._drawProjectile(p, z);
-    for (const s of scene.soldiers) this._drawSoldier(s, s === this.currentSoldier(), z);
+    const drivenHere = this.currentSoldier(); // hoisted: an id lookup, and the loop asks per soldier
+    for (const s of scene.soldiers) this._drawSoldier(s, s === drivenHere, z);
     this._drawParticles(ctx);
 
     ctx.restore();
@@ -671,7 +753,10 @@ export class Mission {
     this._drawVignette(ctx, W, H);
     this._drawHUD();
     if (this.introTimer > 0) this._drawIntro();
-    if (this.endBanner) this._drawEndBanner();
+    // THIS commander's banner. Another commander extracting is not this page's
+    // news and puts nothing on this screen (J2).
+    const end = this.endFor();
+    if (end) this._drawEndBanner(end);
   }
 
   // Screen space, but camera-aware. The horizon is measured from where the
@@ -1007,10 +1092,15 @@ export class Mission {
     // Squad cards (top-left) — THIS commander's squad. The other one is on the
     // level and drawn there; its roster, its health and what it recovered are
     // not this commander's to read (approximation 7).
+    //
+    // Once this commander has resolved, the cards come off the END record
+    // rather than the array (J2): the bodies were spliced out on extraction and
+    // the banner still has a second and a half of frames to draw over.
     let y = 12;
     const cardW = 200, cardH = 42;
     const cur = this.currentSoldier();
-    for (const s of this.soldiersOf()) {
+    const end = this.endFor();
+    for (const s of end ? end.squad : this.soldiersOf()) {
       const controlled = s === cur && s.alive;
       ctx.fillStyle = "rgba(9,14,23,0.8)";
       this._roundRect(ctx, 12, y, cardW, cardH, 6);
@@ -1144,13 +1234,13 @@ export class Mission {
     ctx.restore();
   }
 
-  _drawEndBanner() {
+  _drawEndBanner(end) {
     const ctx = this.ctx;
     const k = this._uiScale();
     ctx.save();
     ctx.scale(k, k); // design space — see _drawHUD
     const W = this.canvas.width / k, H = DESIGN_H;
-    const win = this.endBanner.success;
+    const win = end.success;
     ctx.fillStyle = "rgba(4,6,12,0.72)";
     ctx.fillRect(0, 0, W, H);
     const col = win ? "#8affc1" : "#ff6a6a";

@@ -315,10 +315,21 @@ function playNext() {
   if (current.playerId !== you) swapTo(current.playerId);
   hub.noteDispatch(current.squad);
   showScene("mission");
-  mission.start(current.mission, current.level, current.squad);
+  // The commander at THIS keyboard (J1/J2). Only named once the dispatch
+  // actually carries owners, which is J5's change to projectDispatch: until
+  // then every soldier lands owner-less and naming this seat would leave the
+  // mission partitioning by a commander who owns nobody. Once they do, this is
+  // the seat whose squad the keyboard drives — and on a joint lead that is one
+  // of two, which is the case J1's "first soldier deployed" default gets wrong.
+  const owner = current.squad.some((s) => s.owner != null) ? current.playerId : null;
+  mission.start(current.mission, current.level, current.squad, owner);
 }
 
-function onMissionComplete(result) {
+// `owner` is which commander finished; the mission fires this once per
+// commander now (J2). This page holds one dispatch, so there is one, and the
+// routing below is still the dispatch's. A room is what will have two, and it
+// is the room that sends both missionResults (J8).
+function onMissionComplete(result, owner) {
   const done = current;
   current = null;
   // Routed by the DISPATCH, not by the seat on screen: the commander who owns

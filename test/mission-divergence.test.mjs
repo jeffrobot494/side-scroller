@@ -62,7 +62,10 @@ function probe(controlled) {
   m.start(mission, level, SQUAD);
   m.running = false; // the frames are ours from here, at a fixed step
   m.input = scriptedInput();
-  m.control.set(m.owner, controlled); // the one knob this probe turns
+  // The one knob this probe turns. Control is keyed by soldier ID since J2, so
+  // the index the probe is parameterised on is resolved through the array here
+  // rather than stored — set an index and this drives nobody.
+  m.control.set(m.owner, m.scene.soldiers[controlled].id);
 
   // Count draws off the mission's stream. The wrapper goes on the scene AND on
   // every root, because loadMission handed each root the same function and the

@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // MISSION OWNERSHIP — two commanders on one level
-// (tech/multiplayer-missions.md, J1).
+// (tech/multiplayer-missions.md, J1 and J2).
 //
 // A soldier has an OWNER: the commander who inputs for it and the one credited
 // for it. It is a second axis over `scene.soldiers`, and the whole slice is that
@@ -15,6 +15,13 @@
 // At one owner every partition is the whole array, which is why
 // test/mission-golden.test.mjs does not move: it is the guard that single-player
 // is untouched, and this suite is the guard that two owners are actually two.
+//
+// J2 added the second half: an END is per commander too. Reaching the exit
+// resolves that commander alone, their squad is SPLICED OUT of scene.soldiers,
+// and the level keeps running for whoever is left. The golden cannot see any of
+// it — its 41 samples never resolve — so every assertion under "ends are
+// independent" below is the only thing standing between this and a mission that
+// stops when the first person walks out of it.
 // ---------------------------------------------------------------------------
 
 import { Mission } from "../src/mission/mission.js";
@@ -198,7 +205,7 @@ export default async function run(t) {
     m.scene.collected.push({ item: { name: "his", value: 90 }, owner: "bo", by: "bo2" });
 
     m._resolve(true);
-    const hers = m.result;
+    const hers = m.resultFor("ana");
     t.eq("result: survivors are her squad's", hers.survivors.join(","), "ana1");
     t.eq("result: casualties are her squad's", hers.casualties.join(","), "ana2");
     t.eq("result: kills total only her squad's", hers.kills, 3);
@@ -207,14 +214,156 @@ export default async function run(t) {
     t.eq("result: loot is what her squad carried out", hers.loot.map((i) => i.name).join(","), "hers");
     t.ok("result: and never leaks his haul", !hers.loot.some((i) => i.name === "his"));
 
-    // The same scene resolved for the other commander. J2 is what makes the two
-    // ENDS independent; J1 is what makes the two results exist.
-    m.endBanner = null;
+    // The same scene resolved for the other commander. J1 is what makes the two
+    // results exist; since J2 they exist AT ONCE, so this needs no reset — the
+    // guard is per commander and hers stays exactly as it was built.
     m._resolve(false, "bo");
-    const his = m.result;
+    const his = m.resultFor("bo");
+    t.eq("result: hers survives his being built", m.resultFor("ana").kills, 3);
     t.eq("result: his survivors are his", his.survivors.join(","), "bo2");
     t.eq("result: his kills are his", his.kills, 5);
     t.eq("result: a failure carries no loot, his included", his.loot.length, 0);
+  }
+
+  // ---- ends are independent (J2) ------------------------------------------
+  //
+  // `play` returns a mission whose onComplete is a no-op, so these drive
+  // _resolve/_finish directly and count the calls where the count is the point.
+
+  // Standing a soldier in the exit is how a commander extracts, and it is the
+  // only way out — there is no leave action.
+  const toExit = (m, s) => {
+    s.x = m.scene.exit.x + 2;
+    s.y = m.scene.exit.y + m.scene.exit.h - s.h;
+  };
+
+  {
+    // One commander walks out. The other is still fighting, and the level is
+    // still hers to fight on.
+    const m = play(JOINT, "ana");
+    toExit(m, m.scene.soldiers[0]); // ana1
+    m.update(STEP);
+
+    t.ok("ends: the commander who reached the exit has resolved", !!m.endFor("ana"));
+    t.ok("ends: and it was a success", m.endFor("ana").success);
+    t.ok("ends: the other commander has not", !m.endFor("bo"));
+    t.eq("ends: her squad has left the level", idsOf(m.scene.soldiers).join(","), "bo1,bo2");
+    t.eq("ends: his is all that is left of it", m.scene.soldiers.length, 2);
+    t.eq("ends: and her cards still have somebody on them, off the frozen roster",
+      idsOf(m.endFor("ana").squad).join(","), "ana1,ana2");
+
+    // The level is NOT frozen: the pre-J2 early return stopped the step for
+    // everybody the moment anyone resolved, and it was measured at 30 steps of
+    // nobody moving.
+    const before = m.scene.soldiers.map((s) => `${s.x},${s.y}`);
+    for (let i = 0; i < 30; i++) m.update(STEP);
+    t.ok("ends: the level keeps running for the commander still on it",
+      m.scene.soldiers.some((s, i) => `${s.x},${s.y}` !== before[i]));
+
+    // A resolved commander is SKIPPED by _checkOutcome, not re-tested. Her
+    // squad is off the array, so an empty slice would read as a wipe and
+    // overwrite the extraction she just earned.
+    t.ok("ends: her extraction is not overwritten by her empty squad reading as a wipe",
+      m.endFor("ana").success);
+    t.eq("ends: and her result still says so", m.resultFor("ana").success, true);
+  }
+
+  {
+    // Control is keyed by soldier ID since J2. Under the old index it was the
+    // DEPARTING commander's own entry that was dangerous: after the splice,
+    // index 0 stops being ana1 and becomes bo1, and the local keyboard ends up
+    // driving somebody else's squad.
+    const m = play(JOINT, "ana");
+    const boDriving = m.currentSoldier("bo").id;
+    toExit(m, m.scene.soldiers[0]);
+    m.update(STEP);
+
+    t.eq("ends: soldiers[0] is now the other commander's", m.scene.soldiers[0].id, "bo1");
+    t.ok("ends: and the extracted commander drives nobody, rather than his soldier",
+      m.currentSoldier("ana") === undefined);
+    t.eq("ends: his own control is untouched by her leaving", m.currentSoldier("bo").id, boDriving);
+
+    // Her keyboard is dead for the rest of the level: a swap has nobody to
+    // reach and must not walk into his squad.
+    m.input.press("swap");
+    m.update(STEP);
+    t.ok("ends: a swap after extracting reaches nobody", m.currentSoldier("ana") === undefined);
+  }
+
+  {
+    // The losing branch, which J1 narrowed to the local owner without a case.
+    // One commander wiped is one commander's failure, not the level's.
+    const m = play(JOINT, "ana");
+    for (const s of m.scene.soldiers) if (s.owner === "bo") s.alive = false;
+    m.update(STEP);
+
+    t.ok("ends: a wiped squad resolves its own commander", !!m.endFor("bo"));
+    t.eq("ends: as a failure", m.endFor("bo").success, false);
+    t.ok("ends: and does not resolve the commander still standing", !m.endFor("ana"));
+    // The splice takes whoever WALKED OUT. His squad did not — it died there —
+    // so the bodies stay on the ground she is still fighting over.
+    t.eq("ends: his casualties stay where they fell", idsOf(m.scene.soldiers).join(","), "ana1,ana2,bo1,bo2");
+    t.ok("ends: and none of them is alive", m.scene.soldiers.filter((s) => s.owner === "bo").every((s) => !s.alive));
+    t.eq("ends: a failure carries no loot out", m.resultFor("bo").loot.length, 0);
+  }
+
+  {
+    // _finish is per commander and idempotent. stop() killing the rAF loop used
+    // to be its only guard; with the loop alive for the other commander it fired
+    // every frame — 104 times, measured.
+    const fired = [];
+    const { level, mission } = generateLevel({ seed: SEED, difficulty: "low" });
+    const m = new Mission(makeEl("canvas"), (result, owner) => fired.push(owner));
+    m.start(mission, level, JOINT, "ana");
+    // `running` is left TRUE here, unlike everywhere else in this suite: the
+    // harness's requestAnimationFrame is a no-op so nothing drives the loop but
+    // us, and the flag is then the readout for whether stop() was called.
+    m.input = stubInput();
+
+    toExit(m, m.scene.soldiers[0]);
+    for (let i = 0; i < 200; i++) m.update(STEP); // well past the 1.6s banner
+    t.eq("ends: her onComplete fired exactly once", fired.filter((o) => o === "ana").length, 1);
+    t.ok("ends: and the scene did NOT stop with him still on it", m.running === true);
+    t.ok("ends: he has not been handed a result he did not earn", !fired.includes("bo"));
+
+    // Now he leaves too, and with nobody on the level the scene stops.
+    toExit(m, m.scene.soldiers[0]); // bo1 — hers are already gone
+    for (let i = 0; i < 200; i++) m.update(STEP);
+    t.eq("ends: his onComplete fired once as well", fired.filter((o) => o === "bo").length, 1);
+    t.eq("ends: the mission hands back a result per commander, in extraction order",
+      fired.join(","), "ana,bo");
+    t.ok("ends: and the scene stops once nobody is left on it", m.running === false);
+  }
+
+  {
+    // The artifact is the indivisible reward, and extraction is the race
+    // (approximation 4). Whoever trips the exit first holds it; the second
+    // commander out finds nothing.
+    const m = play(JOINT, "ana");
+    m.scene.artifact = { name: "the core", value: 200 };
+    toExit(m, m.scene.soldiers[2]); // bo1 gets there first
+    m.update(STEP);
+    t.eq("artifact: it goes to whoever extracted first", m.resultFor("bo").loot.map((i) => i.name).join(","), "the core");
+    t.ok("artifact: and is off the level", m.scene.artifact === null);
+
+    toExit(m, m.scene.soldiers[0]); // ana1, now that his squad has gone
+    m.update(STEP);
+    t.eq("artifact: the second commander out extracts without it", m.resultFor("ana").loot.length, 0);
+  }
+
+  {
+    // A result is frozen when its commander leaves. The bodies are still
+    // reachable — a projectile in flight carries its shooter and a root carries
+    // its last attacker — so a kill CAN land on an extracted soldier afterwards.
+    // It goes nowhere, which is the honest half of approximation 11b: lost, not
+    // misattributed.
+    const m = play(JOINT, "ana");
+    const ana1 = m.scene.soldiers[0];
+    toExit(m, ana1);
+    m.update(STEP);
+    const reported = m.resultFor("ana").killsBySoldier.find((k) => k.id === "ana1").kills;
+    ana1.kills += 1; // the round that was already in the air
+    t.eq("ends: the result froze as the squad left", m.resultFor("ana").killsBySoldier.find((k) => k.id === "ana1").kills, reported);
   }
 
   // ---- owner is not team, and owner is not authority ----------------------
