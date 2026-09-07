@@ -132,20 +132,21 @@ section + the tests are the source of truth for what currently exists):
   pruned; a graph build goes 0.09ms → 0.69ms (3.12ms worst). The attempt cap and
   the ban ledger stay — static clearance cannot predict a knockback mid-flight.
   **Those numbers are true and were the wrong ones.** In play this cost **22% of
-  the reachable standable surface** and 256 of 813 above-ground spots: an agent
-  under a perch now declines the climb rather than attempting it. The predictor
-  is sound (87% of what it rejected is genuinely unflyable, and a generous PLAYER
-  model reaches 0 of 40 lost spots — `layTerrain` chains tower steps by height
-  alone, so each step roofs the takeoff for the one beneath it and the upper
-  steps are decoration). The contract the predictor was given is too narrow, and
-  the graph it filters lies about surfaces. Two further
-  faults visible alongside it PRE-DATE this work: flush co-planar platforms are
-  separate nodes with a fake gap, so agents jump over solid floor (594 such edges
-  across 30 levels), and ground cut from the graph for headroom hands the agent
-  back to the pre-N3 reflex, which hops blind (15.8% of ground under an
-  overhang). Full evidence, and why the suite stayed green, in
-  `tech/nav-clearance.md` "Regressions found in play". **The spec is being
-  rewritten; do not build on C2's contract as it stands.**
+  the reachable node span** and 256 of 813 above-ground spots: an agent under a
+  perch declines a climb it can make. **`nav.js` node spans are the defect.**
+  `collideAxis` puts a body on a platform on ANY overlap; `buildNodes` requires
+  the body to fit WHOLLY on it, so the graph models ~55% of the standable surface
+  (measured against `stepActor`: a 100px perch supports 128px of positions and
+  the span is 70). The predictor takes off from, aims at and lands on spans, so
+  **70% of the climbs it removed are flyable**. The same fact makes a column and
+  the slab flush against it two nodes with a fake gap, so agents jump over solid
+  floor (594 such edges across 30 levels; merging co-planar surfaces takes it to
+  11) — that one and the blind reflex hop off the graph (15.8% of ground under an
+  overhang) both PRE-DATE this work. Generation is not implicated. Full evidence,
+  and how a first pass at this got it badly wrong by measuring through the graph
+  instead of the integrator, in `tech/nav-clearance.md` "Regressions found in
+  play". **The spec is being rewritten; do not build on C2's contract as it
+  stands.**
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,

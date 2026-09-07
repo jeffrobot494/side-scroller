@@ -122,89 +122,72 @@ This revision replaces the earlier clearance proposal in this file. Its scratch 
 
 ## Regressions found in play — 2026-09-07
 
-C1–C2 shipped green and made the game worse. Bo found three faults in the Behavior Lab; screenshots in `screen-shots/`. This section is the evidence, so the rewrite is aimed at causes rather than symptoms. **Every measurement below is 30 generated levels at high difficulty on the soldier profile** (30×46, gravity 2000, jump 700, run 320), unless it says otherwise.
+C1–C2 shipped green and made the game worse. Bo found three faults in the Behavior Lab; screenshots in `screen-shots/`. This section is the evidence, so the rewrite is aimed at causes rather than symptoms.
+
+**Revised 2026-09-07, second pass.** The first version of this section claimed 87% of the rejected climbs were unflyable and that 9 of 40 generated levels could not be completed. Both were wrong, and wrong for one reason given under "How this was measured wrong" below. Nothing in that first version was measured against the game's physics; all of it was measured through the nav graph's own model of where a body can stand.
 
 | # | Symptom | Screenshot | Root cause | Introduced by C1/C2? |
 |---|---|---|---|---|
-| 1 | An agent under a platform will not attempt the climb at all | `no-vertical-path.png` | Mostly generated terrain that **nothing** can climb — perches whose only in-range takeoff is roofed by the piece above. The graph offered the climb, no body could fly it, and C2 removed the edge rather than the failure. The remaining 13% is a follower whose takeoff vocabulary is two positions wide | **No — revealed, not caused** (except the 13%). See the two sections below |
-| 2 | A column and the slab flush against its top are separate surfaces, and the agent jumps between them | `separated-surfaces.png` | One node per PLATFORM, not per walkable surface. Two flush platforms leave a 30px gap in body-left-edge span space, which `kindOf` calls a `hop` | **No — pre-existing since N1** |
+| 1 | An agent under a platform will not attempt the climb at all | `no-vertical-path.png` | The predictor rejects arcs a body can fly, because it takes off from and lands on `nav.js` node spans, which are far narrower than the surface the physics supports | **Yes.** 70% of the rejected climbs are flyable |
+| 2 | A column and the slab flush against its top are separate surfaces, and the agent jumps between them | `separated-surfaces.png` | One node per PLATFORM, not per walkable surface. Two flush platforms leave a gap in span space that `kindOf` calls a `hop` | **No — pre-existing since N1** |
 | 3 | Approaching a sideways L, the agent jumps once into the overhang, fails, then routes around | `one-incorrect-jump.png` | Ground beneath an overhang is cut from the graph for headroom, so `routeRequest` returns null and the caller falls back to the pre-N3 reflex, which hops at anything 40–60px above it with no terrain knowledge | **No — pre-existing since N3.** C2 makes it fire more often, because routes now go *around* obstacles and spend longer underneath them |
 
-**None of the three is fixed by reverting C1–C2.** #2 and #3 predate this work entirely; #1 goes back to being invisible rather than going away.
+### The root cause of #1 and #2: a node span is not the standable surface
+
+`collideAxis` in `src/mission/entities.js` places a body on top of a platform on **any** box overlap — one pixel of foot is enough, and `onGround` is set. `buildNodes` defines a span as `[p.x, p.x + p.w - bodyW]`: where the body fits **wholly** on the platform. The two do not agree, and the gap is a body width at each end.
+
+Measured against the real integrator — drop a `Soldier` at each x and see where it rests — on a 100px perch with a 30px body:
+
+| | Standing positions |
+|---|---|
+| `buildNodes` span | 500..570 (70px) |
+| What `stepActor` actually supports | 471..599 (128px) |
+| | **the graph models 55%** |
+
+Everything downstream inherits that. The predictor starts its arcs from span positions, aims at span positions, and accepts a landing only inside a span, so it rejects real jumps at both ends. Before C2 the graph was merely *narrow*; C2 turned narrow into a hard filter.
+
+The same fact produces #2 directly: a 110px column yields the span `[x, x+80]` and a slab butted against it at `x+110` yields `[x+110, …]`, so `gapBetween` reports 30px of "gap" across what is one continuous floor, and `kindOf` calls it a `hop`. Across 30 generated levels there are **1,004 flush same-height platform pairs and 594 hop edges**. Merging co-planar touching platforms into one surface takes the hop edges to **11**.
+
+### What the rejections actually are
+
+Replaying every up-edge that clearance removed, from every position the **physics** supports on the source platform, at five launch velocities:
+
+| | Share of 235 rejected up-edges |
+|---|---|
+| Flyable — the rejection is wrong | **164 (70%)** |
+| Not flyable from anywhere — the rejection is right | 71 (30%) |
+
+The three known contributors to the 70%, in the order they are worth fixing:
+
+| Contributor | Note |
+|---|---|
+| Landing is only accepted inside the destination's node span | The largest one. A body that lands with 20px of foot on a ledge is standing on it; the predictor calls that a miss |
+| Takeoff is only attempted from two positions — the ones flanking the destination footprint | A body has the whole platform, including the ~30px at each end the span does not model |
+| An upward jump takes off at `vx: 0` | `linkBetween`'s budget is `maxRunTo(dh)`, which already *assumes* the running start the executor throws away. The graph and the follower disagree about the same jump |
+
+One mismatch that costs everybody, independent of the above: the graph's `maxRise` is the **continuous** 122.5px, while a 1/60 semi-implicit integration reaches **116.67px**. Every edge in that 5.8px band is offered and flyable by nothing.
 
 ### What it cost
 
 | Measure | Legacy graph | As shipped | Change |
 |---|---|---|---|
-| Reachable standable surface from spawn | 237,180 px | 184,492 px | **−22%** |
+| Reachable node span from spawn | 237,180 px | 184,492 px | **−22%** |
 | Standable spots above the ground | 813 | 557 | **−256** |
-| Up-edges in the graph | 1,333 | 1,005 | −328 |
 
-`test/navigation.test.mjs` and the C2 sweep both stayed green through this, for the reason in "Why the bar missed it" below.
+Both sides of that comparison use the same node model, so the delta is a fair measure of what clearance removed — but both understate the real surface by about 45%, so neither number is an absolute.
 
-### What the rejections actually are
+### There is no crouch escape hatch
 
-Of 235 rejected up-edges sampled over 20 levels, replayed from **every** x on the source span at 4px steps rather than only from the takeoffs the follower knows:
+`Soldier.applyMovement` returns early while crouched: `move` only sets facing, and `vx` decays at friction. A kneeling body cannot travel, so crouching cannot reach a space a standing body cannot. Worth stating because the headroom cut in `buildNodes` looks like it might have one.
 
-| | Count | Reading |
-|---|---|---|
-| Not flyable from anywhere on the source span | 204 (87%) | The edge was a lie. The graph offered it, no body could ever fly it, and pre-C2 the agent discovered that by failing three times |
-| Flyable from some x, but not one the follower is offered | 21 (9%) | A real route, lost. `takeoffCandidates` proposes exactly two positions — the ones flanking the destination footprint — and where those are roofed it gives up, though a takeoff further back is clear. Seed 3: offered 1180, flies from 1124 |
-| Flyable from an offered takeoff, still rejected | 10 (4%) | **A defect.** `takeoffBand` requires the nominal takeoff *and* a one-frame-early offset to both fly; an edge that works at its exact x and fails 5.33px short is dropped |
+### How this was measured wrong
 
-Why the 204 fail, by first contact: 147 rise into an underside, 59 hit a side, 13 land on the destination but off its span, 5 land on another platform first.
+The C2 sweep measured failed jumps (207 → 0) and agents making progress (169 → 170). Both improved, and both were blind: the sweep sent agents at a target at the far end of a level, where ground travel dominates, so reachability could fall 22% without moving either number.
 
-### The 87% is a generation bug, and it is not agent-specific
+The first pass at this section then made a worse error. Every follow-up measurement — "is this edge flyable", "can a player reach this spot", "is this level completable" — used node spans for takeoff positions, for steering targets and for landing acceptance. **A model cannot detect its own definition being wrong.** Compounded over a multi-step route those 45% errors produced "9 of 40 levels unwinnable", which Bo refuted from having played dozens of missions without ever meeting one. The one measurement that found the real defect is the only one taken against `stepActor` directly.
 
-The obvious reading of the 204 is "the player can get there and the agent cannot". **That reading is wrong.** Replaying every lost destination against a deliberately generous player model — any x on the source span at 6px steps, five takeoff velocities from −runSpeed to +runSpeed, and free in-flight steering at the landing span — reaches **0 of the 40** spots the agent lost, over 10 levels. Nothing gets to them. They are decoration.
+The rule the rewrite needs: **a claim about what a body can do is measured against the integrator, never against the graph.** A guard belongs in `test/nav.test.mjs` pinning node spans against `stepActor`'s actual support, and one in `test/navigation.test.mjs` pinning that a graph change does not shrink reachable surface.
 
-The mechanism, traced on seed 1's four-step zigzag tower at x≈2700–2950. Each rise is inside the 122.5px `maxRise`, which is the only thing `layTerrain` checks:
-
-| Step | Top | Left takeoff | Right takeoff |
-|---|---|---|---|
-| A | y401 | x2740, rise 99 — roofed by B | x2940, rise 99 — **clear** |
-| B | y322 | x2660, rise 178 — past `maxRise` | x2850, rise 79 — roofed by C |
-| C | y240 | x2730, rise 82 — roofed by D | x2880, rise 161 — past `maxRise` |
-| D | y159 | x2660, rise 341 — past `maxRise` | x2820, rise 81 — clear, but only from C |
-
-A is reachable. B, C and D have no working takeoff at all: the only positions inside jumping range are the ones the step above overhangs. **In a zigzag tower every step roofs the takeoff for the step beneath it**, and `layTerrain` chains pieces by height alone — "each chained piece within a single jump of the previous" — without ever asking whether there is somewhere to *stand* beside the next piece.
-
-`auditGeometry` then certifies the level, because it inherits `linkBetween`'s reachability test: `gapBetween` reports 0 for overlapping spans, and an up-edge is never charged for the body-width takeoff clearance it needs. That approximation is recorded in `tech/agent-navigation.md` as "An up-edge is not charged for its takeoff clearance", where it is described as costing the attempt cap. It costs more than that: it lets the generator certify terrain that nothing in the game can climb.
-
-**There is no crouch escape hatch.** `Soldier.applyMovement` returns early while crouched — `move` only sets facing and `vx` decays at friction — so a kneeling body cannot travel. Crouching lowers the hitbox for cover, not for traversal, and cannot be used to reach a space a standing body cannot.
-
-### Where the agent really is weaker than the player
-
-Separate from the above, and the honest size of it: **31 of 235 rejections (13%)** are destinations a body can reach and this follower cannot.
-
-| Gap | Share | Note |
-|---|---|---|
-| The follower is offered exactly two takeoff positions, the ones flanking the destination footprint, where a body has the whole span | 9% | Seed 3: offered x1180, flies from x1124 |
-| An upward jump takes off at `vx: 0` | 3% | `linkBetween`'s budget is `maxRunTo(dh)`, which already *assumes* the running start the executor throws away. The graph and the follower disagree about the same jump |
-| The tolerance band requires the nominal takeoff and a one-frame-early offset to both fly | 5% | A defect in this implementation, not in the contract |
-
-One more mismatch that costs everybody: the graph's `maxRise` is the **continuous** 122.5px, while a 1/60 semi-implicit integration reaches **116.67px**. Every edge in that 5.8px band is offered and flyable by nothing.
-
-### The surface model is a separate lever
-
-Merging co-planar platforms whose x ranges touch into one surface, as an estimate:
-
-| | Hop edges | Reachable surface |
-|---|---|---|
-| Legacy | 594 | 237,180 px |
-| Merged surfaces + clearance | 11 | 178,632 px |
-
-1,004 flush same-height platform pairs exist across the 30 levels. Merging **fixes #2 outright** — 594 ordered jumps over solid floor become 11 — and **does not recover reachability**. The two problems are independent, and an earlier reading of this that treated the node model as the cause of #1 was wrong.
-
-### Why the bar missed it
-
-The C2 sweep measured failed jumps (207 → 0) and agents making progress (169 → 170). Both improved. Both were blind to this: the sweep sent agents at a target at the far end of a level, where ground travel dominates, so reachability could fall 22% without moving either number.
-
-**The metric that catches it is reachable surface from spawn, before and after** — four lines, and it fails instantly. No suite in the repo asserts that a change to the graph does not shrink where an agent can go; that is the guard the rewrite needs first, not last.
-
-### One thing worth keeping
-
-The predictor itself is not what is wrong. It agrees with the real integrator, its swept sampling catches thin terrain, and 87% of what it rejected was genuinely unflyable. Its two real defects are the tolerance band above and a takeoff vocabulary of two positions — both in the *contract* it was given (see "Candidate choice" and "Takeoff tolerance" in the manoeuvre clearance contract), not in the code that implements it.
 
 ## As built
 
