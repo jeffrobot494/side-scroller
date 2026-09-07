@@ -100,7 +100,8 @@ section + the tests are the source of truth for what currently exists):
   `root.brainState.lastDecision` — nothing reads it now, and it is what a future
   scoreboard would read.
 - **Agents route around terrain they cannot jump through (`tech/nav-clearance.md`
-  C1–C2 — built).** `linkBetween` tests where a jump LANDS, never the arc, so the
+  C1–C2 — built, AND REGRESSED IN PLAY; see the end of this entry before
+  building on it).** `linkBetween` tests where a jump LANDS, never the arc, so the
   graph offered hops through pillars and climbs into overhangs and the agent was
   the only thing that ever found out — three failed attempts later. C2 adds a
   PREDICTOR: `buildGraph(platforms, profile, { clearance: true })` flies each
@@ -130,6 +131,18 @@ section + the tests are the source of truth for what currently exists):
   before, 0 after**, one more agent making progress, and 21% of hop/jump edges
   pruned; a graph build goes 0.09ms → 0.69ms (3.12ms worst). The attempt cap and
   the ban ledger stay — static clearance cannot predict a knockback mid-flight.
+  **Those numbers are true and were the wrong ones.** In play this cost **22% of
+  the reachable standable surface** and 256 of 813 above-ground spots: an agent
+  under a perch now declines the climb rather than attempting it. The predictor
+  is sound (87% of what it rejected is genuinely unflyable) — the contract it was
+  given is too narrow, and the graph it filters lies about surfaces. Two further
+  faults visible alongside it PRE-DATE this work: flush co-planar platforms are
+  separate nodes with a fake gap, so agents jump over solid floor (594 such edges
+  across 30 levels), and ground cut from the graph for headroom hands the agent
+  back to the pre-N3 reflex, which hops blind (15.8% of ground under an
+  overhang). Full evidence, and why the suite stayed green, in
+  `tech/nav-clearance.md` "Regressions found in play". **The spec is being
+  rewritten; do not build on C2's contract as it stands.**
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,

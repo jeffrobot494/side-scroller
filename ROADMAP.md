@@ -65,6 +65,7 @@ leaving them in "Next" hides the fact that the blocker is a choice, not effort.
 
 | Item | Situation | Decision needed |
 |---|---|---|
+| Nav clearance C1–C2 | Built and green, and it made the game worse in play — 22% less reachable surface, agents that decline climbs instead of attempting them. Evidence in `tech/nav-clearance.md` "Regressions found in play". The predictor is sound; the contract it was given is too narrow, and two of the three faults predate it | Two: whether generated terrain must guarantee agent-reachable perches (the audit does not charge an up-edge for takeoff clearance), and whether to ship with `navClearance` defaulted off while the spec is rewritten |
 | Locomotor L4+ | L1–L3 built; `wheeled`/`limbed`/`crawler` deliberately deferred. | None for now — deferred on purpose, listed so it is not mistaken for an oversight |
 
 ## Shipped
@@ -82,7 +83,6 @@ description of what the game does today; this is only the index.
 | Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `tech/sound.md` |
 | Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `tech/weapon-designer.md` |
 | Ranged repositioning R1–R2 — a `keepDistance` agent that cannot see its target walks to somewhere it can, both teams | `tech/ranged-repositioning.md` |
-| Nav clearance C1–C2 — a grounded agent's graph no longer offers a hop or a climb its body cannot fly, so it routes around a column or under an overhang instead of discovering the wall three failed jumps later | `design/agent-navigation.md` · `tech/nav-clearance.md` |
 | Behavior Lab v2 B1–B3 — one agent on a generated level, click to set a goal, 1:1 panned view, graph + path overlays, draggable platforms (v1 deleted) | `design/behavior-lab.md` · `tech/behavior-lab.md` |
 | Campaign pacing C1–C5 — the day is the only currency, leads expire and arrive on the clock, the finale is gated on High wins | `design/campaign-pacing.md` · `tech/campaign-pacing.md` |
 | Soldier ducking D1–D2 — squadmates kneel under a round a knee would dodge, and the Speed stat decides whether and how fast | `design/soldier-behavior.md` · `tech/soldier-ducking.md` |
@@ -101,7 +101,11 @@ description of what the game does today; this is only the index.
 | `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
 | Flyers can grind against terrain — steering pushes in while resolution pushes out | out of scope in `sprints/2026-08.md` |
 | Grounded bodies guess when a steering intent implies a jump, from a 40px heuristic with no terrain knowledge | fixed by `tech/agent-navigation.md` N3 |
-| A jump edge tests where it lands, not the arc, so a column or an overhang is only found by failing at it | fixed by `tech/nav-clearance.md` C2 |
+| A jump edge tests where it lands, not the arc, so a column or an overhang is only found by failing at it | `tech/nav-clearance.md` C2 addressed this and regressed reachability doing it — see below |
+| A column and the slab flush against its top are two nodes with a fake gap, so agents jump over solid floor | `tech/nav-clearance.md` "Regressions found in play" #2 — pre-dates C2 |
+| Off the graph, the router hands back to a reflex that hops at anything above it with no terrain knowledge | `tech/nav-clearance.md` "Regressions found in play" #3 — pre-dates C2 |
+| Generated levels contain perches an agent cannot take off beside; the audit never charges an up-edge for takeoff clearance | `tech/nav-clearance.md` "What the rejections actually are" |
+| Nothing in the suite asserts that a graph change does not shrink where an agent can go | `tech/nav-clearance.md` "Why the bar missed it" |
 | Two enemy jump impulses disagree, and the reflex hop out-jumps the deliberate jump | fixed by `tech/agent-navigation.md` N2 |
 | No coyote time — a jump one frame after leaving a ledge is silently dropped | fixed by `tech/agent-navigation.md` N2 |
 

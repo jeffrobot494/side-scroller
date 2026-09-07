@@ -120,6 +120,63 @@ No new subsystem, dependency, test suite or movement ability is needed. If numer
 
 This revision replaces the earlier clearance proposal in this file. Its scratch pruning counts are not implementation evidence, and its stationary-ascent description is not the current follower's airborne rule. The design addendum is the authority for this work.
 
+## Regressions found in play — 2026-09-07
+
+C1–C2 shipped green and made the game worse. Bo found three faults in the Behavior Lab; screenshots in `screen-shots/`. This section is the evidence, so the rewrite is aimed at causes rather than symptoms. **Every measurement below is 30 generated levels at high difficulty on the soldier profile** (30×46, gravity 2000, jump 700, run 320), unless it says otherwise.
+
+| # | Symptom | Screenshot | Root cause | Introduced by C1/C2? |
+|---|---|---|---|---|
+| 1 | An agent under a platform will not attempt the climb at all | `no-vertical-path.png` | Perches whose only takeoff is under a neighbouring piece. The graph offered the climb, the body was never able to fly it, and C2 removed the edge rather than the failure | **No — revealed, not caused.** See "What the rejections actually are" |
+| 2 | A column and the slab flush against its top are separate surfaces, and the agent jumps between them | `separated-surfaces.png` | One node per PLATFORM, not per walkable surface. Two flush platforms leave a 30px gap in body-left-edge span space, which `kindOf` calls a `hop` | **No — pre-existing since N1** |
+| 3 | Approaching a sideways L, the agent jumps once into the overhang, fails, then routes around | `one-incorrect-jump.png` | Ground beneath an overhang is cut from the graph for headroom, so `routeRequest` returns null and the caller falls back to the pre-N3 reflex, which hops at anything 40–60px above it with no terrain knowledge | **No — pre-existing since N3.** C2 makes it fire more often, because routes now go *around* obstacles and spend longer underneath them |
+
+**None of the three is fixed by reverting C1–C2.** #2 and #3 predate this work entirely; #1 goes back to being invisible rather than going away.
+
+### What it cost
+
+| Measure | Legacy graph | As shipped | Change |
+|---|---|---|---|
+| Reachable standable surface from spawn | 237,180 px | 184,492 px | **−22%** |
+| Standable spots above the ground | 813 | 557 | **−256** |
+| Up-edges in the graph | 1,333 | 1,005 | −328 |
+
+`test/navigation.test.mjs` and the C2 sweep both stayed green through this, for the reason in "Why the bar missed it" below.
+
+### What the rejections actually are
+
+Of 235 rejected up-edges sampled over 20 levels, replayed from **every** x on the source span at 4px steps rather than only from the takeoffs the follower knows:
+
+| | Count | Reading |
+|---|---|---|
+| Not flyable from anywhere on the source span | 204 (87%) | The edge was a lie. The graph offered it, no body could ever fly it, and pre-C2 the agent discovered that by failing three times |
+| Flyable from some x, but not one the follower is offered | 21 (9%) | A real route, lost. `takeoffCandidates` proposes exactly two positions — the ones flanking the destination footprint — and where those are roofed it gives up, though a takeoff further back is clear. Seed 3: offered 1180, flies from 1124 |
+| Flyable from an offered takeoff, still rejected | 10 (4%) | **A defect.** `takeoffBand` requires the nominal takeoff *and* a one-frame-early offset to both fly; an edge that works at its exact x and fails 5.33px short is dropped |
+
+Why the 204 fail, by first contact: 147 rise into an underside, 59 hit a side, 13 land on the destination but off its span, 5 land on another platform first.
+
+**The uncomfortable half of this is a generation finding, not a navigation one.** `auditGeometry` certifies a level traversable using `gapBetween`, which reports 0 for overlapping spans and never charges an up-edge for the body-width takeoff clearance it actually needs — the approximation recorded in `tech/agent-navigation.md` as "An up-edge is not charged for its takeoff clearance". So generated levels contain perches only the player can reach. Pre-C2 that was masked by agents flailing at them; C2 made it visible as an agent standing still. **Whether generated terrain should guarantee agent-reachable perches is Bo's call, not a bug to fix quietly.**
+
+### The surface model is a separate lever
+
+Merging co-planar platforms whose x ranges touch into one surface, as an estimate:
+
+| | Hop edges | Reachable surface |
+|---|---|---|
+| Legacy | 594 | 237,180 px |
+| Merged surfaces + clearance | 11 | 178,632 px |
+
+1,004 flush same-height platform pairs exist across the 30 levels. Merging **fixes #2 outright** — 594 ordered jumps over solid floor become 11 — and **does not recover reachability**. The two problems are independent, and an earlier reading of this that treated the node model as the cause of #1 was wrong.
+
+### Why the bar missed it
+
+The C2 sweep measured failed jumps (207 → 0) and agents making progress (169 → 170). Both improved. Both were blind to this: the sweep sent agents at a target at the far end of a level, where ground travel dominates, so reachability could fall 22% without moving either number.
+
+**The metric that catches it is reachable surface from spawn, before and after** — four lines, and it fails instantly. No suite in the repo asserts that a change to the graph does not shrink where an agent can go; that is the guard the rewrite needs first, not last.
+
+### One thing worth keeping
+
+The predictor itself is not what is wrong. It agrees with the real integrator, its swept sampling catches thin terrain, and 87% of what it rejected was genuinely unflyable. Its two real defects are the tolerance band above and a takeoff vocabulary of two positions — both in the *contract* it was given (see "Candidate choice" and "Takeoff tolerance" in the manoeuvre clearance contract), not in the code that implements it.
+
 ## As built
 
 C1 landed as planned: `lipToward`, `landingX`, `footprintClear`, `airborneAimX` and `driveV` moved from `src/mission/navigation.js` into `src/game/nav.js`, the follower's decisions were byte-identical, and no fixture moved. `takeoffCandidates` was added there unused — it is `takeoffX`'s answer with the body's position taken out of it, which is what C2 stores on an edge.
