@@ -17,9 +17,9 @@ built-in defaults and the editor tunes a copy of the game nobody is in.
 
 | | |
 |---|---|
-| What it shows | Every knob in the config schema, the same ones the editor's Settings tab shows |
+| What it shows | The knobs ONLY a room reads — friendly fire, gravity, damage, movement, the squad's reflexes, navigation, the board. Not the ones a browser also reads |
 | Where | The editor's Settings tab, opened against a server rather than this browser |
-| Who may change them | Anyone holding a seat token for that server. Not a stranger who found the URL |
+| Who may change them | Anyone who can reach the server. Nobody owns a setting and nothing is asked of whoever changes one |
 | Scope | The whole server. Not per room, and not per commander |
 | When a change takes effect | Whenever the game next reads that value. Some are read every shot, some at the start of a mission, some at the start of a campaign |
 | Lifetime | The server process. A restart or a deploy returns it to built-in defaults |
@@ -41,6 +41,17 @@ A player will therefore see some sliders move the game under them, some do
 nothing until they deploy, and some do nothing to work already sitting on the
 board. That is the honest behaviour and the screen does not pretend otherwise.
 
+## Whose setting is it
+
+A room simulates and a browser draws, so a knob belongs to whichever half reads
+it. That split is the whole of what this screen may touch.
+
+| | |
+|---|---|
+| The room's | Anything ONLY the mission or the campaign is run by: friendly fire, gravity, squad damage, movement and jump, the ducking reflexes, navigation, the board's size and arrival rate |
+| The viewer's | Anything about looking and listening: canvas size, zoom, the FPS meter, sound volumes, gamepad deadzone, aim mode. A room never draws and never plays a sound, so these stay on the machine that does |
+| Read by both | Some settings are consulted on both machines — a soldier's hit points are applied where the mission runs and drawn where the base is. These belong to neither list and this screen does not offer them |
+
 ## Making a change permanent
 
 The dashboard tunes a session. A value that should outlive the process is
@@ -54,6 +65,8 @@ Named so they read as absent rather than overlooked.
 | | |
 |---|---|
 | Per-room settings | One server, one set of values. Two rooms on one process share them |
+| Any authentication | Nothing is asked of whoever changes a setting |
+| Changing a viewer's settings for them | Volume and zoom are nobody else's business |
 | Settings that survive a restart | The campaign does not either |
 | A host or an owner | Every seat token is equal. There is nobody a setting belongs to |
 | A record of who changed what | |

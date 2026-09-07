@@ -678,7 +678,10 @@ export class Mission {
   // commander's input (J7).
   //
   // THE AIM MODE IS THE DEVICE'S BUSINESS, NOT THIS SCENE'S. `config.aimMode`
-  // is handed to the input and read by nothing here, because a room holds one
+  // is handed to the input and acted on by nothing here — the room's own copy
+  // still crosses this line, and is inert because the wire input's `aimSource`
+  // declares no parameter. It is passed rather than dropped because the LOCAL
+  // device needs it. A room holds one
   // scene for two commanders who may be holding different things — one on a
   // stick and one on a mouse is the ordinary case, and a scene that consulted a
   // single mode would force them to agree. The local `MissionInput` uses the
