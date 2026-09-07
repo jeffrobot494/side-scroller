@@ -19,7 +19,10 @@
 // layer has. See "Who decides to jump" in the spec.
 // ---------------------------------------------------------------------------
 
-import { bodyProfile, profileKey, buildGraph, nodeUnder, nearestNode, route, bestPartial, costsFrom, edgeKey } from "../game/nav.js";
+import {
+  bodyProfile, profileKey, buildGraph, nodeUnder, nearestNode, route, bestPartial, costsFrom, edgeKey,
+  takeoffX, landingX, footprintClear, airborneAimX, driveV,
+} from "../game/nav.js";
 import { bodyJump } from "./locomotion.js";
 import { config } from "../game/config.js";
 
@@ -84,51 +87,6 @@ function newNav(gen) {
 
 const dist2 = (ax, ay, bx, by) => (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
 
-// Where on `from`'s span a body should stand to attempt the edge to `to`.
-//
-// For a jump UP this is not simply "the closest point": platforms are solid from
-// below (`collideAxis` blocks upward passage), so taking off from under the
-// destination drives the body's head into its underside and it never rises. The
-// takeoff must clear the destination platform's footprint entirely — stand just
-// beside it and use air control to drift on. `w` is the body width, which is
-// exactly how far outside the footprint "beside it" is.
-//
-// The graph does not model this: `gapBetween` reports 0 for overlapping spans,
-// so an edge can exist whose real takeoff needs `w` px of horizontal budget the
-// link test never charged for. Where that budget is not there the jump fails,
-// and the attempt cap is what notices. Recorded in the spec's Approximations.
-function takeoffX(from, to, x, w, up) {
-  // The ordinary answer: the closest point on this node to the destination.
-  let lip;
-  if (to.a > from.b) lip = from.b; // destination is to the right — right lip
-  else if (to.b < from.a) lip = from.a; // to the left — left lip
-  else lip = clamp(x, Math.max(from.a, to.a), Math.min(from.b, to.b));
-  if (!up) return lip;
-
-  // Jumping up, the lip is only usable if the body is clear of the destination
-  // platform's footprint, which in left-edge space runs (to.a - w, to.b + w).
-  // A takeoff inside it is a takeoff underneath, and the body rises into solid
-  // platform. When the destination is off to one side the lip is already clear
-  // and this changes nothing.
-  const left = to.a - w;
-  const right = to.b + w;
-  if (lip <= left || lip >= right) return lip;
-  const okLeft = left >= from.a && left <= from.b;
-  const okRight = right >= from.a && right <= from.b;
-  if (okLeft && okRight) return Math.abs(left - x) <= Math.abs(right - x) ? left : right;
-  if (okLeft) return left;
-  if (okRight) return right;
-  // Neither side is standable on this node — there is no takeoff here that
-  // works. Try the lip anyway; the bonk is a failed attempt and the cap retires
-  // the edge, which is the designed response to a jump that cannot be made.
-  return lip;
-}
-
-// The nearest standable x on a node, in body-left-edge space.
-function landingX(node, x) {
-  return clamp(x, node.a, node.b);
-}
-
 function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -175,18 +133,11 @@ export function routeRequest(ent, dest, speed, scene, dt) {
     if (!nav.leg) return null;
     const to = graph.nodes[nav.leg.to];
     if (!to) return null;
-    // Climbing: while the feet are still below the destination surface, close on
-    // it but stop at the edge of its footprint. Entering early means hitting the
-    // platform's SIDE, which is solid, and the jump reads as a failed attempt.
-    // Holding position instead would be simpler and worse — it spends the whole
-    // rise standing still, and the graph's horizontal budget is priced from
-    // takeoff, not from the apex. Approaching the edge keeps that budget.
-    if (to.y < ent.y + ent.h) {
-      const lo = to.a - ent.w;
-      const hi = to.b + ent.w;
-      return drive(ent, ent.x < (lo + hi) / 2 ? lo : hi, speed, dt);
-    }
-    return drive(ent, landingX(to, ent.x), speed, dt);
+    // `airborneAimX` is the shared rule (nav.js): close on the footprint edge
+    // while still rising past it, then on the landing span. C2's predictor flies
+    // the same rule, which is the only reason a predicted arc and a real one can
+    // be compared at all.
+    return drive(ent, airborneAimX(to, ent.x, ent.w, ent.y + ent.h), speed, dt);
   }
 
   // ---- grounded: resolve where we are -------------------------------------
@@ -334,9 +285,8 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // happens and the cap retires the edge — refusing to jump there would drive
   // the body at a lip it is already standing on, forever, and it would never
   // learn the edge is a lie.
-  if (up) {
-    const clear = (x) => x <= next.a - ent.w || x >= next.b + ent.w;
-    if (clear(lip) && !clear(ent.x)) return drive(ent, lip, speed, dt);
+  if (up && footprintClear(lip, next, ent.w) && !footprintClear(ent.x, next, ent.w)) {
+    return drive(ent, lip, speed, dt);
   }
 
   // At the takeoff. Commit: the hop flag is the whole point of the slice.
@@ -351,22 +301,12 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   return req;
 }
 
-// Full-speed horizontal toward a left-edge x, or a halt once inside the arrival
-// radius — driveX rather than steer, because a legged `steer` scales horizontal
-// speed by the normalized direction and crawls when its point is far above.
+// Full-speed horizontal toward a left-edge x, or a halt once there — driveX
+// rather than steer, because a legged `steer` scales horizontal speed by the
+// normalized direction and crawls when its point is far above. The magnitude is
+// `driveV` in nav.js, shared with the clearance predictor.
 function drive(ent, toX, speed, dt) {
-  const dx = toX - ent.x;
-  // Full speed while there is ground to cover, but never more than the distance
-  // that remains. A fixed deadband cannot work here: one frame at 210px/s is
-  // 3.5px, so anything smaller than a frame's travel makes the body oscillate
-  // around its target forever instead of settling on it. That jitter is
-  // ordinarily invisible and once was not — a body holding station at the edge
-  // of a platform's footprint kept stepping back UNDER it and rising into the
-  // underside, which the router then scored as a failed jump.
-  const step = dt > 0 ? Math.abs(dx) / dt : speed;
-  const v = Math.min(speed, step);
-  if (v < 1) return { kind: "driveX", v: 0 };
-  return { kind: "driveX", v: (dx > 0 ? 1 : -1) * v };
+  return { kind: "driveX", v: driveV(toX - ent.x, speed, dt) };
 }
 
 // ---- band resolver (tech/ranged-repositioning.md, R1) -----------------------

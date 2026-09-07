@@ -148,6 +148,124 @@ export function buildGraph(platforms, profile) {
   return { nodes, edges: buildEdges(nodes, profile), profile };
 }
 
+// ---- the manoeuvre (tech/nav-clearance.md, C1) -----------------------------
+//
+// How a body actually TRAVELS an edge: where it stands to take off, where it
+// steers while airborne, and how fast it walks at a target. These were four
+// private functions in src/mission/navigation.js, because until C1 only the
+// follower needed them. C2's clearance predictor needs the same answers — it
+// simulates the manoeuvre the follower will perform — and two implementations
+// of "where does this body take off" is exactly how a predicted jump and a real
+// jump come to disagree.
+//
+// They live HERE rather than there because this module is the pure one: no
+// scene, no entity, no config. Spans, a body width and a speed go in; a number
+// comes out. `navigation.js` supplies the entity's fields at the call site.
+
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+// The ordinary directed lip: the closest point on `from`'s span to `to`. `x` is
+// only consulted when the two spans OVERLAP, where "closest" is underfoot.
+export function lipToward(from, to, x) {
+  if (to.a > from.b) return from.b; // destination is to the right — right lip
+  if (to.b < from.a) return from.a; // to the left — left lip
+  return clamp(x, Math.max(from.a, to.a), Math.min(from.b, to.b));
+}
+
+// The nearest standable x on a node, in body-left-edge space.
+export function landingX(node, x) {
+  return clamp(x, node.a, node.b);
+}
+
+// Is a body at left-edge `x` clear of `to`'s footprint? Platforms are solid from
+// below, so a body standing anywhere in (to.a - w, to.b + w) that jumps drives
+// its head into the underside and never rises.
+export function footprintClear(x, to, w) {
+  return x <= to.a - w || x >= to.b + w;
+}
+
+// The standable positions on `from` that clear `to`'s footprint, left then
+// right. Both when both are available: an up-edge is not one-sided, and
+// rejecting a usable far side because the near one is roofed is a route lost.
+export function clearTakeoffs(from, to, w) {
+  const out = [];
+  const left = to.a - w;
+  const right = to.b + w;
+  if (left >= from.a && left <= from.b) out.push(left);
+  if (right >= from.a && right <= from.b) out.push(right);
+  return out;
+}
+
+// Where on `from`'s span a body should stand to attempt the edge to `to`.
+//
+// For a jump UP this is not simply "the closest point", for the reason
+// footprintClear states: the takeoff must clear the destination platform
+// entirely, and `w` is exactly how far outside "beside it" is.
+//
+// The graph does not model this: `gapBetween` reports 0 for overlapping spans,
+// so an edge can exist whose real takeoff needs `w` px of horizontal budget the
+// link test never charged for. Where that budget is not there the jump fails,
+// and (without clearance) the attempt cap is what notices.
+export function takeoffX(from, to, x, w, up) {
+  const lip = lipToward(from, to, x);
+  if (!up || footprintClear(lip, to, w)) return lip;
+  const sides = clearTakeoffs(from, to, w);
+  // Neither side is standable on this node — there is no takeoff here that
+  // works. Return the lip anyway; without clearance the bonk is a failed attempt
+  // and the cap retires the edge, which is the designed response to a jump that
+  // cannot be made.
+  if (!sides.length) return lip;
+  if (sides.length === 1) return sides[0];
+  return Math.abs(sides[0] - x) <= Math.abs(sides[1] - x) ? sides[0] : sides[1];
+}
+
+// Every takeoff worth TESTING for this edge, in a fixed order and with no
+// reference to where any body currently is. `takeoffX` picks one of these for a
+// body that is already standing somewhere; C2's predictor validates all of them.
+//
+// A hop's spans never overlap (gap > 0 is what makes it a hop), so its answer is
+// the single directed lip. An up-edge offers the lip when the lip already clears
+// the footprint, plus each standable clear side.
+export function takeoffCandidates(from, to, w, up) {
+  const lip = to.a > from.b ? from.b : to.b < from.a ? from.a : null;
+  if (!up) return lip === null ? [] : [lip];
+  const out = lip !== null && footprintClear(lip, to, w) ? [lip] : [];
+  for (const s of clearTakeoffs(from, to, w)) if (!out.includes(s)) out.push(s);
+  return out;
+}
+
+// Where an AIRBORNE body on a jump leg steers, in body-left-edge space.
+//
+// Climbing: while the feet are still below the destination surface, close on it
+// but stop at the edge of its footprint. Entering early means hitting the
+// platform's SIDE, which is solid. Holding position instead would be simpler and
+// worse — it spends the whole rise standing still, and the graph's horizontal
+// budget is priced from takeoff, not from the apex.
+export function airborneAimX(to, x, w, feetY) {
+  if (to.y < feetY) {
+    const lo = to.a - w;
+    const hi = to.b + w;
+    return x < (lo + hi) / 2 ? lo : hi;
+  }
+  return landingX(to, x);
+}
+
+// Full-speed horizontal toward a left-edge target, signed, or 0 once there.
+//
+// Full speed while there is ground to cover, but never more than the distance
+// that remains. A fixed deadband cannot work here: one frame at 210px/s is
+// 3.5px, so anything smaller than a frame's travel makes the body oscillate
+// around its target forever instead of settling on it. That jitter is ordinarily
+// invisible and once was not — a body holding station at the edge of a
+// platform's footprint kept stepping back UNDER it and rising into the underside,
+// which the router then scored as a failed jump.
+export function driveV(dx, speed, dt) {
+  const step = dt > 0 ? Math.abs(dx) / dt : speed;
+  const v = Math.min(speed, step);
+  if (v < 1) return 0;
+  return (dx > 0 ? 1 : -1) * v;
+}
+
 // ---- queries --------------------------------------------------------------
 
 // Every node reachable from `startId`, following edge direction. This is what

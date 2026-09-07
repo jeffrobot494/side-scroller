@@ -17,6 +17,7 @@
 import {
   bodyProfile, profileKey, buildGraph, buildNodes, linkBetween,
   reachableFrom, route, costsFrom, nearestNode,
+  lipToward, landingX, footprintClear, clearTakeoffs, takeoffX, takeoffCandidates, airborneAimX, driveV,
 } from "../src/game/nav.js";
 
 const SOLDIER = bodyProfile({ w: 30, h: 46, gravity: 2000, jumpSpeed: 720, runSpeed: 320 });
@@ -180,5 +181,83 @@ export default async function run(t) {
     // share it, or generation can promise a level the runtime cannot walk.
     const nodes = buildNodes([{ x: 0, y: 500, w: 200, h: 40 }, { x: 370, y: 500, w: 200, h: 40 }], SOLDIER);
     t.ok("seam: linkBetween is directly callable on two nodes", !!linkBetween(nodes[0], nodes[1], SOLDIER));
+  }
+
+  // ---- the manoeuvre (tech/nav-clearance.md, C1) -------------------------
+  // These four were private to the follower until C1. They are here because C2's
+  // predictor simulates the manoeuvre the follower performs, and two answers to
+  // "where does this body take off" is how a predicted jump and a real one come
+  // to disagree.
+  {
+    const from = { a: 0, b: 200, y: 500 };
+    const right = { a: 400, b: 600, y: 500 };
+    const left = { a: -400, b: -200, y: 500 };
+    t.eq("lip: a destination to the right leaves by the right lip", lipToward(from, right, 50), 200);
+    t.eq("lip: ...and one to the left by the left lip", lipToward(from, left, 150), 0);
+    // Overlapping spans have no lip: "closest" is wherever the body stands.
+    const over = { a: 100, b: 300, y: 400 };
+    t.eq("lip: overlapping spans resolve to the body's own x, clamped", lipToward(from, over, 150), 150);
+    t.eq("lip: ...clamped to the shared stretch", lipToward(from, over, 20), 100);
+
+    t.eq("landing: the nearest standable x on the destination", landingX(right, 50), 400);
+    t.eq("landing: and no move at all when already on it", landingX(right, 500), 500);
+  }
+  {
+    // Footprint clearance in body-LEFT-EDGE space: (to.a - w, to.b + w) is the
+    // band from which a rising body hits the destination's underside.
+    const to = { a: 400, b: 600, y: 400 };
+    t.ok("footprint: a body a full width left of the span is clear", footprintClear(370, to, 30));
+    t.ok("footprint: exactly a width out is clear — the boundary is inclusive", footprintClear(370, to, 30) && footprintClear(630, to, 30));
+    t.ok("footprint: one pixel inside is not", !footprintClear(371, to, 30));
+    t.ok("footprint: and directly underneath certainly is not", !footprintClear(500, to, 30));
+  }
+  {
+    // A ledge whose clear sides are 370 and 630. Which of them a node offers is
+    // a fact about the node's span, and BOTH count when both are standable.
+    const to = { a: 400, b: 600, y: 400 };
+    t.eq("takeoff: both sides on a wide node", clearTakeoffs({ a: 0, b: 900, y: 500 }, to, 30), [370, 630]);
+    t.eq("takeoff: only the near one when the node stops short", clearTakeoffs({ a: 0, b: 500, y: 500 }, to, 30), [370]);
+    t.eq("takeoff: only the far one when the node starts late", clearTakeoffs({ a: 500, b: 900, y: 500 }, to, 30), [630]);
+    t.eq("takeoff: neither, when the node lies wholly under the ledge", clearTakeoffs({ a: 420, b: 580, y: 500 }, to, 30), []);
+
+    // takeoffX picks ONE for a body already standing somewhere; the nearer side.
+    const wide = { a: 0, b: 900, y: 500 };
+    t.eq("takeoff: a body left of the ledge uses the left side", takeoffX(wide, to, 200, 30, true), 370);
+    t.eq("takeoff: a body right of it uses the right side", takeoffX(wide, to, 800, 30, true), 630);
+    // Where neither side is standable it returns the lip anyway: without
+    // clearance the bonk is the failed attempt the cap retires the edge on, and
+    // an agent that refuses to try never learns the edge is a lie.
+    const under = { a: 420, b: 580, y: 500 };
+    t.eq("takeoff: no clear side falls back to the lip, so the attempt happens", takeoffX(under, to, 500, 30, true), 500);
+    // A hop never consults the footprint — it is not rising into anything.
+    t.eq("takeoff: a hop uses the plain directed lip", takeoffX(wide, { a: 1200, b: 1400, y: 500 }, 100, 30, false), 900);
+
+    // The candidate list is position-free: it is what C2 VALIDATES, and a
+    // candidate set that moved with the body could not be stored on an edge.
+    t.eq("candidates: an up-edge offers every clear standable side", takeoffCandidates(wide, to, 30, true), [370, 630]);
+    t.eq("candidates: none when the ledge roofs the whole node", takeoffCandidates(under, to, 30, true), []);
+    t.eq("candidates: a hop offers its one directed lip", takeoffCandidates(wide, { a: 1200, b: 1400, y: 500 }, 30, false), [900]);
+    // A lip that is ALREADY clear is the candidate; the sides are off-span here.
+    t.eq("candidates: a far lip that already clears the footprint counts",
+      takeoffCandidates({ a: 0, b: 200, y: 500 }, { a: 400, b: 600, y: 400 }, 30, true), [200]);
+  }
+  {
+    const to = { a: 400, b: 600, y: 400 };
+    // Rising: aim at the nearer edge of the footprint, never into it.
+    t.eq("airborne: below the surface, close on the near footprint edge", airborneAimX(to, 300, 30, 470), 370);
+    t.eq("airborne: from the far side, the far edge", airborneAimX(to, 700, 30, 470), 630);
+    // Feet at or above the surface: the landing span, clamped.
+    t.eq("airborne: once the feet clear it, head for the landing point", airborneAimX(to, 300, 30, 400), 400);
+    t.eq("airborne: and stay put when already over it", airborneAimX(to, 500, 30, 380), 500);
+  }
+  {
+    // The distance clamp: full speed while there is ground to cover, never more
+    // than what remains, and a halt inside a pixel-per-second of arriving.
+    const dt = 1 / 60;
+    t.eq("drive: full speed toward a distant target", driveV(500, 320, dt), 320);
+    t.eq("drive: reversed for a target behind", driveV(-500, 320, dt), -320);
+    t.ok("drive: capped at the distance remaining, so a body lands exactly on it",
+      near(driveV(2, 320, dt), 120, 1e-9));
+    t.eq("drive: and stops rather than oscillating around it", driveV(0.01, 320, dt), 0);
   }
 }
