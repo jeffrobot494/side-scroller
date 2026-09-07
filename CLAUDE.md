@@ -277,10 +277,31 @@ in ways that look like the repo's fault rather than the instruction's. (A file
 called `nul` once appeared in the repo root for exactly this reason: `2>nul` is
 a null device in `cmd` and a filename everywhere else.)
 
-Static site — serve the folder and open a page. No bundler, no transpile.
+No bundler, no transpile. **`npm start` is how you run this** — the two commands
+below are not alternatives and have not been since `server.mjs` grew a second
+job.
 
-    python3 -m http.server 8000        # then open http://localhost:8000/
-    npm start                          # server.mjs — same site, honours $PORT
+    npm start                          # node server.mjs — the whole game
+    python3 -m http.server 8000        # single-player only; see the table
+
+`server.mjs` serves the files AND is the game's server: it holds the rooms
+(`tech/multiplayer-service.md` V1), steps a joint mission at 60Hz
+(`tech/multiplayer-missions.md` J8), and answers the config routes
+(`tech/server-settings.md`). `python3` serves files and nothing else, so it is a
+strict subset — everything single-player works and every multiplayer URL fails
+at the first request, measured:
+
+| | `python3` | `npm start` |
+|---|---|---|
+| `index.html` — single-player | ✅ | ✅ |
+| `?players=2` — hot-seat | ✅ (a loopback; no server involved) | ✅ |
+| `editor.html` — local settings | ✅ | ✅ |
+| `?room=2` — open a room | ❌ `501` | ✅ |
+| `?seat=<token>` — a joint mission | ❌ | ✅ |
+| `editor.html?server=1` — server settings | ❌ `404` | ✅ |
+
+The static-only path is worth keeping — it is what proves the game still needs
+no process — but reach for it deliberately, not by habit.
 
 - `index.html` → `src/main.js` — the game (single page + scene manager).
 - `editor.html` → `src/editor/editor.js` — the dev editor (settings + GUI tools).

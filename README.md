@@ -78,13 +78,18 @@ rather than centuries today. The story layer is this month's work; see
 
 ## Run it
 
-ES modules must be served over HTTP, not opened as a `file://` path. Any static
-server works:
+ES modules must be served over HTTP, not opened as a `file://` path. **Use
+`npm start`** — a static server is enough for single-player and nothing else:
 
 ```bash
-python3 -m http.server 8000     # then open http://localhost:8000
-npm start                       # same thing via server.mjs, honours $PORT
+npm start                       # node server.mjs — the whole game, honours $PORT
+python3 -m http.server 8000     # single-player only; no rooms, no joint missions
 ```
+
+`server.mjs` is not just a file server any more. It holds the rooms, steps a
+joint mission at 60Hz, and answers the settings routes, so every multiplayer URL
+(`?room=`, `?seat=`, `editor.html?server=`) fails on a static server at the
+first request.
 
 `server.mjs` exists so the repo can be **hosted** — a platform like Railway runs
 a process and expects it to bind `$PORT` rather than serving a folder. It is
