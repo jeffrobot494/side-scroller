@@ -21,11 +21,12 @@
 //   editor.html?server=1              → the origin that served this page
 //   editor.html?server=http://host:80 → that origin
 //
-// The second form exists because of the way this repo is actually run: the
-// documented local command is `python3 -m http.server`, which serves the folder
-// and has no `/api` at all, so `?server=1` there points at something that
-// cannot answer. It fails visibly rather than silently (see `load`), and the
-// URL form is the way out without moving the editor to the node server.
+// The second form exists because this page can be served by something that is
+// not the game's server. `npm start` is how the repo is run and answers
+// everything; `python3 -m http.server` still serves the files and has no `/api`
+// at all (CLAUDE.md carries the measured table), so `?server=1` under it points
+// at something that cannot answer. It fails visibly rather than silently (see
+// `load`), and the URL form is the way out without moving the editor.
 export function serverTarget(href) {
   let url;
   try {
