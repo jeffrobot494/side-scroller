@@ -64,7 +64,7 @@ alternative is finding out after a redeploy.
 
 | | |
 |---|---|
-| Tuning | Live on that server, immediately |
+| Tuning | Live on that server, immediately — by a slider, or by pasting a whole exported set back in |
 | Restart or redeploy | Back to whatever the source says |
 | Committed | The starting point for every server from then on |
 
