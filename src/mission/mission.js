@@ -674,9 +674,28 @@ export class Mission {
     }
   }
 
-  // Resolve how the piloted soldier `s` aims this frame from config.aimMode,
-  // off `inp` — its own commander's input (J7).
-  // keyboard: the legacy up/forward scheme. mouse/gamepad/auto: a free aimVec.
+  // Resolve how the piloted soldier `s` aims this frame, off `inp` — its own
+  // commander's input (J7).
+  //
+  // THE AIM MODE IS THE DEVICE'S BUSINESS, NOT THIS SCENE'S. `config.aimMode`
+  // is handed to the input and read by nothing here, because a room holds one
+  // scene for two commanders who may be holding different things — one on a
+  // stick and one on a mouse is the ordinary case, and a scene that consulted a
+  // single mode would force them to agree. The local `MissionInput` uses the
+  // mode to pick which device it is listening to; the wire input
+  // (`src/net/mission-wire.js`) ignores the argument entirely, because the
+  // client already resolved its aim before the packet left.
+  //
+  // NO SOURCE THIS FRAME MEANS KEEP THE LAST AIM. `aimStick.active` goes false
+  // the instant a right stick re-centres, so clearing `aimVec` here snapped the
+  // gun back to facing every time somebody let go — which is what a player
+  // feels as the gun jumping. Aim persists until something aims it somewhere
+  // else.
+  //
+  // A soldier who has NEVER been given a vector is on the keyboard scheme, and
+  // that is what `aimUp` is for. So the up/forward scheme is the absence of a
+  // vector ENTIRELY, not the absence of one this frame, and `aimUp` is a button
+  // that already crosses the wire. Nothing about the mode has to.
   //
   // THREE SOURCE SHAPES, and the split is about who owns a camera. `stick` is a
   // direction and needs none. `mouse` is canvas pixels and needs THIS page's
@@ -685,15 +704,13 @@ export class Mission {
   // ever one of them. `world` is an absolute world point, already resolved by
   // whoever owns the camera it came from, and is the shape that crosses a wire.
   _applyAim(s, inp) {
-    const mode = config.aimMode;
-    if (mode === "keyboard") {
-      s.aimVec = null;
-      s.aimUp = inp.isDown("aimUp") && !s.crouched;
+    const src = inp.aimSource(config.aimMode);
+    if (!src) {
+      // Hold the aim. Only a soldier who has never had one reads the button.
+      if (!s.aimVec) s.aimUp = inp.isDown("aimUp") && !s.crouched;
       return;
     }
     s.aimUp = false;
-    const src = inp.aimSource(mode);
-    if (!src) { s.aimVec = null; return; }
     let dx, dy;
     const mx = s.x + s.w / 2, my = s.y + s.h * 0.42;
     if (src.type === "stick") {

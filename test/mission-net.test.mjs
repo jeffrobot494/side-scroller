@@ -132,6 +132,48 @@ export default async function run(t) {
     wired.sample();
     t.eq("aim: ...and arrives as the shape the mission takes without a camera",
       wired.aimSource(), { type: "world", x: 1100, y: 250 });
+
+    // THE ROOM IS AIM-MODE AGNOSTIC, and it has to be: two commanders in one
+    // scene may be holding different things. The scene reads no mode — the
+    // client resolves its aim before the packet leaves, and the absence of a
+    // vector ENTIRELY is what the keyboard scheme means. `config.aimMode` is set
+    // here to something neither seat is using, because the point is that the
+    // room's own mode does not matter.
+    //
+    // `_applyAim` is called off the prototype with a bare `this`: the stick and
+    // no-source branches touch no scene state, and only the `mouse` branch —
+    // which is local-device-only and never crosses a wire — reads a camera.
+    config.aimMode = "gamepad";
+    const applyAim = (body, wired) => Mission.prototype._applyAim.call({}, body, wired);
+    const framed = (dev, mode) => {
+      const w = createWireInput();
+      w.receive(packInput(dev, 1, mode, null));
+      w.sample();
+      return w;
+    };
+    const body = { x: 0, y: 0, w: 30, h: 46, crouched: false, aimVec: null, aimUp: false, facing: 1 };
+
+    // A keyboard commander: no vector, ever. Before this the room early-returned
+    // on ITS OWN mode, so in a gamepad-configured room their aimUp was forced
+    // false and their aim was silently dead.
+    applyAim(body, framed(stubInput({ down: { aimUp: true } }), "keyboard"));
+    t.ok("aim: a keyboard commander's aimUp survives a room set to gamepad",
+      body.aimUp === true && body.aimVec === null);
+
+    // A stick commander in the same room, same frame.
+    applyAim(body, framed(stubInput({ aim: { type: "stick", x: 0.6, y: -0.8 } }), "gamepad"));
+    t.ok("aim: ...and a stick commander in the same room still gets a vector",
+      body.aimVec !== null && Math.abs(body.aimVec.x - 0.6) < 1e-9 && body.aimUp === false);
+
+    // Releasing the stick must not snap the gun back to facing: aimStick.active
+    // goes false the instant it re-centres, and clearing the vector there is
+    // what a player feels as the gun jumping.
+    const held = { ...body.aimVec };
+    applyAim(body, framed(stubInput({}), "gamepad"));
+    t.ok("aim: a released stick keeps the aim it had, rather than snapping to facing",
+      body.aimVec && body.aimVec.x === held.x && body.aimVec.y === held.y);
+    t.ok("aim: ...and a soldier who already aims somewhere ignores the aimUp button",
+      body.aimUp === false);
   }
 
   // ======================================================================
