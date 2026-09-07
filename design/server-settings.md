@@ -1,7 +1,7 @@
 ---
 type: design
 category: development-tools
-status: unbuilt
+status: built
 resolution: sharp
 related: [multiplayer, multiplayer-service, multiplayer-missions]
 ---
@@ -22,7 +22,7 @@ built-in defaults and the editor tunes a copy of the game nobody is in.
 | Who may change them | Anyone who can reach the server. Nobody owns a setting and nothing is asked of whoever changes one |
 | Scope | The whole server. Not per room, and not per commander |
 | When a change takes effect | Whenever the game next reads that value. Some are read every shot, some at the start of a mission, some at the start of a campaign |
-| Lifetime | The server process. A restart or a deploy returns it to built-in defaults |
+| Lifetime | The server process, unless the change is made permanent. A restart or a deploy returns it to the built-in defaults |
 
 ## When a change lands
 
@@ -57,14 +57,15 @@ it. That split is the whole of what this screen may touch.
 The dashboard tunes a session. A change is live on that server the moment it is
 made and is gone when the server restarts.
 
-To keep it: export the settings as JSON, paste them into the config schema in
-source, and commit — which is how every other editor-authored change in this
-repo becomes permanent. The screen says so, beside the sliders, because the
+To keep it, the values the server is running are written into the config schema
+in source, and committed — which is how every other editor-authored change in
+this repo becomes permanent. The screen says so, beside the sliders, because the
 alternative is finding out after a redeploy.
 
 | | |
 |---|---|
 | Tuning | Live on that server, immediately — by a slider, or by pasting a whole exported set back in |
+| Made permanent | The running values written into the config schema in source, in one action, from the screen |
 | Restart or redeploy | Back to whatever the source says |
 | Committed | The starting point for every server from then on |
 
@@ -77,7 +78,6 @@ Named so they read as absent rather than overlooked.
 | Per-room settings | One server, one set of values. Two rooms on one process share them |
 | Any authentication | Nothing is asked of whoever changes a setting |
 | Changing a viewer's settings for them | Volume and zoom are nobody else's business |
-| Settings that survive a restart | The campaign does not either |
 | A host or an owner | Every seat token is equal. There is nobody a setting belongs to |
 | A record of who changed what | |
 | Changing settings from inside the game | The editor is where settings live, as it is for everything else |
