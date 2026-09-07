@@ -270,6 +270,13 @@ lot, stop elaborating.
 
 ## Running it (no build step)
 
+**Bo's shell is bash, under WSL, always.** Every command handed to him is bash:
+`rm`, `mv`, forward slashes. Never `del`, never `rmdir /s`, never PowerShell,
+never a `\\?\` path — those are for a Windows shell he is not in, and they fail
+in ways that look like the repo's fault rather than the instruction's. (A file
+called `nul` once appeared in the repo root for exactly this reason: `2>nul` is
+a null device in `cmd` and a filename everywhere else.)
+
 Static site — serve the folder and open a page. No bundler, no transpile.
 
     python3 -m http.server 8000        # then open http://localhost:8000/
