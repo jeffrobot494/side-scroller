@@ -54,9 +54,19 @@ it. That split is the whole of what this screen may touch.
 
 ## Making a change permanent
 
-The dashboard tunes a session. A value that should outlive the process is
-exported as JSON and pasted into the config schema in source, which is how every
-other editor-authored change in this repo becomes permanent.
+The dashboard tunes a session. A change is live on that server the moment it is
+made and is gone when the server restarts.
+
+To keep it: export the settings as JSON, paste them into the config schema in
+source, and commit — which is how every other editor-authored change in this
+repo becomes permanent. The screen says so, beside the sliders, because the
+alternative is finding out after a redeploy.
+
+| | |
+|---|---|
+| Tuning | Live on that server, immediately |
+| Restart or redeploy | Back to whatever the source says |
+| Committed | The starting point for every server from then on |
 
 ## Not in this design
 
