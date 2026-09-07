@@ -134,8 +134,11 @@ section + the tests are the source of truth for what currently exists):
   **Those numbers are true and were the wrong ones.** In play this cost **22% of
   the reachable standable surface** and 256 of 813 above-ground spots: an agent
   under a perch now declines the climb rather than attempting it. The predictor
-  is sound (87% of what it rejected is genuinely unflyable) — the contract it was
-  given is too narrow, and the graph it filters lies about surfaces. Two further
+  is sound (87% of what it rejected is genuinely unflyable, and a generous PLAYER
+  model reaches 0 of 40 lost spots — `layTerrain` chains tower steps by height
+  alone, so each step roofs the takeoff for the one beneath it and the upper
+  steps are decoration). The contract the predictor was given is too narrow, and
+  the graph it filters lies about surfaces. Two further
   faults visible alongside it PRE-DATE this work: flush co-planar platforms are
   separate nodes with a fake gap, so agents jump over solid floor (594 such edges
   across 30 levels), and ground cut from the graph for headroom hands the agent

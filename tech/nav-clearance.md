@@ -126,7 +126,7 @@ C1–C2 shipped green and made the game worse. Bo found three faults in the Beha
 
 | # | Symptom | Screenshot | Root cause | Introduced by C1/C2? |
 |---|---|---|---|---|
-| 1 | An agent under a platform will not attempt the climb at all | `no-vertical-path.png` | Perches whose only takeoff is under a neighbouring piece. The graph offered the climb, the body was never able to fly it, and C2 removed the edge rather than the failure | **No — revealed, not caused.** See "What the rejections actually are" |
+| 1 | An agent under a platform will not attempt the climb at all | `no-vertical-path.png` | Mostly generated terrain that **nothing** can climb — perches whose only in-range takeoff is roofed by the piece above. The graph offered the climb, no body could fly it, and C2 removed the edge rather than the failure. The remaining 13% is a follower whose takeoff vocabulary is two positions wide | **No — revealed, not caused** (except the 13%). See the two sections below |
 | 2 | A column and the slab flush against its top are separate surfaces, and the agent jumps between them | `separated-surfaces.png` | One node per PLATFORM, not per walkable surface. Two flush platforms leave a 30px gap in body-left-edge span space, which `kindOf` calls a `hop` | **No — pre-existing since N1** |
 | 3 | Approaching a sideways L, the agent jumps once into the overhang, fails, then routes around | `one-incorrect-jump.png` | Ground beneath an overhang is cut from the graph for headroom, so `routeRequest` returns null and the caller falls back to the pre-N3 reflex, which hops at anything 40–60px above it with no terrain knowledge | **No — pre-existing since N3.** C2 makes it fire more often, because routes now go *around* obstacles and spend longer underneath them |
 
@@ -154,7 +154,36 @@ Of 235 rejected up-edges sampled over 20 levels, replayed from **every** x on th
 
 Why the 204 fail, by first contact: 147 rise into an underside, 59 hit a side, 13 land on the destination but off its span, 5 land on another platform first.
 
-**The uncomfortable half of this is a generation finding, not a navigation one.** `auditGeometry` certifies a level traversable using `gapBetween`, which reports 0 for overlapping spans and never charges an up-edge for the body-width takeoff clearance it actually needs — the approximation recorded in `tech/agent-navigation.md` as "An up-edge is not charged for its takeoff clearance". So generated levels contain perches only the player can reach. Pre-C2 that was masked by agents flailing at them; C2 made it visible as an agent standing still. **Whether generated terrain should guarantee agent-reachable perches is Bo's call, not a bug to fix quietly.**
+### The 87% is a generation bug, and it is not agent-specific
+
+The obvious reading of the 204 is "the player can get there and the agent cannot". **That reading is wrong.** Replaying every lost destination against a deliberately generous player model — any x on the source span at 6px steps, five takeoff velocities from −runSpeed to +runSpeed, and free in-flight steering at the landing span — reaches **0 of the 40** spots the agent lost, over 10 levels. Nothing gets to them. They are decoration.
+
+The mechanism, traced on seed 1's four-step zigzag tower at x≈2700–2950. Each rise is inside the 122.5px `maxRise`, which is the only thing `layTerrain` checks:
+
+| Step | Top | Left takeoff | Right takeoff |
+|---|---|---|---|
+| A | y401 | x2740, rise 99 — roofed by B | x2940, rise 99 — **clear** |
+| B | y322 | x2660, rise 178 — past `maxRise` | x2850, rise 79 — roofed by C |
+| C | y240 | x2730, rise 82 — roofed by D | x2880, rise 161 — past `maxRise` |
+| D | y159 | x2660, rise 341 — past `maxRise` | x2820, rise 81 — clear, but only from C |
+
+A is reachable. B, C and D have no working takeoff at all: the only positions inside jumping range are the ones the step above overhangs. **In a zigzag tower every step roofs the takeoff for the step beneath it**, and `layTerrain` chains pieces by height alone — "each chained piece within a single jump of the previous" — without ever asking whether there is somewhere to *stand* beside the next piece.
+
+`auditGeometry` then certifies the level, because it inherits `linkBetween`'s reachability test: `gapBetween` reports 0 for overlapping spans, and an up-edge is never charged for the body-width takeoff clearance it needs. That approximation is recorded in `tech/agent-navigation.md` as "An up-edge is not charged for its takeoff clearance", where it is described as costing the attempt cap. It costs more than that: it lets the generator certify terrain that nothing in the game can climb.
+
+**There is no crouch escape hatch.** `Soldier.applyMovement` returns early while crouched — `move` only sets facing and `vx` decays at friction — so a kneeling body cannot travel. Crouching lowers the hitbox for cover, not for traversal, and cannot be used to reach a space a standing body cannot.
+
+### Where the agent really is weaker than the player
+
+Separate from the above, and the honest size of it: **31 of 235 rejections (13%)** are destinations a body can reach and this follower cannot.
+
+| Gap | Share | Note |
+|---|---|---|
+| The follower is offered exactly two takeoff positions, the ones flanking the destination footprint, where a body has the whole span | 9% | Seed 3: offered x1180, flies from x1124 |
+| An upward jump takes off at `vx: 0` | 3% | `linkBetween`'s budget is `maxRunTo(dh)`, which already *assumes* the running start the executor throws away. The graph and the follower disagree about the same jump |
+| The tolerance band requires the nominal takeoff and a one-frame-early offset to both fly | 5% | A defect in this implementation, not in the contract |
+
+One more mismatch that costs everybody: the graph's `maxRise` is the **continuous** 122.5px, while a 1/60 semi-implicit integration reaches **116.67px**. Every edge in that 5.8px band is offered and flyable by nothing.
 
 ### The surface model is a separate lever
 

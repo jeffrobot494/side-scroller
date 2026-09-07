@@ -65,7 +65,7 @@ leaving them in "Next" hides the fact that the blocker is a choice, not effort.
 
 | Item | Situation | Decision needed |
 |---|---|---|
-| Nav clearance C1–C2 | Built and green, and it made the game worse in play — 22% less reachable surface, agents that decline climbs instead of attempting them. Evidence in `tech/nav-clearance.md` "Regressions found in play". The predictor is sound; the contract it was given is too narrow, and two of the three faults predate it | Two: whether generated terrain must guarantee agent-reachable perches (the audit does not charge an up-edge for takeoff clearance), and whether to ship with `navClearance` defaulted off while the spec is rewritten |
+| Nav clearance C1–C2 | Built and green, and it made the game worse in play — 22% less reachable surface, agents that decline climbs instead of attempting them. Evidence in `tech/nav-clearance.md` "Regressions found in play". The predictor is sound; the contract it was given is too narrow, and two of the three faults predate it. Generation is agreed in scope: `layTerrain` chains pieces by height alone and builds towers whose upper steps nothing can reach, player included | One: whether to ship with `navClearance` defaulted off while the spec is rewritten |
 | Locomotor L4+ | L1–L3 built; `wheeled`/`limbed`/`crawler` deliberately deferred. | None for now — deferred on purpose, listed so it is not mistaken for an oversight |
 
 ## Shipped
@@ -104,7 +104,7 @@ description of what the game does today; this is only the index.
 | A jump edge tests where it lands, not the arc, so a column or an overhang is only found by failing at it | `tech/nav-clearance.md` C2 addressed this and regressed reachability doing it — see below |
 | A column and the slab flush against its top are two nodes with a fake gap, so agents jump over solid floor | `tech/nav-clearance.md` "Regressions found in play" #2 — pre-dates C2 |
 | Off the graph, the router hands back to a reflex that hops at anything above it with no terrain knowledge | `tech/nav-clearance.md` "Regressions found in play" #3 — pre-dates C2 |
-| Generated levels contain perches an agent cannot take off beside; the audit never charges an up-edge for takeoff clearance | `tech/nav-clearance.md` "What the rejections actually are" |
+| Generated levels contain perches NOTHING can reach — a zigzag tower roofs its own takeoffs; `layTerrain` chains by height alone and the audit never charges an up-edge for takeoff clearance | `tech/nav-clearance.md` "The 87% is a generation bug" |
 | Nothing in the suite asserts that a graph change does not shrink where an agent can go | `tech/nav-clearance.md` "Why the bar missed it" |
 | Two enemy jump impulses disagree, and the reflex hop out-jumps the deliberate jump | fixed by `tech/agent-navigation.md` N2 |
 | No coyote time — a jump one frame after leaving a ledge is silently dropped | fixed by `tech/agent-navigation.md` N2 |
