@@ -39,6 +39,9 @@
 // ---------------------------------------------------------------------------
 
 import { spawn } from "node:child_process";
+import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
@@ -533,6 +536,11 @@ export default async function run(t) {
   // 5. THE SETTINGS ROUTES — a second server, and no socket needed
   // ======================================================================
   await configRoutes(t);
+
+  // ======================================================================
+  // 6. MAKE PERMANENT — a server pointed at a COPY of the config source
+  // ======================================================================
+  await configPermanent(t);
 }
 
 // --- section 4 -------------------------------------------------------------
@@ -579,11 +587,11 @@ async function until(pred, ms = 4000) {
 // The real `server.mjs` on a port of its own. Hoisted out of `twoSeatDrive`
 // because section 5 needs one too and must not inherit that section's
 // WebSocket skip.
-async function spawnServer() {
+async function spawnServer(env = {}) {
   const port = 8400 + Math.floor(Math.random() * 120);
   const base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let err = "";
@@ -847,6 +855,111 @@ async function configRoutes(t) {
   } finally {
     server.kill();
     await sleep(60);
+  }
+}
+
+// --- section 6 -------------------------------------------------------------
+
+// `POST /api/config/permanent`  (tech/server-settings.md, C4).
+//
+// ITS OWN SPAWN, AND ITS OWN CONFIG SOURCE. Two reasons, and both are load
+// bearing. Section 5 deliberately leaves its server dirty — a clamped gravity,
+// a whole 47-key import — so "written where it differs and nowhere else" on
+// that spawn would be a claim about leftovers. And this suite starts the REAL
+// `server.mjs` against the REAL checkout, so a route that wrote its default
+// target would edit `src/game/config.js` under every other suite in the run.
+// `CONFIG_SOURCE` points the child at a copy, and the last case here is that
+// the actual file did not move.
+async function configPermanent(t) {
+  const real = fileURLToPath(new URL("../src/game/config.js", import.meta.url));
+  const untouched = await readFile(real, "utf8");
+  const dir = await mkdtemp(join(tmpdir(), "cfgsrc-"));
+  const copy = join(dir, "config.js");
+  await writeFile(copy, untouched);
+
+  const { server, base, up, stderr } = await spawnServer({ CONFIG_SOURCE: copy });
+  t.ok("permanent: the server is up", up, stderr().slice(0, 300));
+  if (!up) {
+    server.kill();
+    await rm(dir, { recursive: true, force: true });
+    return;
+  }
+
+  try {
+    // Two knobs moved, of different types, so the literal the patcher writes is
+    // exercised for a number AND a bool.
+    await postStatus(base, "/api/config", { key: "gravity", value: 2600 });
+    await postStatus(base, "/api/config", { key: "friendlyFire", value: true });
+
+    const r = await postStatus(base, "/api/config/permanent", {});
+    t.eq("permanent: a checkout server accepts", r.status, 200);
+    t.eq("permanent: ...and says where it wrote", r.body.path, copy);
+    const keys = r.body.written.map((w) => w.key).sort();
+    t.eq("permanent: it wrote exactly the two knobs that differ", keys, ["friendlyFire", "gravity"]);
+    t.ok("permanent: ...reporting what each moved from and to",
+      r.body.written.every((w) => w.from !== undefined && w.to !== undefined));
+
+    const after = await readFile(copy, "utf8");
+    t.ok("permanent: the number landed in the source", after.includes("default: 2600,"));
+    t.ok("permanent: and so did the bool", /key: "friendlyFire",\n\s*scope: "server",\n\s*label:[^\n]*\n\s*type: "bool",\n\s*default: true,/.test(after));
+    t.ok("permanent: a knob still at its default was not rewritten",
+      after.includes("default: 4,") && after.includes(`key: "soldierMagazines",`));
+
+    // THE KNOBS THIS MAY NOT MOVE. `aimMode` is refused by the route and
+    // `soldierBaseHp` is unmarked, so neither can differ — but the file is what
+    // proves it, because a patcher that walked the whole SCHEMA would not care.
+    t.ok("permanent: an unmarked key is untouched in the file", after.includes(`default: 15,`));
+    t.ok("permanent: aimMode is untouched too", after.includes(`default: "gamepad",`));
+
+    // ...and only those lines moved.
+    const diff = after.split("\n").filter((l, i) => l !== untouched.split("\n")[i]);
+    t.eq("permanent: exactly two lines of the file changed", diff.length, 2);
+
+    // IDEMPOTENT, because the process updated its own `item.default` after
+    // writing. Without that the dots stay lit and this rewrites the same lines.
+    const again = await postStatus(base, "/api/config/permanent", {});
+    t.eq("permanent: a second call is still a 200", again.status, 200);
+    t.eq("permanent: ...with nothing left to write", again.body.written.length, 0);
+    t.eq("permanent: and the GET now reports them as the defaults",
+      (await getJson(base, "/api/config")).values.gravity, 2600);
+
+    // The patched module is still a module.
+    const mod = await import(`file://${copy}?v=${Date.now()}`);
+    const grav = mod.SCHEMA.flatMap((g) => g.items).find((it) => it.key === "gravity");
+    t.eq("permanent: the patched file still parses, with the new default", grav.default, 2600);
+
+    // THE ONE THAT PROTECTS THE REPO.
+    t.eq("permanent: src/game/config.js itself was never touched", await readFile(real, "utf8"), untouched);
+  } catch (e) {
+    t.ok(`permanent: threw — ${e && e.message}`, false);
+  } finally {
+    server.kill();
+    await sleep(60);
+  }
+
+  // THE DEPLOYED ANSWER. This suite only ever runs inside a checkout, so the
+  // gate is pointed at a path that does not exist — which is what a Fly image
+  // is, `.dockerignore` having excluded `.git` from the build context.
+  const off = await spawnServer({ CONFIG_SOURCE: copy, CONFIG_GIT_DIR: join(dir, "no-such-git") });
+  try {
+    t.ok("permanent: a non-checkout server is up", off.up, off.stderr().slice(0, 300));
+    if (off.up) {
+      const before = await readFile(copy, "utf8");
+      await postStatus(off.base, "/api/config", { key: "gravity", value: 3000 });
+      const r = await postStatus(off.base, "/api/config/permanent", {});
+      t.eq("permanent: ...and refuses to make anything permanent", r.status, 403);
+      t.eq("permanent: ...saying why, not just no", r.body.checkout, false);
+      t.ok("permanent: ...naming the export route out", /Export/.test(r.body.error));
+      t.eq("permanent: and it wrote nothing", await readFile(copy, "utf8"), before);
+      t.eq("permanent: while the knob still moved on the live server",
+        (await getJson(off.base, "/api/config")).values.gravity, 3000);
+    }
+  } catch (e) {
+    t.ok(`permanent: refusal threw — ${e && e.message}`, false);
+  } finally {
+    off.server.kill();
+    await sleep(60);
+    await rm(dir, { recursive: true, force: true });
   }
 }
 

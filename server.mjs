@@ -40,7 +40,7 @@
 // ---------------------------------------------------------------------------
 
 import { createServer } from "node:http";
-import { readFile, stat, readdir } from "node:fs/promises";
+import { readFile, writeFile, stat, readdir } from "node:fs/promises";
 import { join, extname, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRooms } from "./src/net/rooms.js";
@@ -62,6 +62,27 @@ const rooms = createRooms({ startMission });
 // Built once: the SCHEMA is data and does not change while the process runs.
 const FLAT_SCHEMA = SCHEMA.flatMap((g) => g.items);
 const SERVER_ITEMS = new Map(FLAT_SCHEMA.filter((it) => it.scope === "server").map((it) => [it.key, it]));
+
+// WHERE "MAKE PERMANENT" WRITES  (tech/server-settings.md, C4).
+//
+// A CONSTANT, NEVER A REQUEST PARAMETER. This process serves the whole repo at
+// its URL and `resolve()` below is how a request names a file; the one route in
+// here that WRITES must share none of that machinery, or it is an arbitrary
+// file-write on an unauthenticated endpoint. The env var exists for exactly one
+// caller — `test/mission-net.test.mjs`, which spawns this server against the
+// real checkout and would otherwise rewrite the defaults every other suite in
+// the run reads.
+const CONFIG_SOURCE = process.env.CONFIG_SOURCE || join(ROOT, "src", "game", "config.js");
+// The checkout test. `ROOT` is the repo root (this file sits in it), so `.git`
+// is a CHILD of it. `.dockerignore` excludes `.git` from the build context and
+// the Dockerfile is `COPY . .`, so a deployed image has none — which makes this
+// a fact about the machine rather than a policy about the caller, and leaves
+// the design's "no authentication" intact.
+// Overridable for the same one caller, and for the same reason: the refusal is
+// what a DEPLOYED server answers, and this suite can only ever run inside a
+// checkout, so without a seam the branch a real person meets on Fly is the one
+// branch with no test.
+const GIT_DIR = process.env.CONFIG_GIT_DIR || join(ROOT, ".git");
 
 // `.js` MUST be application/javascript or every ESM import in the page fails
 // with a MIME-type error — the whole game is native modules with no bundler.
@@ -307,8 +328,77 @@ async function apiRoute(req, res) {
     return true;
   }
 
+  // MAKE PERMANENT  (tech/server-settings.md, C4). No body: it writes every
+  // server-scoped knob whose live value differs from the one this process
+  // booted with, and answers what it wrote.
+  if (url.pathname === "/api/config/permanent" && req.method === "POST") {
+    if (!(await isCheckout())) {
+      // The deployed answer, and it is honest rather than cautious: a write to
+      // an image's filesystem reverts on the next deploy and never reaches the
+      // repo, so it would look like it had worked while changing nothing — the
+      // same failure Reset is disabled for (approximation 2).
+      json(res, 403, {
+        error: "This server is not running from a git checkout, so it cannot make anything permanent. " +
+          "A file written here would revert on the next deploy and never reach the repo. " +
+          "Export the settings and paste them into src/game/config.js instead.",
+        checkout: false,
+      });
+      return true;
+    }
+    try {
+      const written = await writePermanent();
+      json(res, 200, { written, path: CONFIG_SOURCE, checkout: true });
+    } catch (e) {
+      json(res, 500, { error: `Could not write ${CONFIG_SOURCE}: ${e && e.message}` });
+    }
+    return true;
+  }
+
   json(res, 404, { error: `No such route: ${url.pathname}` });
   return true;
+}
+
+const isCheckout = () => stat(GIT_DIR).then(() => true, () => false);
+
+// Patch `default:` for every server-scoped entry whose live value differs from
+// the one this process is holding as the default, and answer what changed.
+//
+// A LINE REPLACEMENT, NOT A PARSE. Every entry in `src/game/config.js` is one
+// `key:` line followed by exactly one `default: <literal>,` line at the same
+// indent — 71 of each, no exceptions — so the anchor is the key and the edit is
+// the next `default:` under it. `JSON.stringify` reproduces every literal the
+// file holds, which is why a bool, a number and an enum all take the same path.
+//
+// The value written is EXACTLY the one the server ran, float noise and all
+// (approximation 14): a source value that differs from what was tuned is worse
+// than an ugly diff.
+async function writePermanent() {
+  const before = await readFile(CONFIG_SOURCE, "utf8");
+  const lines = before.split("\n");
+  const written = [];
+
+  for (const [key, item] of SERVER_ITEMS) {
+    const live = config[key];
+    if (live === item.default) continue;
+    const at = lines.findIndex((l) => l.trim() === `key: "${key}",`);
+    if (at < 0) continue; // a knob with no source line is not one this can move
+    const dat = lines.findIndex((l, i) => i > at && /^\s*default: .*,$/.test(l));
+    if (dat < 0) continue;
+    const indent = lines[dat].match(/^\s*/)[0];
+    lines[dat] = `${indent}default: ${JSON.stringify(live)},`;
+    written.push({ key, from: item.default, to: live });
+  }
+
+  if (!written.length) return written;
+  await writeFile(CONFIG_SOURCE, lines.join("\n"));
+  // THE PROCESS NOW AGREES WITH THE FILE IT WROTE. Without this the changed-dot
+  // stays lit on every knob just made permanent and a second press rewrites the
+  // same lines. It mutates the SCHEMA objects `config.js` holds by reference,
+  // so `defaults()`, `isDefault()` and `resetConfig()` move with it in THIS
+  // process — benign in a room (`persist()` is a no-op and nothing resets), and
+  // the same in-place shape `applyWeaponOverrides()` uses over `arsenal.js`.
+  for (const { key, to } of written) SERVER_ITEMS.get(key).default = to;
+  return written;
 }
 
 // The server-scoped entries and their live values, in SCHEMA order and grouped

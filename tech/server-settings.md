@@ -43,6 +43,13 @@ the next reader both depend on them.
 | `flush()` before Export | Export does `flush()` → `GET` → print. A debounce that fired a moment ago has a POST in the air, and a GET issued past it would print the value from BEFORE the drag — into the JSON whose whole job is to be pasted into `config.js` defaults |
 | Reset is refused twice | `disabled` in the markup with the reason in its `title`, AND refused in the handler. The markup is what a person sees; the handler is what survives somebody re-enabling the button in devtools |
 
+**As built (C4).**
+
+| What | As built |
+|---|---|
+| A second env seam, `CONFIG_GIT_DIR` | The plan gives `CONFIG_SOURCE` a test override and leaves the `.git` gate hard-wired. That makes the 403 — **the branch every deployed user meets** — the one path with no coverage, because this suite can only ever run inside a checkout. Both are test seams with the same standing, and the refusal case now asserts the file was not written AND that the live knob still moved, which is the distinction the route exists to draw |
+| The answer carries `checkout` | `{ written: [{key, from, to}], path, checkout }` on success, `{ error, checkout: false }` on the refusal. The flag is what lets C5 say "this server cannot" rather than "something went wrong", without parsing the message |
+
 ## Reuses
 
 | What | Where | Used for |
