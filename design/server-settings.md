@@ -32,12 +32,14 @@ moment for every knob and is not a rule anyone enforces.
 | Read | Lands |
 |---|---|
 | Every shot — friendly fire, squad damage, aim spread | Immediately, mid-mission |
-| Once per mission — gravity, and anything the level is built from | The next mission |
-| Once per campaign — the board's size, arrival rate, seeding | The next campaign |
+| Once when a mission is loaded — gravity | The next mission |
+| Once when a LEAD is born — the terrain knobs, the threat scale | Only on leads that arrive afterwards. A lead already on the board keeps the level it was generated with |
+| Every day advance — how many leads arrive, and the ceiling they cannot cross | The next day |
+| Once when a campaign opens — how many leads it starts with | The next campaign |
 
-A player will therefore see some sliders move the game under them and others do
-nothing until they deploy. That is the honest behaviour and the screen does not
-pretend otherwise.
+A player will therefore see some sliders move the game under them, some do
+nothing until they deploy, and some do nothing to work already sitting on the
+board. That is the honest behaviour and the screen does not pretend otherwise.
 
 ## Making a change permanent
 
