@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: built
+status: building
 resolution: sharp
 needs: [agent-navigation]
 tags: [ai, movement, navigation]
@@ -9,116 +9,126 @@ tags: [ai, movement, navigation]
 
 # Nav clearance
 
-Implements the "Awareness of obstructed paths" addendum in [Agent navigation](../design/agent-navigation.md#addendum-awareness-of-obstructed-paths); the baseline navigation implementation is recorded in [Agent navigation tech](agent-navigation.md).
+Implements the "Awareness of obstructed paths" addendum in [Agent navigation](../design/agent-navigation.md#addendum-awareness-of-obstructed-paths); the baseline is recorded in [Agent navigation tech](agent-navigation.md).
+
+C1–C2 are built and regressed in play. The evidence is in "Regressions found in play" below, and everything here follows from one fact: **`collideAxis` supports a body on any box overlap, while `buildNodes` requires it to fit wholly on the platform.** S0–S4 re-aim the existing work at the physics. They do not revert it.
 
 ## Slices
 
 | # | Slice | Runtime behaviour |
 |---|---|---|
-| C1 | Share the follower's existing takeoff, landing, airborne aim, takeoff eligibility and horizontal distance clamp as pure manoeuvre calculations. Keep the follower's decisions and requests identical | None. Existing navigation and locomotion fixtures pass unchanged |
-| C2 | Validate hop and upward-jump manoeuvres against static terrain, retain their clear takeoffs, and make the follower use a validated takeoff. Enable clearance for runtime graphs, integrate graph identity with route-state validity, and add the editor comparison control and regression cases | Changed. Agents choose clear routes before attempting blocked jumps; no generated geometry changes. This is the first playable slice |
+| S0 | **Measure the model against the integrator.** Two guards: a characterization of the positions `stepActor` actually supports beside the span the graph builds, and reachable standable surface per seed, frozen so a later graph change that shrinks it reddens the bar | None. Pure test addition, and it lands green by *recording* today's gap, not by asserting it away |
+| S1 | **Separate a platform's solid extent from a node's standable span.** The footprint and landing tests take the destination's solid x-extent from the platform it belongs to, instead of deriving it from the span | None. The two numbers coincide under today's span formula, so every request and every fixture is unchanged |
+| S2 | **A node is a standable surface.** Spans cover every position the physics supports; co-planar platforms whose tops touch become one node carrying all of them | **Changed.** A column and the slab flush against it stop being two places with a gap between them, so agents walk the join instead of jumping it |
+| S3 | **Clearance measured against the physics.** Landing acceptance, the takeoff set and the in-flight aim move onto supported positions; the follower commits to a takeoff from the set the predictor validated | **Changed.** Climbs a body can make stop being refused. The slice that fixes the reported "won't climb" |
+| S4 | **Off the graph, never hop blind.** A body that has a graph but no route under it walks; it does not jump at terrain it cannot see | **Changed.** The single failed jump at an overhang stops happening |
 
-- Land C1 and C2 separately after their regression bars pass. Do not begin C2 with a second copy of the follower's steering rules.
-- The spec is a separate commit before either implementation slice. No gameplay implementation belongs in the spec commit.
+- **S1 exists because S2 is unsafe without it.** `footprintClear`, `clearTakeoffs`, `takeoffCandidates`, `airborneAimX` and the landing test all read `to.a`/`to.b` as a stand-in for the destination platform's solid edges. That stand-in is only correct while a span is `[p.x, p.x + p.w - w]`. Widening the span first moves every footprint by a body width and **refuses more climbs than it fixes** — measured on ground+perch, the up-edge that today offers takeoffs `[670, 1000]` becomes null.
+- **S0 is not optional and it is first.** C1–C2 shipped green on metrics that could not see the regression they caused, and every follow-up measurement was taken through the graph's own model.
+- Land each slice after its own bar. The spec commits on its own, before any implementation commit.
+- **C1's shared manoeuvre calculations and C2's predictor both stay.** The swept sampling, the integration order and the top-contact landing rule are correct and measured; the positions they start and end at are not.
 
 ## Reuses
 
 | Existing capability | Source | Use |
 |---|---|---|
-| Body-sized standing spans, directed jump envelope checks, edge costs, Dijkstra and partial routes | `src/game/nav.js`, `src/game/gen/reach.js` | Keep node construction and cheap reachability checks; add clearance only after an edge passes them. Keep routing and cost calculation |
-| Takeoff selection, landing clamp, airborne steering, takeoff window and distance-limited drive | `src/mission/navigation.js` | Share these calculations with the clearance predictor; preserve their legacy behaviour when clearance is off |
-| Body profiles, scene cache, terrain invalidation and per-agent failure ledger | `src/mission/navigation.js` | Build clearance graphs per profile and reuse the three-failure ban and alternate-route behaviour |
-| Grounded integration and solid rectangle collision | `src/mission/entities.js` | Match gravity-before-motion and x-before-y collision ordering, strict overlap semantics and downward top landing. Use the actual integrator in comparison tests |
-| Legged and soldier movement adapters | `src/mission/locomotion.js` | Keep existing actuation. Test the predictor against both body types; do not migrate companions to another locomotor |
-| Repositioning's reachable-standing-point query | `src/mission/navigation.js`, `src/mission/enemyspec/runtime.js` | Let existing consumers query the same filtered graph without adding terrain logic to the brain or changing destination scoring |
-| Config schema and graph/path preview | `src/game/config.js`, `src/editor/tools/behavior-lab.js` | Expose clearance through the existing settings and Lab, using the graph the agent actually follows |
-| Generation audit and frozen output | `src/game/gen/levelgen.js`, `test/levelgen-golden.test.mjs` | Preserve the audit's envelope-only behaviour and its output |
+| The authority on where a body is supported | `src/mission/entities.js` | `overlaps`, `collideAxis` and `stepActor` decide what standing means. S0's guard and S3's predictor measure against them, never against the graph |
+| Node construction, directed edges, second-costs, Dijkstra, partial routes, `nodeUnder` | `src/game/nav.js` | Kept. Only span arithmetic, the grouping of platforms into surfaces, and which positions the predictor uses change |
+| C1's shared manoeuvre calculations | `src/game/nav.js` | The lip, landing clamp, footprint test, airborne aim and drive clamp keep the follower and the predictor on one set of rules. Extend them; never fork a second copy |
+| C2's arc predictor | `src/game/nav.js` | Per-frame swept sampling, x-before-y ordering and the downward-top-contact rule are kept exactly. Its landing *acceptance* is not — that is a span test and S3 moves it |
+| Route following, the scene graph cache, the per-agent ban ledger, route-state validity | `src/mission/navigation.js` | `navState` is already the one validity check every consumer calls. A wider span changes what a node is, not when state goes stale |
+| Legged and soldier actuation | `src/mission/locomotion.js` | The adapters keep their arithmetic. S4 touches only whether a *routed* body's fallback may carry a jump |
+| The band resolver for `keepDistance` | `src/mission/navigation.js` | `holdPoint` needs no terrain logic of its own, but `standPoint` clips candidates to the span — so it inherits whichever notion of standable S2 gives it, and that is a choice to make rather than a thing to leave |
+| The generation audit and its frozen output | `src/game/gen/levelgen.js`, `test/levelgen-golden.test.mjs` | `auditGeometry` keeps the legacy edge set and its verdict, **provided a merged node carries every platform it covers** — see "Where the code goes" |
+| Schema-driven knobs and the live comparison surface | `src/game/config.js`, `src/editor/tools/behavior-lab.js` | `navClearance` and the Lab's toggle exist and work; no new knob is required |
+| Shared graph and path overlays | `src/mission/render.js` | Both drawers read only `n.a`/`n.b`/`n.y`, so they follow the model with no edit |
 
 ## Where the code goes
 
 | Existing module | Responsibility in this change |
 |---|---|
-| `src/game/nav.js` | Pure shared manoeuvre calculations and body-box terrain clearance, including validated takeoff information on accepted runtime edges. No imports from mission code or config |
-| `src/mission/navigation.js` | Runtime opt-in to clearance, following the validated manoeuvre, and consistent cache/route/ban validity for every graph consumer |
-| `src/mission/enemyspec/runtime.js`, `src/mission/enemyspec/perception.js` | Validate navigation state before movement-order/repositioning decisions or navigation-sense publication can consume it. Keep controller precedence, unrelated senses and ordinary perception cadence |
-| `src/game/config.js` | Add `navClearance`, a boolean defaulting on in Agent navigation with server scope. Correct the existing attempt-limit label/help to describe avoiding the failed connection before giving up on the target |
-| `src/editor/tools/behavior-lab.js` | Expose the clearance comparison alongside existing Lab controls, reuse schema metadata, and invalidate navigation when it changes |
-| `test/nav.test.mjs` | Pure clearance acceptance/rejection cases and the explicit generation/runtime seam |
-| `test/navigation.test.mjs` | Real route execution, validated takeoff selection, retained failure recovery, both body types, and graph-change lifecycle |
-| `test/behavior-lab.test.mjs`, `test/reposition.test.mjs` | Live comparison/terrain edits and downstream reachable-position queries |
+| `src/game/nav.js` | A platform's solid extent as a first-class input to the footprint and landing tests; surfaces built from touching co-planar platforms; the supported-extent span rule; the predictor's takeoff, aim and landing positions. Still imports nothing from `src/mission/` |
+| `src/mission/navigation.js` | The follower's committed takeoff drawn from the set the predictor validated; drop and walk lip arithmetic re-derived against wider spans; where a body settles on arrival, and what `standPoint` is allowed to offer |
+| `src/mission/enemyspec/runtime.js` | The `chase` fallback must not carry `hopToward` for a body that has a graph |
+| `src/mission/locomotion.js` | **S4 lands here too.** The `moveTo` and `moveOrder` fallbacks are `steer`, and a soldier body's blind hop comes from the locomotor's own steer branch, not from the request. The Behavior Lab agent and every escorted squadmate arrive through exactly that path |
+| `src/game/gen/levelgen.js` | The audit's verdict and its `{ traversable, unreachable, offenders }` shape are unchanged. Its three reads of a node's platform must become reads of the platform *set* a merged node covers, or culls rise and every golden case moves |
+| `src/game/config.js` | No new knob. If a settle margin becomes a number, it is a `SCHEMA` entry |
+| `test/nav.test.mjs` | The span-versus-integrator characterization, surfaces from touching platforms, clearance accept/reject stated in supported positions. Its five existing assertions on a node's single platform are part of the change |
+| `test/navigation.test.mjs` | The reachable-surface guard, real execution on both body types, recovery with clearance on |
+| `test/reposition.test.mjs`, `test/behavior-lab.test.mjs`, `test/companion-aim.test.mjs` | Standing-point queries, the live comparison, and the companion cover case that a span change breaks |
+| `test/levelgen-golden.test.mjs`, `test/gen.test.mjs` | Generated levels and audit reports identical; do not regenerate `test/levelgen.golden.json` |
 
-No new subsystem, dependency, test suite or movement ability is needed. If numerical resolution becomes a tuning parameter, expose it through the existing schema; do not hide a new gameplay knob in the predictor.
+No new module, dependency, test suite or movement ability. A second definition of "where a body can stand" anywhere in the repo is the failure this spec removes, not one to add.
 
 ## The seam
 
 | Owns | Preserves or excludes |
 |---|---|
-| Whether a runtime hop or upward jump has a clear manoeuvre, and which validated takeoff the follower uses | Standing nodes, walk/drop edges, edge costs and shortest-path algorithm |
-| Static solid rectangles from the scene's platform list, including source and destination geometry | Other bodies, moving obstacles, projectiles, decorative art and combat decisions |
-| Clearance-aware graphs used by existing grounded navigation callers | Flyers, direct player controls and off-graph fallback behaviour |
-| Cache identity and per-agent state validity when clearance, body profile or terrain changes | Per-agent bans remain private and survive ordinary target changes and completed movement orders |
-| Runtime filtering explicitly enabled by the mission adapter | Generation stays on the legacy builder behaviour; no change to culling, seeds, geometry or audit verdicts |
+| Where a body can be supported, and which manoeuvres it can fly | Edge kinds, edge costs, Dijkstra, partial routing and the arrival rule |
+| Grouping touching co-planar platforms into one walkable surface | Platform data. Nothing mutates a scene's platforms |
+| The takeoff a follower commits to, drawn from the set the predictor accepted | Both locomotors' actuation arithmetic |
+| Clearance-aware graphs for grounded navigation | Flyers and direct player control |
+| Whether a *routed* body may jump with no route in hand | The reflex itself, which stays for bodies that have no graph at all |
+| Runtime filtering, enabled only by the mission adapter | Generation. The audit calls the builder with no options and its verdict does not move |
 
-### Manoeuvre clearance contract
+### What "standable" has to mean
 
-| Concern | Requirement |
-|---|---|
-| Candidate choice | For a hop, use the follower's existing directed lip. For an upward jump, consider each standable side that clears the destination footprint, including both sides when available. Do not reject a usable far-side takeoff because the nearer side is roofed |
-| Agreement with execution | Store the accepted takeoff choices with the edge. The follower chooses from those choices and holds that choice through approach and flight; it must not recompute an untested side from the entity's current position. No search for arbitrary early or trick jumps |
-| Movement being tested | Start from a standable takeoff and apply the shared hop/upward-jump rules through landing. Upward jumps request zero horizontal drive on the takeoff frame; while the feet are below the destination top, steer toward its footprint boundary, then toward the landing span. Do not replace this with a straight line or a stationary ascent |
-| Whole-body clearance | Check the body rectangle over each movement step against all relevant solid platforms. Source and destination remain collision participants: neither is ignored wholesale. Prevent thin obstacles being skipped between samples; do not use one broad rectangle enclosing the entire curved jump |
-| Landing | A downward top contact that leaves the body on the intended destination span is success. Side/underside collisions, premature contact with another platform, a missed destination or a bounded simulation timeout reject that candidate. Adjacent platform seams must not turn a valid landing into a false obstruction |
-| Takeoff tolerance | The execution window must not authorize an untested blocked launch. Align to the validated takeoff under a justified numerical tolerance; verify realistic frame steps and the soldier adapter, which acts on the sign of drive rather than its requested magnitude |
-| Generation boundary | Legacy graph construction remains the default for callers that do not explicitly request clearance. The audit supplies only dimensions and an envelope, not the full runtime physics profile; it must never enter the predictor. Keep shared node and envelope logic rather than duplicating the audit |
-| Cache lifecycle | Include clearance policy and every predictor input in graph identity. A graph change invalidates saved paths, committed takeoffs, step-off state and learned bans before they are used. Check identity in route following, reachable-position queries and earlier state consumers, not only when the cache builds a replacement. Repositioning reads the blocked verdict before calling the follower, and perception publishes navigation senses before movement. Ensure those consumers cannot act on stale state or previously published navigation senses after a graph change, including frames between ordinary perception updates. Movement-order completion must also read a valid leg. Use a shared validity check rather than separate rules in each caller; preserve unrelated sense cadence and values. Do not count an abandoned airborne leg as a failed jump against the new graph |
-| Unreachable destinations | Use existing best-partial routing and its final-position stop. A rejected shortcut must not trigger straight-line steering into the same obstacle when the body is on a valid node |
-| Failure recovery | Preserve the configured attempt cap, edge bans and rerouting for actual failed jumps. Static clearance reduces failures; it does not remove the recovery path |
+Two questions the model has collapsed into one number. Separating them is the substance of S1–S3:
+
+| Question | Answer it needs | Read by |
+|---|---|---|
+| Where is this platform solid? | Its own `x` and `w`. Independent of any body | The footprint tests, and the landing test's "did I land on the right thing" |
+| Can a body be supported here? | Any overlap, because that is what `collideAxis` does | Takeoffs, landings, and whether a route connects |
+| Should a body stand here? | Narrower than "supported" — a body parked with one foot on a ledge is legal and reads as broken | Where the follower settles, and what `standPoint` offers |
+
+**The supported extent is an open interval.** `overlaps` is strict, so a body whose right edge is exactly the platform's left edge is not supported. A span that includes its own endpoints hands the predictor a takeoff the physics does not hold up.
 
 ## Must not regress
 
 | Guard | Required evidence |
 |---|---|
-| `test/nav.test.mjs` | Reject a tall column, a low ceiling and an intervening overhang; accept a hop that clears a low column, unobstructed flat/upward jumps and valid platform-top landings. Demonstrate body-size differences, directional differences, a blocked near takeoff with a clear far takeoff, and thin-obstacle coverage. Walk/drop edges remain unchanged |
-| `test/navigation.test.mjs` | With clearance on, the existing PILLAR scene is traversed without first attempting its blocked shortcut; the tall-wall scene stops at the closest point with no doomed takeoff. Keep two-step climbs, clear jumps, overlapping drops, step-off and cut-span cases. Exercise actual soldier movement as well as legged movement |
-| `test/navigation.test.mjs` failure cases | Keep the wall, PILLAR, impossible-takeoff, ban-persistence and invalidation tests that intentionally need impossible edges, explicitly with clearance off and config restored afterward. Add clearance-on recovery coverage using an interrupted or otherwise failed valid jump; do not delete the cap tests or disable clearance for the whole suite |
-| `test/navigation.test.mjs` cache cases | Toggle on/off/on with a live path and with a committed jump; change body profile and terrain; verify new graph use, no stale manoeuvre, no spurious failure and private ledgers. Ordinary destination changes must still preserve bans |
-| `test/reposition.test.mjs` | Preserve the existing ranged and companion outcomes; a candidate reachable only through a rejected jump is not offered. A stale ledger from a different graph cannot remove a valid candidate |
-| `test/reposition.test.mjs`, `test/enemyspec-brain.test.mjs` | A graph change clears stale blocked/leg verdicts before commitment or order decisions and before a brain consumes navigation senses, including an update where the ordinary perception timer has not expired. Preserve existing unrelated perception facts and action precedence |
-| `test/behavior-lab.test.mjs` | The comparison control works live; graph/path overlays describe current navigation. Dragging a blocking platform rebuilds graph and path without moving the agent artificially |
-| `test/levelgen-golden.test.mjs`, `test/gen.test.mjs` | Generated levels and audit reports remain identical under clearance on and off; do not regenerate `test/levelgen.golden.json`. Revise comments claiming runtime and audit edges are always identical to state the explicit runtime-only filtering boundary |
-| `test/locomotion-intents.test.mjs`, `test/locomotion-characterization.test.mjs` | Preserve escort, expressive jumps and body actuation. C1 leaves `test/locomotion.golden.json` unchanged. C2 may change routed trajectories only; inspect and explain each changed case before any deliberate fixture update |
-| `test/docs.test.mjs` and full suite | Real citations, all seven spec parts and no unrelated regression. Run the full test bar for each slice |
+| `test/nav.test.mjs` | The positions `stepActor` supports, measured by dropping a real body, characterized beside the span the graph builds — the guard that would have caught C2. Touching co-planar platforms yield ONE node, so the join is ordinary walking and produces no edge at all. Clearance still rejects a tall column, a low ceiling and an intervening overhang, and still accepts a low column, unobstructed hops and jumps, both takeoff sides, body-size differences and thin obstacles |
+| `test/navigation.test.mjs` | Reachable standable surface from spawn does not fall across any slice, over a spread of generated seeds. The PILLAR scene is traversed without attempting its blocked shortcut; the tall-wall scene stops at the closest point. Two-step climbs, clear jumps, overlapping drops, step-off and cut-span cases survive wider spans. Real soldier movement as well as legged |
+| `test/navigation.test.mjs` failure cases | The wall, PILLAR, impossible-takeoff, ban-persistence and invalidation cases keep working with clearance explicitly off and config restored. Recovery with clearance ON stays covered by an interrupted valid jump |
+| `test/navigation.test.mjs` cache cases | Graph identity still covers policy, body profile and terrain; no stale manoeuvre, no spurious failure, private ledgers |
+| `test/reposition.test.mjs` | Existing ranged and companion outcomes hold. A candidate reachable only through a rejected jump is not offered; a stale ledger cannot remove a valid one |
+| `test/companion-aim.test.mjs` | The cover case — a companion that climbs a 200×80 block and gets shots off — survives the span change. Verified to break under a naive widening |
+| `test/enemyspec-brain.test.mjs` | Navigation senses stay ahead of the perception cadence; unrelated senses keep their values and their timing |
+| `test/behavior-lab.test.mjs` | The clearance comparison works live, overlays describe current navigation, dragging rebuilds graph and path without moving the agent |
+| `test/levelgen-golden.test.mjs`, `test/gen.test.mjs` | Byte-identical levels and audit reports with clearance on and off, and across S2. Measured before writing this: the audit verdict is identical on all 19 golden cases **when a merged node carries every platform it covers**; with a merged node naively keeping one, culls rise and all 19 move |
+| `test/locomotion-intents.test.mjs`, `test/locomotion-characterization.test.mjs` | Escort, expressive jumps and body actuation preserved. S0 and S1 leave `test/locomotion.golden.json` alone. Later slices may move routed trajectories only, and each changed case is inspected and explained before any fixture is regenerated |
+| `test/mission-golden.test.mjs` | Determinism holds. The trace may move where routing legitimately changes; the twice-run self-check is what proves the change is not a new unseeded draw |
+| `test/docs.test.mjs` and the full suite | Real citations, seven parts, no unrelated regression. `node test/run.mjs` green per slice |
 
-- Compare predicted manoeuvres with actual motion at normal and varied frame steps, including an approaching soldier with residual horizontal velocity. Both a false rejection of a clear route and acceptance of a known blocked route fail the bar.
-- All planned production modules are covered by existing test imports. Visual route legibility and the cost of repeated graph rebuilds during Lab dragging still require a served Behavior Lab play check; headless assertions do not prove either.
-- On Windows, the current test runner imports absolute drive paths that Node rejects. Run the same discovered suites with file-URL imports in a temporary runner if necessary; do not treat a loader failure as passing tests or include an unrelated runner fix in the feature.
+- **Every claim about what a body can do is measured against the integrator, never against the graph.** A measurement taken through the model cannot detect the model being wrong; that is the whole reason S0 is first.
+- Route legibility, whether a widened span makes an agent perch badly, and the cost of Lab rebuilds during a drag all need a served play check. Headless assertions prove none of them.
 
 ## Approximations
 
 | Limit | Effect and guard |
 |---|---|
-| Existing takeoff styles, not all physically possible jumps | Tests cover the follower's ordinary lip/side choices. A human's earlier jump or unusual steering may cross terrain the agent declines. This is the design's explicit exclusion of exhaustive human jump search; usable ordinary alternatives must be retained |
-| Nominal body profile | The profile describes standing body dimensions and base jump/run physics. Temporary slow, crouch, reload and knockback do not create new graphs. Existing movement interruption and failed-jump recovery remain; this change adds no crouch navigation |
-| Soldier actuation differs from instantaneous legged drive | Soldiers accelerate, brake and act on drive direction. A nominal predictor is not proof of the exact soldier trajectory. Keep this limitation visible and require real-soldier acceptance cases; do not claim that every residual-velocity or temporary-status case is predicted. If the known column/ceiling cases fail, fix the prediction or takeoff execution before shipping |
-| Numerical stepping | A bounded predictor approximates continuous motion. Swept step checks prevent thin-terrain tunnelling; boundary and varied-frame tests guard against over-pruning and known blocked launches. Numerical tolerance is not permission to ignore solid overlap |
-| Existing route costs | Least time still means the current estimated edge seconds, which omit some travel within standing spans. This feature filters manoeuvres without replacing the cost model |
-| Walks and drops are unchanged | The addendum specifically adds hop/upward-jump clearance. Existing drop approximation and recovery remain; this spec does not claim to validate all falling trajectories |
-| Static terrain only | Dynamic obstacle avoidance is excluded by the design. Clearance operates on solid level rectangles and does not guarantee success after another action or changing motion conditions interrupt a jump |
-| Generation retains envelope reachability | A level accepted for player traversal can contain destinations the agent cannot reach with its ordinary manoeuvres. The design excludes changing generated layouts; generation must not silently become an AI-route guarantee |
-| Graph-build work | Clearance runs only while building a cached graph, with bounded candidate count and flight duration. Reuse bounds from the body envelope and restrict terrain checks spatially if needed. Measure Lab rebuilds before introducing broader optimisation |
+| Ordinary takeoff styles, not every physically possible jump | The predictor tests takeoffs a follower will actually use. A human's earlier jump or unusual steering may cross terrain the agent declines. Widening the set costs graph-build time, so it stays bounded, and the reachable-surface guard is what prices the bound |
+| The airborne aim, not the graph's budget | `maxRunTo(dh)` prices horizontal travel from the takeoff instant, but the follower pins the body at the destination's footprint edge for the whole rise and only closes on the landing span once the feet clear it. The graph and the executor therefore disagree about the same jump, and the disagreement is in the aim rule, not in the one frame of `vx: 0` at takeoff. S3 narrows it; it does not claim to remove it |
+| Nominal body profile | Standing dimensions and base physics. Slow, crouch, reload and knockback create no new graphs. Crouching is not an escape hatch — a kneeling body cannot travel at all |
+| Soldier actuation differs from instantaneous legged drive | Soldiers accelerate, brake and read the sign of a drive request. A nominal predictor is not proof of an exact soldier trajectory; real-soldier acceptance cases are required, and the takeoff tolerance is derived from a frame of travel rather than guessed |
+| Numerical stepping | Swept sampling prevents thin-terrain tunnelling; it does not make a bounded simulation continuous. The graph's `maxRise` is the continuous 122.5px where a 1/60 integration reaches 116.67px, so edges in that band are offered and flyable by nothing. Clearance removes them at runtime; the audit keeps them deliberately, so generation does not move |
+| Off the graph, an agent steers rather than routes | Where headroom cuts the floor from the graph, `routeRequest` returns null and the caller drives straight at its destination. S4 removes the jump from that fallback and leaves the walk, so "get as close as you can along a **clear route**" is not delivered underneath an overhang — the agent approaches in a straight line instead. Naming it because the design asks for it and this spec does not deliver it |
+| Existing route costs | Least time is still estimated edge seconds. This filters manoeuvres; it does not replace the cost model |
+| Walks and drops are unchanged | The addendum adds hop and upward-jump clearance. Drop approximation and recovery remain, and no falling trajectory is validated |
+| Static terrain only | Solid level rectangles. No other body, projectile or moving obstacle, and no guarantee once something interrupts a jump — which is why the attempt cap and the ban ledger stay |
+| Generation keeps envelope reachability | A level accepted for the player can still contain a destination an agent's ordinary manoeuvres decline. The design excludes changing generated layouts, and generation must not silently become an AI-route guarantee |
 
 ## Design coverage
 
 | Addendum outcome | Delivery |
 |---|---|
-| Clear route around a column without failed probes | C2 graph filtering plus validated takeoff following |
-| Ceiling excludes an otherwise reachable jump | Whole-body flight checks, including source and destination undersides |
-| Body-dependent routes | Existing per-body profiles and full collision box |
-| Least-time alternative or closest reachable stop | Existing routing over the filtered graph |
-| Failure excludes a connection before giving up | Existing per-agent recovery retained and covered with clearance enabled |
-| Low column can still be crossed; clear routes and drops remain | Positive clearance fixtures and unchanged walk/drop behaviour |
-
-This revision replaces the earlier clearance proposal in this file. Its scratch pruning counts are not implementation evidence, and its stationary-ascent description is not the current follower's airborne rule. The design addendum is the authority for this work.
+| Clear route around a column without failed probes | S3's filtering over S2's surfaces |
+| Ceiling excludes an otherwise reachable jump | Whole-body flight checks, source and destination undersides included |
+| Body-dependent routes | Per-body profiles and the full collision box |
+| Least-time alternative over the graph | Existing routing, unchanged |
+| The closest reachable stop | Delivered **on** the graph by existing partial routing. Not delivered off it — see the off-graph row in Approximations |
+| Failure excludes a connection before giving up | Existing per-agent recovery, covered with clearance enabled |
+| A low column can still be crossed; clear routes and drops remain usable | S0's reachable-surface guard is what holds this, and it is the outcome C2 broke |
 
 ## Regressions found in play — 2026-09-07
 
@@ -142,11 +152,15 @@ Measured against the real integrator — drop a `Soldier` at each x and see wher
 |---|---|
 | `buildNodes` span | 500..570 (70px) |
 | What `stepActor` actually supports | 471..599 (128px) |
-| | **the graph models 55%** |
+| | **the graph models 55% of it** |
 
-Everything downstream inherits that. The predictor starts its arcs from span positions, aims at span positions, and accepts a landing only inside a span, so it rejects real jumps at both ends. Before C2 the graph was merely *narrow*; C2 turned narrow into a hard filter.
+The shortfall is a body width at each end, so it is worst on small platforms and negligible on the ground slab — 55% is this perch, not a constant. Perches are where climbing happens, which is why it matters.
 
-The same fact produces #2 directly: a 110px column yields the span `[x, x+80]` and a slab butted against it at `x+110` yields `[x+110, …]`, so `gapBetween` reports 30px of "gap" across what is one continuous floor, and `kindOf` calls it a `hop`. Across 30 generated levels there are **1,004 flush same-height platform pairs and 594 hop edges**. Merging co-planar touching platforms into one surface takes the hop edges to **11**.
+Everything downstream inherits it. The predictor starts its arcs from span positions, aims at span positions, and accepts a landing only inside a span, so it rejects real jumps at both ends. Before C2 the graph was merely *narrow*; C2 turned narrow into a hard filter.
+
+The same fact produces #2 directly: a 110px column yields the span `[x, x+80]` and a slab butted against it at `x+110` yields `[x+110, …]`, so `gapBetween` reports 30px of "gap" across what is one continuous floor, and `kindOf` calls it a `hop`. Across 30 generated levels there are **81 touching co-planar platform pairs** and **586 hop edges**; under a surface node model the touching pairs stop being two nodes at all, and hop edges fall to **426**.
+
+**Two numbers in the first version of this section were wrong and are corrected above.** It claimed 1,004 touching pairs, from a count that paired NODES and never excluded two nodes of the same platform — the ground slab is cut into many, so it was mostly counting ground-segment pairs against each other. And it claimed merging took hop edges to 11, which came from merging platform *rectangles* and rebuilding the graph on them: that changes the collision geometry, not just the node model, and deleted edges for a reason that has nothing to do with merging surfaces. Found by the review subagent, not by me.
 
 ### What the rejections actually are
 
