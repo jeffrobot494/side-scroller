@@ -320,7 +320,16 @@ Static site — serve the folder and open a page. No bundler, no transpile.
   scene is narrowed for the wire (per recipient: another commander's squad is
   visible, their haul is not), `src/net/mission-socket.js` is the browser end,
   and the ROOM files both `missionResult`s and pushes each commander their own
-  day summary. Single-player is unaffected and still needs no process — it is
+  day summary. **`tech/server-settings.md` (C1-C3) is how you turn a knob on
+  it**: a schema entry carries `scope: "server"` when ONLY the room reads it (47
+  of 71 - not `soldierBaseHp`/`soldierHpPerHealth` or the `doomPer*` family,
+  which the hub also prints, and never `aimMode`), `GET`/`POST /api/config`
+  carry those, and **`editor.html?server=1`** points the Settings tab at the
+  running server instead of localStorage (`src/editor/remote-config.js` is the
+  browser half). Export and Import cross the wire; Reset does not, because it
+  writes to the browser and over a wire would look like it had worked. Values
+  die with the process, and the screen says so.
+  Single-player is unaffected and still needs no process — it is
   static files and `python3 -m http.server` serves a playable game. Nothing in
   `src/` imports `server.mjs`; `test/mission-net.test.mjs` spawns it on its own
   port and drives two seats through it, which is the only guard the loop and the

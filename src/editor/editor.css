@@ -48,6 +48,12 @@
   background: rgba(20,25,32,0.5); border-radius: 0 4px 4px 0;
 }
 .ed-note code { color: var(--credits); font-size: 12px; }
+/* Server mode's failure state (tech/server-settings.md, C3): `?server=1` points
+   at the origin that served the page, which under `python3 -m http.server` has
+   no /api at all. It says so rather than falling back to localStorage, which
+   would look exactly like tuning a server that was not listening. */
+.ed-note.bad { border-left-color: var(--bad); color: var(--text); }
+.ed-note strong { color: var(--text); }
 
 /* ---- settings groups ---- */
 /* Settings sub-tabs — one SCHEMA group at a time, so finding a knob is a click

@@ -89,6 +89,7 @@ description of what the game does today; this is only the index.
 | Mission determinism D1–D3 — a mission replays from its seed given the same input trace at a fixed step; one PRNG for the whole repo | `tech/mission-determinism.md` |
 | Multiplayer missions, Phase 3 J0–J8 — a soldier has an owner, ends are independent, one lead takes two results, input is sampled per step, a dispatch is joint, a mission runs with no browser, input arrives per commander, and the room holds the simulation and broadcasts it. Two commanders on one level, server-authoritative | `tech/multiplayer-missions.md` |
 | Multiplayer transport seam, Phase 2 T1 (W1–W3) — the page holds a client per seat instead of the session, commands answer through a callback, the round is pushed and projected, and a view is a per-seat snapshot refreshed by a broadcast. In-process loopback: still no server | `tech/multiplayer-session.md` |
+| Server settings C1–C3 — `scope: "server"` names the 47 knobs only a room reads, `GET`/`POST /api/config` carry them, and `editor.html?server=1` tunes a running server (Reset stays local; Export and Import cross) | `tech/server-settings.md` |
 | Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `design/design-map.md` · `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 

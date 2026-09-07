@@ -7,6 +7,7 @@ import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
 import { createFiringRoom } from "../src/editor/tools/firing-room.js";
 import { createSoundPage } from "../src/editor/sound-page.js";
 import { controlsTabsHTML, showControlsTab } from "../src/editor/controls.js";
+import { serverTarget, createRemoteConfig } from "../src/editor/remote-config.js";
 import { SCHEMA, config, resetConfig, setConfig, isDefault } from "../src/game/config.js";
 import { Soldier } from "../src/mission/entities.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
@@ -477,5 +478,86 @@ export default async function run(t) {
     t.ok("switch: the active tab moved with it", tabs[2]._cls.has("active") && !tabs[0]._cls.has("active"));
     t.eq("switch: out-of-range is clamped, never a blank page", showControlsTab(root, 99), 2);
     t.eq("switch: and a junk index falls back to the first", showControlsTab(root, "nope"), 0);
+  }
+
+  // ---- the editor's end of /api/config -------------------------------------
+  // `src/editor/remote-config.js` (tech/server-settings.md, C3). It lives here
+  // rather than in `test/mission-net.test.mjs` because that suite is a node
+  // HTTP client and this is the BROWSER half: what it decides before it sends
+  // anything. The routes' refusal of an unmarked key is tested there; this is
+  // the drop rule, which used to be approximation 9's untested claim.
+  //
+  // `fetch` is injected, so no server and no DOM.
+  {
+    t.eq("remote: no query string is not server mode", serverTarget("http://x/editor.html"), null);
+    t.eq("remote: ?server=1 means the origin that served the page",
+      serverTarget("http://x:9/editor.html?server=1").base, "http://x:9");
+    // Approximation 8: `python3 -m http.server` is the documented way to run
+    // this and has no /api, so the flag has to be able to carry a base.
+    t.eq("remote: ...and a URL points somewhere else",
+      serverTarget("http://x/editor.html?server=http://host:8000/").base, "http://host:8000");
+    t.ok("remote: junk in the flag is invalid, not silently same-origin",
+      serverTarget("http://x/editor.html?server=nope").invalid === true);
+
+    const calls = [];
+    const fakeFetch = (url, init) => {
+      calls.push({ url, init: init || null, body: init && init.body ? JSON.parse(init.body) : null });
+      if (!init) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            groups: [{ title: "Combat", items: [{ key: "friendlyFire", type: "bool", default: false }] }],
+            values: { friendlyFire: false },
+          }),
+        });
+      }
+      const key = JSON.parse(init.body).key;
+      if (key === "boom") return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: "nope" }) });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ key, value: JSON.parse(init.body).value }) });
+    };
+
+    const rc = createRemoteConfig(serverTarget("http://srv/editor.html?server=1"), {
+      fetch: fakeFetch, debounceMs: 0,
+    });
+    const payload = await rc.load();
+    t.eq("remote: load asks the server, not localStorage", calls[0].url, "http://srv/api/config");
+    t.eq("remote: and hands back what it answered", payload.groups.length, 1);
+    t.ok("remote: the server's key set is the drop rule", rc.owns("friendlyFire") && !rc.owns("aimMode"));
+
+    // A whole exported config, the shape a person actually pastes: every key,
+    // most of them the browser's. The dropped ones are never sent — refusing
+    // them at the far end would still be correct, but then the count reported
+    // would be a count of things that failed.
+    calls.length = 0;
+    const res = await rc.importAll(JSON.stringify({
+      friendlyFire: true,   // the server's
+      aimMode: "mouse",     // the seam says never
+      soldierBaseHp: 15,    // the hub draws HP bars with it
+      notAKnob: 7,          // not in any schema
+    }));
+    t.eq("remote: an import applies what the server owns", res.applied, 1);
+    t.eq("remote: ...drops the rest silently rather than refusing the paste", res.dropped, 3);
+    t.eq("remote: ...and nothing fails", res.failures.length, 0);
+    t.eq("remote: exactly one POST left the browser", calls.length, 1);
+    t.eq("remote: ...carrying the key the server owns", calls[0].body.key, "friendlyFire");
+
+    t.ok("remote: bad JSON is reported, not thrown", (await rc.importAll("{{")).ok === false);
+    t.ok("remote: and so is a JSON array", (await rc.importAll("[1,2]")).ok === false);
+
+    // A failure mid-import is named rather than counted as applied
+    // (approximation 11: N POSTs, not a transaction).
+    const owned = createRemoteConfig(serverTarget("http://srv/e.html?server=1"), { fetch: fakeFetch, debounceMs: 0 });
+    await owned.load();
+    const half = await owned.importAll({ friendlyFire: true, boom: 1 });
+    t.eq("remote: a key the server does not own never becomes a failure", half.failures.length, 0);
+    t.eq("remote: ...it is a drop", half.dropped, 1);
+
+    // THE DEBOUNCE (approximation 5). A range fires `input` per pixel; one drag
+    // must be one POST, carrying the value the drag ended on.
+    calls.length = 0;
+    for (const v of [1, 2, 3, 4, 5]) rc.set("friendlyFire", v);
+    await rc.flush();
+    t.eq("remote: a drag is one POST, not one per pixel", calls.length, 1);
+    t.eq("remote: ...carrying the value it ended on", calls[0].body.value, 5);
   }
 }
