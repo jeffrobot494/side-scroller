@@ -12,6 +12,12 @@ tags: [ai, movement, navigation]
 How the baseline agent gets somewhere. What it does: `design/agent-navigation.md`.
 Everything beyond a given destination: `idea/advanced-agent-navigation.md`.
 
+The design's obstacle-awareness addendum is specified in [Nav clearance](nav-clearance.md).
+N0–N4 below record the baseline implementation; the new work is C1–C2 in that
+spec and has not been implemented. Its runtime clearance rules supersede this
+record's "Edges ignore ceilings" approximation when C2 lands; generation keeps
+the existing envelope-only audit.
+
 `needs: []` — every piece this builds on already exists in the repo.
 
 ## Slices
@@ -498,4 +504,3 @@ travelling one and no destination resolves, so nothing routes. And a committed
 dash already outranks routing via the existing `dash > moveOrder > controller`
 precedence, so an action in windup/steps/recovery cannot be interrupted by a
 path.
-
