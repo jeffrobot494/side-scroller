@@ -8,6 +8,16 @@
 // paste into these defaults to make a change permanent.
 //
 // `type`:  bool | range | enum | text
+// `scope`: "server" marks a knob READ ONLY BY THE ROOM — the multiplayer
+// process that holds the campaign and steps the mission (`server.mjs`). Those
+// are the entries `GET/POST /api/config` serve and `editor.html?server=1` tunes
+// (tech/server-settings.md). Unmarked is the default and means local: viewer
+// state (zoom, sound buses, the gamepad deadzone), or a knob a browser reads
+// TOO — `soldierBaseHp`/`soldierHpPerHealth` draw the hub's HP bars and
+// `doomPerDay`/`doomPerExpiry*` are printed by the hub, so scoping them would
+// show one machine's numerator over the other's denominator. `aimMode` is the
+// hand at the keyboard and must never be scoped. Single-player ignores the
+// field entirely: the plain URL reads and writes localStorage for every knob.
 // Where a value is READ decides how "live" it is — friendlyFire is read per
 // shot (instant); gravity is read at mission start (applies next deploy).
 // ---------------------------------------------------------------------------
@@ -18,6 +28,7 @@ export const SCHEMA = [
     items: [
       {
         key: "friendlyFire",
+        scope: "server",
         label: "Friendly fire",
         type: "bool",
         default: false,
@@ -25,6 +36,7 @@ export const SCHEMA = [
       },
       {
         key: "playerDamageMult",
+        scope: "server",
         label: "Squad damage ×",
         type: "range",
         default: 1.25,
@@ -45,6 +57,7 @@ export const SCHEMA = [
       },
       {
         key: "soldierMagazines",
+        scope: "server",
         label: "Magazines carried",
         type: "range",
         default: 4,
@@ -65,6 +78,7 @@ export const SCHEMA = [
       },
       {
         key: "lootPerThreat",
+        scope: "server",
         label: "Loot value / threat",
         type: "range",
         default: 0.3,
@@ -80,6 +94,7 @@ export const SCHEMA = [
     items: [
       {
         key: "gravity",
+        scope: "server",
         label: "Gravity",
         type: "range",
         default: 2000,
@@ -90,6 +105,7 @@ export const SCHEMA = [
       },
       {
         key: "runSpeed",
+        scope: "server",
         label: "Run speed",
         type: "range",
         default: 320,
@@ -100,6 +116,7 @@ export const SCHEMA = [
       },
       {
         key: "jumpSpeed",
+        scope: "server",
         label: "Jump strength",
         type: "range",
         default: 700,
@@ -110,6 +127,7 @@ export const SCHEMA = [
       },
       {
         key: "enemyJump",
+        scope: "server",
         label: "Enemy jump strength",
         type: "range",
         default: 665,
@@ -120,6 +138,7 @@ export const SCHEMA = [
       },
       {
         key: "coyoteTime",
+        scope: "server",
         label: "Coyote time",
         type: "range",
         default: 0.1,
@@ -130,6 +149,7 @@ export const SCHEMA = [
       },
       {
         key: "duckHoldTime",
+        scope: "server",
         label: "Duck hold",
         type: "range",
         default: 0.45,
@@ -140,6 +160,7 @@ export const SCHEMA = [
       },
       {
         key: "duckLookahead",
+        scope: "server",
         label: "Duck lookahead",
         type: "range",
         default: 1.5,
@@ -150,6 +171,7 @@ export const SCHEMA = [
       },
       {
         key: "duckChanceSlow",
+        scope: "server",
         label: "Duck chance @ Speed 1",
         type: "range",
         default: 0.25,
@@ -160,6 +182,7 @@ export const SCHEMA = [
       },
       {
         key: "duckChanceFast",
+        scope: "server",
         label: "Duck chance @ Speed 10",
         type: "range",
         default: 0.95,
@@ -170,6 +193,7 @@ export const SCHEMA = [
       },
       {
         key: "duckLatencySlow",
+        scope: "server",
         label: "Duck latency @ Speed 1",
         type: "range",
         default: 0.35,
@@ -180,6 +204,7 @@ export const SCHEMA = [
       },
       {
         key: "duckLatencyFast",
+        scope: "server",
         label: "Duck latency @ Speed 10",
         type: "range",
         default: 0.05,
@@ -190,6 +215,7 @@ export const SCHEMA = [
       },
       {
         key: "knockbackDecay",
+        scope: "server",
         label: "Knockback decay",
         type: "range",
         default: 3000,
@@ -200,6 +226,7 @@ export const SCHEMA = [
       },
       {
         key: "companionBrain",
+        scope: "server",
         label: "Companion AI",
         type: "enum",
         options: ["legacy", "spec"],
@@ -221,6 +248,7 @@ export const SCHEMA = [
       },
       {
         key: "aimSpread",
+        scope: "server",
         label: "Aim spread",
         type: "range",
         default: 0.12,
@@ -231,6 +259,7 @@ export const SCHEMA = [
       },
       {
         key: "reloadSpeedMult",
+        scope: "server",
         label: "Reload move speed ×",
         type: "range",
         default: 1,
@@ -430,6 +459,7 @@ export const SCHEMA = [
       },
       {
         key: "doomPerFailure",
+        scope: "server",
         label: "Doom / failed mission",
         type: "range",
         default: 10,
@@ -440,6 +470,7 @@ export const SCHEMA = [
       },
       {
         key: "threatRewardLow",
+        scope: "server",
         label: "Win restores — Low",
         type: "range",
         default: 4,
@@ -450,6 +481,7 @@ export const SCHEMA = [
       },
       {
         key: "threatRewardMedium",
+        scope: "server",
         label: "Win restores — Medium",
         type: "range",
         default: 6,
@@ -460,6 +492,7 @@ export const SCHEMA = [
       },
       {
         key: "threatRewardHigh",
+        scope: "server",
         label: "Win restores — High",
         type: "range",
         default: 10,
@@ -470,6 +503,7 @@ export const SCHEMA = [
       },
       {
         key: "threatRewardExtreme",
+        scope: "server",
         label: "Win restores — Extreme",
         type: "range",
         default: 15,
@@ -480,6 +514,7 @@ export const SCHEMA = [
       },
       {
         key: "dayPerDeploy",
+        scope: "server",
         label: "One mission per day",
         type: "bool",
         default: true,
@@ -487,6 +522,7 @@ export const SCHEMA = [
       },
       {
         key: "healPerDay",
+        scope: "server",
         label: "Heal / day at base",
         type: "range",
         default: 3,
@@ -536,6 +572,7 @@ export const SCHEMA = [
     items: [
       {
         key: "leadCount",
+        scope: "server",
         label: "Leads on the board",
         type: "range",
         default: 3,
@@ -546,6 +583,7 @@ export const SCHEMA = [
       },
       {
         key: "leadArrivalRate",
+        scope: "server",
         label: "Lead arrivals / day",
         type: "range",
         default: 1.25,
@@ -556,6 +594,7 @@ export const SCHEMA = [
       },
       {
         key: "seedLeads",
+        scope: "server",
         label: "Leads on day 1",
         type: "range",
         default: 1,
@@ -566,6 +605,7 @@ export const SCHEMA = [
       },
       {
         key: "leadVisibility",
+        scope: "server",
         label: "Lead visibility",
         type: "range",
         default: 0.5,
@@ -577,6 +617,7 @@ export const SCHEMA = [
       },
       {
         key: "missionSnapshotHz",
+        scope: "server",
         label: "Mission snapshot rate",
         type: "range",
         default: 20,
@@ -588,6 +629,7 @@ export const SCHEMA = [
       },
       {
         key: "leadLifeMin",
+        scope: "server",
         label: "Lead lifespan — shortest",
         type: "range",
         default: 1,
@@ -598,6 +640,7 @@ export const SCHEMA = [
       },
       {
         key: "leadLifeMax",
+        scope: "server",
         label: "Lead lifespan — longest",
         type: "range",
         default: 3,
@@ -608,6 +651,7 @@ export const SCHEMA = [
       },
       {
         key: "bossHighWins",
+        scope: "server",
         label: "High wins before the finale",
         type: "range",
         default: 2,
@@ -618,6 +662,7 @@ export const SCHEMA = [
       },
       {
         key: "threatScaleCap",
+        scope: "server",
         label: "Max threat scaling",
         type: "range",
         default: 4,
@@ -628,6 +673,7 @@ export const SCHEMA = [
       },
       {
         key: "genSpawnClear",
+        scope: "server",
         label: "Spawn clearance",
         type: "range",
         default: 960,
@@ -638,6 +684,7 @@ export const SCHEMA = [
       },
       {
         key: "genPlatformDensity",
+        scope: "server",
         label: "Terrain density",
         type: "range",
         default: 1,
@@ -648,6 +695,7 @@ export const SCHEMA = [
       },
       {
         key: "genMaxTiers",
+        scope: "server",
         label: "Terrain verticality",
         type: "range",
         default: 4,
@@ -658,6 +706,7 @@ export const SCHEMA = [
       },
       {
         key: "genStructureSpacing",
+        scope: "server",
         label: "Structure spacing",
         type: "range",
         default: 300,
@@ -677,6 +726,7 @@ export const SCHEMA = [
     items: [
       {
         key: "navEnabled",
+        scope: "server",
         label: "Route following",
         type: "bool",
         default: true,
@@ -684,6 +734,7 @@ export const SCHEMA = [
       },
       {
         key: "navArriveRadius",
+        scope: "server",
         label: "Arrival radius",
         type: "range",
         default: 14,
@@ -694,6 +745,7 @@ export const SCHEMA = [
       },
       {
         key: "navTakeoffWindow",
+        scope: "server",
         label: "Takeoff window",
         type: "range",
         default: 12,
@@ -704,6 +756,7 @@ export const SCHEMA = [
       },
       {
         key: "navRepathInterval",
+        scope: "server",
         label: "Repath interval",
         type: "range",
         default: 0.5,
@@ -714,6 +767,7 @@ export const SCHEMA = [
       },
       {
         key: "navJumpAttempts",
+        scope: "server",
         label: "Jump attempts before giving up",
         type: "range",
         default: 3,
@@ -724,6 +778,7 @@ export const SCHEMA = [
       },
       {
         key: "navReposition",
+        scope: "server",
         label: "Ranged repositioning",
         type: "bool",
         default: true,
@@ -731,6 +786,7 @@ export const SCHEMA = [
       },
       {
         key: "navRepositionHold",
+        scope: "server",
         label: "Reposition commitment",
         type: "range",
         default: 1.5,
@@ -741,6 +797,7 @@ export const SCHEMA = [
       },
       {
         key: "navStallTime",
+        scope: "server",
         label: "Stall before repositioning",
         type: "range",
         default: 0.6,
