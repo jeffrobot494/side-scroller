@@ -20,8 +20,19 @@
 //                             half of the fork at once — and it is in the bar,
 //                             unlike the prototype's, because by J8 this is a
 //                             subsystem rather than a probe.
+//   5. The settings routes    `GET`/`POST /api/config` (tech/server-settings.md,
+//                             C2), against a server of their own. THEIR OWN
+//                             SPAWN, not section 4's: that one returns early on
+//                             a node without a global `WebSocket`, and route
+//                             cases nested inside it would vanish silently on
+//                             an older runtime rather than run. What they can
+//                             claim is POST-then-GET THROUGH THE ROUTES — this
+//                             is the parent process and has no handle on the
+//                             child's `config` object, so "the live object
+//                             moved" is not assertable from here and is not
+//                             asserted.
 //
-// Section 4 spawns a process and talks HTTP to it. That is deliberate and it is
+// Sections 4 and 5 spawn a process and talk HTTP to it. That is deliberate and it is
 // the same instrument J6 added for a different reason: `server.mjs` binds a
 // port on load, which is exactly why no suite imports it and exactly what a
 // child process makes harmless.
@@ -32,7 +43,7 @@ import { fileURLToPath } from "node:url";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { createRooms } from "../src/net/rooms.js";
-import { config } from "../src/game/config.js";
+import { config, exportConfig } from "../src/game/config.js";
 import {
   packInput, createWireInput, projectScene, applySnapshot, WIRE_ACTIONS,
 } from "../src/net/mission-wire.js";
@@ -517,6 +528,11 @@ export default async function run(t) {
   // 4. THE TWO-SEAT DRIVE — the real server, on its own port
   // ======================================================================
   await twoSeatDrive(t);
+
+  // ======================================================================
+  // 5. THE SETTINGS ROUTES — a second server, and no socket needed
+  // ======================================================================
+  await configRoutes(t);
 }
 
 // --- section 4 -------------------------------------------------------------
@@ -560,32 +576,18 @@ async function until(pred, ms = 4000) {
   return null;
 }
 
-function post(base, path, body) {
-  return fetch(base + path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }).then((r) => r.json());
-}
-
-async function twoSeatDrive(t) {
-  // A CLIENT SOCKET IS THE ONE THING THIS SUITE NEEDS FROM THE RUNTIME. Global
-  // `WebSocket` landed unflagged in node 22, and the repo has no dependencies to
-  // fall back on — so on an older node this section reports what it could not
-  // do rather than failing, which is a different claim from "the room is
-  // broken". The other three sections are pure and run everywhere.
-  if (typeof WebSocket !== "function") {
-    t.ok(`drive: SKIPPED — node ${process.version} has no global WebSocket (needs 22+)`, true);
-    return;
-  }
+// The real `server.mjs` on a port of its own. Hoisted out of `twoSeatDrive`
+// because section 5 needs one too and must not inherit that section's
+// WebSocket skip.
+async function spawnServer() {
   const port = 8400 + Math.floor(Math.random() * 120);
   const base = `http://127.0.0.1:${port}`;
   const server = spawn(process.execPath, [SERVER], {
     env: { ...process.env, PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let stderr = "";
-  server.stderr.on("data", (d) => (stderr += d));
+  let err = "";
+  server.stderr.on("data", (d) => (err += d));
   const up = await new Promise((resolve) => {
     const timer = setTimeout(() => resolve(false), 8000);
     server.stdout.on("data", (d) => {
@@ -599,7 +601,42 @@ async function twoSeatDrive(t) {
       resolve(false);
     });
   });
-  t.ok("drive: the real server.mjs starts with a mission loop in it", up, stderr.slice(0, 300));
+  return { server, base, port, up, stderr: () => err };
+}
+
+function post(base, path, body) {
+  return fetch(base + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((r) => r.json());
+}
+
+// The same POST, with the status kept. A refusal is the point of half of
+// section 5 and `post` throws its status away.
+async function postStatus(base, path, body) {
+  const res = await fetch(base + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+const getJson = (base, path) => fetch(base + path).then((r) => r.json());
+
+async function twoSeatDrive(t) {
+  // A CLIENT SOCKET IS THE ONE THING THIS SUITE NEEDS FROM THE RUNTIME. Global
+  // `WebSocket` landed unflagged in node 22, and the repo has no dependencies to
+  // fall back on — so on an older node this section reports what it could not
+  // do rather than failing, which is a different claim from "the room is
+  // broken". The other three sections are pure and run everywhere.
+  if (typeof WebSocket !== "function") {
+    t.ok(`drive: SKIPPED — node ${process.version} has no global WebSocket (needs 22+)`, true);
+    return;
+  }
+  const { server, base, up, stderr } = await spawnServer();
+  t.ok("drive: the real server.mjs starts with a mission loop in it", up, stderr().slice(0, 300));
   if (!up) {
     server.kill();
     return;
@@ -607,10 +644,14 @@ async function twoSeatDrive(t) {
 
   const open = [];
   try {
-    // ONE LEAD TWO COMMANDERS CAN BOTH SEE. `config.leadVisibility` is 0.5 in
-    // the server's process and no test can reach it — a room reads built-in
-    // defaults (approximation 5) — so the overlap is a coin flip and the answer
-    // is to open rooms until one lands rather than to stub the config.
+    // ONE LEAD TWO COMMANDERS CAN BOTH SEE. `config.leadVisibility` is 0.5, so
+    // every lead is rolled per commander and the overlap used to be a coin
+    // flip this section retried its way past — the room read built-in defaults
+    // and nothing could reach them. `POST /api/config` (C2) can, and this is
+    // the strongest thing section 5 cannot claim: a route call changing what
+    // the running server DOES, not just what a GET says. The retry loop stays
+    // as the fallback it always was; with visibility at 1 it lands first time.
+    await post(base, "/api/config", { key: "leadVisibility", value: 1 });
     let room = null, seatA = null, seatB = null, lead = null;
     for (let tries = 0; tries < 12 && !lead; tries++) {
       for (const s of open.splice(0)) s.close();
@@ -718,6 +759,92 @@ async function twoSeatDrive(t) {
     t.ok(`drive: threw — ${e && e.message}`, false);
   } finally {
     for (const s of open) s.close();
+    server.kill();
+    await sleep(60);
+  }
+}
+
+// --- section 5 -------------------------------------------------------------
+
+// `GET`/`POST /api/config`  (tech/server-settings.md, C2).
+//
+// EVERY CLAIM HERE IS MADE THROUGH THE ROUTES. This is the parent process; the
+// server's `config` object lives in a child and nothing here can read it. So
+// "the value landed" means a GET said so afterwards, which is weaker than "the
+// live object moved" and is the honest ceiling of an HTTP suite.
+async function configRoutes(t) {
+  const { server, base, up, stderr } = await spawnServer();
+  t.ok("config: the server is up", up, stderr().slice(0, 300));
+  if (!up) {
+    server.kill();
+    return;
+  }
+
+  try {
+    const payload = await getJson(base, "/api/config");
+    const items = payload.groups.flatMap((g) => g.items);
+    const keys = new Set(items.map((it) => it.key));
+
+    t.ok("config: GET answers groups and values", Array.isArray(payload.groups) && !!payload.values);
+    t.eq("config: six groups hold a server knob", payload.groups.length, 6);
+    t.ok("config: and none of them is empty", payload.groups.every((g) => g.items.length > 0));
+    t.eq("config: every entry it serves is scoped", items.filter((it) => it.scope !== "server").length, 0);
+    t.ok("config: a value comes with every entry", items.every((it) => payload.values[it.key] !== undefined));
+    // The four the seam and C1 argue about by name, so a later re-scoping has
+    // to come past this line rather than past a count.
+    t.ok("config: aimMode is not served — it is the hand at the keyboard", !keys.has("aimMode"));
+    t.ok("config: nor is soldierBaseHp — the hub draws HP bars with it", !keys.has("soldierBaseHp"));
+    t.ok("config: nor doomPerDay — the hub prints it", !keys.has("doomPerDay"));
+    t.ok("config: but friendlyFire is, and so is gravity", keys.has("friendlyFire") && keys.has("gravity"));
+
+    // POST THEN GET. A bool, because `false`/`0` are the values a falsiness
+    // check would drop and the route is written against that.
+    const on = await postStatus(base, "/api/config", { key: "friendlyFire", value: true });
+    t.eq("config: POST answers 200", on.status, 200);
+    t.eq("config: ...with the value it stored", on.body.value, true);
+    t.eq("config: and a GET shows it", (await getJson(base, "/api/config")).values.friendlyFire, true);
+    const off = await postStatus(base, "/api/config", { key: "friendlyFire", value: false });
+    t.eq("config: turning it back off is not a refusal", off.status, 200);
+    t.eq("config: ...and `false` survives the round trip", (await getJson(base, "/api/config")).values.friendlyFire, false);
+
+    // COERCION IS `setConfig`'s, not the route's. gravity is 600–4000.
+    const wild = await postStatus(base, "/api/config", { key: "gravity", value: 99999 });
+    t.eq("config: an out-of-range value is accepted", wild.status, 200);
+    t.eq("config: ...clamped by the schema, not rejected by the route", wild.body.value, 4000);
+    t.eq("config: and the clamped value is what a GET reads back", (await getJson(base, "/api/config")).values.gravity, 4000);
+
+    // THE TWO REFUSALS.
+    const unknown = await postStatus(base, "/api/config", { key: "notAKnob", value: 3 });
+    t.eq("config: an unknown key is a 400", unknown.status, 400);
+    const local = await postStatus(base, "/api/config", { key: "aimMode", value: "keyboard" });
+    t.eq("config: an unmarked key is refused", local.status, 403);
+    t.ok("config: ...and named in the answer, so a browser can report it", local.body.key === "aimMode");
+    const missing = await postStatus(base, "/api/config", { value: 3 });
+    t.eq("config: a body with no key is a 400 rather than a throw", missing.status, 400);
+
+    // A WHOLE EXPORTED CONFIG, POSTED BACK — what C3's Import does, and what
+    // approximation 2b is about: `exportConfig` is all 71 keys, defaults
+    // included, so this writes every server knob rather than the changed ones.
+    // The claim is that it lands without failing, not that it is a good idea.
+    const whole = JSON.parse(exportConfig());
+    whole.healPerDay = 3;      // server-scoped: must apply
+    whole.doomPerDay = 99;     // hub-read: must be dropped
+    let applied = 0, refused = 0, broke = 0;
+    for (const [key, value] of Object.entries(whole)) {
+      const r = await postStatus(base, "/api/config", { key, value });
+      if (r.status === 200) applied++;
+      else if (r.status === 403) refused++;
+      else broke++;
+    }
+    t.eq("config: a whole exported config applies its 47 server keys", applied, 47);
+    t.eq("config: ...drops the other 24", refused, 24);
+    t.eq("config: ...and nothing in it errors", broke, 0);
+    const after = await getJson(base, "/api/config");
+    t.eq("config: the server-scoped key it carried landed", after.values.healPerDay, 3);
+    t.ok("config: and the hub-read one never reached the server", after.values.doomPerDay === undefined);
+  } catch (e) {
+    t.ok(`config: threw — ${e && e.message}`, false);
+  } finally {
     server.kill();
     await sleep(60);
   }

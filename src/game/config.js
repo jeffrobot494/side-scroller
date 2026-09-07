@@ -625,7 +625,7 @@ export const SCHEMA = [
         max: 60,
         step: 5,
         help:
-          "Multiplayer only. How many times a second a room sends each seat the state of the mission it is holding (tech/multiplayer-missions.md, J8). The simulation always steps at 60Hz; this is only how often a viewer is told about it, so lowering it costs smoothness and saves bandwidth. Half a snapshot interval is added to input latency. Single-player never sends one. NOTE: a room reads built-in defaults — it has no localStorage — so changing this in the editor moves your own view of nothing (approximation 5).",
+          "Multiplayer only. How many times a second a room sends each seat the state of the mission it is holding (tech/multiplayer-missions.md, J8). The simulation always steps at 60Hz; this is only how often a viewer is told about it, so lowering it costs smoothness and saves bandwidth. Half a snapshot interval is added to input latency. Single-player never sends one. Server-scoped: the room reads it live inside its step loop, so turning it here on `editor.html?server=1` changes the running server (tech/server-settings.md).",
       },
       {
         key: "leadLifeMin",

@@ -47,7 +47,7 @@ import { createRooms } from "./src/net/rooms.js";
 import { attachWebSocket } from "./src/net/ws.mjs";
 import { Mission } from "./src/mission/mission.js";
 import { createWireInput, projectScene } from "./src/net/mission-wire.js";
-import { config } from "./src/game/config.js";
+import { config, setConfig, SCHEMA } from "./src/game/config.js";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const PORT = Number(process.env.PORT) || 8000;
@@ -57,6 +57,11 @@ const PORT = Number(process.env.PORT) || 8000;
 // without it a room is exactly the V1–V3 campaign service and every page plays
 // its own dispatch, which is what every suite that builds a registry gets.
 const rooms = createRooms({ startMission });
+
+// Every schema entry, and the ones a room owns (tech/server-settings.md, C1).
+// Built once: the SCHEMA is data and does not change while the process runs.
+const FLAT_SCHEMA = SCHEMA.flatMap((g) => g.items);
+const SERVER_ITEMS = new Map(FLAT_SCHEMA.filter((it) => it.scope === "server").map((it) => [it.key, it]));
 
 // `.js` MUST be application/javascript or every ESM import in the page fails
 // with a MIME-type error — the whole game is native modules with no bundler.
@@ -248,8 +253,77 @@ async function apiRoute(req, res) {
     return true;
   }
 
+  // THE ROOM'S SETTINGS  (tech/server-settings.md, C2)
+  //
+  // A room reads `config` live — the mission's `_ctx` getters, `advanceDay`,
+  // the generator, the step loop's snapshot rate — and until now nothing could
+  // set it, because a node process has no localStorage and `setConfig`'s
+  // `persist()` is a silent no-op there. That no-op is the feature: the setter
+  // still validates, coerces and mutates the live object in place, so every
+  // importer sees the new number. These two routes are the only thing that was
+  // missing, and `scope: "server"` is the list of what may cross.
+  //
+  // UNAUTHENTICATED, deliberately (approximation 1). A seat token would prove
+  // nothing — `POST /api/rooms` mints one to anybody who asks, by design — so
+  // what protects this is that it is a two-player game on a URL nobody has.
+  if (url.pathname === "/api/config" && req.method === "GET") {
+    json(res, 200, serverConfig());
+    return true;
+  }
+
+  if (url.pathname === "/api/config" && req.method === "POST") {
+    let body;
+    try {
+      body = await readJson(req);
+    } catch (e) {
+      json(res, 400, { error: e.message });
+      return true;
+    }
+    const key = body && body.key;
+    const item = SERVER_ITEMS.get(key);
+    if (!item) {
+      // Two different refusals, because they mean different things to whoever
+      // is holding the browser: 400 is "no such knob" (a typo, or a config
+      // exported from a newer build), 403 is "that knob is yours, not mine" —
+      // which is the normal, expected answer while importing somebody's whole
+      // exported config.
+      const known = FLAT_SCHEMA.some((it) => it.key === key);
+      json(res, known ? 403 : 400, {
+        error: known ? `Not a server setting: ${key}` : `No such setting: ${key}`,
+        key,
+      });
+      return true;
+    }
+    // `setConfig` owns coercion and clamping — a route that validated again
+    // would be a second opinion about the schema. It answers `undefined` for a
+    // key it does not know; checked against undefined and never for falsiness,
+    // because `false` and `0` are legal values.
+    const value = setConfig(key, body.value);
+    if (value === undefined) {
+      json(res, 400, { error: `No such setting: ${key}`, key });
+      return true;
+    }
+    json(res, 200, { key, value });
+    return true;
+  }
+
   json(res, 404, { error: `No such route: ${url.pathname}` });
   return true;
+}
+
+// The server-scoped entries and their live values, in SCHEMA order and grouped
+// as the SCHEMA groups them — which is what lets the editor hand the payload
+// straight to the renderer it already has. A group with nothing left in it is
+// dropped here rather than sent empty.
+function serverConfig() {
+  const groups = [];
+  for (const g of SCHEMA) {
+    const items = g.items.filter((it) => it.scope === "server");
+    if (items.length) groups.push({ title: g.title, items });
+  }
+  const values = {};
+  for (const g of groups) for (const it of g.items) values[it.key] = config[it.key];
+  return { groups, values };
 }
 
 // ---------------------------------------------------------------------------
@@ -271,8 +345,10 @@ const STEP_MS = 1000 / TICK_HZ;
 // Every flight being stepped. A room holds the flight; this holds the loop.
 const live = new Set();
 
-// The snapshot rate, as the room reads it: built-in defaults, because a node
-// process has no localStorage (approximation 5).
+// The snapshot rate, as the room reads it. Read live off `config` each time
+// round the loop, and since `POST /api/config` (tech/server-settings.md, C2)
+// this is a knob somebody can actually turn on a running server — it was a
+// built-in default nothing could reach when J8 shipped.
 const clampHz = (v) => Math.min(TICK_HZ, Math.max(1, Math.round(Number(v) || 20)));
 
 // A room is opening a mission. Build it, wire one input per seat, and hand the

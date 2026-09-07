@@ -1,7 +1,7 @@
 ---
 type: tech
 category: development-tools
-status: unbuilt
+status: building
 resolution: sharp
 needs: [multiplayer-service]
 related: [multiplayer-service, multiplayer-missions]
@@ -20,6 +20,15 @@ reach the other, and a way to say which knobs may cross.
 | **C1** | **`scope` on a schema entry.** A knob is `"server"` — **read only by the room** — or it is not, and this screen leaves it alone. "Only" is the load-bearing word and "a knob the room reads" is NOT the rule: `soldierBaseHp`/`soldierHpPerHealth` are read by the room to build a soldier (`src/mission/entities.js`) AND by the base to draw its HP bars (`src/hub/hub.js`), and `applySoldier` copies `health` but not the ceiling — so scoping those gives every bar the room's numerator over the browser's denominator. The `doomPerDay`/`doomPerExpiry*` family is the same shape: applied by the room, printed by the hub. Single-player is untouched by any of it — the plain URL reads and writes localStorage as today, for every knob. Marked entries are the ones the routes will serve; everything unmarked is viewer state (zoom, canvas size, FPS meter, sound buses, gamepad deadzone) or a knob no room has an opinion about. **Unmarked is the default**, so a knob added later stays local until somebody decides otherwise, which is the safe direction to fail in | No — a field nothing reads yet |
 | **C2** | **The routes.** `GET /api/config` answers the server-scoped entries and their live values; `POST /api/config` puts one key through `setConfig`, refusing anything not marked. **Inside `apiRoute`, above its 404 catch-all** — that function handles every `/api/` path and swallows the rest, so a route added below the outer method guard is unreachable for GET as well as POST (verified: `POST /api/config` against the running server answers 404 from `apiRoute`, not 405) | **Yes.** `server.mjs` serves the whole repo at the deployed URL, so this alone opens an unauthenticated write endpoint on a live deployment. It cannot land as a no-behaviour slice, and approximation 1 is why that is accepted rather than fixed |
 | **C3** | **The editor points at a server.** `editor.html?server=1` fetches its values from C2 and sends changes there; no query string is today's localStorage behaviour, unchanged. Four sites know, not one — see Where the code goes. **`Export JSON ▾` serves the SERVER's values in this mode**, which is what closes the design's permanence loop: the button's whole job is to hand over JSON to paste into `src/game/config.js` defaults, and reading the browser's object on a page showing the server's would hand over the wrong numbers silently. `GET /api/config` already returns them, so this is a source swap rather than a feature. **`▴ Import JSON` posts to the server too** — the pasted object is parsed and validated locally against the schema, then sent key by key, so an import is a batch of the same writes a slider makes and needs no second route. It reports how many applied, as it does now, and **silently drops anything not server-scoped** rather than refusing the paste, because the JSON a person has is an Export of a whole config and refusing it over one viewer knob would make the round trip useless. **Reset stays disabled**: it writes to the browser, and over a wire it would refresh the sliders and look like it had worked while the server kept every value | Yes. A knob dragged here changes a running server |
+
+**As built (C2).** Two details the plan left open, written down because C3 and
+the next reader both depend on them.
+
+| What | As built |
+|---|---|
+| The GET payload | `{ groups: [{ title, items }], values: { key: value } }` — the SCHEMA's own groups with a filtered `items`, empty ones dropped server-side, plus one flat map of live values. Shaped so the browser hands it straight to `controlsTabsHTML`, which takes exactly a schema, a values object and a comparison |
+| Two refusals, not one | An unknown key is **400** and a known-but-unmarked key is **403**. The plan says only "refused"; they are split because they mean different things to the browser — 400 is a typo or a config from a newer build, 403 is the normal, expected answer for most of an imported whole config, and approximation 11's count is only honest if the two can be told apart |
+| `leadVisibility` in section 4 | The plan says to fix the suite's stale note. What shipped uses the route instead: the two-seat drive now POSTs `leadVisibility: 1` before opening its rooms, so the overlap it used to retry its way past is set rather than rolled. It is also the one claim section 5 cannot make — a route call changing what the running server DOES, rather than what a GET reports |
 
 ## Reuses
 
