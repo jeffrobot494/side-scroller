@@ -349,7 +349,11 @@ no process — but reach for it deliberately, not by habit.
   running server instead of localStorage (`src/editor/remote-config.js` is the
   browser half). Export and Import cross the wire; Reset does not, because it
   writes to the browser and over a wire would look like it had worked. Values
-  die with the process, and the screen says so.
+  die with the process unless **`⤓ Make permanent`** (C4–C5) writes them into
+  `src/game/config.js` — one route, `POST /api/config/permanent`, gated on
+  `.git` being under `ROOT`, so a deployed image (`.dockerignore` drops `.git`)
+  refuses and says why rather than writing a file that reverts on next deploy.
+  It does not commit, and nothing warns you that it hasn't.
   Single-player is unaffected and still needs no process — it is
   static files and `python3 -m http.server` serves a playable game. Nothing in
   `src/` imports `server.mjs`; `test/mission-net.test.mjs` spawns it on its own

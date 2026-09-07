@@ -161,6 +161,40 @@ export function createRemoteConfig(target, opts = {}) {
       while (inFlight.size) await Promise.all([...inFlight]);
     },
 
+    // Write the server's running values into its own `src/game/config.js`
+    // (tech/server-settings.md, C4). No body — the server knows what differs.
+    //
+    // A REFUSAL HERE IS A NORMAL ANSWER, not an error: a deployed server has no
+    // checkout and cannot make anything permanent, and the caller has to be
+    // able to say that in words rather than as a status code. `checkout: false`
+    // is what distinguishes it from a write that failed.
+    async makePermanent() {
+      if (!base) return { ok: false, reason: `Not a server URL: ${target && target.label}` };
+      let res;
+      try {
+        res = await doFetch(`${base}/api/config/permanent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+      } catch (e) {
+        return { ok: false, reason: `${base} is unreachable (${e && e.message})` };
+      }
+      let body = null;
+      try {
+        body = await res.json();
+      } catch {
+        /* a refusal with no JSON body is still a refusal */
+      }
+      if (!res.ok)
+        return {
+          ok: false,
+          canPersist: !(body && body.checkout === false),
+          reason: (body && body.error) || `HTTP ${res.status}`,
+        };
+      return { ok: true, written: (body && body.written) || [], path: body && body.path };
+    },
+
     // A pasted config, sent key by key — an import is a batch of the same
     // writes a slider makes, which is why there is no second route.
     //

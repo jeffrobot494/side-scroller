@@ -197,9 +197,11 @@ function serverSettingsView() {
       <strong>Tuning ${remote.label}</strong> — the room holding the campaign, not this browser.
       A change here is <strong>live on that server the moment you make it</strong>, mid-mission included,
       for every commander in every room it is running.
-      <strong>It is lost when that server restarts</strong> — to keep a tweak, Export below and paste the
-      values into <code>src/game/config.js</code> defaults, then redeploy. Only the knobs the room reads
-      are shown; everything else (view, sound, your own aim mode) stays on the
+      <strong>It is lost when that server restarts</strong> — <strong>⤓ Make permanent</strong> writes what
+      it is running into <code>src/game/config.js</code>, and committing that is what carries it to every
+      server from then on. A server with no checkout under it (a deployed one) cannot do that and says so;
+      there, Export below and paste the values in by hand. Only the knobs the room reads are shown;
+      everything else (view, sound, your own aim mode) stays on the
       <a href="./editor.html">plain editor</a> and in this browser.
     </p>
     <div id="cfg" class="cfg">${controlsTabsHTML(serverCfg.groups, serverCfg.values, serverIsDefault(items), settingsTab)}</div>
@@ -216,6 +218,7 @@ function ioHTML() {
         <button class="btn" data-action="reset"${noReset}>Reset all to defaults</button>
         <button class="btn" data-action="export">Export JSON ▾</button>
         <button class="btn" data-action="import">▴ Import JSON</button>
+        ${remote ? `<button class="btn" data-action="permanent" title="Write the values this server is running into src/game/config.js, so a restart comes up on them.">⤓ Make permanent</button>` : ""}
         <span id="io-msg" class="ed-msg"></span>
       </div>
       <textarea id="io" class="ed-json" spellcheck="false"
@@ -269,6 +272,30 @@ root.addEventListener("click", (e) => {
       render();
       loadServerConfig();
       break;
+    case "permanent":
+      // The whole point of the slice: no textarea, no paste. On success it
+      // re-fetches AND renders — the server's `item.default` moved, so every
+      // dot on a knob just made permanent should now be out, and `serverCfg`
+      // is read at render time. (The Export handler next door deliberately does
+      // NOT render; copying it here would leave a stale strip.)
+      remote.makePermanent().then((r) => {
+        if (!r.ok) {
+          // A server with no checkout is not a broken server. Say which it is.
+          msg(r.canPersist === false ? `Cannot make anything permanent here. ${r.reason}` : r.reason, false);
+          return;
+        }
+        if (!r.written.length) {
+          msg("Nothing to write — the server is already running its defaults.");
+          return;
+        }
+        return remote.load().then((payload) => {
+          serverCfg = payload;
+          render();
+          const names = r.written.map((w) => w.key).join(", ");
+          msg(`Wrote ${r.written.length} default(s) into ${r.path}: ${names}. Commit it to keep them.`);
+        });
+      }).catch((e) => msg(String(e && e.message), false));
+      break;
     case "reset":
       // Disabled in server mode, and refused here too rather than only in the
       // markup: `resetConfig` writes the browser's store and its `writeStore({})`
@@ -294,7 +321,7 @@ root.addEventListener("click", (e) => {
           .then((payload) => {
             serverCfg = payload;
             document.getElementById("io").value = JSON.stringify(payload.values, null, 2);
-            msg(`Exported ${Object.keys(payload.values).length} server setting(s). Paste into config.js defaults and redeploy to keep them.`);
+            msg(`Exported ${Object.keys(payload.values).length} server setting(s). ⤓ Make permanent writes them into config.js for you, where the server has a checkout.`);
           })
           .catch((e) => msg(String(e && e.message), false));
         break;

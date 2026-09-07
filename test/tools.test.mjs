@@ -559,5 +559,35 @@ export default async function run(t) {
     await rc.flush();
     t.eq("remote: a drag is one POST, not one per pixel", calls.length, 1);
     t.eq("remote: ...carrying the value it ended on", calls[0].body.value, 5);
+
+    // MAKE PERMANENT (C5's half of C4). The case that matters is the REFUSAL:
+    // a deployed server has no checkout, that is the answer every deployed user
+    // meets, and it must arrive as a sentence the screen can print rather than
+    // as a status code or a thrown error.
+    const permFetch = (verdict) => async (url, init) => {
+      if (!init) return { ok: true, json: async () => ({ groups: [], values: {} }) };
+      if (verdict === "ok")
+        return { ok: true, status: 200, json: async () => ({ written: [{ key: "gravity", from: 2000, to: 2600 }], path: "/repo/src/game/config.js", checkout: true }) };
+      if (verdict === "nocheckout")
+        return { ok: false, status: 403, json: async () => ({ error: "not a git checkout — Export instead", checkout: false }) };
+      return { ok: false, status: 500, json: async () => ({ error: "EACCES" }) };
+    };
+    const perm = (v) => createRemoteConfig(serverTarget("http://srv/e.html?server=1"), { fetch: permFetch(v) });
+
+    const wrote = await perm("ok").makePermanent();
+    t.ok("permanent: a checkout server reports what it wrote", wrote.ok && wrote.written.length === 1);
+    t.eq("permanent: ...and where", wrote.path, "/repo/src/game/config.js");
+
+    const refused = await perm("nocheckout").makePermanent();
+    t.ok("permanent: a deployed server is a refusal, not a throw", refused.ok === false);
+    t.eq("permanent: ...marked as 'this server cannot', not 'this failed'", refused.canPersist, false);
+    t.ok("permanent: ...carrying the server's own reason", /Export/.test(refused.reason));
+
+    const broke = await perm("boom").makePermanent();
+    t.ok("permanent: a real failure is NOT marked as a non-checkout", broke.ok === false && broke.canPersist === true);
+
+    // The two must stay distinguishable: one is "press Export instead", the
+    // other is "something is wrong with the server".
+    t.ok("permanent: the two refusals do not read alike", refused.canPersist !== broke.canPersist);
   }
 }

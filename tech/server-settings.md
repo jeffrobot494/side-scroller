@@ -50,6 +50,13 @@ the next reader both depend on them.
 | A second env seam, `CONFIG_GIT_DIR` | The plan gives `CONFIG_SOURCE` a test override and leaves the `.git` gate hard-wired. That makes the 403 — **the branch every deployed user meets** — the one path with no coverage, because this suite can only ever run inside a checkout. Both are test seams with the same standing, and the refusal case now asserts the file was not written AND that the live knob still moved, which is the distinction the route exists to draw |
 | The answer carries `checkout` | `{ written: [{key, from, to}], path, checkout }` on success, `{ error, checkout: false }` on the refusal. The flag is what lets C5 say "this server cannot" rather than "something went wrong", without parsing the message |
 
+**As built (C5).**
+
+| What | As built |
+|---|---|
+| `canPersist` on the browser result | A refusal carries whether the server *cannot* (no checkout: `checkout: false` from C4) or *failed* (anything else). The screen says "Cannot make anything permanent here" for the first and prints the error for the second, and `test/tools.test.mjs` asserts the two do not read alike — because "press Export instead" and "something is wrong with your server" are different instructions |
+| Three texts changed, not one | The button, plus the two places that told you to do this by hand: the server-mode `ed-note` and the Export success message. Both now name the button and both still say what to do on a server that refuses, which is the case where the old wording was right |
+
 ## Reuses
 
 | What | Where | Used for |
