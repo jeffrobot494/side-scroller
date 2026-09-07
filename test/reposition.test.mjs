@@ -15,6 +15,8 @@
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { holdPoint, abortRoute, invalidateNavGraphs } from "../src/mission/navigation.js";
+import { graphKey } from "../src/game/nav.js";
+import { navState } from "../src/mission/navigation.js";
 import { losBetween } from "../src/mission/enemyspec/perception.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
 import { updateProjectiles } from "../src/mission/combat.js";
@@ -279,8 +281,12 @@ export default async function run(t) {
     t.ok("companion: and gets a sight line on the enemy behind it", on.sawTarget);
     t.ok(`off: without R2 it stays on the ground (feet ${off.highest})`, off.highest === 500);
     t.ok("off: and never sees the enemy at all", !off.sawTarget);
-    t.ok("companion: routed on the SOLDIER profile, not a legged one",
-      [...on.sc.navGraphs.keys()].some((k) => k === `30x46@2000/${config.jumpSpeed}/${config.runSpeed}`));
+    // The cache key carries the clearance policy as well as the body
+    // (tech/nav-clearance.md): two graphs of the same terrain for the same body
+    // are different graphs when one of them has been filtered, and an agent
+    // holding node ids from the other is holding ids for other places.
+    t.ok(`companion: routed on the SOLDIER profile, not a legged one (${[...on.sc.navGraphs.keys()].join(", ")})`,
+      on.sc.navGraphs.has(graphKey({ w: 30, h: 46, gravity: 2000, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed }, { clearance: config.navClearance })));
   }
 
   // ---- it does not break the follower ---------------------------------------
@@ -396,6 +402,83 @@ export default async function run(t) {
     t.eq("abort: and the path with it", g.nav.path, null);
     t.ok("abort: the ban ledger is not touched", g.nav.banned.has("5->6"));
     t.eq("abort: nor a part-spent attempt count", g.nav.attempts["3->4"], 1);
+  }
+
+  // ---- C2: the resolver reads the FILTERED graph ------------------------------
+  {
+    // A spot is only worth offering if the follower can be expected to deliver
+    // it, and clearance is now part of "can". The perch below is inside the
+    // gunner's reach and sits under an overhang, so the climb onto it does not
+    // exist — and neither should a firing position on top of it.
+    //
+    // The gunner is on the ground with the target on a slab; the perch is the
+    // only place in the band with a sight line, and the only way onto the perch
+    // is the jump clearance rejects.
+    const ROOFED_PERCH = [
+      { x: 0, y: 500, w: 1400, h: 40 },
+      { x: 600, y: 400, w: 200, h: 20 }, // the target stands here
+      { x: 1000, y: 420, w: 200, h: 20 }, // a perch level-ish with it
+      // 34 wide, so neither is standable itself (34 - 30 is under MIN_SEGMENT)
+      { x: 960, y: 400, w: 34, h: 20 }, // roofs the perch's near takeoff (970)
+      { x: 1190, y: 400, w: 34, h: 20 }, // ...and its far one
+    ];
+    const tp = { x: 700, y: 400 - 23 };
+    const see = (x, y) => losBetween(x, y, tp.x, tp.y, ROOFED_PERCH);
+    const mk = () => {
+      const sc = scene(ROOFED_PERCH, [soldierAt(685, 400 - 46)]);
+      const g = gunner(200, 474);
+      updateSpecEnemy(g, STEP, sc, ctx);
+      return { sc, g };
+    };
+    const off = (() => {
+      const was = config.navClearance;
+      config.navClearance = false;
+      const { sc, g } = mk();
+      const p = holdPoint(g, sc, 140, tp, 220, 480, see);
+      config.navClearance = was;
+      return p;
+    })();
+    const { sc, g } = mk();
+    const on = holdPoint(g, sc, 140, tp, 220, 480, see);
+    t.ok(`clearance: without it the perch is offered (${off && Math.round(off.x)}, ${off && Math.round(off.y)})`,
+      !!off && off.y < 420);
+    t.ok(`clearance: with it, a spot only a rejected jump reaches is not offered (${on ? `${Math.round(on.x)},${Math.round(on.y)}` : "null"})`,
+      !on || on.y >= 420);
+  }
+  {
+    // A ban is only a fact about the graph it was learned on. Carried across a
+    // graph change it names an edge id that now means somewhere else, and it
+    // would silently delete a candidate the agent can perfectly well reach.
+    const sc = scene(SLAB, [TARGET]);
+    const g = gunner(200, 474);
+    sim(g, sc, 1);
+    const tp = { x: 715, y: 377 };
+    const see = (x, y) => losBetween(x, y, tp.x, tp.y, sc.platforms);
+    const good = holdPoint(g, sc, 140, tp, 220, 480, see);
+    t.ok("stale ledger: there is a candidate to lose", !!good);
+    // Ban everything, then move the terrain: the ledger belongs to the old graph.
+    for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) g.nav.banned.add(`${i}->${j}`);
+    t.eq("stale ledger: with the ledger live, nothing off this node is offered",
+      holdPoint(g, sc, 140, tp, 220, 480, see) && holdPoint(g, sc, 140, tp, 220, 480, see).x, good.x);
+    invalidateNavGraphs(sc);
+    const after = holdPoint(g, sc, 140, tp, 220, 480, see);
+    t.ok(`stale ledger: after a graph change the candidate is offered again (${after && Math.round(after.x)})`,
+      !!after && Math.abs(after.x - good.x) < 1);
+  }
+  {
+    // `blocked` is a verdict about a graph, and repositioning reads it BEFORE it
+    // calls the follower. Left stale across a graph change it releases the agent
+    // back to holdRange for a dead end that no longer exists.
+    const sc = scene(SLAB, [TARGET]);
+    const g = gunner(200, 474);
+    sim(g, sc, 1);
+    g.nav.blocked = true;
+    t.ok("stale verdict: it is set", !!g.nav.blocked);
+    invalidateNavGraphs(sc);
+    t.eq("stale verdict: and not readable against the new graph", navState(g, sc), null);
+    updateSpecEnemy(g, STEP, sc, ctx);
+    t.eq("stale verdict: the rebuilt state starts clean", g.nav.blocked, false);
+    t.eq("stale verdict: and the sense with it", g.sense.navBlocked, false);
   }
 
   // ---- fallback discipline ---------------------------------------------------

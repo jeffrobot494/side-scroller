@@ -20,8 +20,8 @@
 // ---------------------------------------------------------------------------
 
 import {
-  bodyProfile, profileKey, buildGraph, nodeUnder, nearestNode, route, bestPartial, costsFrom, edgeKey,
-  takeoffX, landingX, footprintClear, airborneAimX, driveV,
+  bodyProfile, buildGraph, graphKey, nodeUnder, nearestNode, route, bestPartial, costsFrom, edgeKey,
+  takeoffX, landingX, footprintClear, airborneAimX, driveV, takeoffTolerance,
 } from "../game/nav.js";
 import { bodyJump } from "./locomotion.js";
 import { config } from "../game/config.js";
@@ -44,17 +44,26 @@ export function profileFor(ent, scene, speed) {
   return bodyProfile({ w: b.w, h: b.h, gravity: world * b.gravity, jumpSpeed: bodyJump(ent), runSpeed: speed });
 }
 
-// One graph per distinct profile, built lazily and held on the scene. There is
-// no per-mission hook to build them from — `scene.platforms` is assembled at
-// four unrelated sites — so first use is the trigger. Terrain does not move
-// during a mission; the Behavior Lab's platform dragging is what invalidate()
-// is for.
+// THE ONE PLACE the runtime opts into clearance (tech/nav-clearance.md, C2).
+// `src/game/nav.js` offers the filter; this is the mission adapter that asks
+// for it, which is why generation's audit keeps the legacy builder without
+// having to know the option exists.
+function navOpts() {
+  return { clearance: !!config.navClearance };
+}
+
+// One graph per distinct profile AND policy, built lazily and held on the scene.
+// There is no per-mission hook to build them from — `scene.platforms` is
+// assembled at four unrelated sites — so first use is the trigger. Terrain does
+// not move during a mission; the Behavior Lab's platform dragging is what
+// invalidate() is for.
 export function graphFor(scene, profile) {
   if (!scene.navGraphs) scene.navGraphs = new Map();
-  const key = profileKey(profile);
+  const opts = navOpts();
+  const key = graphKey(profile, opts);
   let g = scene.navGraphs.get(key);
   if (!g) {
-    g = buildGraph(scene.platforms, profile);
+    g = buildGraph(scene.platforms, profile, opts);
     scene.navGraphs.set(key, g);
   }
   return g;
@@ -71,18 +80,47 @@ export function invalidateNavGraphs(scene) {
 
 // ---- per-agent route state -----------------------------------------------
 
-function newNav(gen) {
+function newNav(scene, graph) {
   return {
-    gen, // the graph generation this state belongs to (see invalidateNavGraphs)
+    // WHICH WORLD this state describes. `gen` is the terrain (invalidateNavGraphs
+    // bumps it); `key` is the body profile AND the clearance policy the graph was
+    // built under. Both matter, and until C2 only the first was checked: retuning
+    // a body sends an agent to a DIFFERENT cached graph whose node ids mean other
+    // places, and a path, a committed takeoff or a learned ban carried across
+    // that is nonsense the agent then acts on.
+    gen: scene.navGen || 0,
+    key: graph.key,
+    // The policy on its own as well as inside `key`, because the consumers that
+    // hold no graph can still compare it.
+    clearance: !!config.navClearance,
     dest: null, // the point the current path was built FOR
     path: null, // [nodeId] remaining, path[0] = the node we are standing on
     reachable: true, // false = this is the best partial path, so stop at its end
     repathIn: 0,
     leg: null, // { from, to } — a jump in progress, resolved on landing
+    commit: null, // { from, to, x } — the validated takeoff chosen for this edge
     attempts: {}, // edgeKey → failed jumps on that edge, not yet a ban
     banned: new Set(), // edgeKey — proven unflyable BY THIS AGENT; routed around
     blocked: false, // nowhere left to go: no route, and already at the best spot
   };
+}
+
+// This agent's route state, or null when it belongs to a world that has moved on.
+//
+// ONE validity rule, shared by every consumer, rather than a different rule in
+// each. `routeRequest` and `holdPoint` hold the graph and check its full
+// identity; `runtime.js` and `perception.js` read a verdict (`blocked`) or a leg
+// without ever building one, and check the two things that can change under a
+// caller with no graph in hand. A stale ledger must not remove a valid candidate,
+// a stale `blocked` must not end a reposition, and a stale leg must not book a
+// failed jump against a graph the jump was never attempted on.
+export function navState(ent, scene, graph) {
+  const nav = ent && ent.nav;
+  if (!nav) return null;
+  if (nav.gen !== (scene.navGen || 0)) return null;
+  if (nav.clearance !== !!config.navClearance) return null;
+  if (graph && nav.key !== graph.key) return null;
+  return nav;
 }
 
 const dist2 = (ax, ay, bx, by) => (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
@@ -102,11 +140,12 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   if (b.gravity === 0) return null; // flyers move in two dimensions already
   if (!scene.platforms || !scene.platforms.length) return null;
 
-  const gen = scene.navGen || 0;
-  if (!ent.nav || ent.nav.gen !== gen) ent.nav = newNav(gen);
-  const nav = ent.nav;
+  // The graph FIRST, because its identity is what decides whether the route
+  // state on the agent still describes the world it is standing in.
   const graph = graphFor(scene, profileFor(ent, scene, speed));
   if (!graph.nodes.length) return null;
+  let nav = navState(ent, scene, graph);
+  if (!nav) nav = ent.nav = newNav(scene, graph);
 
   const destX = dest.x - ent.w / 2;
   const destY = dest.y;
@@ -186,6 +225,7 @@ export function routeRequest(ent, dest, speed, scene, dt) {
       }
     }
     nav.leg = null;
+    nav.commit = null; // the takeoff was for that manoeuvre and it is over
     nav.path = null; // repath from wherever we actually landed
   }
 
@@ -272,8 +312,18 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   }
 
   const up = edge.kind === "jump";
-  const lip = takeoffX(here, next, ent.x, ent.w, up);
-  if (Math.abs(lip - ent.x) > config.navTakeoffWindow) return drive(ent, lip, speed, dt);
+  const lip = takeoffFor(nav, here, next, edge, ent, up);
+  // How close counts as "at the takeoff". With clearance the lip is a takeoff
+  // the predictor FLEW, and the window has to align to it or it authorizes a
+  // launch from an x nothing tested — 12px of tolerance is 12px of untested arc
+  // past a column. One frame of travel is the honest number: a legged body
+  // arrives exactly, and a soldier body (which acts on the sign of the request,
+  // not its magnitude) crosses its target in steps no larger than that, so one
+  // straddling frame is always inside it. The predictor validates the same band.
+  const window = edge.takeoffs
+    ? Math.min(config.navTakeoffWindow, takeoffTolerance(graph.profile))
+    : config.navTakeoffWindow;
+  if (Math.abs(lip - ent.x) > window) return drive(ent, lip, speed, dt);
   // The takeoff window is a tolerance on ARRIVING at the lip, and for an up-edge
   // it must not become a licence to jump from under the destination: at the
   // default 12px a body can commit while still overlapping the platform it means
@@ -301,6 +351,26 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   return req;
 }
 
+// The takeoff this body is walking to for the edge here→next.
+//
+// Without clearance the edge has no validated takeoffs and this is `takeoffX`
+// fresh every frame, exactly as before C2. With clearance the edge carries the
+// takeoffs the predictor accepted, and the choice among them is made ONCE and
+// held: recomputing from the current position would let an approach that crossed
+// the midpoint between two clear sides switch to the side it is now nearer,
+// which is a side the body has been walking away from and — more to the point —
+// a different arc from the one that was tested. The commitment is keyed by the
+// edge, so a repath onto a different edge simply replaces it.
+function takeoffFor(nav, here, next, edge, ent, up) {
+  if (!edge.takeoffs) return takeoffX(here, next, ent.x, ent.w, up);
+  const c = nav.commit;
+  if (c && c.from === here.id && c.to === next.id) return c.x;
+  let best = edge.takeoffs[0];
+  for (const x of edge.takeoffs) if (Math.abs(x - ent.x) < Math.abs(best - ent.x)) best = x;
+  nav.commit = { from: here.id, to: next.id, x: best };
+  return best;
+}
+
 // Full-speed horizontal toward a left-edge x, or a halt once there — driveX
 // rather than steer, because a legged `steer` scales horizontal speed by the
 // normalized direction and crawls when its point is far above. The magnitude is
@@ -323,6 +393,7 @@ function drive(ent, toX, speed, dt) {
 export function abortRoute(ent) {
   if (!ent.nav) return;
   ent.nav.leg = null;
+  ent.nav.commit = null; // the takeoff belonged to the manoeuvre being dropped
   ent.nav.path = null;
   ent.nav.dest = null;
 }
@@ -357,8 +428,10 @@ export function holdPoint(ent, scene, speed, tp, min, max, see) {
 
   // Route around edges this body has already proven it cannot fly, so a spot is
   // only offered if the follower can honestly be expected to deliver it. The
-  // ledger is only valid against the graph it was learned on.
-  const nav = ent.nav && ent.nav.gen === (scene.navGen || 0) ? ent.nav : null;
+  // ledger is only valid against the graph it was learned on — a ban carried
+  // over from another graph names an edge id that now means something else, and
+  // would silently remove a perfectly good candidate.
+  const nav = navState(ent, scene, graph);
   const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null);
 
   let best = null;
@@ -422,8 +495,12 @@ function standPoint(n, ent, tp, min, max, see) {
 // What perception publishes as sense.*. Read by the Behavior Lab's overlays and
 // available to authored `when` expressions — an enemy can legitimately want to
 // know that it cannot get to you.
-export function navSense(ent) {
-  const nav = ent.nav;
+//
+// Route state from a graph that no longer applies reads as NO route rather than
+// as the old one. "I gave up" is a verdict about terrain, and terrain that has
+// moved has not been given up on yet.
+export function navSense(ent, scene) {
+  const nav = navState(ent, scene);
   return {
     routeSteps: nav && nav.path ? nav.path.length - 1 : 0,
     routeReachable: nav ? nav.reachable && !nav.blocked : true,

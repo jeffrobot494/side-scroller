@@ -57,6 +57,39 @@ export default async function run(t) {
     t.ok("sense: timeSinceSeen grows without LOS", root.sense.timeSinceSeen >= 1.5);
     t.eq("sense: last-seen position remembered", Math.round(root.sense.lastSeenX), 915);
   }
+  {
+    // NAVIGATION SENSES ARE NOT ON THE CADENCE (tech/nav-clearance.md).
+    //
+    // Everything above is a sensor reading, throttled to 0.2s on purpose: a
+    // bounded cost and a fair reaction delay. `routeSteps` / `routeReachable` /
+    // `navBlocked` are neither — they are the router's verdict about the frame
+    // that is about to run, and a brain must not still be acting on "I gave up"
+    // about a graph that stopped existing two frames ago. So they publish every
+    // frame, and they read as no-route when the state behind them is stale.
+    const scene = makeScene(900, 454);
+    const root = instantiate(normalizeSpec({ id: "s", root: { health: { max: 10 }, visual: { size: [30, 40] } } }), 300, 460);
+    updateSense(root, scene, 1);
+    const wasLos = root.sense.los;
+    const wasSeen = root.sense.lastSeenX;
+
+    // A verdict from a graph, and then the graph moves. `senseTimer` is left
+    // FULL: this is a frame the ordinary cadence would have skipped entirely.
+    root.nav = { gen: 0, key: "x", clearance: true, path: [1, 2, 3], reachable: false, blocked: true, leg: null, attempts: {}, banned: new Set() };
+    updateSense(root, scene, STEP);
+    t.eq("nav sense: a live verdict is published", root.sense.navBlocked, true);
+    t.eq("nav sense: with the steps left on it", root.sense.routeSteps, 2);
+
+    scene.navGen = 1; // the Lab dragged a platform; the mission never does
+    t.ok("nav sense: the cadence has not come round", root.memory.senseTimer > 0);
+    updateSense(root, scene, STEP);
+    t.eq("nav sense: the stale verdict is gone the same frame", root.sense.navBlocked, false);
+    t.eq("nav sense: and it reads as no route rather than the old one", root.sense.routeSteps, 0);
+    t.eq("nav sense: 'reachable' defaults to true, not to a remembered false", root.sense.routeReachable, true);
+
+    // ...and none of the throttled facts moved with them.
+    t.eq("nav sense: unrelated senses keep their cadence and their values", root.sense.los, wasLos);
+    t.eq("nav sense: ...including the memory", root.sense.lastSeenX, wasSeen);
+  }
 
   {
     // player above on a perch

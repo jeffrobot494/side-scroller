@@ -45,6 +45,28 @@ export default async function run(t) {
   t.ok("gen: deterministic — same seed → identical level", JSON.stringify(g1.level) === JSON.stringify(g2.level));
   t.ok("gen: different seed → different level", JSON.stringify(generateLevel({ seed: 5 }).level) !== JSON.stringify(g1.level));
 
+  // ---- generation is on the far side of the clearance boundary ------------
+  // `config.navClearance` filters the graph an AGENT routes on. The audit builds
+  // its own graph with the legacy builder and no options, so a level and its
+  // verdict must be bit-identical either way (tech/nav-clearance.md, "Generation
+  // boundary"). If a caller ever wires the runtime flag into levelgen, this is
+  // what says so — and it fails loudly, because the audit's profile carries no
+  // physics and the predictor throws on it.
+  {
+    const wasClear = config.navClearance;
+    const cap = (on) => {
+      config.navClearance = on;
+      return [10, 77, 2026, 40].map((seed) => {
+        const g = generateLevel({ seed, difficulty: "high" });
+        return JSON.stringify({ level: g.level, report: g.report });
+      }).join("\n");
+    };
+    const withOn = cap(true);
+    const withOff = cap(false);
+    config.navClearance = wasClear;
+    t.ok("gen: clearance is a runtime filter and cannot reach generation", withOn === withOff);
+  }
+
   const L = g1.level;
   t.ok("gen: LEVELS-shaped", L.world && Array.isArray(L.platforms) && L.playerSpawn && L.exit && L.artifact && Array.isArray(L.enemies));
   t.ok("gen: continuous ground spans world width", L.platforms[0].x === 0 && L.platforms[0].w === L.world.width);

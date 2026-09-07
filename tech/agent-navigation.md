@@ -12,11 +12,12 @@ tags: [ai, movement, navigation]
 How the baseline agent gets somewhere. What it does: `design/agent-navigation.md`.
 Everything beyond a given destination: `idea/advanced-agent-navigation.md`.
 
-The design's obstacle-awareness addendum is specified in [Nav clearance](nav-clearance.md).
-N0–N4 below record the baseline implementation; the new work is C1–C2 in that
-spec and has not been implemented. Its runtime clearance rules supersede this
-record's "Edges ignore ceilings" approximation when C2 lands; generation keeps
-the existing envelope-only audit.
+The design's obstacle-awareness addendum is specified in [Nav clearance](nav-clearance.md),
+and C1–C2 there are built. N0–N4 below record the baseline implementation. Its
+runtime clearance rules supersede this record's "Edges ignore ceilings"
+approximation for a hop or an upward jump on a RUNTIME graph; generation keeps
+the existing envelope-only audit, so everything N0–N4 says about what the
+generator promises is unchanged.
 
 `needs: []` — every piece this builds on already exists in the repo.
 
@@ -232,7 +233,7 @@ cannot be verified headlessly and is an eyeball check in the Lab.
 |---|---|---|
 | Takeoff is assumed to be at full horizontal speed | `LEGGED` sets `vx = req.v` instantly, so this holds for spec enemies; the player `Soldier` accelerates at 2600 px/s² toward `config.runSpeed` and under-reaches `flatReach` from a standstill | The 3-attempt cap. `levelgen` already ships this assumption for the soldier, so the graph inherits it rather than introducing it |
 | Drop edges get a flat-hop reachability *budget* | The link test gives a drop of any depth exactly `flatReach` of horizontal budget and ignores fall time. Conservative — it under-promises how far a fall carries — and unchanged by N1, because changing it would change what the audit accepts | Nothing. A drop the graph refuses is a drop an agent could actually have made, which costs a route, never a fall |
-| Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead — or a pillar between two spans of the same slab — can clip a jump the graph believes in | The stuck detector, then the attempt cap, which **retires the edge and reroutes** (N4). Before N4 it retired the destination, which is the bug N4 fixes. **The cap only counts while the caller keeps the ledger** — under a `moveOrder` it did not, and the whole mechanism was dead for companions until the escort-order note above |
+| Edges ignore ceilings | `maxRunTo(dh)` tests the landing, not the arc. A platform overhead — or a pillar between two spans of the same slab — can clip a jump the graph believes in | The stuck detector, then the attempt cap, which **retires the edge and reroutes** (N4). Before N4 it retired the destination, which is the bug N4 fixes. **The cap only counts while the caller keeps the ledger** — under a `moveOrder` it did not, and the whole mechanism was dead for companions until the escort-order note above. **Superseded on runtime graphs by `tech/nav-clearance.md` C2**, which flies each hop and upward jump against the terrain before offering it — measured at 21% of them on generated levels. The cap stays, for the failures no static check can predict; the audit still builds the unfiltered graph, so this row remains exactly true of generation |
 | N4: three failures ban an edge permanently, with no decay | An edge that cannot be flown is a fact about geometry and a body, not about the moment — which is also why bans survive a destination change. Without that, a chaser following a moving target resets its count every tick and jumps into the same pillar forever | Nothing, deliberately. A transient failure — knocked back mid-air, landed on a corpse — can retire a legal edge for that agent's lifetime. Accepted because a body that can make an edge makes it on the first attempt, and the alternative is a decay constant with no evidence behind it. Graph invalidation clears the ledger |
 | An up-edge is not charged for its takeoff clearance | `gapBetween` reports 0 for overlapping spans, but a body cannot take off from *underneath* the destination — platforms are solid from below. The real takeoff is a body width outside the destination's footprint, and that width was never charged against `maxRunTo(dh)` | The attempt cap. Confirmed reachable in generated terrain: the N0 fixture is unchanged, and generation's own audit uses the same uncharged measure, so nothing gets *promised* that was not promised before |
 | Nodes are built for a standing body | Crouching drops the hitbox 46→22, changing headroom but not the envelope | None needed. A crouched agent has strictly more clearance, so the graph errs safe |
@@ -389,9 +390,10 @@ leader 500px past it: **57 jumps in 15s and never off the lip** before; after, t
 hop is banned on the third try at t≈2s, the route goes over the slab, and the
 squadmate is in formation at t≈6s having jumped 5 times.
 
-This does not make the graph honest — the hop across a pillar is still offered and
-still has to be discovered by failing at it three times. That is
-`tech/nav-clearance.md`.
+This did not make the graph honest — the hop across a pillar was still offered and
+still had to be discovered by failing at it three times. `tech/nav-clearance.md`
+C2 is what closed that, and on the same reported geometry the hop is no longer
+offered at all.
 
 **Correction to the slice table: the fixture never covered `backHop`.** N2's row
 predicted `locomotion.golden.json` would move on both the traversal hop and

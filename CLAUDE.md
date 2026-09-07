@@ -99,6 +99,37 @@ section + the tests are the source of truth for what currently exists):
   the only place it still exists. `tickUtility` still records its scoring pass on
   `root.brainState.lastDecision` — nothing reads it now, and it is what a future
   scoreboard would read.
+- **Agents route around terrain they cannot jump through (`tech/nav-clearance.md`
+  C1–C2 — built).** `linkBetween` tests where a jump LANDS, never the arc, so the
+  graph offered hops through pillars and climbs into overhangs and the agent was
+  the only thing that ever found out — three failed attempts later. C2 adds a
+  PREDICTOR: `buildGraph(platforms, profile, { clearance: true })` flies each
+  accepted `hop`/`jump` edge from every candidate takeoff, stepping the mission's
+  own integrator (gravity before motion, x before y, strict overlap, a landing
+  only on a downward top contact) with swept samples inside each frame so a thin
+  platform cannot be skipped. An edge nothing can fly is dropped; one that can
+  keeps `takeoffs: [x, …]`, the takeoffs that worked. **The follower commits to
+  one of those and holds it** (`nav.commit`), and its takeoff window tightens to
+  `takeoffTolerance(profile)` — one frame of travel — so the window cannot
+  authorize a launch from an x nothing tested. **Clearance is opt-in and the
+  mission adapter is the only caller**: `graphFor` asks for it off
+  `config.navClearance` (default on, server scope); `auditGeometry` calls
+  `buildGraph` with no options and generated levels are byte-identical either way
+  — its profile carries no physics, and passing it to the predictor throws rather
+  than approximating. **Graph identity now includes the policy AND the body**:
+  `graph.key` is `profileKey + "+clear"`, route state carries `gen`/`key`/
+  `clearance`, and `navState(ent, scene, graph?)` is the ONE validity check —
+  `routeRequest`, `holdPoint`, the `moveOrder` completion test, repositioning's
+  `blocked` read and `navSense` all go through it. (That closed a hole older than
+  C2: `nav.gen` tracked only the terrain, so retuning a body handed an agent a
+  different cached graph whose node ids meant other places.) Navigation senses
+  publish EVERY frame now, ahead of perception's 0.2s cadence, so a stale
+  `navBlocked` cannot outlive the graph it was learned on. The Behavior Lab has a
+  toggle for it in the bar, labelled from the schema entry, that rebuilds live.
+  Measured on 60 generated levels and 174 grounded agents: **207 failed jumps
+  before, 0 after**, one more agent making progress, and 21% of hop/jump edges
+  pruned; a graph build goes 0.09ms → 0.69ms (3.12ms worst). The attempt cap and
+  the ban ledger stay — static clearance cannot predict a knockback mid-flight.
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
@@ -342,8 +373,8 @@ no process — but reach for it deliberately, not by habit.
   visible, their haul is not), `src/net/mission-socket.js` is the browser end,
   and the ROOM files both `missionResult`s and pushes each commander their own
   day summary. **`tech/server-settings.md` (C1-C3) is how you turn a knob on
-  it**: a schema entry carries `scope: "server"` when ONLY the room reads it (47
-  of 71 - not `soldierBaseHp`/`soldierHpPerHealth` or the `doomPer*` family,
+  it**: a schema entry carries `scope: "server"` when ONLY the room reads it (48
+  of 72 - not `soldierBaseHp`/`soldierHpPerHealth` or the `doomPer*` family,
   which the hub also prints, and never `aimMode`), `GET`/`POST /api/config`
   carry those, and **`editor.html?server=1`** points the Settings tab at the
   running server instead of localStorage (`src/editor/remote-config.js` is the

@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: unbuilt
+status: built
 resolution: sharp
 needs: [agent-navigation]
 tags: [ai, movement, navigation]
@@ -119,3 +119,43 @@ No new subsystem, dependency, test suite or movement ability is needed. If numer
 | Low column can still be crossed; clear routes and drops remain | Positive clearance fixtures and unchanged walk/drop behaviour |
 
 This revision replaces the earlier clearance proposal in this file. Its scratch pruning counts are not implementation evidence, and its stationary-ascent description is not the current follower's airborne rule. The design addendum is the authority for this work.
+
+## As built
+
+C1 landed as planned: `lipToward`, `landingX`, `footprintClear`, `airborneAimX` and `driveV` moved from `src/mission/navigation.js` into `src/game/nav.js`, the follower's decisions were byte-identical, and no fixture moved. `takeoffCandidates` was added there unused — it is `takeoffX`'s answer with the body's position taken out of it, which is what C2 stores on an edge.
+
+Six things C2 got differently from the plan.
+
+| | As built | Why |
+|---|---|---|
+| Graph identity needed more than the clearance policy | A built graph carries `key` (`graphKey(profile, opts)` — the profile key plus `+clear`), and route state carries `gen` + `key` + `clearance`. `navState(ent, scene, graph?)` is the one validity check every consumer calls | The plan said "include clearance policy and every predictor input in graph identity", which uncovered a hole that predates this work: `nav.gen` tracked only the TERRAIN. Retune a body and `graphFor` hands the agent a different cached graph whose node ids mean other places, while `navGen` never moves — so a path, a committed takeoff and a ban ledger all carried across silently. The `graph`-less form of the check exists because `runtime.js` and `perception.js` read a verdict without ever building one |
+| Navigation senses publish every frame | `publishNav` moved above the 0.2s throttle in `updateSense`; every other sense keeps its cadence | The spec asked that consumers not act on "previously published navigation senses after a graph change, including frames between ordinary perception updates". A stale `navBlocked` otherwise stands for up to `SENSE_INTERVAL`. These are not sensor readings with a fair reaction delay — they are the router's verdict about the frame that is about to run |
+| The takeoff tolerance is derived, not a knob, and the band is one-sided | `takeoffTolerance(profile) = runSpeed × 1/60` — one frame of travel. The follower's window becomes `min(navTakeoffWindow, tolerance)` on a validated edge, and the predictor validates the takeoff plus ONE offset, away from the destination | A legged body lands exactly on its target (`driveV` caps at the distance remaining); a SOLDIER body acts on the sign of the request and crosses it, in steps no larger than one frame's travel, so a straddling frame is always inside the tolerance. The band is one-sided because a body walks *toward* its takeoff: the only place it can commit that is not the takeoff is short of it. Testing the far side would reject good edges — on an upward jump the far side is inside the destination's footprint, which the follower's own guard refuses to launch from |
+| A spatial pre-filter, taken up front rather than "if needed" | `nearbyPlatforms` clips the platform list to the flight's bounding box before the per-step checks; the body box is still tested against each survivor individually | The Lab rebuilds the whole graph on every pointer move. Measured below |
+| The predictor's landing test needed `<=` on its own destination | `nearbyPlatforms` uses `p.y <= bottom` | The destination's surface sits exactly on the bottom of the flight box. With `<` it was filtered out of its own flight check and every clear jump was rejected — a false-rejection bug the positive fixtures caught immediately, which is why they are written first |
+| Discretisation is part of the answer, not noise | The predictor steps at 1/60 with the mission's own semi-implicit integration | A charger's continuous apex puts its head at 363.4px and its discrete apex at 369.0px. An overhang between the two is one the body squeaks under in play, and the predictor agrees because it integrates the same way. Fixtures are written against the discrete number |
+
+**Fixtures that moved, and why each one moved.**
+
+| Fixture | Change |
+|---|---|
+| `test/locomotion.golden.json` | The same 2 of 22 cases as N2/N3 (`roster:husk_charger`, `tpl:tpl_charger`). Frames 16–34 were three doomed jumps at the scene's 200px wall; they are now a body standing still on the ground. Horizontal position moves 11.5px — the arrival radius short of the lip it used to walk to — and nothing else in the fixture moves |
+| `test/mission.golden.json` | Regenerated. A duelist and both companions stop jumping at blocked edges and walk instead, and everything downstream of that (projectiles, health, loot) follows. The suite's twice-run self-check still passes, so determinism is unaffected — this golden pins reproducibility, not behaviour |
+| `test/levelgen.golden.json` | Untouched, and `test/gen.test.mjs` now asserts why: a level and its audit report are byte-identical with clearance on and off, over four seeds |
+
+**One test changed what it asks rather than what it expects.** `test/navigation.test.mjs`'s "a companion's envelope reaches a 120px ledge" now asks the legacy builder. The claim on trial is that a soldier-locomotor profile produces the player's envelope and not a legged one; that ledge is 2.5px inside a soldier's `maxRise`, and clearance rejects it truthfully (the body is above the surface for six frames and needs seven to cross the footprint). Asking the filtered builder would have made the case about the manoeuvre and not about the profile.
+
+**Measured.** 40 generated levels at high difficulty, long, on the soldier profile: 36.5 nodes and 123.8 edges per level, of which **21.1% of hop and jump edges do not survive the predictor** (123.8 → 97.7). Build cost goes 0.09ms → 0.69ms average, 3.12ms worst — the Lab rebuilds on every pointer move, so the worst case is a fifth of a frame and no further optimisation is warranted.
+
+60 generated levels, 174 grounded agents, 20 seconds each, chasing a target at the far end of the level:
+
+| | Clearance off | Clearance on |
+|---|---|---|
+| Failed jumps (pending attempts + bans) | 207 | **0** |
+| Agents left blocked | 0 | 0 |
+| Agents that made progress | 169 | **170** |
+| Frames spent airborne | 24,811 | 19,098 |
+
+Not one agent had to fail at a jump to learn what the terrain was. The extra agent making progress is the check against over-pruning: nothing was filtered into paralysis.
+
+**Still an eyeball check.** Whether a route around a column *reads* as deliberate, and whether the Lab's clearance toggle is legible as a comparison, are not assertable headlessly. Serve `editor.html`, open the Behavior Lab, turn on Graph, and flip the toggle.

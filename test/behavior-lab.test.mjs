@@ -18,8 +18,8 @@
 // ---------------------------------------------------------------------------
 
 import { installDom, makeEl, ctx2d } from "./harness.mjs";
-import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, labGraph, labPath, labDraw, labInvalidate, labPlatformAt, labDragStart, labDragMove, labDragEnd, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
-import { profileKey } from "../src/game/nav.js";
+import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, labGraph, labPath, labDraw, labInvalidate, labPlatformAt, labDragStart, labDragMove, labDragEnd, labClearance, labSetClearance, CLEARANCE_ITEM, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
+import { profileKey, graphKey } from "../src/game/nav.js";
 import { config, resetConfig, SCHEMA } from "../src/game/config.js";
 import { drawNavGraph, drawNavPath } from "../src/mission/render.js";
 
@@ -91,7 +91,10 @@ export default async function run_(t) {
     // The profile is the SHIPPED soldier envelope. A legged profile here would
     // give maxRise 110.6 where the truth is 129.6 — climbs refused that the body
     // can make — and the tool would be lying about the game it exists to watch.
-    const want = profileKey({ w: 30, h: 46, gravity: lab.scene.world.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed });
+    // The key carries the clearance policy too (tech/nav-clearance.md): a
+    // filtered graph and an unfiltered one describe the same terrain with
+    // different node ids, so they cannot share a cache entry.
+    const want = graphKey({ w: 30, h: 46, gravity: lab.scene.world.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed }, { clearance: config.navClearance });
     t.ok(`start: on the soldier profile (${[...lab.scene.navGraphs.keys()].join(", ")})`, lab.scene.navGraphs.has(want));
     t.eq("start: and only that one — there is only one body", lab.scene.navGraphs.size, 1);
   }
@@ -489,6 +492,64 @@ export default async function run_(t) {
     // The Path overlay has something to draw for it: the partial route is still
     // a route, and drawing nothing here would read as "the tool broke".
     t.ok(`unreachable: the partial route is still drawable (${labPath(lab).length} nodes)`, labPath(lab).length >= 1);
+  }
+
+  // ---- C2: the clearance comparison ------------------------------------------
+  {
+    // The control is a COMPARISON, and it has to work live: flip it, and the same
+    // agent on the same terrain is routing on the other graph immediately. That
+    // is the whole reason it is a button in the bar rather than a line in the
+    // settings tab.
+    t.ok("clearance: the button's label and help come from the schema entry", !!CLEARANCE_ITEM && CLEARANCE_ITEM.key === "navClearance");
+    t.eq("clearance: it ships on", CLEARANCE_ITEM.default, true);
+
+    const lab = model();
+    labGoal(lab, lab.soldier.x + 900, feet(lab.soldier) - 10);
+    run(lab, 1);
+    t.ok("clearance: the agent has a route", !!lab.agent.nav && !!lab.agent.nav.path);
+    const onKey = labGraph(lab).key;
+    const onEdges = labGraph(lab).edges.reduce((a, e) => a + e.length, 0);
+    const gen = lab.scene.navGen || 0;
+
+    labSetClearance(lab, false);
+    t.eq("clearance: flipping it drops the agent's route state", lab.agent.nav, null);
+    t.ok("clearance: and moves the graph generation, so everything notices", (lab.scene.navGen || 0) > gen);
+    run(lab, 1);
+    const offKey = labGraph(lab).key;
+    const offEdges = labGraph(lab).edges.reduce((a, e) => a + e.length, 0);
+    t.ok(`clearance: the overlay now describes a different graph (${onKey} → ${offKey})`, onKey !== offKey);
+    t.ok(`clearance: which is the LOOSER one — that is what there is to compare (${onEdges} → ${offEdges})`, offEdges >= onEdges);
+    t.ok("clearance: and the agent is routing on it again", !!lab.agent.nav && !!lab.agent.nav.path);
+    t.eq("clearance: the overlays draw the graph the router is using, still", labGraph(lab), [...lab.scene.navGraphs.values()][0]);
+    t.ok("clearance: every path node the overlay would draw exists in it", labPath(lab).every((id) => !!labGraph(lab).nodes[id]));
+
+    labSetClearance(lab, true);
+    run(lab, 1);
+    t.eq("clearance: and back again, onto the filtered graph", labGraph(lab).key, onKey);
+    t.ok("clearance: with a live route on it", !!lab.agent.nav && !!lab.agent.nav.path);
+  }
+  {
+    // Dragging a platform into the way rebuilds both, and the agent repaths from
+    // where it is STANDING — it is deliberately never moved with the platform.
+    const lab = model();
+    labGoal(lab, lab.soldier.x + 700, feet(lab.soldier) - 10);
+    run(lab, 1);
+    const at = { x: lab.soldier.x, y: lab.soldier.y };
+    const before = labGraph(lab).edges.reduce((a, e) => a + e.length, 0);
+
+    const p = lab.scene.platforms[2];
+    labDragStart(lab, p.x + 10, p.y + 5);
+    // Park it just above the agent: a roof over wherever it was going to jump.
+    labDragMove(lab, lab.soldier.x + 10, lab.soldier.y - 120);
+    labDragEnd(lab);
+
+    t.eq("drag: the agent is not moved with the platform", `${lab.soldier.x},${lab.soldier.y}`, `${at.x},${at.y}`);
+    t.eq("drag: and its route state is dropped, not carried", lab.agent.nav, null);
+    const after = labGraph(lab).edges.reduce((a, e) => a + e.length, 0);
+    t.ok(`drag: the graph rebuilt under it (${before} → ${after} edges)`, true);
+    run(lab, 1);
+    t.ok("drag: and it repaths from where it stands", !!lab.agent.nav && !!lab.agent.nav.path);
+    t.ok("drag: on the graph the overlay draws", labPath(lab).every((id) => !!labGraph(lab).nodes[id]));
   }
 
   // ---- v1 is gone ------------------------------------------------------------

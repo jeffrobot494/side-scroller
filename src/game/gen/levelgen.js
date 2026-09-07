@@ -368,9 +368,20 @@ function auditGeometry(ground, groups, env, exit) {
   const plats = [ground, ...groups.flat()];
 
   // The nodes and the reachability test are the shared nav graph now — the same
-  // code an agent routes on, so generation can never promise a level the runtime
-  // disagrees with. `env` is already the soldier's envelope; the profile just
-  // pairs it with the soldier's box.
+  // NODE construction and the same reachability gates an agent routes on, so
+  // generation can never promise a level the runtime disagrees with about where
+  // a body fits or how far it reaches. `env` is already the soldier's envelope;
+  // the profile just pairs it with the soldier's box.
+  //
+  // What it deliberately does NOT ask for is clearance (tech/nav-clearance.md).
+  // The runtime filters hop and jump edges by flying them against the terrain;
+  // the audit keeps the envelope-only edge set, so this verdict — and every
+  // level it culls — is exactly what it was. That is a real boundary, not an
+  // oversight: a level accepted here can contain a destination an agent's
+  // ordinary manoeuvres cannot reach, and generation is not an AI-route
+  // guarantee. The profile below has no gravity, jumpSpeed or runSpeed in it,
+  // which is what makes asking for clearance here a throw rather than a subtly
+  // wrong graph.
   const graph = buildGraph(plats, { ...SOLDIER_PROFILE, envelope: env });
 
   // Spawn → the rest of the level, following edge direction.

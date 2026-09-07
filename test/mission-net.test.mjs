@@ -844,7 +844,7 @@ async function configRoutes(t) {
       else if (r.status === 403) refused++;
       else broke++;
     }
-    t.eq("config: a whole exported config applies its 47 server keys", applied, 47);
+    t.eq("config: a whole exported config applies its 48 server keys", applied, 48);
     t.eq("config: ...drops the other 24", refused, 24);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");
@@ -864,7 +864,7 @@ async function configRoutes(t) {
 //
 // ITS OWN SPAWN, AND ITS OWN CONFIG SOURCE. Two reasons, and both are load
 // bearing. Section 5 deliberately leaves its server dirty — a clamped gravity,
-// a whole 47-key import — so "written where it differs and nowhere else" on
+// a whole 48-key import — so "written where it differs and nowhere else" on
 // that spawn would be a claim about leftovers. And this suite starts the REAL
 // `server.mjs` against the REAL checkout, so a route that wrote its default
 // target would edit `src/game/config.js` under every other suite in the run.

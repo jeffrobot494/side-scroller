@@ -733,6 +733,14 @@ export const SCHEMA = [
         help: "Grounded agents path through a node graph of the terrain instead of walking straight at their destination. Off = the pre-N3 behaviour (drive at the point, hop when it is above). Applies on next deploy.",
       },
       {
+        key: "navClearance",
+        scope: "server",
+        label: "Obstacle-aware jumps",
+        type: "bool",
+        default: true,
+        help: "Before offering a hop or an upward jump, check that the body's whole box clears the static terrain along the arc — columns, walls, ceilings and overhangs (tech/nav-clearance.md). Off = the graph tests only where a jump lands, so blocked jumps are discovered by failing at them. Applies on next deploy.",
+      },
+      {
         key: "navArriveRadius",
         scope: "server",
         label: "Arrival radius",
@@ -768,13 +776,13 @@ export const SCHEMA = [
       {
         key: "navJumpAttempts",
         scope: "server",
-        label: "Jump attempts before giving up",
+        label: "Jump attempts before avoiding a connection",
         type: "range",
         default: 3,
         min: 1,
         max: 10,
         step: 1,
-        help: "Failed attempts at one jump edge before the destination is treated as unreachable and the agent stops. Live.",
+        help: "Failed attempts at one jump before the agent stops routing over that connection and takes another way round. It gives up on the target only when no route is left. Live.",
       },
       {
         key: "navReposition",

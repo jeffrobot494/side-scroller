@@ -170,15 +170,37 @@ export function labPan(lab, dy) {
   lab.panX = clampPan(lab, lab.panX + dy);
 }
 
-// Everything derived from the terrain or the body is now void. Two callers, one
-// meaning: retuning changes the body (runSpeed and jumpSpeed are IN the profile
-// the graph is keyed by), dragging changes the terrain. Either way the cached
-// graphs and every node id the agent is holding describe a world that no longer
-// exists — including what it learned about which jumps it cannot make, which was
-// a fact about geometry that has just moved.
+// Everything derived from the terrain or the body is now void. Three callers,
+// one meaning: retuning changes the body (runSpeed and jumpSpeed are IN the
+// profile the graph is keyed by), dragging changes the terrain, and the
+// clearance toggle changes which edges the graph is allowed to contain. Either
+// way the cached graphs and every node id the agent is holding describe a world
+// that no longer exists — including what it learned about which jumps it cannot
+// make, which was a fact about geometry that has just moved.
 export function labInvalidate(lab) {
   invalidateNavGraphs(lab.scene);
   lab.agent.nav = null;
+}
+
+// ---- the clearance comparison (tech/nav-clearance.md, C2) -------------------
+
+// The schema's own entry, so the button's label and its tooltip are the shipped
+// game's words rather than a second description of the same knob that can drift
+// from it.
+export const CLEARANCE_ITEM = SCHEMA.flatMap((g) => g.items).find((i) => i.key === "navClearance");
+
+export function labClearance() {
+  return !!config.navClearance;
+}
+
+// Flip it and rebuild. This is a COMPARISON control, not a preference: the
+// question it answers is "which of these two graphs is this level, for this
+// body", and the answer is only legible if the same agent on the same terrain
+// re-routes immediately. It writes the real config key, like the tuning panel
+// below the canvas, so what you see here is what a mission does.
+export function labSetClearance(lab, on) {
+  setConfig("navClearance", !!on);
+  if (lab) labInvalidate(lab);
 }
 
 // ---- dragging (B3) ----------------------------------------------------------
@@ -335,6 +357,7 @@ export function createBehaviorLab(container, onBack) {
         <button class="btn" data-bl="new">New level</button>
         <button class="btn bl-tog" data-bl="graph" aria-pressed="false">Graph</button>
         <button class="btn bl-tog" data-bl="path" aria-pressed="false">Path</button>
+        <button class="btn bl-tog" data-bl="clearance" title="${CLEARANCE_ITEM.help}">${CLEARANCE_ITEM.label}</button>
         <span class="bl-seed" data-bl="seed"></span>
         <span class="bl-hint">click = set goal · drag a platform = move it · wheel = pan</span>
       </div>
@@ -355,9 +378,18 @@ export function createBehaviorLab(container, onBack) {
   const tuneEl = container.querySelector("#bl-tune");
   const legendEl = container.querySelector('[data-bl="legend"]');
 
+  const clearEl = container.querySelector('[data-bl="clearance"]');
+
   function build() {
     lab = createLabModel();
     seedEl.textContent = `seed ${lab.seed} · ${lab.scene.world.width}px wide`;
+  }
+
+  // The button reflects the config rather than owning a flag: it defaults ON,
+  // it persists, and the tuning panel below can reset it out from under us.
+  function syncClearance() {
+    clearEl.setAttribute("aria-pressed", String(labClearance()));
+    clearEl.classList.toggle("on", labClearance());
   }
 
   const draw = () => labDraw(ctx, lab);
@@ -431,6 +463,12 @@ export function createBehaviorLab(container, onBack) {
     const id = b.dataset.bl;
     if (id === "back") return onBack();
     if (id === "new") { build(); draw(); return; }
+    if (id === "clearance") {
+      labSetClearance(lab, !labClearance());
+      syncClearance();
+      draw();
+      return;
+    }
     if (id === "graph" || id === "path") {
       lab.show[id] = !lab.show[id];
       b.setAttribute("aria-pressed", String(lab.show[id]));
@@ -457,6 +495,7 @@ export function createBehaviorLab(container, onBack) {
   });
 
   build();
+  syncClearance();
   draw(); // one synchronous draw at mount, per the editor tool contract
   last = typeof performance !== "undefined" ? performance.now() : 0;
   raf = requestAnimationFrame(frame);

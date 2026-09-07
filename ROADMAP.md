@@ -82,6 +82,7 @@ description of what the game does today; this is only the index.
 | Sound Slices 1–3 — cue catalog, synth, bank, engine, per-weapon and per-enemy layers | `tech/sound.md` |
 | Weapon designer rework — effect schema, all 9 kinds authorable, built-in overrides | `tech/weapon-designer.md` |
 | Ranged repositioning R1–R2 — a `keepDistance` agent that cannot see its target walks to somewhere it can, both teams | `tech/ranged-repositioning.md` |
+| Nav clearance C1–C2 — a grounded agent's graph no longer offers a hop or a climb its body cannot fly, so it routes around a column or under an overhang instead of discovering the wall three failed jumps later | `design/agent-navigation.md` · `tech/nav-clearance.md` |
 | Behavior Lab v2 B1–B3 — one agent on a generated level, click to set a goal, 1:1 panned view, graph + path overlays, draggable platforms (v1 deleted) | `design/behavior-lab.md` · `tech/behavior-lab.md` |
 | Campaign pacing C1–C5 — the day is the only currency, leads expire and arrive on the clock, the finale is gated on High wins | `design/campaign-pacing.md` · `tech/campaign-pacing.md` |
 | Soldier ducking D1–D2 — squadmates kneel under a round a knee would dodge, and the Speed stat decides whether and how fast | `design/soldier-behavior.md` · `tech/soldier-ducking.md` |
@@ -89,7 +90,7 @@ description of what the game does today; this is only the index.
 | Mission determinism D1–D3 — a mission replays from its seed given the same input trace at a fixed step; one PRNG for the whole repo | `tech/mission-determinism.md` |
 | Multiplayer missions, Phase 3 J0–J8 — a soldier has an owner, ends are independent, one lead takes two results, input is sampled per step, a dispatch is joint, a mission runs with no browser, input arrives per commander, and the room holds the simulation and broadcasts it. Two commanders on one level, server-authoritative | `tech/multiplayer-missions.md` |
 | Multiplayer transport seam, Phase 2 T1 (W1–W3) — the page holds a client per seat instead of the session, commands answer through a callback, the round is pushed and projected, and a view is a per-seat snapshot refreshed by a broadcast. In-process loopback: still no server | `tech/multiplayer-session.md` |
-| Server settings C1–C3 — `scope: "server"` names the 47 knobs only a room reads, `GET`/`POST /api/config` carry them, and `editor.html?server=1` tunes a running server (Reset stays local; Export and Import cross). C4–C5 add `POST /api/config/permanent` and a `⤓ Make permanent` button that writes the running values into the config schema in source — on a server with a checkout under it; a deployed one refuses and says why | `design/server-settings.md` · `tech/server-settings.md` |
+| Server settings C1–C3 — `scope: "server"` names the 48 knobs only a room reads, `GET`/`POST /api/config` carry them, and `editor.html?server=1` tunes a running server (Reset stays local; Export and Import cross). C4–C5 add `POST /api/config/permanent` and a `⤓ Make permanent` button that writes the running values into the config schema in source — on a server with a checkout under it; a deployed one refuses and says why | `design/server-settings.md` · `tech/server-settings.md` |
 | Design map + doc schema — the viewer, the seven-part spec gate, the `/spec` procedure | `design/design-map.md` · `DOC-SCHEMA.md` |
 | Editor tools — settings, firing room, level generator, controls, sound mixer | — |
 
@@ -100,6 +101,7 @@ description of what the game does today; this is only the index.
 | `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
 | Flyers can grind against terrain — steering pushes in while resolution pushes out | out of scope in `sprints/2026-08.md` |
 | Grounded bodies guess when a steering intent implies a jump, from a 40px heuristic with no terrain knowledge | fixed by `tech/agent-navigation.md` N3 |
+| A jump edge tests where it lands, not the arc, so a column or an overhang is only found by failing at it | fixed by `tech/nav-clearance.md` C2 |
 | Two enemy jump impulses disagree, and the reflex hop out-jumps the deliberate jump | fixed by `tech/agent-navigation.md` N2 |
 | No coyote time — a jump one frame after leaving a ledge is silently dropped | fixed by `tech/agent-navigation.md` N2 |
 

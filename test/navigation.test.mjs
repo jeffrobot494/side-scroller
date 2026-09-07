@@ -14,7 +14,10 @@
 
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
-import { profileFor, graphFor, routeRequest, invalidateNavGraphs } from "../src/mission/navigation.js";
+import { Soldier, stepActor } from "../src/mission/entities.js";
+import { WEAPONS } from "../src/game/content.js";
+import { profileFor, graphFor, routeRequest, invalidateNavGraphs, navState, abortRoute } from "../src/mission/navigation.js";
+import { buildGraph, graphKey } from "../src/game/nav.js";
 import { config, resetConfig } from "../src/game/config.js";
 
 const STEP = 1 / 60;
@@ -66,6 +69,60 @@ function sim(root, sc, seconds) {
 
 const feet = (e) => e.y + e.h;
 
+// A body on the SOLDIER locomotor — a companion, and the one adapter that does
+// not obey a drive request's magnitude. It accelerates at 2600px/s\u00b2 toward
+// config.runSpeed off `Math.sign(v)`, so it crosses its takeoff rather than
+// settling on it and arrives carrying real horizontal velocity. The clearance
+// predictor is nominal (instantaneous drive, no residual), so this is the body
+// its approximation is stated against and the one worth flying for real.
+//
+// Nothing integrates a Soldier for us — SOLDIER.apply calls applyMovement and
+// steps nothing — so the mirror-then-step loop below is the one src/mission/ai.js
+// does for companions and the Behavior Lab does for its agent.
+const AGENT_DATA = {
+  id: "sa", name: "SA", callsign: "", traits: [], cost: 0, status: "roster",
+  stats: { aim: 5, health: 5, speed: 5, nerve: 5 }, record: { missions: 0, kills: 0 }, wounds: 0,
+};
+
+function soldierAgent(x, feetY) {
+  const agent = instantiate(normalizeSpec({
+    id: "sagent",
+    root: { health: { max: 1 }, visual: { size: [30, 46] }, body: { locomotor: "soldier", gravity: 1 }, motion: { type: "static" } },
+  }), x, feetY - 46, "player");
+  const s = new Soldier(AGENT_DATA, WEAPONS.carbine, x, feetY - 46);
+  s.onGround = true;
+  agent.soldier = s;
+  agent.rng = () => 0.5;
+  return agent;
+}
+
+// Send it somewhere and run, at whatever step the caller wants to prove.
+function simSoldier(agent, sc, seconds, goal, dt = STEP) {
+  const s = agent.soldier;
+  agent.motion = { type: "moveTo", target: [goal.x, goal.y], speed: config.runSpeed };
+  for (let i = 0; i < Math.round(seconds / dt); i++) {
+    agent.x = s.x; agent.y = s.y; agent.w = s.w; agent.h = s.h;
+    agent.vx = s.vx; agent.vy = s.vy; agent.onGround = s.onGround; agent.facing = s.facing;
+    updateSpecEnemy(agent, dt, sc, ctx);
+    stepActor(s, dt, sc.world, sc.platforms);
+  }
+  return s;
+}
+
+// Run a block against the PRE-C2 graph, where a jump's arc is not checked.
+//
+// Several cases below need an edge the body cannot fly, because what they prove
+// is the recovery that happens when it finds out: the attempt cap, the ban, the
+// reroute. Clearance removes those edges — that is the whole point of it — so
+// with it on the geometry no longer poses the question. Turned off explicitly
+// and restored explicitly, rather than disabling it for the file: the same
+// geometry with clearance ON is a case too, and it is the one below each of them.
+function noClearance(fn) {
+  const was = config.navClearance;
+  config.navClearance = false;
+  try { fn(); } finally { config.navClearance = was; }
+}
+
 export default async function run(t) {
   resetConfig(); // routing knobs must be the shipping ones, whatever ran before
 
@@ -115,15 +172,14 @@ export default async function run(t) {
   }
 
   // ---- the attempt cap ------------------------------------------------------
-  {
-    // A 40x200 wall standing on the ground. The graph believes the 70px gap
-    // across it is hoppable (edges test the landing, not the arc — a documented
-    // approximation), so the agent tries, is clipped, and lands back where it
-    // started. That is precisely what the cap exists for.
-    const sc = scene(
-      [{ x: 0, y: 500, w: 1400, h: 40 }, { x: 560, y: 300, w: 40, h: 200 }],
-      [soldierAt(900, 500 - 46)],
-    );
+  // A 40x200 wall standing on the ground. WITHOUT clearance the graph believes
+  // the 70px gap across it is hoppable (edges test the landing, not the arc), so
+  // the agent tries, is clipped, and lands back where it started. That is
+  // precisely what the cap exists for, and it stays the recovery path for every
+  // jump that fails for a reason static terrain cannot predict.
+  const WALL = [{ x: 0, y: 500, w: 1400, h: 40 }, { x: 560, y: 300, w: 40, h: 200 }];
+  noClearance(() => {
+    const sc = scene(WALL, [soldierAt(900, 500 - 46)]);
     const c = chaser(200, 474);
     sim(c, sc, 8);
     t.eq(`attempts: exactly one edge is banned, after config.navJumpAttempts (${config.navJumpAttempts}) tries`, c.nav.banned.size, 1);
@@ -132,18 +188,32 @@ export default async function run(t) {
     t.eq("attempts: the sense reports it", c.sense.navBlocked, true);
     t.ok("attempts: a blocked agent still holds its best position, not its panic spot", Math.abs(c.x - 530) < 2);
     t.ok("attempts: and stays stopped", Math.abs(c.vx) < 1);
-  }
-  {
+  });
+  noClearance(() => {
     // the cap is a knob, and it is honoured
-    const sc = scene(
-      [{ x: 0, y: 500, w: 1400, h: 40 }, { x: 560, y: 300, w: 40, h: 200 }],
-      [soldierAt(900, 500 - 46)],
-    );
+    const sc = scene(WALL, [soldierAt(900, 500 - 46)]);
     config.navJumpAttempts = 1;
     const c = chaser(200, 474);
     sim(c, sc, 8);
     config.navJumpAttempts = 3;
     t.eq("attempts: one try is enough to ban when the knob says so", c.nav.banned.size, 1);
+  });
+  {
+    // THE SAME WALL WITH CLEARANCE ON (tech/nav-clearance.md, C2). The hop is
+    // never offered, so the doomed takeoff never happens: the agent walks to the
+    // closest point it can reach and stops, first time, with an empty ledger.
+    const sc = scene(WALL, [soldierAt(900, 500 - 46)]);
+    const c = chaser(200, 474);
+    let airborne = 0;
+    for (let i = 0; i < 60 * 8; i++) {
+      updateSpecEnemy(c, STEP, sc, ctx);
+      if (!c.onGround) airborne++;
+    }
+    t.eq("clearance: the wall hop is never attempted", airborne, 0);
+    t.eq("clearance: so nothing is ever banned", c.nav.banned.size, 0);
+    t.ok(`clearance: it still walks as close as it can get (x ${c.x.toFixed(0)}, lip 530)`, c.x > 500 && c.x <= 530);
+    t.ok("clearance: and stops there", Math.abs(c.vx) < 1);
+    t.eq("clearance: knowing it cannot get there", c.sense.routeReachable, false);
   }
 
   // ---- N4: retire the failed EDGE, not the destination ----------------------
@@ -164,7 +234,7 @@ export default async function run(t) {
     { x: 470, y: 409, w: 70, h: 91 }, // the pillar, floor to y=409
     { x: 540, y: 409, w: 110, h: 20 }, // the ledge that roofs the takeoff
   ];
-  {
+  noClearance(() => {
     const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
     const c = chaser(600, 474); // right of the pillar; the target is left of it
     sim(c, sc, 12);
@@ -172,8 +242,8 @@ export default async function run(t) {
     t.ok("N4: it banned the hop it could not fly", c.nav.banned.size >= 1);
     t.ok("N4: and did NOT give up on the destination", c.nav.blocked === false);
     t.eq("N4: the sense agrees it is still going somewhere", c.sense.navBlocked, false);
-  }
-  {
+  });
+  noClearance(() => {
     // the same scene with the cap set absurdly high never bans, so it never
     // reroutes — which is precisely the pre-N4 behaviour, and shows the fix is
     // the ban rather than anything else that changed
@@ -183,8 +253,32 @@ export default async function run(t) {
     sim(c, sc, 12);
     config.navJumpAttempts = 3;
     t.ok(`N4: without banning it never gets past (x ${c.x.toFixed(0)})`, c.x > 440);
-  }
+  });
   {
+    // THE PILLAR WITH CLEARANCE ON, and the whole point of C2: the same route,
+    // arrived at without ever attempting the hop the graph used to offer. The
+    // agent does not learn this the expensive way; it is never told the lie.
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const c = chaser(600, 474);
+    let bonked = 0;
+    let prevLeg = null;
+    for (let i = 0; i < 60 * 12; i++) {
+      updateSpecEnemy(c, STEP, sc, ctx);
+      const leg = c.nav && c.nav.leg;
+      // The blocked shortcut is the flat hop ACROSS the pillar: same height,
+      // and the takeoff is roofed by the ledge. Count any leg that starts one.
+      if (leg && !prevLeg) {
+        const g = [...sc.navGraphs.values()][0];
+        if (g.nodes[leg.from].y === 500 && g.nodes[leg.to].y === 500) bonked++;
+      }
+      prevLeg = leg;
+    }
+    t.eq("clearance: the blocked ground-to-ground hop is never attempted", bonked, 0);
+    t.eq("clearance: and nothing has to be banned to discover that", c.nav.banned.size, 0);
+    t.ok(`clearance: it still gets past the pillar the long way (x ${c.x.toFixed(0)})`, c.x < 440);
+    t.eq("clearance: never blocked", c.sense.navBlocked, false);
+  }
+  noClearance(() => {
     // a ban is a fact about geometry, so it must survive the destination moving.
     // Without this a chaser resets its count every tick and never reaches three.
     const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
@@ -195,8 +289,8 @@ export default async function run(t) {
     }
     t.ok("N4: a moving destination does not wipe the ban ledger", c.nav.banned.size >= 1);
     t.ok(`N4: so the chaser still gets round (x ${c.x.toFixed(0)})`, c.x < 440);
-  }
-  {
+  });
+  noClearance(() => {
     // ...and it must survive the ORDER that was carrying it ending. Every N4
     // case above drives the `chase` motion CONTROLLER, which never touches
     // ent.nav — so none of them could see that the moveOrder branch used to
@@ -209,7 +303,7 @@ export default async function run(t) {
     sim(o, sc, 12);
     t.ok("N4: a completed moveOrder keeps the ban ledger", o.nav.banned.size >= 1);
     t.ok(`N4: so an ordered agent gets past the pillar too (x ${o.x.toFixed(0)})`, o.x < 440);
-  }
+  });
   {
     // The other half: an order must not END mid-jump. `stop` runs the soldier's
     // 3000px/s² friction with no grounded gate, so a handover in the air brakes
@@ -222,7 +316,7 @@ export default async function run(t) {
     t.ok(`N4: an order expiring mid-jump does not strand the climb (feet ${feet(o)})`, feet(o) < 500);
     t.eq("N4: and no legal edge was banned for it", o.nav.banned.size, 0);
   }
-  {
+  noClearance(() => {
     // bans belong to the agent, not the shared graph — two bodies with the same
     // profile share one graph object, and one's failure must not blind the other
     const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
@@ -234,7 +328,7 @@ export default async function run(t) {
     const g = [...sc.navGraphs.values()][0];
     t.ok("N4: and the shared graph still has every edge it built",
       g.edges.some((list) => list.length > 0));
-  }
+  });
   {
     // A body must never commit to a climb from UNDER its destination: platforms
     // are solid from below, so that jump can only bonk. The takeoff window used
@@ -263,22 +357,36 @@ export default async function run(t) {
     }
     t.ok(`takeoff: never climbs from under its destination${badTakeoff ? ` (${JSON.stringify(badTakeoff)})` : ""}`, !badTakeoff);
   }
-  {
+  // Ground [0, 170]; the perch's clear positions are -30 and 230, neither of
+  // which is on it, so there is no good takeoff anywhere.
+  const ROOFED = [{ x: 0, y: 500, w: 200, h: 40 }, { x: 0, y: 420, w: 200, h: 20 }];
+  noClearance(() => {
     // ...but insisting on clearance must never become a freeze. A perch with no
     // standable takeoff on either side has to be ATTEMPTED and then retired,
     // because an agent that refuses to try never learns the edge is a lie.
-    // Ground [0, 170]; the perch's clear positions are -30 and 230, neither of
-    // which is on it, so there is no good takeoff anywhere.
-    const sc = scene(
-      [{ x: 0, y: 500, w: 200, h: 40 }, { x: 0, y: 420, w: 200, h: 20 }],
-      [soldierAt(100, 420 - 46)],
-    );
+    const sc = scene(ROOFED, [soldierAt(100, 420 - 46)]);
     const c = chaser(20, 474);
     sim(c, sc, 10);
     t.ok("takeoff: an unreachable perch is attempted, not refused", c.nav.banned.size >= 1 || c.y + c.h === 420);
     t.ok("takeoff: and the agent does not freeze mid-approach undecided", c.nav.path !== null);
-  }
+  });
   {
+    // The same perch with clearance ON: there is no takeoff, so there is no
+    // edge, so there is nothing to attempt and nothing to learn. The freeze the
+    // case above guards against cannot happen either — with no route to offer,
+    // the agent stands where it is rather than leaning at a lip forever.
+    const sc = scene(ROOFED, [soldierAt(100, 420 - 46)]);
+    const c = chaser(20, 474);
+    let airborne = 0;
+    for (let i = 0; i < 60 * 10; i++) {
+      updateSpecEnemy(c, STEP, sc, ctx);
+      if (!c.onGround) airborne++;
+    }
+    t.eq("clearance: a perch with no standable takeoff is never jumped at", airborne, 0);
+    t.eq("clearance: and never banned, because it was never offered", c.nav.banned.size, 0);
+    t.ok("clearance: the agent still holds a route (to where it stands)", c.nav.path !== null);
+  }
+  noClearance(() => {
     // moving the terrain invalidates what an agent learned about it
     const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
     const c = chaser(600, 474);
@@ -287,7 +395,7 @@ export default async function run(t) {
     invalidateNavGraphs(sc);
     updateSpecEnemy(c, STEP, sc, ctx);
     t.eq("N4: invalidating the graph clears the ledger", c.nav.banned.size, 0);
-  }
+  });
 
   // ---- dropping off a ledge -------------------------------------------------
   // Leaving a ledge is not the same as lining up with the node below it. The
@@ -416,15 +524,22 @@ export default async function run(t) {
     // and the difference is not cosmetic: a 120px ledge sits BETWEEN the two
     // envelopes, so reading body.* for a companion would deny it a climb it can
     // actually make — the escort falling behind at exactly the interesting spot
-    const ledged = scene([{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 380, w: 300, h: 20 }]);
+    //
+    // Asked of the LEGACY builder deliberately. What is on trial here is the
+    // envelope a profile produces, and this ledge is 2.5px inside a soldier's
+    // maxRise: clearance rejects it (the body is above the surface for six
+    // frames and needs seven to cross the footprint), which is a true statement
+    // about the manoeuvre and no statement at all about the profile.
+    const ledgePlats = [{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 380, w: 300, h: 20 }];
+    const ledged = scene(ledgePlats);
     const up = (prof) => {
-      const g = graphFor(ledged, prof);
+      const g = buildGraph(ledgePlats, prof);
       const ground = g.nodes.find((n) => n.y === 500);
       const ledge = g.nodes.find((n) => n.y === 380);
       return g.edges[ground.id].some((e) => e.to === ledge.id);
     };
-    t.ok("profile: a companion's graph HAS the edge onto a 120px ledge", up(profileFor(comp, ledged, 210)));
-    t.ok("profile: a legged body's graph does not — 120 is past its 110.6 maxRise",
+    t.ok("profile: a companion's envelope REACHES a 120px ledge", up(profileFor(comp, ledged, 210)));
+    t.ok("profile: a legged body's does not — 120 is past its 110.6 maxRise",
       !up(profileFor(legged, ledged, 210)));
   }
 
@@ -517,6 +632,204 @@ export default async function run(t) {
     const left = routeRequest(c, { x: 200, y: 474 }, 210, sc, STEP);
     t.ok("repath: a destination behind me reverses the drive on the SAME frame",
       right.v > 0 && left.v < 0);
+  }
+
+  // ---- C2: the validated takeoff, flown for real ----------------------------
+  // The predictor's whole claim is that the manoeuvre it simulated is the
+  // manoeuvre the follower performs. These fly it with the real integrator and
+  // the real locomotors, which is the only way that claim can be checked.
+  //
+  // Ground plus a 100px perch at [700,970], with a small slab roofing the LEFT
+  // takeoff (670) and nothing over the right one (1000). The graph therefore
+  // offers exactly one way up, and it is the one on the far side of the perch:
+  // an agent approaching from the left has to walk past its destination.
+  //
+  // The overhang is 34 wide on purpose: a body needs `MIN_SEGMENT` of span to
+  // stand anywhere, and 34 - 30 = 4 is under it, so this piece of terrain roofs
+  // the takeoff without becoming a step up to the perch by another route.
+  const ONE_WAY_UP = [
+    { x: 0, y: 500, w: 1400, h: 40 },
+    { x: 700, y: 400, w: 300, h: 20 },
+    { x: 640, y: 380, w: 34, h: 20 }, // over the 670 takeoff, and only that one
+  ];
+  {
+    const sc = scene(ONE_WAY_UP, [soldierAt(850, 400 - 46)]);
+    const c = chaser(200, 474);
+    const g = graphFor(sc, profileFor(c, sc, 210));
+    const ground = g.nodes.find((n) => n.y === 500);
+    const perch = g.nodes.find((n) => n.y === 400 && n.a === 700);
+    const edge = g.edges[ground.id].find((e) => e.to === perch.id);
+    t.ok("takeoff: the climb survives with one validated takeoff", !!edge);
+    t.eq("takeoff: and it is the far side, not the roofed near one", edge.takeoffs, [1000]);
+
+    sim(c, sc, 14);
+    t.ok(`takeoff: the agent gets up there (feet ${feet(c)})`, feet(c) === 400);
+    t.ok(`takeoff: having walked PAST the perch to the clear side (x ${c.x.toFixed(0)})`, c.x > 700);
+    t.eq("takeoff: with no failed attempt on the way", Object.keys(c.nav.attempts).length, 0);
+    t.eq("takeoff: and nothing banned", c.nav.banned.size, 0);
+  }
+  {
+    // The commitment is held. Recomputing the side every frame from the entity's
+    // position is the defect this exists to prevent: an agent walking right to
+    // reach 1000 crosses the midpoint between 670 and 1000 and would flip to the
+    // side it is now nearer — which is the side nothing tested.
+    const sc = scene([{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 400, w: 300, h: 20 }],
+      [soldierAt(850, 400 - 46)]);
+    const c = chaser(900, 474); // under the perch, nearer the RIGHT takeoff
+    c.onGround = true;
+    routeRequest(c, { x: 850, y: 400 - 13 }, 210, sc, STEP);
+    const chosen = c.nav.commit && c.nav.commit.x;
+    t.ok(`takeoff: a takeoff is committed as soon as the edge is chosen (${chosen})`, chosen === 670 || chosen === 1000);
+    // Walk it to the far side of the midpoint and ask again.
+    c.x = 700;
+    routeRequest(c, { x: 850, y: 400 - 13 }, 210, sc, STEP);
+    t.eq("takeoff: and it does not change under the body's own movement", c.nav.commit.x, chosen);
+  }
+  {
+    // ...but it IS dropped when the manoeuvre is. A caller that abandons the
+    // route must not leave a takeoff pinned for an edge nobody is travelling.
+    const sc = scene([{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 400, w: 300, h: 20 }],
+      [soldierAt(850, 400 - 46)]);
+    const c = chaser(900, 474);
+    c.onGround = true;
+    routeRequest(c, { x: 850, y: 400 - 13 }, 210, sc, STEP);
+    t.ok("takeoff: committed", !!c.nav.commit);
+    abortRoute(c);
+    t.eq("takeoff: and released with the manoeuvre", c.nav.commit, null);
+  }
+
+  // ---- C2: an actual soldier, with actual momentum --------------------------
+  {
+    // The soldier adapter acts on the SIGN of a drive request, so it arrives at
+    // its takeoff carrying up to a full runSpeed the predictor never modelled.
+    // If the prediction and the execution disagree anywhere, they disagree here.
+    const sc = scene(ONE_WAY_UP);
+    const a = soldierAgent(200, 500);
+    const s = simSoldier(a, sc, 16, { x: 850, y: 400 - 23 });
+    t.ok(`soldier: a real Soldier body makes the validated climb (feet ${s.y + s.h})`, s.y + s.h === 400);
+    t.ok(`soldier: from the far takeoff, having walked past the perch (x ${s.x.toFixed(0)})`, s.x > 700);
+    t.eq("soldier: without spending an attempt on the roofed side", Object.keys(a.nav.attempts).length, 0);
+  }
+  {
+    // ...and at frame steps that are not 1/60. The predictor samples at a fixed
+    // step; a host running at 50 or 120 must still fly what it validated.
+    for (const dt of [1 / 50, 1 / 120]) {
+      const sc = scene(ONE_WAY_UP);
+      const a = soldierAgent(200, 500);
+      const s = simSoldier(a, sc, 16, { x: 850, y: 400 - 23 }, dt);
+      t.ok(`soldier: the same climb at dt=1/${Math.round(1 / dt)} (feet ${s.y + s.h}, x ${s.x.toFixed(0)})`,
+        s.y + s.h === 400 && s.x > 700);
+    }
+  }
+  {
+    // The negative half of the same claim, and the one that fails silently if it
+    // is wrong: a route that clearance rejected must be a route the real body
+    // genuinely cannot fly. Turn clearance off so the edge exists to attempt,
+    // and watch the soldier fail at it exactly as predicted.
+    const ROOFED_BOTH = [
+      { x: 0, y: 500, w: 1400, h: 40 },
+      { x: 700, y: 400, w: 300, h: 20 },
+      { x: 640, y: 380, w: 34, h: 20 }, // over 670
+      { x: 1000, y: 380, w: 34, h: 20 }, // ...and over 1000
+    ];
+    {
+      const sc = scene(ROOFED_BOTH);
+      const probe = soldierAgent(200, 500);
+      t.eq("soldier: clearance rejects this climb — both takeoffs are roofed",
+        graphFor(sc, profileFor(probe, sc, config.runSpeed)).edges.flat().some((e) => e.kind === "jump"), false);
+    }
+    noClearance(() => {
+      const sc = scene(ROOFED_BOTH);
+      const a = soldierAgent(200, 500);
+      const s = simSoldier(a, sc, 16, { x: 850, y: 400 - 23 });
+      t.ok(`soldier: and with clearance off the real body cannot fly it either (feet ${s.y + s.h})`, s.y + s.h !== 400);
+      t.ok("soldier: it discovers that the expensive way, by failing at it", a.nav.banned.size >= 1);
+    });
+  }
+
+  // ---- C2: failure recovery still works with clearance ON -------------------
+  {
+    // Static clearance reduces failures; it does not remove the recovery path.
+    // Nothing static predicts a jump that is interrupted, so the cap has to keep
+    // counting on edges the predictor accepted. Interrupt every jump this agent
+    // makes by braking it in the air, and it should ban the edge and reroute.
+    const sc = scene([{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 400, w: 300, h: 20 }],
+      [soldierAt(850, 400 - 46)]);
+    const c = chaser(200, 474);
+    for (let i = 0; i < 60 * 14; i++) {
+      updateSpecEnemy(c, STEP, sc, ctx);
+      // A knockback mid-flight: the one channel the locomotor does not overwrite
+      // each frame, and exactly the class of interruption no static predictor can
+      // see coming.
+      if (!c.onGround) c.shoveX = -700;
+    }
+    t.ok("recovery: a jump the predictor accepted can still fail in play", c.nav.banned.size >= 1);
+    t.ok("recovery: and the cap still retires it", feet(c) === 500);
+    t.ok("recovery: leaving the agent stopped, not pogoing", Math.abs(c.vx) < 1);
+  }
+
+  // ---- C2: graph identity, and every consumer that reads route state --------
+  {
+    // Toggling clearance builds a DIFFERENT graph of the same terrain, and its
+    // node ids mean different places. A path, a committed takeoff or a ban
+    // carried across that is nonsense the agent would then act on.
+    const sc = scene(PILLAR, [soldierAt(100, 500 - 46)]);
+    const c = chaser(600, 474);
+    sim(c, sc, 2);
+    t.ok("identity: a live route before the toggle", !!c.nav.path);
+    const key = c.nav.key;
+    config.navClearance = false;
+    t.eq("identity: the held state is not valid against the new policy", navState(c, sc), null);
+    updateSpecEnemy(c, STEP, sc, ctx);
+    config.navClearance = true;
+    t.ok(`identity: so the agent rebuilt onto the other graph (${key} → ${c.nav.key})`, c.nav.key !== key);
+    t.ok("identity: with a fresh path, not the old ids", !!c.nav.path);
+  }
+  {
+    // The same toggle with a jump IN FLIGHT. The leg names an edge on a graph
+    // that no longer applies, and resolving it on landing would book a failed
+    // attempt against an edge that was never attempted there.
+    const sc = scene([{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 400, w: 300, h: 20 }],
+      [soldierAt(850, 400 - 46)]);
+    const c = chaser(200, 474);
+    let flipped = false;
+    for (let i = 0; i < 60 * 10; i++) {
+      updateSpecEnemy(c, STEP, sc, ctx);
+      if (!flipped && !c.onGround && c.nav && c.nav.leg) {
+        config.navClearance = false; // mid-jump, mid-air
+        flipped = true;
+      }
+    }
+    config.navClearance = true;
+    t.ok("identity: a toggle mid-jump does not book a failed attempt", flipped);
+    t.eq("identity: nothing was banned for an abandoned airborne leg", c.nav.banned.size, 0);
+  }
+  {
+    // The body's own profile is part of the identity too, and it was NOT checked
+    // before C2: a retune sends the agent to another cached graph whose ids mean
+    // other places, and `navGen` never moves. Same terrain, same generation.
+    const sc = scene([{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 400, w: 300, h: 20 }],
+      [soldierAt(850, 400 - 46)]);
+    const c = chaser(200, 474);
+    sim(c, sc, 2);
+    const before = c.nav.key;
+    const g2 = graphFor(sc, profileFor(c, sc, 400)); // a different run speed
+    t.ok("identity: a different body gets a different graph", g2.key !== before);
+    t.eq("identity: and state learned on the first is not valid against it", navState(c, sc, g2), null);
+    t.ok("identity: while it stays valid against its own", !!navState(c, sc, graphFor(sc, profileFor(c, sc, 210))));
+  }
+  {
+    // Ledgers stay private, with clearance on as without it. Two bodies of one
+    // profile share one graph object; one's experience must not be the other's.
+    const sc = scene([{ x: 0, y: 500, w: 1400, h: 40 }, { x: 700, y: 400, w: 300, h: 20 }],
+      [soldierAt(850, 400 - 46)]);
+    const a = chaser(200, 474);
+    const b = chaser(300, 474);
+    sim(a, sc, 2);
+    sim(b, sc, 2);
+    a.nav.banned.add("0->1");
+    t.ok("identity: one agent's ban is its own", !b.nav.banned.has("0->1"));
+    t.ok("identity: and both are still routing on the one shared graph", sc.navGraphs.size === 1);
   }
 
   // ---- senses ---------------------------------------------------------------

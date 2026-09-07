@@ -25,6 +25,14 @@
 // maxRise gate, same maxRunTo/flatReach budget, same gap measure. N1 is a
 // behaviour-preserving refactor — test/levelgen.golden.json is what proves it.
 // Costs are new; nothing reads them until N3.
+//
+// SINCE C2 THE TWO CALLERS NO LONGER GET THE SAME EDGE SET, and the boundary is
+// explicit rather than incidental: `buildGraph(platforms, profile, { clearance:
+// true })` additionally FILTERS accepted hop and jump edges through a predictor
+// that flies them (tech/nav-clearance.md). Only the mission adapter asks for
+// that. `auditGeometry` calls this module with no options and keeps the legacy
+// edge set exactly, so what generation promises a player has not changed — an
+// agent is simply no longer told about jumps its body cannot make.
 // ---------------------------------------------------------------------------
 
 import { jumpEnvelope } from "./gen/reach.js";
@@ -131,21 +139,55 @@ export function linkBetween(na, nb, profile) {
   return { to: nb.id, kind: kindOf(dh, gap), cost: costOf(dh, gap, profile) };
 }
 
-export function buildEdges(nodes, profile) {
+export function buildEdges(nodes, profile, platforms, opts) {
+  const clearance = !!(opts && opts.clearance);
+  // The seam, stated loudly rather than silently approximated. `auditGeometry`
+  // builds a profile of `{ w, h, envelope }` — a box and a reachability
+  // envelope, and no physics at all — because reachability is all it needs. The
+  // predictor integrates gravity and impulses, so that profile must never reach
+  // it; a level's audit is not the place to discover the difference.
+  if (clearance && !(profile.gravity > 0 && profile.jumpSpeed > 0 && profile.runSpeed > 0)) {
+    throw new Error("nav: clearance needs a full body profile (gravity, jumpSpeed, runSpeed)");
+  }
   const edges = nodes.map(() => []);
   for (const na of nodes) {
     for (const nb of nodes) {
       if (na === nb) continue;
       const link = linkBetween(na, nb, profile);
-      if (link) edges[na.id].push(link);
+      if (!link) continue;
+      // Clearance is a FILTER over accepted edges, never a second reachability
+      // test: the cheap gates above decide what exists, and only then does the
+      // predictor ask whether the body can actually fly it.
+      if (clearance && (link.kind === "hop" || link.kind === "jump")) {
+        const takeoffs = validTakeoffs(na, nb, profile, platforms, link.kind === "jump");
+        if (!takeoffs.length) continue; // no clear manoeuvre: this edge is a lie
+        link.takeoffs = takeoffs;
+      }
+      edges[na.id].push(link);
     }
   }
   return edges;
 }
 
-export function buildGraph(platforms, profile) {
+// `opts.clearance` turns on the C2 predictor. It is OPT-IN, and the caller that
+// opts in is the mission adapter (src/mission/navigation.js); generation's audit
+// calls this with no options and keeps the legacy builder exactly.
+export function buildGraph(platforms, profile, opts) {
   const nodes = buildNodes(platforms, profile);
-  return { nodes, edges: buildEdges(nodes, profile), profile };
+  return {
+    nodes,
+    edges: buildEdges(nodes, profile, platforms, opts),
+    profile,
+    key: graphKey(profile, opts),
+  };
+}
+
+// The identity of a built graph: the body it was built for AND the policy it was
+// built under. Held on the graph so a route, a committed takeoff or a ban ledger
+// can be checked against the graph it was learned on, rather than only against
+// the terrain generation (tech/nav-clearance.md, "Cache lifecycle").
+export function graphKey(profile, opts) {
+  return profileKey(profile) + (opts && opts.clearance ? "+clear" : "");
 }
 
 // ---- the manoeuvre (tech/nav-clearance.md, C1) -----------------------------
@@ -264,6 +306,161 @@ export function driveV(dx, speed, dt) {
   const v = Math.min(speed, step);
   if (v < 1) return 0;
   return (dx > 0 ? 1 : -1) * v;
+}
+
+// ---- clearance (tech/nav-clearance.md, C2) ---------------------------------
+//
+// `linkBetween` tests where a jump LANDS, never where it goes. A column between
+// two halves of a slab, a slab roofing a takeoff, an overhang over a perch: all
+// of them leave an edge the graph believes in and no body can fly, and until C2
+// the only thing that ever found out was the agent, three failed attempts later.
+//
+// The predictor closes that by FLYING the manoeuvre. It starts from a standable
+// takeoff, applies the same hop/upward-jump rules the follower applies, steps
+// the same physics the mission steps, and asks whether the body arrives on the
+// destination span without touching anything else on the way. It is deliberately
+// nominal — instantaneous horizontal drive, no residual velocity, no slow or
+// knockback — which is the approximation the spec records and the attempt cap
+// still backs.
+
+// Numerical resolution, not tuning. PREDICT_STEP is the mission's own fixed
+// step; SWEEP_MAX is how far the body may move between collision samples, and
+// exists so a platform thinner than a frame's travel cannot be skipped between
+// them. LAND_TOL is `nodeUnder`'s own tolerance — the runtime's answer to "am I
+// standing on this node" — so the predictor accepts a landing on exactly the
+// terms the follower will later recognise it on.
+const PREDICT_STEP = 1 / 60;
+const SWEEP_MAX = 4;
+const LAND_TOL = 2;
+const MAX_FALL = 1200; // terminal velocity, from src/mission/entities.js
+
+// How far off its validated takeoff a body may commit and still be flying a
+// tested arc: one frame of travel. A legged body arrives exactly (driveV caps at
+// the distance remaining) but a SOLDIER body acts on the sign of the request and
+// accelerates, so it crosses its target rather than settling on it — and
+// consecutive positions differ by at most this, so one of the two straddling
+// frames is always inside it. The follower uses it as its takeoff window and the
+// predictor validates the whole band, so the window cannot authorize a launch
+// from an x nothing tested.
+export function takeoffTolerance(profile) {
+  return profile.runSpeed * PREDICT_STEP;
+}
+
+// Which of this edge's candidate takeoffs a body can actually fly from. [] means
+// the edge does not survive clearance.
+function validTakeoffs(from, to, profile, platforms, up) {
+  const out = [];
+  for (const x of takeoffCandidates(from, to, profile.w, up)) {
+    if (takeoffBand(from, to, profile, x, up).every((s) => flies(from, to, profile, platforms, s, up))) out.push(x);
+  }
+  return out;
+}
+
+// The positions the follower may actually commit from, for a takeoff at `x`.
+//
+// Not a symmetric band around the point: a body walks TOWARD its takeoff and
+// commits on the first frame inside the window, so the only place it can be that
+// is not the takeoff itself is short of it, on the side it came from. Testing
+// the other side would reject good edges — for an upward jump the other side is
+// inside the destination's footprint, which the follower's own takeoff guard
+// refuses to launch from in the first place.
+function takeoffBand(from, to, profile, x, up) {
+  const away = (to.a + to.b) / 2 >= x ? -1 : 1;
+  const early = clamp(x + away * takeoffTolerance(profile), from.a, from.b);
+  if (early === x) return [x];
+  if (up && !footprintClear(early, to, profile.w)) return [x];
+  return [x, early];
+}
+
+// Everything solid that the flight could possibly touch. A spatial pre-filter,
+// not the clearance test: the body box is still checked against each of these
+// individually at every step. Without it a 20-platform level costs 20 overlap
+// tests per sample, and the Lab rebuilds the whole graph on every pointer move.
+function nearbyPlatforms(from, to, profile, platforms, x) {
+  const env = profile.envelope;
+  const lo = Math.min(x, to.a) - env.flatReach - profile.w;
+  const hi = Math.max(x + profile.w, to.b + profile.w) + env.flatReach;
+  const top = Math.min(from.y, to.y) - env.maxRise - profile.h;
+  // `<=` on the bottom, not `<`: the destination's own surface sits exactly at
+  // this line, and dropping the platform the body is trying to land on out of
+  // its own flight check rejects every clear jump there is.
+  const bottom = Math.max(from.y, to.y);
+  return platforms.filter((p) => p.x < hi && p.x + p.w > lo && p.y <= bottom && p.y + p.h > top);
+}
+
+// Can this body leave `from` at left-edge `x` and arrive standing on `to`?
+//
+// The integration mirrors `stepActor` in src/mission/entities.js: gravity before
+// motion, x resolved before y, strict overlap, and a landing only on a DOWNWARD
+// contact with a platform top. Anything else the body touches — a column's side,
+// a slab's underside, a platform that is not the destination — rejects this
+// candidate, because that is a jump the follower would fly and fail.
+function flies(from, to, profile, platforms, x, up) {
+  const { w, h, gravity: g, runSpeed } = profile;
+  const dt = PREDICT_STEP;
+  const near = nearbyPlatforms(from, to, profile, platforms, x);
+  const box = { x, y: from.y - h, w, h };
+  let vy = -profile.jumpSpeed;
+  // The takeoff frame is the follower's own: an upward jump requests zero
+  // horizontal drive (it is standing clear of the destination precisely because
+  // the takeoff guard insisted, and steering at the landing point would walk it
+  // straight back under), a hop drives at its landing point.
+  let vx = up ? 0 : driveV(landingX(to, x) - x, runSpeed, dt);
+
+  // A hop returns to takeoff height at exactly `airtime` and an upward jump
+  // lands sooner, so a flight still going after that has missed. Four frames of
+  // slack for the landing sample itself.
+  const maxFrames = Math.ceil(profile.envelope.airtime / dt) + 4;
+  for (let f = 0; f < maxFrames; f++) {
+    vy += g * dt;
+    if (vy > MAX_FALL) vy = MAX_FALL;
+    if (sweep(box, "x", vx * dt, near)) return false; // a side: solid either way
+    const hit = sweep(box, "y", vy * dt, near);
+    if (hit) return vy > 0 && landsOn(box, hit, to, h);
+    vx = driveV(airborneAimX(to, box.x, w, box.y + h) - box.x, runSpeed, dt);
+  }
+  return false; // never came down anywhere: not a manoeuvre this body performs
+}
+
+// Advance one axis by `d` in samples no larger than SWEEP_MAX, stopping at the
+// first that overlaps anything. Returns `{ hit, prev }` — the platforms
+// overlapped and the axis position just before them — or null when the whole
+// move is clear. Sampling rather than testing only the end point is what stops a
+// thin platform being skipped between one frame and the next.
+function sweep(box, axis, d, platforms) {
+  const start = box[axis];
+  const steps = Math.max(1, Math.ceil(Math.abs(d) / SWEEP_MAX));
+  let prev = start;
+  for (let i = 1; i <= steps; i++) {
+    box[axis] = start + (d * i) / steps;
+    const hit = platforms.filter((p) => boxHits(box, p));
+    if (hit.length) return { hit, prev };
+    prev = box[axis];
+  }
+  return null;
+}
+
+// Strict overlap, exactly as `overlaps` in entities.js: a body resting with its
+// feet on a surface is touching it, not inside it.
+function boxHits(b, p) {
+  return b.x < p.x + p.w && b.x + b.w > p.x && b.y < p.y + p.h && b.y + b.h > p.y;
+}
+
+// A downward contact that leaves the body standing on the destination span.
+//
+// Every platform in contact must be met from ABOVE. That is what keeps a seam
+// between two flush platforms from reading as an obstruction: landing across the
+// join touches both, and both are tops. One of them touched from the side or
+// below is a real obstruction and rejects.
+function landsOn(box, { hit, prev }, to, h) {
+  let top = Infinity;
+  for (const p of hit) {
+    if (prev + h > p.y) return false; // the body was already past this surface
+    if (p.y < top) top = p.y;
+  }
+  if (Math.abs(top - to.y) > LAND_TOL) return false; // came down on another level
+  if (!hit.includes(to.plat)) return false; // ...or another platform entirely
+  return box.x >= to.a - LAND_TOL && box.x <= to.b + LAND_TOL;
 }
 
 // ---- queries --------------------------------------------------------------

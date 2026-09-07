@@ -21,7 +21,7 @@
 
 import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
-import { routeRequest, holdPoint, abortRoute } from "../navigation.js";
+import { routeRequest, holdPoint, abortRoute, navState } from "../navigation.js";
 import { tickBrain } from "./brain.js";
 import { updateSense, nearestHostile, losBetween } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
@@ -325,7 +325,11 @@ function motionRequest(root, ent, dt, scene) {
     // The dropped `leg` costs the other half, the failed attempt the cap counts.
     // Same rule as the reposition window below, for the same reason: every
     // window ends somewhere a decision can actually be made.
-    if (ent.onGround || !ent.nav || !ent.nav.leg) {
+    // A leg only holds an order open if it belongs to the graph in force. One
+    // learned against terrain that has since moved describes an arc nothing is
+    // flying, and waiting on it would leave the order open indefinitely.
+    const nav = navState(ent, scene);
+    if (ent.onGround || !nav || !nav.leg) {
       o.timeout -= dt;
       if (o.timeout <= 0 || Math.hypot(o.x - cx(ent), o.y - cy(ent)) < 12) {
         ent.moveOrder = null;
@@ -471,7 +475,12 @@ function repositionRequest(root, ent, m, point, scene, dt) {
     // resolve. Every window now ends somewhere a decision can actually be made.
     if (ent.onGround) st.hold -= dt;
     // Arrived and shooting, or the follower has run out of ideas: hand back.
-    if ((root.sense.los && !outside) || (ent.nav && ent.nav.blocked)) return release(st, ent);
+    // "The follower has run out of ideas" is a verdict about a graph, so it is
+    // only worth reading while that graph is the one in force. Terrain that has
+    // moved has not been given up on yet, and releasing on a stale `blocked`
+    // hands the agent back to holdRange for a dead end that no longer exists.
+    const nav = navState(ent, scene);
+    if ((root.sense.los && !outside) || (nav && nav.blocked)) return release(st, ent);
     // Mid-window: keep walking. A null from the follower (mid-fall, off the
     // graph) is one frame of holdRange, not a reason to abandon the choice.
     if (st.hold > 0) return routeRequest(ent, st.dest, m.speed, scene, dt);

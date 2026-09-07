@@ -26,6 +26,14 @@ const EDGE = 90;
 
 export function updateSense(root, scene, dt) {
   const m = root.memory;
+  // Navigation senses are published EVERY frame; everything below stays on the
+  // 0.2s cadence. They are not a sensor reading with a fair reaction delay —
+  // they are the router's own verdict about the frame that is about to run, and
+  // the frame the terrain moves is the frame a brain must stop believing "I gave
+  // up". Between sense ticks a stale navBlocked would otherwise stand for up to
+  // SENSE_INTERVAL after the graph it was learned on stopped existing
+  // (tech/nav-clearance.md, "Cache lifecycle").
+  publishNav(root, scene);
   m.timeSinceSeen += dt;
   m.senseTimer -= dt;
   if (m.senseTimer > 0) return;
@@ -54,7 +62,6 @@ export function updateSense(root, scene, dt) {
     s.cornered = false;
     s.groundAhead = true;
     s.timeSinceSeen = m.timeSinceSeen;
-    publishNav(root); // a moveOrder still routes with nobody to fight
     return;
   }
 
@@ -79,16 +86,15 @@ export function updateSense(root, scene, dt) {
   s.timeSinceSeen = m.timeSinceSeen;
   s.lastSeenX = m.lastSeenX;
   s.lastSeenY = m.lastSeenY;
-  publishNav(root);
 }
 
-// Navigation senses (tech/agent-navigation.md, N3). Published on the same
-// throttled cadence as everything else, and set even when there is no hostile —
-// an agent moving under a moveOrder still has a route. The router owns the
-// values; this only exposes them, so a brain can ask "can I actually get there"
-// without knowing what a node is.
-function publishNav(root) {
-  const n = navSense(root);
+// Navigation senses (tech/agent-navigation.md, N3). Set even when there is no
+// hostile — an agent moving under a moveOrder still has a route. The router owns
+// the values; this only exposes them, so a brain can ask "can I actually get
+// there" without knowing what a node is. Published every frame, ahead of the
+// cadence, for the reason given at the top of updateSense.
+function publishNav(root, scene) {
+  const n = navSense(root, scene);
   root.sense.routeSteps = n.routeSteps;
   root.sense.routeReachable = n.routeReachable;
   root.sense.navBlocked = n.navBlocked;

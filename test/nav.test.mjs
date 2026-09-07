@@ -183,6 +183,142 @@ export default async function run(t) {
     t.ok("seam: linkBetween is directly callable on two nodes", !!linkBetween(nodes[0], nodes[1], SOLDIER));
   }
 
+  // ---- clearance (tech/nav-clearance.md, C2) -----------------------------
+  //
+  // `linkBetween` tests where a jump LANDS. Clearance asks the other question —
+  // whether the body's whole box can get there — by flying the manoeuvre against
+  // the static terrain. Every case below is a pair: what the legacy builder says
+  // and what the filtered builder says, so a case that stops meaning anything
+  // (because the geometry no longer poses the question) fails rather than passes.
+  //
+  // The pair is `[0, 500, 200, 40]` and `[370, 500, 200, 40]`: spans [0,170] and
+  // [370,540], a 200px gap against a 230.4 flatReach. Every obstacle goes in that
+  // gap, and the soldier's arc through it peaks at box-top 324.4 (500 − 129.6 − 46).
+  const HOP_A = { x: 0, y: 500, w: 200, h: 40 };
+  const HOP_B = { x: 370, y: 500, w: 200, h: 40 };
+  // The other shape: continuous ground and a 100px perch. Its span is [700,970],
+  // so a 30-wide body's clear takeoffs are 670 and 1000.
+  const GROUND = { x: 0, y: 500, w: 1400, h: 40 };
+  const PERCH = { x: 700, y: 400, w: 300, h: 20 };
+
+  // The edge from the node at (y, a) to the node at (y, a), or false. Null when
+  // the geometry did not produce the nodes the case is about, which is a broken
+  // case rather than a passing one.
+  function edgeUnder(plats, profile, from, to, clearance) {
+    const g = buildGraph(plats, profile, clearance ? { clearance: true } : undefined);
+    const at = ([y, a]) => g.nodes.find((n) => n.y === y && Math.abs(n.a - a) < 0.5);
+    const na = at(from);
+    const nb = at(to);
+    if (!na || !nb) return null;
+    return g.edges[na.id].find((e) => e.to === nb.id) || false;
+  }
+  // "The legacy graph offers this edge, and the filtered one does not" — the
+  // shape of every rejection case, stated once.
+  const rejects = (name, plats, from, to, profile = SOLDIER) => {
+    const legacy = edgeUnder(plats, profile, from, to, false);
+    const filtered = edgeUnder(plats, profile, from, to, true);
+    t.ok(`clearance: ${name} — offered without clearance`, !!legacy);
+    t.eq(`clearance: ${name} — rejected with it`, filtered, false);
+  };
+  const accepts = (name, plats, from, to, profile = SOLDIER) => {
+    const filtered = edgeUnder(plats, profile, from, to, true);
+    t.ok(`clearance: ${name} — still offered`, !!filtered);
+    return filtered;
+  };
+
+  {
+    // Positives first, because over-pruning is the failure that would not
+    // announce itself: an agent simply stops going places, and nothing errors.
+    const flat = accepts("an unobstructed flat hop", [HOP_A, HOP_B], [500, 0], [500, 370]);
+    t.eq("clearance: ...taking off from the directed lip", flat.takeoffs, [170]);
+    const up = accepts("an unobstructed jump onto a perch", [GROUND, PERCH], [500, 0], [400, 700]);
+    t.eq("clearance: ...from either clear side of its footprint", up.takeoffs, [670, 1000]);
+
+    // A column in the gap is not on its own a reason to refuse the crossing —
+    // the design says so in as many words. 40px tall, and the arc is 130 up.
+    accepts("a hop over a low column", [HOP_A, HOP_B, { x: 270, y: 460, w: 20, h: 40 }], [500, 0], [500, 370]);
+  }
+  {
+    // A 200px column: the body's whole box is inside it at the apex.
+    rejects("a hop into a tall column", [HOP_A, HOP_B, { x: 270, y: 300, w: 20, h: 200 }], [500, 0], [500, 370]);
+    // The same column 2px wide. A frame at 320px/s covers 5.33px, so an
+    // end-of-frame test would step straight over this one; the swept sampling
+    // inside each frame is what catches it. If this ever goes green-by-accident
+    // the tall column above will not notice.
+    rejects("a hop into a 2px column", [HOP_A, HOP_B, { x: 279, y: 300, w: 2, h: 200 }], [500, 0], [500, 370]);
+    // A ceiling across the gap, which the arc rises into.
+    rejects("a hop under a low ceiling", [HOP_A, HOP_B, { x: 150, y: 330, w: 300, h: 20 }], [500, 0], [500, 370]);
+    // An overhang over the perch: the landing surface is well inside maxRise and
+    // the body still cannot get to it, which is the addendum's second outcome.
+    rejects("a jump under an overhang", [GROUND, PERCH, { x: 600, y: 320, w: 400, h: 20 }], [500, 0], [400, 700]);
+  }
+  {
+    // DIRECTION. Clearance filters directed edges, so an up-edge it rejects
+    // leaves the drop back down untouched — you can always come down the way you
+    // could not go up. (A flat hop is near enough symmetric by construction: both
+    // arcs cover the same span at the same heights, so an obstacle that blocks
+    // one blocks the other. The asymmetry lives on up-edges, where the takeoff
+    // must clear a footprint and the return is a fall.)
+    const roofed = [GROUND, PERCH, { x: 600, y: 320, w: 400, h: 20 }];
+    t.eq("clearance: the blocked climb is gone", edgeUnder(roofed, SOLDIER, [500, 0], [400, 700], true), false);
+    const down = edgeUnder(roofed, SOLDIER, [400, 700], [500, 0], true);
+    t.ok("clearance: and the drop off the same perch survives it", !!down && down.kind === "drop");
+  }
+  {
+    // A blocked NEAR takeoff must not condemn a clear far one. The overhang sits
+    // over 670 only; 1000 is in open air, and the edge keeps exactly that.
+    const one = accepts("a jump whose near takeoff is roofed",
+      [GROUND, PERCH, { x: 640, y: 320, w: 80, h: 20 }], [500, 0], [400, 700]);
+    t.eq("clearance: ...and only the far takeoff is kept", one.takeoffs, [1000]);
+  }
+  {
+    // BODY SIZE. Same envelope, different box: the arc's apex puts a 46-tall
+    // body's head at 324.4 and a 20-tall body's at 350.4, and the lid's underside
+    // is at 340. "A gap admits one body but not another", from the design table.
+    const LID = { x: 200, y: 320, w: 140, h: 20 };
+    const SHORT = bodyProfile({ w: 30, h: 20, gravity: 2000, jumpSpeed: 720, runSpeed: 320 });
+    rejects("a 46-tall body under a lid", [HOP_A, HOP_B, LID], [500, 0], [500, 370]);
+    accepts("a 20-tall body under the same lid", [HOP_A, HOP_B, LID], [500, 0], [500, 370], SHORT);
+  }
+  {
+    // WALKS AND DROPS ARE UNTOUCHED. The addendum adds hop and upward-jump
+    // clearance and nothing else; a drop is a fall this predictor does not model
+    // and does not claim to. Compared as sets rather than by count, so a drop
+    // quietly turning into a different drop would show.
+    const MIX = [
+      { x: 0, y: 500, w: 200, h: 40 }, // ground left  — span [0,170]
+      { x: 160, y: 500, w: 200, h: 40 }, // ...touching it: a WALK, gap 0
+      { x: 500, y: 500, w: 400, h: 40 },
+      { x: 200, y: 380, w: 300, h: 20 }, // a ledge to drop off
+      { x: 270, y: 300, w: 20, h: 200 }, // and a column that breaks hops
+    ];
+    const kinds = (clearance) => {
+      const g = buildGraph(MIX, SOLDIER, clearance ? { clearance: true } : undefined);
+      const out = [];
+      g.edges.forEach((list, i) => list.forEach((e) => { if (e.kind === "walk" || e.kind === "drop") out.push(`${i}->${e.to}:${e.kind}`); }));
+      return out.sort().join(" ");
+    };
+    t.ok(`clearance: the scene has walks and drops to lose (${kinds(false)})`,
+      kinds(false).includes("walk") && kinds(false).includes("drop"));
+    t.eq("clearance: and it loses none of them", kinds(true), kinds(false));
+  }
+  {
+    // THE SEAM, and it throws rather than approximating. `auditGeometry` builds
+    // its profile as a box plus a reachability envelope — no gravity, no impulse,
+    // no run speed — because reachability is all generation needs. The predictor
+    // integrates all three. A level's audit is not the place to find that out.
+    const auditProfile = { w: 30, h: 46, envelope: SOLDIER.envelope };
+    let threw = null;
+    try { buildGraph([HOP_A, HOP_B], auditProfile, { clearance: true }); } catch (e) { threw = e; }
+    t.ok(`seam: the audit's envelope-only profile cannot enter the predictor (${threw && threw.message})`, !!threw);
+    let ok = null;
+    try { buildGraph([HOP_A, HOP_B], auditProfile); ok = true; } catch { ok = false; }
+    t.ok("seam: and the same profile still builds the legacy graph it is for", ok);
+    // Identity carries the policy, or the two graphs would share a cache entry.
+    t.ok(`graph: a filtered graph has its own key (${buildGraph([HOP_A], SOLDIER, { clearance: true }).key})`,
+      buildGraph([HOP_A], SOLDIER, { clearance: true }).key !== buildGraph([HOP_A], SOLDIER).key);
+  }
+
   // ---- the manoeuvre (tech/nav-clearance.md, C1) -------------------------
   // These four were private to the follower until C1. They are here because C2's
   // predictor simulates the manoeuvre the follower performs, and two answers to
