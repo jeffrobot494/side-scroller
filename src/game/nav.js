@@ -142,6 +142,15 @@ function gapBetween(na, nb) {
   return Math.max(nb.a - na.b, na.a - nb.b, 0);
 }
 
+// What is left of an edge's horizontal budget once the gap is paid for: how much
+// further from the destination a body may start and still be inside the reach
+// `linkBetween` priced the edge on. S3's run-up is bounded by it.
+function reachSlack(na, nb, profile) {
+  const dh = na.y - nb.y;
+  const reach = dh > 0 ? profile.envelope.maxRunTo(dh) : profile.envelope.flatReach;
+  return reach - gapBetween(na, nb);
+}
+
 function kindOf(dh, gap) {
   if (dh > 0) return "jump"; // up onto something
   if (dh < 0) return "drop"; // off a ledge — one-way
@@ -205,7 +214,7 @@ export function buildEdges(nodes, profile, platforms, opts) {
       // test: the cheap gates above decide what exists, and only then does the
       // predictor ask whether the body can actually fly it.
       if (clearance && (link.kind === "hop" || link.kind === "jump")) {
-        const takeoffs = validTakeoffs(na, nb, profile, platforms, link.kind === "jump");
+        const takeoffs = validTakeoffs(na, nb, profile, platforms, link.kind === "jump", reachSlack(na, nb, profile));
         if (!takeoffs.length) continue; // no clear manoeuvre: this edge is a lie
         link.takeoffs = takeoffs;
       }
@@ -431,30 +440,85 @@ export function takeoffTolerance(profile) {
   return profile.runSpeed * PREDICT_STEP;
 }
 
-// Which of this edge's candidate takeoffs a body can actually fly from. [] means
-// the edge does not survive clearance.
-function validTakeoffs(from, to, profile, platforms, up) {
+// Which of this edge's takeoffs a body can actually fly from. [] means the edge
+// does not survive clearance.
+//
+// Two sets, tried in order, because a body should not walk backwards to make a
+// jump it can make from where the route already takes it. The ordinary takeoffs
+// are the ones beside the destination; only when NONE of them flies does the
+// run-up come into it (tech/nav-clearance.md, S3).
+function validTakeoffs(from, to, profile, platforms, up, slack) {
+  const ok = (x) => takeoffBand(from, to, profile, x, up).every((s) => flies(from, to, profile, platforms, s, up));
+  const out = takeoffCandidates(from, to, profile.w, up).filter(ok);
+  if (out.length) return out;
+  return runUpTakeoffs(from, to, profile, up, slack).filter(ok);
+}
+
+// How far back along its own surface a body may walk to find a takeoff, and how
+// finely that run-up is sampled: two body widths, in thirds of one.
+//
+// Not tuning — a measured bound. Over 60 generated levels, 138 hop/jump edges
+// that no ordinary takeoff can fly are flyable from somewhere else on the source
+// surface, EVERY one of them further from the destination than the ordinary
+// takeoff and none of them nearer. Two body widths back recovers 134 of the 138
+// and 90px recovers one more; a third-of-a-body-width sample is what fits inside
+// the narrowest window that works (28px in the case that motivated it).
+const RUNUP_BACK = 2;
+const RUNUP_STEPS = 6;
+
+// Standable positions further from the destination than the ordinary takeoffs.
+//
+// What this buys is rise before arrival. A body flush against a block on its own
+// floor jumps and drives at its landing point on the same frame, which walks it
+// into the block's SIDE; from a run-up it is above the block by the time it gets
+// there. The graph never charged for that distance — `slack` is what the edge's
+// reach budget has left after the gap, and stepping back further than that is
+// asking for ground the envelope does not grant.
+//
+// Stepping AWAY from a footprint-clear takeoff stays footprint-clear, so there
+// is no clearance test here; running out of surface ends the ladder.
+function runUpTakeoffs(from, to, profile, up, slack) {
+  const w = profile.w;
+  const mid = (to.a + to.b) / 2;
+  const limit = Math.min(RUNUP_BACK * w, slack);
   const out = [];
-  for (const x of takeoffCandidates(from, to, profile.w, up)) {
-    if (takeoffBand(from, to, profile, x, up).every((s) => flies(from, to, profile, platforms, s, up))) out.push(x);
+  for (const c of takeoffCandidates(from, to, w, up)) {
+    const dir = c <= mid ? -1 : 1;
+    for (let k = 1; k <= RUNUP_STEPS; k++) {
+      const d = ((k * RUNUP_BACK) / RUNUP_STEPS) * w;
+      if (d > limit) break;
+      const x = clamp(c + dir * d, from.a, from.b);
+      if (x === c) break; // ran out of surface
+      if (!out.includes(x)) out.push(x);
+    }
   }
   return out;
 }
 
 // The positions the follower may actually commit from, for a takeoff at `x`.
 //
-// Not a symmetric band around the point: a body walks TOWARD its takeoff and
-// commits on the first frame inside the window, so the only place it can be that
-// is not the takeoff itself is short of it, on the side it came from. Testing
-// the other side would reject good edges — for an upward jump the other side is
-// inside the destination's footprint, which the follower's own takeoff guard
-// refuses to launch from in the first place.
+// A body walks TOWARD its takeoff and commits on the first frame inside the
+// window, so what has to be tested is the takeoff and one frame of travel to
+// either side of it — whichever side the body came from. Both sides, because
+// since S3 a takeoff need not be at the end of the span: a run-up takeoff is
+// approached from the destination side by a body already standing at the lip,
+// and from the far side by one walking in.
+//
+// For every ORDINARY takeoff exactly one side survives the two filters below and
+// the band is what it was before S3: the far side of a hop's lip is off the span
+// and clamps back onto it, and the near side of an upward jump's flanking
+// takeoff is inside the destination's footprint, which the follower's own
+// takeoff guard refuses to launch from.
 function takeoffBand(from, to, profile, x, up) {
-  const away = (to.a + to.b) / 2 >= x ? -1 : 1;
-  const early = clamp(x + away * takeoffTolerance(profile), from.a, from.b);
-  if (early === x) return [x];
-  if (up && !footprintClear(early, to, profile.w)) return [x];
-  return [x, early];
+  const tol = takeoffTolerance(profile);
+  const out = [x];
+  for (const dir of [-1, 1]) {
+    const s = clamp(x + dir * tol, from.a, from.b);
+    if (s === x) continue; // off the span: the body cannot stand there
+    if (up && !footprintClear(s, to, profile.w)) continue;
+    out.push(s);
+  }
+  return out;
 }
 
 // Everything solid that the flight could possibly touch. A spatial pre-filter,

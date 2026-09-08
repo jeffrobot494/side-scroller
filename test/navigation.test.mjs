@@ -760,6 +760,47 @@ export default async function run(t) {
     });
   }
 
+  // ---- S3: a real soldier taking the run-up ---------------------------------
+  {
+    // The graph guard for this shape is in nav.test.mjs; this is the body flying
+    // it. A 90x62 block standing on the floor cuts the floor in two, and the
+    // only takeoff that crosses it is a run-up 50-60px back from the lip.
+    const FLOOR = { x: 0, y: 500, w: 1400, h: 40 };
+    const BLOCK = { x: 600, y: 438, w: 90, h: 62 };
+    // Approaching from the left, the run-up is on the way: the body launches
+    // where it was already walking, and OVER the block rather than onto it.
+    for (const dt of [STEP, 1 / 50]) {
+      const sc = scene([FLOOR, BLOCK]);
+      const a = soldierAgent(200, 500);
+      let stood = false;
+      const s = a.soldier;
+      a.motion = { type: "moveTo", target: [900, 500], speed: config.runSpeed };
+      for (let i = 0; i < Math.round(6 / dt); i++) {
+        a.x = s.x; a.y = s.y; a.w = s.w; a.h = s.h;
+        a.vx = s.vx; a.vy = s.vy; a.onGround = s.onGround; a.facing = s.facing;
+        updateSpecEnemy(a, dt, sc, ctx);
+        stepActor(s, dt, sc.world, sc.platforms);
+        if (s.onGround && Math.abs(s.y + s.h - 438) < 1) stood = true;
+      }
+      t.ok(`S3: a real Soldier crosses the block at dt=1/${Math.round(1 / dt)} (x ${s.x.toFixed(0)})`, s.x > 690);
+      t.ok("S3: ...over it, not up onto it", !stood);
+      t.eq("S3: ...and spends no attempt finding that out", Object.keys(a.nav.attempts).length, 0);
+    }
+    {
+      // Starting AT the lip, the same takeoff is behind the body: it walks back
+      // to it and launches while still carrying leftward speed, which is not the
+      // launch the predictor flew. It gets across, one failed jump later. That
+      // one attempt is S4's — the predictor launches from a standstill, and the
+      // range a follower can arrive with is what S4 makes it fly.
+      const sc = scene([FLOOR, BLOCK]);
+      const a = soldierAgent(560, 500);
+      const s = simSoldier(a, sc, 6, { x: 900, y: 500 });
+      const spent = Object.values(a.nav.attempts).reduce((n, v) => n + v, 0);
+      t.ok(`S3: and crosses it from the lip too, walking back to the run-up (x ${s.x.toFixed(0)})`, s.x > 690);
+      t.ok(`S3: ...at the cost of one reversed launch, which is S4's (attempts ${spent})`, spent <= 1 && a.nav.banned.size === 0);
+    }
+  }
+
   // ---- C2: failure recovery still works with clearance ON -------------------
   {
     // Static clearance reduces failures; it does not remove the recovery path.

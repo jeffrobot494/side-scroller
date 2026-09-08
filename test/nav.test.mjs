@@ -387,6 +387,52 @@ export default async function run(t) {
     t.eq("clearance: ...and only the far takeoff is kept", one.takeoffs, [1000]);
   }
   {
+    // ---- S3: the run-up ----------------------------------------------------
+    //
+    // A block standing ON the floor cuts the floor in two, and the takeoff the
+    // ordinary rule offers is the lip — the body flush against the block's left
+    // face. From there the launch frame drives at the landing point and walks
+    // straight into the side. A body that starts further back is above the block
+    // by the time it gets there, which is what a player does and what the
+    // takeoff set now offers.
+    //
+    // 90px wide and 62 tall: a 120px gap against a 230.4 flatReach, so the
+    // crossing is well inside the envelope and only the launch position is in
+    // question.
+    const FLOOR = { x: 0, y: 500, w: 1400, h: 40 };
+    const BLOCK = { x: 600, y: 438, w: 90, h: 62 };
+    // Both floor segments belong to the same platform, so `edgeUnder`'s
+    // solid-edge lookup cannot tell them apart. Span start does.
+    const seg = (plats, fromA, toA, clearance) => {
+      const g = buildGraph(plats, SOLDIER, clearance ? { clearance: true } : undefined);
+      const na = g.nodes.find((n) => near(n.a, fromA, 0.5));
+      const nb = g.nodes.find((n) => near(n.a, toA, 0.5));
+      if (!na || !nb) return null;
+      return g.edges[na.id].find((e) => e.to === nb.id) || false;
+    };
+    t.ok("clearance: a hop over a block on the floor — offered without clearance", !!seg([FLOOR, BLOCK], -30, 690, false));
+    const over = seg([FLOOR, BLOCK], -30, 690, true);
+    t.ok("clearance: a hop over a block on the floor — still offered", !!over);
+    t.ok(`clearance: ...from a run-up, never the lip (${over && over.takeoffs})`,
+      !!over && over.takeoffs.length > 0 && over.takeoffs.every((x) => x < 570));
+    // Measured: every takeoff that rescues an edge no ordinary one can fly is
+    // FURTHER from the destination, and not one is nearer. The ladder only ever
+    // walks backwards, so this is the direction, not an artefact of this case.
+    t.ok("clearance: ...and the run-up stays within two body widths of it",
+      !!over && over.takeoffs.every((x) => x >= 570 - 2 * SOLDIER.w));
+    // Bounded, not unlimited. The same block 140 wide leaves a 170px gap the
+    // body cannot clear from anywhere on the floor, and no amount of run-up
+    // turns that into a jump — an edge nothing can fly is still refused.
+    const WIDE = [FLOOR, { x: 600, y: 438, w: 140, h: 62 }];
+    t.ok("clearance: a hop over a block too wide to clear — offered without clearance", !!seg(WIDE, -30, 740, false));
+    t.eq("clearance: a hop over a block too wide to clear — rejected with it", seg(WIDE, -30, 740, true), false);
+    // A last resort, not a preference: the block's own TOP is reached from the
+    // lip, so that edge keeps the ordinary takeoff and gains no run-up.
+    const onto = seg([FLOOR, BLOCK], -30, 570, true);
+    t.eq("clearance: a jump onto the same block takes off from the lip, with no run-up added",
+      onto && onto.takeoffs, [570]);
+  }
+  {
     // BODY SIZE. Same envelope, different box: the arc's apex puts a 46-tall
     // body's head at 324.4 and a 20-tall body's at 350.4, and the lid's underside
     // is at 340. "A gap admits one body but not another", from the design table.

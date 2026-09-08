@@ -139,7 +139,7 @@ section + the tests are the source of truth for what currently exists):
   from, aimed at and landed on those spans. Full evidence, and how a first pass
   got it badly wrong by measuring through the graph instead of the integrator, in
   `tech/nav-clearance.md` "Regressions found in play". **The spec was rewritten;
-  S0–S2 of it are built, S3–S5 are not, and the reported faults are not all fixed
+  S0–S3 of it are built, S4–S5 are not, and the reported faults are not all fixed
   yet.**
   **S0 (guards) + S1 (solid extent) + S2 (a node is a SURFACE) — built.** A node
   is now every position the physics supports, `[p.x - w, p.x + p.w]` open at both
@@ -152,12 +152,34 @@ section + the tests are the source of truth for what currently exists):
   test asks. `settleX` answers a third — "where does a body come to REST" — and
   is what an aim uses, because a span endpoint is a real place to stand and a
   target a fraction of a pixel wide. Reachable surface is +26% and back to 77% of
-  the unfiltered graph. **Still open: the reported faults themselves.** S3
-  (clearance measured against the physics, the "won't climb" one), S4 (the
-  predictor flies a RUNNING launch, the one failed jump), S5 (off the graph,
-  never hop blind). Two guards now exist and are the bar: node spans are pinned
-  against `stepActor` in `test/nav.test.mjs`, and reachable surface is frozen per
-  seed in `test/navigation.test.mjs` so a graph change that shrinks it reddens.
+  the unfiltered graph, and **that is what fixed the reported "won't climb"** —
+  see S3.
+  **S3 (clearance measured against the physics) — built, and it found that S2
+  had already done the work.** Three of the four things S3 names were shipped by
+  S2 and C2 (landing acceptance became a supported-position test the moment the
+  span did; the in-flight aim is `settleX`; `nav.commit` is the follower's
+  commitment to a validated takeoff). What was left is the takeoff SET, which now
+  carries a **run-up**: when no takeoff beside the destination flies, the
+  predictor walks back along the source surface, up to two body widths in thirds
+  of one, bounded by the edge's remaining reach budget. Measured, every takeoff
+  that rescues an edge is FURTHER from the destination and none is nearer — what
+  the distance buys is rise before arrival, so a body flush against a block stops
+  jumping into its side. The takeoff band is two-sided now, because a run-up
+  takeoff sits mid-span and is approached from either direction. **It is thin and
+  the measurement says so**: 82 hop/jump edges added over 60 levels, 0 removed, 0
+  existing takeoffs moved, +5 reachable node pairs in one seed, the frozen
+  surface guard unmoved, the 60-level agent sweep byte-identical, build 0.75 →
+  1.06ms. The headline number is the re-measurement it forced: **91% of what
+  clearance still drops is not flyable from anywhere at any launch speed** (the
+  spec's old "70% are flyable" was measured on the pre-S2 spans), 22 edges over
+  60 levels want a running launch, and the seeds that still lose most of their
+  surface lose it to real geometry — a head-bonk under a shelf no arc reaches.
+  **Still open:** S4 (the predictor flies a RUNNING launch, the one failed jump —
+  and the reversed launch S3's own run-up can provoke), S5 (off the graph, never
+  hop blind). Three guards are the bar: node spans pinned against `stepActor` in
+  `test/nav.test.mjs`, reachable surface frozen per seed in
+  `test/navigation.test.mjs` so a graph change that shrinks it reddens, and a
+  real `Soldier` crossing the run-up block in the same suite.
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
