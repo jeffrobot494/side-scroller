@@ -21,7 +21,7 @@
 
 import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
-import { routeRequest, holdPoint, abortRoute, navState } from "../navigation.js";
+import { routeRequest, holdPoint, abortRoute, navState, navGraph } from "../navigation.js";
 import { tickBrain } from "./brain.js";
 import { updateSense, nearestHostile, losBetween } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
@@ -315,8 +315,9 @@ function motionRequest(root, ent, dt, scene) {
     // The arrival and timeout tests stay here either way: they are the ORDER's
     // terms, not the route's, and a routed agent that reaches the point is done
     // for the same reason an unrouted one is.
-    req = routeRequest(ent, { x: o.x, y: o.y }, o.speed, scene, dt)
-      || { kind: "steer", point: { x: o.x, y: o.y }, speed: o.speed };
+    const at = { x: o.x, y: o.y };
+    req = routeRequest(ent, at, o.speed, scene, dt)
+      || { kind: "steer", point: at, speed: o.speed, hopToward: reflexHop(ent, scene, o.speed, at) };
     // An order does not end with a routed jump in the air. Whatever takes over
     // is a controller that did not plan this arc — and for a soldier body the
     // handover is actively destructive, because `stop` runs SOLDIER_TUNING's
@@ -350,6 +351,22 @@ function motionRequest(root, ent, dt, scene) {
   return req;
 }
 
+// OFF THE GRAPH, NEVER HOP BLIND (tech/nav-clearance.md, S5). Every fallback
+// below is a straight line at the destination, and the question this answers is
+// whether it may also JUMP at it. `hopToward` is the pre-N3 reflex — "the target
+// is above me, try" — and it knows nothing about terrain: under an overhang it
+// hops into the ceiling, fails, and does it again next frame.
+//
+// A body with no graph is entitled to it; that is all it has. A body that HAS a
+// graph and is merely standing somewhere the graph does not model (a headroom
+// pocket, a sliver too narrow to be a node, mid step-off) walks instead, and the
+// route it gets back the moment it is on a node again is the thing that knows
+// which climbs exist. Returning `undefined` rather than omitting the key keeps
+// both fallbacks one expression; the locomotors read it as falsy either way.
+function reflexHop(ent, scene, speed, point) {
+  return navGraph(ent, scene, speed) ? undefined : point;
+}
+
 // Translate one of the 10 standing controllers into a MotionRequest. Steering
 // controllers resolve a concrete point here; kinematic styles (flyer-only)
 // pass their pre-resolved params for the locomotor to apply verbatim.
@@ -364,7 +381,8 @@ function controllerRequest(root, ent, m, dt, scene, target) {
     case "moveTo": {
       const at = resolveTargetPoint(root, ent, m.target, scene, target, m.offset);
       if (!at) return { kind: "coast" };
-      return routeRequest(ent, at, m.speed, scene, dt) || { kind: "steer", point: at, speed: m.speed };
+      return routeRequest(ent, at, m.speed, scene, dt)
+        || { kind: "steer", point: at, speed: m.speed, hopToward: reflexHop(ent, scene, m.speed, at) };
     }
     case "patrol": {
       const half = (m.range || 160) / 2;
@@ -378,11 +396,12 @@ function controllerRequest(root, ent, m, dt, scene, target) {
       if (!target) return { kind: "stopX" };
       const point = { x: cx(target), y: cy(target) };
       // a flyer steers in both axes; a legged body routes over the terrain, and
-      // falls back to the pre-N3 reflex (drive at them, hop if they are above)
-      // whenever the graph has nothing to say about where it is standing.
+      // falls back to driving straight at them whenever the graph has nothing to
+      // say about where it is standing — with the pre-N3 hop only if it has no
+      // graph at all (reflexHop).
       if (ent.spec.body.gravity === 0) return { kind: "steer", point, speed: m.speed };
       return routeRequest(ent, point, m.speed, scene, dt)
-        || { kind: "driveX", v: (point.x >= cx(ent) ? 1 : -1) * m.speed, hopToward: point };
+        || { kind: "driveX", v: (point.x >= cx(ent) ? 1 : -1) * m.speed, hopToward: reflexHop(ent, scene, m.speed, point) };
     }
     case "keepDistance": {
       if (!target) return { kind: "brakeX", factor: 0.7 };

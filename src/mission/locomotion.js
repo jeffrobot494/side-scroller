@@ -14,8 +14,9 @@
 //   stop                           — full halt (legged: vx=0; flyer: vx=vy=0)
 //   stopX                          — zero horizontal only, keep vy (a hovering halt)
 //   brakeX {factor}                — decay vx toward 0, keep vy
-//   driveX {v, hopToward?}         — set vx=v; legged hops if hopToward is above
-//   steer {point, speed}           — head to a world point (legged: x only; flyer: x+y)
+//   driveX {v, hopToward?}         — set vx=v; hops if hopToward is above
+//   steer {point, speed, hopToward?} — head to a world point (legged: x only;
+//                                    flyer: x+y); a soldier body hops if asked
 //   holdRange {point, min, max, speed} — close/open to hold a distance band
 //   burst {ux, uy, speed, expire}  — a committed dash in a UNIT direction; each
 //                                    body picks its axes (legged: x only). On the
@@ -62,8 +63,9 @@ const LEGGED = {
     actuateHorizontal(ent, req);
     // Two ways to be told to jump, and they are not the same instruction.
     // `hop: true` is the ROUTER's — this edge is a jump edge and you are at its
-    // takeoff. `hopToward` is the old reflex: the target is above me, try. A
-    // routed agent never sets hopToward, so these never both fire.
+    // takeoff. `hopToward` is the old reflex: the target is above me, try. They
+    // never both fire, and since S5 the reflex is only offered to a body that
+    // has no graph at all — the caller decides that, not the locomotor.
     if (req.kind === "driveX" && canJump(ent) && (req.hop || (req.hopToward && req.hopToward.y < cy(ent) - 40))) {
       ent.vy = -bodyJump(ent);
       consumeJump(ent);
@@ -146,7 +148,11 @@ const SOLDIER = {
         break;
       case "steer":
         move = Math.sign(req.point.x - cx(s));
-        if (wantHop(s, req.point)) jump = true;
+        // The reflex hop, and ONLY when the caller asked for it (S5). This branch
+        // used to hop on its own initiative off `req.point`, which made a soldier
+        // body the one locomotor that jumped at terrain nobody had checked — a
+        // legged `steer` has never hopped at all.
+        if (req.hopToward && wantHop(s, req.hopToward)) jump = true;
         break;
       case "holdRange": {
         const d = Math.hypot(req.point.x - cx(s), req.point.y - cy(s));

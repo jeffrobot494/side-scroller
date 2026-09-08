@@ -988,6 +988,86 @@ export default async function run(t) {
     t.ok(`S4: ${failed} of ${legs} route legs fail in the air (11.9% before S4)`, legs > 200 && failed <= 6);
   }
 
+  // ---- S5: off the graph, never hop blind -----------------------------------
+  //
+  // `buildNodes` deletes floor wherever something overhead leaves less than body
+  // height + 4px, so a pocket with 2px of headroom to spare is walkable and
+  // INVISIBLE: a body standing in it gets no route, and before S5 the fallback
+  // drove at the destination and hopped because it was above — into the pocket's
+  // own ceiling, once per frame it could jump. The graph is the only thing that
+  // knows which climbs exist, so a body that has one does not guess.
+  //
+  // A hop is measured as the body RISING, not as a negative vy: under a ceiling
+  // this tight the collision zeroes vy inside the same frame, and the legged
+  // locomotor integrates inside `apply` where nothing can look between the two.
+  // And it is measured per FRAME, because walking out of the pocket is the
+  // point: the moment it is on a node again it has a route, and a routed jump
+  // is not a blind one.
+  {
+    const FLOOR = { x: 0, y: 500, w: 1400, h: 40 };
+    const PERCH = { x: 700, y: 340, w: 200, h: 20 };
+    const roofFor = (h) => ({ x: 200, y: 500 - h - 2 - 20, w: 900, h: 20 }); // h + 2 of headroom
+    // Rises taken from a standing start on ground the graph does not model.
+    const blindHops = (root, body, sc, seconds, step) => {
+      const graph = graphFor(sc, profileFor(root, sc, config.runSpeed));
+      let blind = 0;
+      let off = 0;
+      for (let i = 0; i < Math.round(seconds * 60); i++) {
+        const y0 = body.y;
+        const blindNow = body.onGround && !nodeUnder(graph, body.x, body.y + body.h);
+        step();
+        if (blindNow) off++;
+        if (blindNow && body.y < y0 - 0.5) blind++;
+      }
+      return { blind, off };
+    };
+    for (const routing of [true, false]) {
+      // The reflex is not deleted, it is narrowed: a body with NO graph still
+      // has it, and it is all such a body has. Routing off is that body.
+      const on = routing ? "" : " (routing off: the reflex a graph-less body keeps)";
+      {
+        const sc = scene([FLOOR, roofFor(46), PERCH]);
+        const a = soldierAgent(300, 500);
+        const s = a.soldier;
+        a.motion = { type: "moveTo", target: [800, PERCH.y - 46], speed: config.runSpeed };
+        const x0 = s.x;
+        config.navEnabled = routing;
+        const { blind, off } = blindHops(a, s, sc, 1.5, () => {
+          a.x = s.x; a.y = s.y; a.w = s.w; a.h = s.h;
+          a.vx = s.vx; a.vy = s.vy; a.onGround = s.onGround; a.facing = s.facing;
+          updateSpecEnemy(a, STEP, sc, ctx);
+          stepActor(s, STEP, sc.world, sc.platforms);
+        });
+        config.navEnabled = true;
+        if (routing) {
+          const graph = graphFor(sc, profileFor(a, sc, config.runSpeed));
+          t.ok("S5: the body HAS a graph", graph.nodes.length > 2);
+          t.ok(`S5: ...and spends the whole run in a pocket it does not model (${off} of 90 frames)`, off > 85);
+          t.eq("S5: a soldier body off the graph does not jump at what is above it", blind, 0);
+          t.ok(`S5: ...it walks instead (x ${x0} -> ${s.x.toFixed(0)})`, s.x > x0 + 100);
+        } else {
+          t.ok(`S5: a soldier body with no graph still hops${on} (${blind})`, blind > 0);
+        }
+      }
+      {
+        // The other half of the fallback: a legged `chase` drives at the target
+        // and carried `hopToward` unconditionally. Its own pocket, because a
+        // 26px body stands under a ceiling a 46px one does not fit in at all.
+        const sc = scene([FLOOR, roofFor(26), PERCH], [soldierAt(800, PERCH.y - 46)]);
+        config.navEnabled = routing;
+        const c = chaser(300, 500 - 26);
+        const { blind, off } = blindHops(c, c, sc, 1.5, () => updateSpecEnemy(c, STEP, sc, ctx));
+        config.navEnabled = true;
+        if (routing) {
+          t.ok(`S5: a legged body is in a pocket of its own size (${off} of 90 frames)`, off > 85);
+          t.eq("S5: ...and off the graph it does not jump at what is above it either", blind, 0);
+        } else {
+          t.ok(`S5: a legged body with no graph still hops${on} (${blind})`, blind > 0);
+        }
+      }
+    }
+  }
+
   // ---- S0: reachable standable surface, frozen (tech/nav-clearance.md) ------
   //
   // The second of S0's two guards. nav.test.mjs pins the MODEL against the

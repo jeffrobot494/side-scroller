@@ -6,12 +6,15 @@
 //   profileFor(ent, scene, speed)  which body is walking, in nav.js's terms
 //   graphFor(scene, profile)       one graph per profile, cached on the scene
 //   routeRequest(ent, dest, ...)   the MotionRequest for this frame, or null
+//   navGraph(ent, scene, speed)    the graph this body routes on, or null
 //
 // `routeRequest` returns **null** to mean "I have nothing useful — do what you
 // did before N3". Off the graph, mid-fall, no platforms, flying, disabled: the
 // caller falls back to straight-line steering rather than freezing. That is the
 // fallback discipline in CLAUDE.md, and it is why routing could be switched on
-// for the whole roster at once.
+// for the whole roster at once. What the fallback may NOT carry is a jump —
+// `navGraph` is how a caller tells "no graph" from "no route", and only the
+// first still hops (S5).
 //
 // The jump comes from HERE, not from the brain and not from the locomotor: the
 // router knows the next edge is a jump edge and that the body is standing at its
@@ -90,6 +93,27 @@ export function graphFor(scene, profile) {
   return g;
 }
 
+// IS THIS BODY ROUTED AT ALL (tech/nav-clearance.md, S5) — the one test, because
+// off the graph a caller has to tell two very different nulls apart.
+// `routeRequest` returns null both for a body navigation cannot describe (turned
+// off, a flyer, terrain nothing can stand on) and for one standing somewhere its
+// own graph does not model. The first keeps the pre-N3 reflex that hops at
+// whatever is above it; the second must not, because the graph is the only thing
+// that knows whether the terrain overhead can be jumped into, and a body that has
+// one and hops anyway is jumping at terrain it cannot see.
+//
+// Free at a fallback site: `routeRequest` has already built and cached the graph
+// for this profile, provided the caller passes the SAME speed it routed with — a
+// legged profile carries its run speed, so a different one is a different graph.
+export function navGraph(ent, scene, speed) {
+  if (!config.navEnabled) return null;
+  const b = ent.spec && ent.spec.body;
+  if (!b || b.gravity === 0) return null; // flyers move in two dimensions already
+  if (!scene.platforms || !scene.platforms.length) return null;
+  const graph = graphFor(scene, profileFor(ent, scene, speed));
+  return graph.nodes.length ? graph : null;
+}
+
 // Drop every cached graph. The generation counter is how agents notice: their
 // route state — including the ban ledger — is keyed to the graph it was learned
 // against, and "this edge cannot be flown" stops being true the moment the
@@ -156,15 +180,11 @@ function clamp(v, lo, hi) {
 // Everything below works in body-LEFT-EDGE space, matching node spans, so the
 // destination is converted once, here, and never again.
 export function routeRequest(ent, dest, speed, scene, dt) {
-  if (!config.navEnabled || !dest) return null;
-  const b = ent.spec.body;
-  if (b.gravity === 0) return null; // flyers move in two dimensions already
-  if (!scene.platforms || !scene.platforms.length) return null;
-
+  if (!dest) return null;
   // The graph FIRST, because its identity is what decides whether the route
   // state on the agent still describes the world it is standing in.
-  const graph = graphFor(scene, profileFor(ent, scene, speed));
-  if (!graph.nodes.length) return null;
+  const graph = navGraph(ent, scene, speed);
+  if (!graph) return null;
   let nav = navState(ent, scene, graph);
   if (!nav) nav = ent.nav = newNav(scene, graph);
 
@@ -456,14 +476,10 @@ export function abortRoute(ent) {
 // both. Returns a world point in CENTRE space — what routeRequest consumes —
 // or null, which means "nothing better exists; hold distance where you are".
 export function holdPoint(ent, scene, speed, tp, min, max, see) {
-  if (!config.navEnabled || !config.navReposition) return null;
-  const b = ent.spec.body;
-  if (b.gravity === 0) return null; // a flyer already moves in two dimensions
+  if (!config.navReposition) return null;
   if (!ent.onGround) return null; // "where I could stand" needs a node to stand on
-  if (!scene.platforms || !scene.platforms.length) return null;
-
-  const graph = graphFor(scene, profileFor(ent, scene, speed));
-  if (!graph.nodes.length) return null;
+  const graph = navGraph(ent, scene, speed);
+  if (!graph) return null;
   const here = nodeUnder(graph, ent.x, ent.y + ent.h);
   if (!here) return null;
 

@@ -138,9 +138,8 @@ section + the tests are the source of truth for what currently exists):
   the graph modelled ~55% of the standable surface, and the predictor took off
   from, aimed at and landed on those spans. Full evidence, and how a first pass
   got it badly wrong by measuring through the graph instead of the integrator, in
-  `tech/nav-clearance.md` "Regressions found in play". **The spec was rewritten;
-  S0–S4 of it are built, S5 is not, and the reported faults are not all fixed
-  yet.**
+  `tech/nav-clearance.md` "Regressions found in play". **The spec was rewritten
+  and S0–S5 of it are built.**
   **S0 (guards) + S1 (solid extent) + S2 (a node is a SURFACE) — built.** A node
   is now every position the physics supports, `[p.x - w, p.x + p.w]` open at both
   ends, and co-planar platforms whose supported extents overlap (a gap narrower
@@ -205,13 +204,37 @@ section + the tests are the source of truth for what currently exists):
   **2,072 of 14,098 route legs failed in the air before (14.7%), 70 of 12,003
   after (0.58%)**, the frozen surface guard unmoved on all 12 seeds for BOTH
   bodies, legged hop/jump edges up 1,988 → 2,044 (S3's two-sided band, paid
-  back), soldier down to 1,893, build ×1.8 legged and ×3 soldier. **Still
-  open:** S5 (off the graph, never hop blind), and the one thing S4 measured and
-  left — reaching a takeoff from the WRONG side, which needs the follower to
-  walk past it and turn around. Four guards are the bar: node spans pinned
-  against `stepActor` in `test/nav.test.mjs`, reachable surface frozen per seed
-  and per body in `test/navigation.test.mjs`, a real `Soldier` climbing at full
-  run speed at three frame steps, and the failed-leg RATE frozen as a ceiling.
+  back), soldier down to 1,893, build ×1.8 legged and ×3 soldier. What S4
+  measured and LEFT is reaching a takeoff from the WRONG side, which needs the
+  follower to walk past it and turn around. Four guards are the bar: node spans
+  pinned against `stepActor` in `test/nav.test.mjs`, reachable surface frozen per
+  seed and per body in `test/navigation.test.mjs`, a real `Soldier` climbing at
+  full run speed at three frame steps, and the failed-leg RATE frozen as a
+  ceiling.
+  **S5 (off the graph, never hop blind) — built, and the reflex it narrows was
+  half of all jumps, not the residue the spec priced.** `buildNodes` deletes
+  floor wherever something overhead leaves less than body height + 4px, so a
+  46–49px pocket is walkable and INVISIBLE: `routeRequest` returns null there and
+  the caller's fallback drove at the destination and HOPPED, because `hopToward`
+  means "the target is above me, try" and knows nothing about terrain. Now the
+  caller decides: `navGraph(ent, scene, speed)` in `src/mission/navigation.js` is
+  the one test for "is this body routed at all" (`routeRequest` and `holdPoint`
+  were each opening with their own copy of it), and `reflexHop()` in
+  `src/mission/enemyspec/runtime.js` passes `hopToward` only to a body with NO
+  graph — navigation off, a flyer, terrain nothing can stand on. A body that HAS
+  one walks instead and gets a route back the moment it is on a node again.
+  `SOLDIER`'s `steer` branch was the other half: it hopped on its own initiative
+  off `req.point`, the one locomotor that jumped without being asked, and the
+  path the Behavior Lab agent and every escorted squadmate take. Measured over 60
+  levels with the destination on the highest node and an agent started on every
+  other one (1,968 runs per body): **blind hops 3,663 → 0 for a soldier and
+  2,306 → 0 for a legged body, against 2,859 and 2,273 ROUTED jumps** — the old
+  8-of-310 number came from a sweep along the ground, where nothing is ever
+  above. It costs 7 arrivals in 1,968 and gains one, and six of the seven are one
+  seed where the hop was masking a `drop` edge the follower cannot execute
+  (walk off a lip 110px from a shelf 39px down and you are on the floor before
+  you are over it) — no falling trajectory is validated, so S5 makes that
+  visible rather than causing it. The graph itself does not move.
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
