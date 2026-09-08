@@ -20,6 +20,7 @@
 import { installDom, makeEl, ctx2d } from "./harness.mjs";
 import { createBehaviorLab, createLabModel, labStep, labGoal, labPan, labGraph, labPath, labDraw, labInvalidate, labPlatformAt, labDragStart, labDragMove, labDragEnd, labClearance, labSetClearance, CLEARANCE_ITEM, VIEW_W, VIEW_H } from "../src/editor/tools/behavior-lab.js";
 import { profileKey, graphKey } from "../src/game/nav.js";
+import { SOLDIER_TUNING } from "../src/mission/entities.js";
 import { config, resetConfig, SCHEMA } from "../src/game/config.js";
 import { drawNavGraph, drawNavPath } from "../src/mission/render.js";
 
@@ -93,8 +94,14 @@ export default async function run_(t) {
     // can make — and the tool would be lying about the game it exists to watch.
     // The key carries the clearance policy too (tech/nav-clearance.md): a
     // filtered graph and an unfiltered one describe the same terrain with
-    // different node ids, so they cannot share a cache entry.
-    const want = graphKey({ w: 30, h: 46, gravity: lab.scene.world.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed }, { clearance: config.navClearance });
+    // different node ids, so they cannot share a cache entry. Since S4 it
+    // carries the body's ACTUATION too: what a soldier can fly depends on the
+    // speed it carries into the jump, and a legged body of the same size does
+    // not carry any.
+    const want = graphKey({
+      w: 30, h: 46, gravity: lab.scene.world.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed,
+      accel: SOLDIER_TUNING.accel, friction: SOLDIER_TUNING.friction,
+    }, { clearance: config.navClearance });
     t.ok(`start: on the soldier profile (${[...lab.scene.navGraphs.keys()].join(", ")})`, lab.scene.navGraphs.has(want));
     t.eq("start: and only that one — there is only one body", lab.scene.navGraphs.size, 1);
   }

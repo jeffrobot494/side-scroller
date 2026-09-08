@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import {
-  bodyProfile, profileKey, buildGraph, buildNodes, linkBetween,
+  bodyProfile, profileKey, graphKey, buildGraph, buildNodes, linkBetween,
   reachableFrom, route, costsFrom, nearestNode,
   lipToward, landingX, footprintClear, clearTakeoffs, takeoffX, takeoffCandidates, airborneAimX, driveV,
   solidLeft, solidRight, settleX,
@@ -27,6 +27,10 @@ const SOLDIER = bodyProfile({ w: 30, h: 46, gravity: 2000, jumpSpeed: 720, runSp
 const DUELIST = bodyProfile({ w: 26, h: 44, gravity: 2000, jumpSpeed: 720, runSpeed: 320 });
 
 const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
+// A validated edge carries `[{ x, dirs }]` since S4 — the takeoff and which way
+// the body has to be travelling when it launches. Most cases below are about the
+// positions alone.
+const txs = (edge) => edge.takeoffs.map((t) => t.x);
 
 // ---- the integrator, asked directly (tech/nav-clearance.md, S0) ------------
 //
@@ -345,9 +349,9 @@ export default async function run(t) {
     // Positives first, because over-pruning is the failure that would not
     // announce itself: an agent simply stops going places, and nothing errors.
     const flat = accepts("an unobstructed flat hop", [HOP_A, HOP_B], [500, 0], [500, 370]);
-    t.ok(`clearance: ...taking off from the directed lip (${flat.takeoffs})`, flat.takeoffs.length === 1 && near(flat.takeoffs[0], 200, 1e-3));
+    t.ok(`clearance: ...taking off from the directed lip (${txs(flat)})`, flat.takeoffs.length === 1 && near(flat.takeoffs[0].x, 200, 1e-3));
     const up = accepts("an unobstructed jump onto a perch", [GROUND, PERCH], [500, 0], [400, 700]);
-    t.eq("clearance: ...from either clear side of its footprint", up.takeoffs, [670, 1000]);
+    t.eq("clearance: ...from either clear side of its footprint", txs(up), [670, 1000]);
 
     // A column in the gap is not on its own a reason to refuse the crossing —
     // the design says so in as many words. 40px tall, and the arc is 130 up.
@@ -384,7 +388,7 @@ export default async function run(t) {
     // over 670 only; 1000 is in open air, and the edge keeps exactly that.
     const one = accepts("a jump whose near takeoff is roofed",
       [GROUND, PERCH, { x: 640, y: 320, w: 80, h: 20 }], [500, 0], [400, 700]);
-    t.eq("clearance: ...and only the far takeoff is kept", one.takeoffs, [1000]);
+    t.eq("clearance: ...and only the far takeoff is kept", txs(one), [1000]);
   }
   {
     // ---- S3: the run-up ----------------------------------------------------
@@ -413,13 +417,13 @@ export default async function run(t) {
     t.ok("clearance: a hop over a block on the floor — offered without clearance", !!seg([FLOOR, BLOCK], -30, 690, false));
     const over = seg([FLOOR, BLOCK], -30, 690, true);
     t.ok("clearance: a hop over a block on the floor — still offered", !!over);
-    t.ok(`clearance: ...from a run-up, never the lip (${over && over.takeoffs})`,
-      !!over && over.takeoffs.length > 0 && over.takeoffs.every((x) => x < 570));
+    t.ok(`clearance: ...from a run-up, never the lip (${over && txs(over)})`,
+      !!over && over.takeoffs.length > 0 && txs(over).every((x) => x < 570));
     // Measured: every takeoff that rescues an edge no ordinary one can fly is
     // FURTHER from the destination, and not one is nearer. The ladder only ever
     // walks backwards, so this is the direction, not an artefact of this case.
     t.ok("clearance: ...and the run-up stays within two body widths of it",
-      !!over && over.takeoffs.every((x) => x >= 570 - 2 * SOLDIER.w));
+      !!over && txs(over).every((x) => x >= 570 - 2 * SOLDIER.w));
     // Bounded, not unlimited. The same block 140 wide leaves a 170px gap the
     // body cannot clear from anywhere on the floor, and no amount of run-up
     // turns that into a jump — an edge nothing can fly is still refused.
@@ -430,8 +434,47 @@ export default async function run(t) {
     // lip, so that edge keeps the ordinary takeoff and gains no run-up.
     const onto = seg([FLOOR, BLOCK], -30, 570, true);
     t.eq("clearance: a jump onto the same block takes off from the lip, with no run-up added",
-      onto && onto.takeoffs, [570]);
+      onto && txs(onto), [570]);
   }
+  {
+    // ---- S4: the launch the body performs ----------------------------------
+    //
+    // Same terrain, same box, same envelope, two bodies: one whose `vx` IS the
+    // drive request (legged) and one that accelerates toward its sign and brakes
+    // on friction (a soldier). The soldier arrives at its takeoff carrying real
+    // speed and carries it into the arc, and 0.09s is how long it needs to stop
+    // moving that way — so the flank beside a ledge, which is clean launched
+    // AWAY from the ledge, is a head-bonk on the ledge's own underside launched
+    // toward it. Both are the same x, which is why a takeoff carries a direction.
+    const FLOOR = { x: 0, y: 500, w: 1400, h: 40 };
+    const PERCH = { x: 900, y: 412, w: 200, h: 20 };
+    const RUNNER = bodyProfile({ w: 30, h: 46, gravity: 2000, jumpSpeed: 720, runSpeed: 320, accel: 2600, friction: 3000 });
+    const climb = (profile) => {
+      const g = buildGraph([FLOOR, PERCH], profile, { clearance: true });
+      const ground = g.nodes.find((n) => n.y === 500);
+      const perch = g.nodes.find((n) => n.y === 412);
+      return g.edges[ground.id].find((e) => e.to === perch.id);
+    };
+    const dirsAt = (edge, x) => (edge.takeoffs.find((t) => near(t.x, x, 0.5)) || {}).dirs;
+
+    t.ok("S4: the actuation is part of the graph's identity", graphKey(RUNNER) !== graphKey(SOLDIER));
+    const legged = climb(SOLDIER);
+    t.eq("S4: a body whose velocity is its request flanks the perch either way", txs(legged), [870, 1100]);
+    t.eq("S4: ...and neither flank cares which way it was walking", dirsAt(legged, 870), [-1, 1]);
+
+    const running = climb(RUNNER);
+    t.eq("S4: a running body may take the near flank only launching away from the perch",
+      dirsAt(running, 870), [-1]);
+    t.eq("S4: ...and the far flank only launching away from it too", dirsAt(running, 1100), [1]);
+    // The rescue, and the reason the run-up is resolved per takeoff and per
+    // direction rather than per edge: 1100 already flies for a body running
+    // right, so an edge-wide fallback would stop here and leave a body coming
+    // from the left to walk PAST the perch and climb the far side.
+    t.ok(`S4: ...so running at it from the left, the takeoff steps back (${txs(running)})`,
+      running.takeoffs.some((k) => k.x < 870 && k.dirs.includes(1)));
+    t.ok("S4: ...never past the perch's own footprint", txs(running).every((x) => x <= 870 || x >= 1100));
+  }
+
   {
     // BODY SIZE. Same envelope, different box: the arc's apex puts a 46-tall
     // body's head at 324.4 and a 20-tall body's at 350.4, and the lid's underside

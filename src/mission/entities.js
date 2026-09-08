@@ -174,8 +174,11 @@ function collideAxis(a, platforms, axis) {
 // ---- Soldier (player-controlled or AI companion) --------------------------
 
 // runSpeed and jumpSpeed are read live from config (tweakable in the editor);
-// accel/friction stay fixed for now.
-const SOLDIER_TUNING = {
+// accel/friction stay fixed for now. Exported because the nav graph is built per
+// BODY and a soldier's horizontal response is part of which jumps it can fly
+// (tech/nav-clearance.md, S4) — `profileFor` hands these to the predictor so it
+// flies the launch this body performs rather than a legged one's.
+export const SOLDIER_TUNING = {
   accel: 2600,
   friction: 3000,
 };

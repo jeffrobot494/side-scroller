@@ -25,6 +25,7 @@ import {
   settleX,
 } from "../game/nav.js";
 import { bodyJump } from "./locomotion.js";
+import { SOLDIER_TUNING } from "./entities.js";
 import { config } from "../game/config.js";
 
 // ---- profiles + graph cache ----------------------------------------------
@@ -36,13 +37,32 @@ import { config } from "../game/config.js";
 // a legged profile for it and you get maxRise 110.6 where the truth is 129.6:
 // climbs it can make, refused. (validate.js rejects the fields outright so an
 // author never believes otherwise; this is the same fact on the reading side.)
+//
+// The same branch is where the body's horizontal ACTUATION comes from (S4). A
+// soldier accelerates and brakes; a legged body's velocity is whatever the
+// request says. That is the difference between a jump the clearance predictor
+// accepts and one the body then fails in the air, so it belongs in the profile
+// — and, through `profileKey`, in the identity of the graph built from it.
 export function profileFor(ent, scene, speed) {
   const b = ent.spec.body;
   const world = scene.world.gravity;
-  if (b.locomotor === "soldier") {
-    return bodyProfile({ w: b.w, h: b.h, gravity: world, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed });
-  }
+  if (b.locomotor === "soldier") return soldierProfile(b.w, b.h, world);
   return bodyProfile({ w: b.w, h: b.h, gravity: world * b.gravity, jumpSpeed: bodyJump(ent), runSpeed: speed });
+}
+
+// The one description of a soldier-locomotor body, because there are two callers
+// and a graph they disagree about is two graphs. `mission.js` draws the squad's
+// routes off this; every companion routes on it. Leave a field out at one of
+// them — the actuation is the easy one to forget — and the overlay quietly
+// describes a different body from the one walking.
+export function soldierProfile(w, h, gravity) {
+  return bodyProfile({
+    w, h, gravity,
+    jumpSpeed: config.jumpSpeed,
+    runSpeed: config.runSpeed,
+    accel: SOLDIER_TUNING.accel,
+    friction: SOLDIER_TUNING.friction,
+  });
 }
 
 // THE ONE PLACE the runtime opts into clearance (tech/nav-clearance.md, C2).
@@ -370,12 +390,24 @@ export function routeRequest(ent, dest, speed, scene, dt) {
 // which is a side the body has been walking away from and — more to the point —
 // a different arc from the one that was tested. The commitment is keyed by the
 // edge, so a repath onto a different edge simply replaces it.
+//
+// Since S4 a takeoff also carries WHICH WAY the body has to be travelling when
+// it launches, and heading for one it will reach from the wrong side is heading
+// for an arc nothing tested. Walking to a takeoff is what decides the direction,
+// so the direction is simply which side of us it is on.
 function takeoffFor(nav, here, next, edge, ent, up) {
   if (!edge.takeoffs) return takeoffX(here, next, ent.x, ent.w, up);
   const c = nav.commit;
   if (c && c.from === here.id && c.to === next.id) return c.x;
-  let best = edge.takeoffs[0];
-  for (const x of edge.takeoffs) if (Math.abs(x - ent.x) < Math.abs(best - ent.x)) best = x;
+  let best = null;
+  for (const t of edge.takeoffs) {
+    if (!t.dirs.includes(t.x >= ent.x ? 1 : -1)) continue;
+    if (best === null || Math.abs(t.x - ent.x) < Math.abs(best - ent.x)) best = t.x;
+  }
+  // Nothing on this edge is flyable from the side we are on. The same answer
+  // `takeoffX` gives when no clear side exists: go anyway, so the attempt
+  // happens and the cap retires the edge, rather than leaning on a lip forever.
+  if (best === null) best = edge.takeoffs[0].x;
   nav.commit = { from: here.id, to: next.id, x: best };
   return best;
 }

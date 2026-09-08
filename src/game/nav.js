@@ -9,7 +9,9 @@
 // imported from src/mission/ — the body's dimensions and physics arrive as a
 // profile argument, so this module is node-testable and generation-side. That is
 // also why the graph is per-BODY: a node is a span where a specific body fits,
-// so a 30x46 soldier and a 26x44 duelist do not share one.
+// so a 30x46 soldier and a 26x44 duelist do not share one — and since S4 two
+// bodies of the same size do not share one either unless they ACCELERATE alike,
+// because what a body can fly depends on the speed it carries into the jump.
 //
 // Geometry model:
 //   - a NODE is a standable span of one SURFACE, in body-LEFT-EDGE space: every
@@ -59,14 +61,23 @@ const SUPPORT_EPS = 1e-6;
 // A body profile is everything the graph needs to know about who is walking:
 // its box and its physics. `envelope` is the reachability math (maxRise,
 // flatReach, maxRunTo) derived from the same triple generation already uses.
-export function bodyProfile({ w, h, gravity, jumpSpeed, runSpeed }) {
-  return { w, h, gravity, jumpSpeed, runSpeed, envelope: jumpEnvelope({ gravity, jumpSpeed, runSpeed }) };
+//
+// `accel`/`friction` are how the body's horizontal velocity RESPONDS to a drive
+// request (tech/nav-clearance.md, S4). Absent means instantaneous — a legged
+// body's `vx` is the request, so it launches a jump from rest and turns in the
+// air on one frame. A soldier body accelerates toward the sign of the request
+// and brakes on friction, so it arrives at its takeoff carrying real speed and
+// carries it into the arc. Two bodies with the same box and envelope but
+// different actuation cannot fly the same jumps, which is why this is part of
+// the profile and part of its key rather than a predictor constant.
+export function bodyProfile({ w, h, gravity, jumpSpeed, runSpeed, accel, friction }) {
+  return { w, h, gravity, jumpSpeed, runSpeed, accel, friction, envelope: jumpEnvelope({ gravity, jumpSpeed, runSpeed }) };
 }
 
 // Stable identity for caching: two bodies with the same box and physics share a
 // graph. The roster collapses to a handful of these.
 export function profileKey(p) {
-  return `${p.w}x${p.h}@${p.gravity}/${p.jumpSpeed}/${p.runSpeed}`;
+  return `${p.w}x${p.h}@${p.gravity}/${p.jumpSpeed}/${p.runSpeed}` + (p.accel ? `+${p.accel}/${p.friction}` : "");
 }
 
 // ---- nodes ----------------------------------------------------------------
@@ -402,6 +413,24 @@ export function driveV(dx, speed, dt) {
   return (dx > 0 ? 1 : -1) * v;
 }
 
+// One frame of a body's horizontal response to a `driveV` request — the other
+// half of the same question, and the half that differs by body.
+//
+// A legged body's `vx` IS the request (locomotion.js `actuateHorizontal`). A
+// SOLDIER body reads only the sign of it and accelerates toward run speed, or
+// coasts down on friction when the request is zero, which is `applyMovement` in
+// entities.js. The difference is not a detail of the launch: it is every frame
+// of the arc. A soldier that takes off at 270px/s needs six frames to stop
+// moving that way, and where a legged body would have held its column beside a
+// ledge it drifts 13px into the ledge's underside instead.
+function actuate(profile, vx, want, dt) {
+  if (!profile.accel) return want; // legged: the request is the velocity
+  const move = Math.sign(want);
+  if (move !== 0) return clamp(vx + move * profile.accel * dt, -profile.runSpeed, profile.runSpeed);
+  const drop = profile.friction * dt;
+  return Math.abs(vx) <= drop ? 0 : vx - Math.sign(vx) * drop;
+}
+
 // ---- clearance (tech/nav-clearance.md, C2) ---------------------------------
 //
 // `linkBetween` tests where a jump LANDS, never where it goes. A column between
@@ -440,18 +469,56 @@ export function takeoffTolerance(profile) {
   return profile.runSpeed * PREDICT_STEP;
 }
 
-// Which of this edge's takeoffs a body can actually fly from. [] means the edge
-// does not survive clearance.
+// Which of this edge's takeoffs a body can actually fly from, and WHICH WAY it
+// has to be travelling when it launches: `[{ x, dirs }, ...]`, dirs a subset of
+// [-1, 1]. [] means the edge does not survive clearance.
 //
-// Two sets, tried in order, because a body should not walk backwards to make a
-// jump it can make from where the route already takes it. The ordinary takeoffs
-// are the ones beside the destination; only when NONE of them flies does the
-// run-up come into it (tech/nav-clearance.md, S3).
+// The direction is not bookkeeping. A body arrives at its takeoff moving, and
+// which way decides the arc: a jump onto a ledge from the flank beside it is
+// clean launched away from the ledge and puts the body's head into the ledge's
+// underside launched toward it. Both are the same x. So the set is resolved a
+// direction at a time, and within a direction each ordinary takeoff gets S3's
+// two chances: itself, and — if it does not fly THIS way — a run-up further from
+// the destination (tech/nav-clearance.md, S4).
+//
+// The arrival SPEED is a range, not a number, because a follower can reach its
+// takeoff at anything up to a run. Both ends are required: a takeoff kept on the
+// strength of a running launch alone is one an agent that repathed while
+// standing on it will fail, and one kept on a standing launch alone is the
+// defect S4 exists to remove. Measured over 60 levels, requiring the standing
+// end costs 128 edges and halves the failed jumps that survive S4 (129 -> 70).
 function validTakeoffs(from, to, profile, platforms, up, slack) {
-  const ok = (x) => takeoffBand(from, to, profile, x, up).every((s) => flies(from, to, profile, platforms, s, up));
-  const out = takeoffCandidates(from, to, profile.w, up).filter(ok);
-  if (out.length) return out;
-  return runUpTakeoffs(from, to, profile, up, slack).filter(ok);
+  const ok = (x, d) => {
+    // A legged body has no arrival velocity to carry — `vx` is whatever the
+    // request says — so one flight answers for it. A soldier gets both ends of
+    // the range, running end first: that is the end that rejects, so a takeoff
+    // about to be refused is refused after one flight rather than two.
+    const arrivals = profile.accel ? [d * profile.runSpeed, 0] : [0];
+    return takeoffBand(from, to, profile, x, up, d)
+      .every((s) => arrivals.every((v) => flies(from, to, profile, platforms, s, up, v)));
+  };
+  // The ladder stops at the first rung that flies — the one nearest the ordinary
+  // takeoff, and therefore the shortest walk backwards. Trying the rest buys a
+  // choice the follower does not use (it commits to whichever validated takeoff
+  // is nearest to the BODY) and costs four flights a rung.
+  const firstOk = (d) => { let done = false; return (x) => !done && (done = ok(x, d)); };
+  const found = new Map();
+  for (const d of [-1, 1]) {
+    for (const c of takeoffCandidates(from, to, profile.w, up)) {
+      // The run-up is per ORDINARY takeoff and per direction, not per edge. A
+      // takeoff that flies approached one way and not the other is the normal
+      // case for a soldier — the flank beside a ledge is clean launched away
+      // from it and a head-bonk launched toward it — so an edge with a working
+      // takeoff still has a direction that needs rescuing, and rescuing it is
+      // what keeps a body from walking past its ledge to climb the far side.
+      const xs = ok(c, d) ? [c] : runUpFrom(c, from, to, profile, up, slack).filter(firstOk(d));
+      for (const x of xs) {
+        if (!found.has(x)) found.set(x, []);
+        found.get(x).push(d);
+      }
+    }
+  }
+  return [...found].map(([x, dirs]) => ({ x, dirs }));
 }
 
 // How far back along its own surface a body may walk to find a takeoff, and how
@@ -477,47 +544,39 @@ const RUNUP_STEPS = 6;
 //
 // Stepping AWAY from a footprint-clear takeoff stays footprint-clear, so there
 // is no clearance test here; running out of surface ends the ladder.
-function runUpTakeoffs(from, to, profile, up, slack) {
+function runUpFrom(c, from, to, profile, up, slack) {
   const w = profile.w;
-  const mid = (to.a + to.b) / 2;
+  const dir = c <= (to.a + to.b) / 2 ? -1 : 1; // away from the destination
   const limit = Math.min(RUNUP_BACK * w, slack);
   const out = [];
-  for (const c of takeoffCandidates(from, to, w, up)) {
-    const dir = c <= mid ? -1 : 1;
-    for (let k = 1; k <= RUNUP_STEPS; k++) {
-      const d = ((k * RUNUP_BACK) / RUNUP_STEPS) * w;
-      if (d > limit) break;
-      const x = clamp(c + dir * d, from.a, from.b);
-      if (x === c) break; // ran out of surface
-      if (!out.includes(x)) out.push(x);
-    }
+  for (let k = 1; k <= RUNUP_STEPS; k++) {
+    const d = ((k * RUNUP_BACK) / RUNUP_STEPS) * w;
+    if (d > limit) break;
+    const x = clamp(c + dir * d, from.a, from.b);
+    if (x === c) break; // ran out of surface
+    out.push(x);
   }
   return out;
 }
 
-// The positions the follower may actually commit from, for a takeoff at `x`.
+// The positions a body travelling in direction `d` may actually commit from, for
+// a takeoff at `x`.
 //
 // A body walks TOWARD its takeoff and commits on the first frame inside the
-// window, so what has to be tested is the takeoff and one frame of travel to
-// either side of it — whichever side the body came from. Both sides, because
-// since S3 a takeoff need not be at the end of the span: a run-up takeoff is
-// approached from the destination side by a body already standing at the lip,
-// and from the far side by one walking in.
+// window, so what has to be tested is the takeoff and one frame of travel BEHIND
+// it — behind meaning the side it is coming from, which is what `d` says. S3
+// tested both sides of every takeoff and required both, because it had no
+// arrival direction to ask; that refused 85 edges over 60 levels for a side no
+// body would ever approach from. Resolving the set a direction at a time is what
+// gives those back (measured: 56 of them on a legged profile).
 //
-// For every ORDINARY takeoff exactly one side survives the two filters below and
-// the band is what it was before S3: the far side of a hop's lip is off the span
-// and clamps back onto it, and the near side of an upward jump's flanking
-// takeoff is inside the destination's footprint, which the follower's own
-// takeoff guard refuses to launch from.
-function takeoffBand(from, to, profile, x, up) {
-  const tol = takeoffTolerance(profile);
+// Clamped to the span, because a body cannot stand off it, and required to clear
+// the destination's footprint on an up-edge, because the follower's own takeoff
+// guard refuses to launch from under it.
+function takeoffBand(from, to, profile, x, up, d) {
   const out = [x];
-  for (const dir of [-1, 1]) {
-    const s = clamp(x + dir * tol, from.a, from.b);
-    if (s === x) continue; // off the span: the body cannot stand there
-    if (up && !footprintClear(s, to, profile.w)) continue;
-    out.push(s);
-  }
+  const s = clamp(x - d * takeoffTolerance(profile), from.a, from.b);
+  if (s !== x && !(up && !footprintClear(s, to, profile.w))) out.push(s);
   return out;
 }
 
@@ -537,14 +596,20 @@ function nearbyPlatforms(from, to, profile, platforms, x) {
   return platforms.filter((p) => p.x < hi && p.x + p.w > lo && p.y <= bottom && p.y + p.h > top);
 }
 
-// Can this body leave `from` at left-edge `x` and arrive standing on `to`?
+// Can this body leave `from` at left-edge `x`, arriving there at `vArrive`, and
+// end up standing on `to`?
 //
 // The integration mirrors `stepActor` in src/mission/entities.js: gravity before
 // motion, x resolved before y, strict overlap, and a landing only on a DOWNWARD
 // contact with a platform top. Anything else the body touches — a column's side,
 // a slab's underside, a platform that is not the destination — rejects this
 // candidate, because that is a jump the follower would fly and fail.
-function flies(from, to, profile, platforms, x, up) {
+//
+// `vArrive` is the horizontal velocity the body walks in with (S4). It is not
+// the launch velocity: the launch frame is a frame of ordinary actuation over
+// the top of it, which for an upward jump is the follower's zero request and
+// therefore one frame of friction, not a stop.
+function flies(from, to, profile, platforms, x, up, vArrive) {
   const { w, h, gravity: g, runSpeed } = profile;
   const dt = PREDICT_STEP;
   const near = nearbyPlatforms(from, to, profile, platforms, x);
@@ -553,8 +618,10 @@ function flies(from, to, profile, platforms, x, up) {
   // The takeoff frame is the follower's own: an upward jump requests zero
   // horizontal drive (it is standing clear of the destination precisely because
   // the takeoff guard insisted, and steering at the landing point would walk it
-  // straight back under), a hop drives at its landing point.
-  let vx = up ? 0 : driveV(settleX(to, x, w) - x, runSpeed, dt);
+  // straight back under), a hop drives at its landing point. What the BODY does
+  // with that request is `actuate` — a legged body obeys it exactly, a soldier
+  // carries `vArrive` through it.
+  let vx = actuate(profile, vArrive || 0, up ? 0 : driveV(settleX(to, x, w) - x, runSpeed, dt), dt);
 
   // A hop returns to takeoff height at exactly `airtime` and an upward jump
   // lands sooner, so a flight still going after that has missed. Four frames of
@@ -566,7 +633,7 @@ function flies(from, to, profile, platforms, x, up) {
     if (sweep(box, "x", vx * dt, near)) return false; // a side: solid either way
     const hit = sweep(box, "y", vy * dt, near);
     if (hit) return vy > 0 && landsOn(box, hit, to, h);
-    vx = driveV(airborneAimX(to, box.x, w, box.y + h) - box.x, runSpeed, dt);
+    vx = actuate(profile, vx, driveV(airborneAimX(to, box.x, w, box.y + h) - box.x, runSpeed, dt), dt);
   }
   return false; // never came down anywhere: not a manoeuvre this body performs
 }

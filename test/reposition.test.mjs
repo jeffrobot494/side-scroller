@@ -21,7 +21,7 @@ import { losBetween } from "../src/mission/enemyspec/perception.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
 import { updateProjectiles } from "../src/mission/combat.js";
 import { makeRng } from "../src/game/gen/rng.js";
-import { Soldier, STAND_H, stepActor } from "../src/mission/entities.js";
+import { Soldier, STAND_H, stepActor, SOLDIER_TUNING } from "../src/mission/entities.js";
 import { config, resetConfig } from "../src/game/config.js";
 
 const STEP = 1 / 60;
@@ -286,7 +286,10 @@ export default async function run(t) {
     // are different graphs when one of them has been filtered, and an agent
     // holding node ids from the other is holding ids for other places.
     t.ok(`companion: routed on the SOLDIER profile, not a legged one (${[...on.sc.navGraphs.keys()].join(", ")})`,
-      on.sc.navGraphs.has(graphKey({ w: 30, h: 46, gravity: 2000, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed }, { clearance: config.navClearance })));
+      on.sc.navGraphs.has(graphKey({
+        w: 30, h: 46, gravity: 2000, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed,
+        accel: SOLDIER_TUNING.accel, friction: SOLDIER_TUNING.friction,
+      }, { clearance: config.navClearance })));
   }
 
   // ---- it does not break the follower ---------------------------------------

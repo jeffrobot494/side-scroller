@@ -139,7 +139,7 @@ section + the tests are the source of truth for what currently exists):
   from, aimed at and landed on those spans. Full evidence, and how a first pass
   got it badly wrong by measuring through the graph instead of the integrator, in
   `tech/nav-clearance.md` "Regressions found in play". **The spec was rewritten;
-  S0–S3 of it are built, S4–S5 are not, and the reported faults are not all fixed
+  S0–S4 of it are built, S5 is not, and the reported faults are not all fixed
   yet.**
   **S0 (guards) + S1 (solid extent) + S2 (a node is a SURFACE) — built.** A node
   is now every position the physics supports, `[p.x - w, p.x + p.w]` open at both
@@ -174,12 +174,44 @@ section + the tests are the source of truth for what currently exists):
   spec's old "70% are flyable" was measured on the pre-S2 spans), 22 edges over
   60 levels want a running launch, and the seeds that still lose most of their
   surface lose it to real geometry — a head-bonk under a shelf no arc reaches.
-  **Still open:** S4 (the predictor flies a RUNNING launch, the one failed jump —
-  and the reversed launch S3's own run-up can provoke), S5 (off the graph, never
-  hop blind). Three guards are the bar: node spans pinned against `stepActor` in
-  `test/nav.test.mjs`, reachable surface frozen per seed in
-  `test/navigation.test.mjs` so a graph change that shrinks it reddens, and a
-  real `Soldier` crossing the run-up block in the same suite.
+  **S4 (the predictor flies the launch the body performs) — built, and the
+  launch velocity was the small half of it. The ACTUATION was the rest.** The
+  predictor recomputes `vx` from the airborne aim every frame, so a launch
+  velocity on its own is a one-frame ±5.3px nudge worth 5 edges and no change in
+  behaviour. What diverges is every frame after: a legged body's `vx` IS its
+  drive request, while a SOLDIER reads the sign and accelerates at 2600px/s², so
+  it needs six frames to stop moving the way it arrived — it launches at 270px/s
+  beside a ledge, drifts 13px under it, and bonks its head on the ledge's own
+  underside. So a **profile carries `accel`/`friction`**, `actuate()` is one
+  frame of the body's horizontal response, and the predictor uses it at the
+  launch and at every step of the arc. That makes actuation part of `profileKey`
+  and therefore of graph identity: **a 30x46 soldier and a 30x46 legged body no
+  longer share a graph**, and `soldierProfile(w, h, gravity)` in
+  `src/mission/navigation.js` is the ONE description of a soldier body (the
+  squad-path overlay in `mission.js` built its own and would have drawn a legged
+  graph beside a squad routing on a soldier's). **A takeoff now carries a
+  DIRECTION** — `link.takeoffs` is `[{ x, dirs }]` — because 96% of a soldier's
+  validated takeoffs are one-sided: the flank beside a ledge is clean launched
+  away from it and a head-bonk launched toward it, same x. `takeoffFor` commits
+  only to a takeoff whose `dirs` include the side it will arrive from. Requiring
+  BOTH sides instead costs 581 of 1,988 hop/jump edges and 44% of reachable
+  pairs; per-direction costs 95 and no reachable surface. S3's run-up moved with
+  it — `runUpFrom` ladders behind each ordinary takeoff that failed for THIS
+  direction and stops at the first rung that flies, because an edge-wide
+  fallback leaves a body walking PAST a ledge to climb the far end. Arrival
+  speed is a range sampled at both ends (full run and a standstill); dropping
+  the standing end keeps 128 more edges and doubles the surviving failures.
+  Measured with every node of 60 levels sending a real `Soldier` to the far end:
+  **2,072 of 14,098 route legs failed in the air before (14.7%), 70 of 12,003
+  after (0.58%)**, the frozen surface guard unmoved on all 12 seeds for BOTH
+  bodies, legged hop/jump edges up 1,988 → 2,044 (S3's two-sided band, paid
+  back), soldier down to 1,893, build ×1.8 legged and ×3 soldier. **Still
+  open:** S5 (off the graph, never hop blind), and the one thing S4 measured and
+  left — reaching a takeoff from the WRONG side, which needs the follower to
+  walk past it and turn around. Four guards are the bar: node spans pinned
+  against `stepActor` in `test/nav.test.mjs`, reachable surface frozen per seed
+  and per body in `test/navigation.test.mjs`, a real `Soldier` climbing at full
+  run speed at three frame steps, and the failed-leg RATE frozen as a ceiling.
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,

@@ -17,8 +17,7 @@ import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload,
 import { fire, updateCompanion, updateCompanionSpec, aimAccuracy } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
 import { drawProjectile, drawNavGraph, drawNavPath } from "./render.js";
-import { graphFor } from "./navigation.js";
-import { bodyProfile } from "../game/nav.js";
+import { graphFor, soldierProfile } from "./navigation.js";
 import {
   updateSpecEnemy, collidables,
   applyDamage as specDamage, killEntity as specKill,
@@ -550,23 +549,16 @@ export class Mission {
     if (this.input.justPressed("debugPath")) this.debug.path = !this.debug.path;
   }
 
-  // The graph the SQUAD routes on. Soldier bodies all share one profile — the
-  // locomotor jumps with config.jumpSpeed under unscaled world gravity whatever
-  // the spec's body fields claim (see profileFor in navigation.js) — so this is
-  // the same cache entry every companion's router already resolved, not a
-  // second graph built for the picture. STAND_H, not the live height: a
+  // The graph the SQUAD routes on. Soldier bodies all share one profile —
+  // `soldierProfile` is the one description of it, so this resolves the same
+  // cache entry every companion's router already did rather than building a
+  // second graph for the picture. STAND_H, not the live height: a
   // kneeling soldier is still routed as a standing one, and reading `s.h` would
   // flip the whole overlay to a different graph the instant you crouch.
   _squadGraph() {
     const s = this.currentSoldier();
     if (!s) return null;
-    return graphFor(this.scene, bodyProfile({
-      w: s.w,
-      h: STAND_H,
-      gravity: this.scene.world.gravity,
-      jumpSpeed: config.jumpSpeed,
-      runSpeed: config.runSpeed,
-    }));
+    return graphFor(this.scene, soldierProfile(s.w, STAND_H, this.scene.world.gravity));
   }
 
   // Routes the squad is HOLDING — read off each companion's own nav state, never

@@ -14,7 +14,7 @@
 
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
-import { Soldier, stepActor } from "../src/mission/entities.js";
+import { Soldier, stepActor, SOLDIER_TUNING } from "../src/mission/entities.js";
 import { WEAPONS } from "../src/game/content.js";
 import { profileFor, graphFor, routeRequest, invalidateNavGraphs, navState, abortRoute } from "../src/mission/navigation.js";
 import { buildGraph, graphKey, bodyProfile, reachableFrom, nodeUnder, footprintClear, solidLeft } from "../src/game/nav.js";
@@ -667,7 +667,7 @@ export default async function run(t) {
     const perch = g.nodes.find((n) => n.y === 400 && solidLeft(n) === 700);
     const edge = g.edges[ground.id].find((e) => e.to === perch.id);
     t.ok("takeoff: the climb survives with one validated takeoff", !!edge);
-    t.eq("takeoff: and it is the far side, not the roofed near one", edge.takeoffs, [1000]);
+    t.eq("takeoff: and it is the far side, not the roofed near one", edge.takeoffs.map((t) => t.x), [1000]);
 
     sim(c, sc, 14);
     t.ok(`takeoff: the agent gets up there (feet ${feet(c)})`, feet(c) === 400);
@@ -789,15 +789,21 @@ export default async function run(t) {
     {
       // Starting AT the lip, the same takeoff is behind the body: it walks back
       // to it and launches while still carrying leftward speed, which is not the
-      // launch the predictor flew. It gets across, one failed jump later. That
-      // one attempt is S4's — the predictor launches from a standstill, and the
-      // range a follower can arrive with is what S4 makes it fly.
+      // launch the predictor flew. It gets across, one failed jump later.
+      //
+      // S4 did NOT remove this one, having measured it. The predictor now knows
+      // that takeoff only flies launched rightward, and the follower now refuses
+      // takeoffs it would reach from the wrong side — but every takeoff on this
+      // edge is behind a body standing at the lip, so refusing them all leaves
+      // nothing, and the fallback attempts it anyway rather than leaning on the
+      // lip forever. Reaching a takeoff from the far side means walking PAST it
+      // and turning around, which is follower machinery this does not have.
       const sc = scene([FLOOR, BLOCK]);
       const a = soldierAgent(560, 500);
       const s = simSoldier(a, sc, 6, { x: 900, y: 500 });
       const spent = Object.values(a.nav.attempts).reduce((n, v) => n + v, 0);
       t.ok(`S3: and crosses it from the lip too, walking back to the run-up (x ${s.x.toFixed(0)})`, s.x > 690);
-      t.ok(`S3: ...at the cost of one reversed launch, which is S4's (attempts ${spent})`, spent <= 1 && a.nav.banned.size === 0);
+      t.ok(`S3: ...at the cost of one reversed launch, which S4 left (attempts ${spent})`, spent <= 1 && a.nav.banned.size === 0);
     }
   }
 
@@ -886,6 +892,102 @@ export default async function run(t) {
     t.ok("identity: and both are still routing on the one shared graph", sc.navGraphs.size === 1);
   }
 
+  // ---- S4: the launch the body performs -------------------------------------
+  {
+    // The graph guard for this shape is in nav.test.mjs; this is the body flying
+    // it. A perch 88px up with its underside 22px below the standing body's head:
+    // a soldier running right at the flank beside it launches carrying 270px/s,
+    // needs six frames to stop moving that way, and drifts 13px under the perch
+    // while still rising — into the perch's own underside. That is the jump
+    // clearance used to accept and the body then failed, 14.7% of all route legs
+    // over 60 generated levels.
+    const FLOOR = { x: 0, y: 500, w: 1400, h: 40 };
+    const PERCH = { x: 900, y: 412, w: 200, h: 20 };
+    // Frame steps other than 1/60: the predictor integrates at 1/60 whatever the
+    // host runs at, so a takeoff kept on a fixed step has to survive a variable
+    // one. 1/120 is a fast host, 1/50 a slow one.
+    for (const dt of [STEP, 1 / 50, 1 / 120]) {
+      const sc = scene([FLOOR, PERCH]);
+      const a = soldierAgent(200, 500);
+      const s = a.soldier;
+      let takeoff = null;
+      a.motion = { type: "moveTo", target: [1000, 412], speed: config.runSpeed };
+      for (let i = 0; i < Math.round(8 / dt); i++) {
+        a.x = s.x; a.y = s.y; a.w = s.w; a.h = s.h;
+        a.vx = s.vx; a.vy = s.vy; a.onGround = s.onGround; a.facing = s.facing;
+        updateSpecEnemy(a, dt, sc, ctx);
+        stepActor(s, dt, sc.world, sc.platforms);
+        if (takeoff === null && a.nav && a.nav.commit) takeoff = a.nav.commit.x;
+      }
+      const n = Math.round(1 / dt);
+      t.ok(`S4: a real Soldier at full run speed climbs the perch at dt=1/${n} (feet ${feet(s).toFixed(0)})`, Math.abs(feet(s) - 412) < 1);
+      t.eq(`S4: ...and spends no attempt finding that out at dt=1/${n}`, Object.keys(a.nav.attempts).length, 0);
+      // The takeoff it commits to is the run-up on the NEAR side, not the far
+      // flank: walking past a ledge to climb its other end is legal, reads as
+      // confusion, and is what a per-edge run-up fallback would have produced.
+      t.ok(`S4: ...off a run-up on the NEAR side, not the far flank (takeoff ${takeoff})`, takeoff !== null && takeoff < 870);
+    }
+    {
+      // The other body on the same terrain. A legged body's velocity IS its
+      // drive request, so it has no launch speed to carry, takes the ordinary
+      // flank, and S4 changes nothing about it.
+      const sc = scene([FLOOR, PERCH], [soldierAt(1000, 412 - 46)]);
+      const c = chaser(200, 474);
+      sim(c, sc, 8);
+      t.ok(`S4: a legged body climbs the same perch off the flank (feet ${feet(c).toFixed(0)})`, Math.abs(feet(c) - 412) < 1);
+      t.eq("S4: ...and spends no attempt either", Object.keys(c.nav.attempts).length, 0);
+    }
+  }
+
+  // ---- S4: jumps attempted versus jumps arrived -----------------------------
+  //
+  // The measurement S4 exists to move, and the only one that can see it: a
+  // single scripted climb proves a shape, and what was wrong was a rate. Every
+  // node of six generated levels gets an agent sent to the far end, and every
+  // route LEG that ends anywhere but where its edge pointed is a jump clearance
+  // accepted and the body then failed.
+  //
+  // Frozen as a ceiling, not an equality — the same shape as the surface floor
+  // above, and for the same reason: a later slice that raises it has to say why.
+  {
+    const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+    let legs = 0;
+    let failed = 0;
+    for (const seed of [11, 22, 33, 44, 55, 66]) {
+      const { level } = generateLevel({ seed, difficulty: "high", length: "long" });
+      const sc = { ...scene(level.platforms), world: { ...level.world, gravity: config.gravity } };
+      invalidateNavGraphs(sc);
+      const gp = level.platforms[0];
+      const probe = soldierAgent(level.playerSpawn.x, gp.y);
+      for (const n of graphFor(sc, profileFor(probe, sc, config.runSpeed)).nodes) {
+        if (n.b - n.a <= 40) continue; // too narrow to place a body on fairly
+        const a = soldierAgent(Math.round((n.a + n.b) / 2), n.y);
+        const s = a.soldier;
+        a.motion = { type: "moveTo", target: [gp.x + gp.w - 60, gp.y - 46], speed: config.runSpeed };
+        let onLeg = false;
+        let spent = 0;
+        for (let f = 0; f < 300; f++) {
+          a.x = s.x; a.y = s.y; a.w = s.w; a.h = s.h;
+          a.vx = s.vx; a.vy = s.vy; a.onGround = s.onGround; a.facing = s.facing;
+          updateSpecEnemy(a, STEP, sc, ctx);
+          stepActor(s, STEP, sc.world, sc.platforms);
+          const leg = !!(a.nav && a.nav.leg);
+          if (leg && !onLeg) legs++;
+          // A leg resolves on the first grounded frame after takeoff, and the
+          // follower books the miss there. Read the ledger rather than the
+          // landing so a ban (which clears the attempt count) still counts.
+          if (!leg && onLeg) {
+            const now = sum(a.nav.attempts) + config.navJumpAttempts * a.nav.banned.size;
+            if (now > spent) failed++;
+            spent = now;
+          }
+          onLeg = leg;
+        }
+      }
+    }
+    t.ok(`S4: ${failed} of ${legs} route legs fail in the air (11.9% before S4)`, legs > 200 && failed <= 6);
+  }
+
   // ---- S0: reachable standable surface, frozen (tech/nav-clearance.md) ------
   //
   // The second of S0's two guards. nav.test.mjs pins the MODEL against the
@@ -906,11 +1008,18 @@ export default async function run(t) {
       11: 10660, 22: 2790, 33: 11480, 44: 10290, 55: 1770, 66: 6179,
       77: 10530, 88: 10510, 99: 11070, 110: 10400, 121: 7578, 132: 10680,
     };
-    const body = bodyProfile({
-      w: 30, h: 46, gravity: config.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed,
-    });
+    const BOX = { w: 30, h: 46, gravity: config.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed };
+    // Since S4 the same box is two graphs: a body whose velocity is its drive
+    // request, and one that accelerates into its jumps. Both are held to the
+    // same floor, and today they reach the SAME surface on all twelve seeds —
+    // which is the claim S4 has to make, that flying the launch a body performs
+    // costs it nowhere to stand.
+    const BODIES = [
+      ["legged", bodyProfile(BOX)],
+      ["soldier", bodyProfile({ ...BOX, accel: SOLDIER_TUNING.accel, friction: SOLDIER_TUNING.friction })],
+    ];
     // Reachable span, in px, from the node the player spawns on.
-    const surface = (level, opts) => {
+    const surface = (level, body, opts) => {
       const g = buildGraph(level.platforms, body, opts);
       const at = nodeUnder(g, level.playerSpawn.x, level.platforms[0].y);
       const seen = reachableFrom(g, at ? at.id : null);
@@ -925,14 +1034,16 @@ export default async function run(t) {
     let short = [];
     for (const seed of Object.keys(SURFACE).map(Number)) {
       const { level } = generateLevel({ seed, difficulty: "high", length: "long" });
-      const legacy = surface(level, undefined);
-      const clear = surface(level, { clearance: true });
-      legacyTotal += legacy.px;
-      clearTotal += clear.px;
-      if (legacy.reached !== legacy.nodes) stranded++;
-      if (clear.px < SURFACE[seed]) short.push(`${seed}: ${clear.px} < ${SURFACE[seed]}`);
+      for (const [name, body] of BODIES) {
+        const legacy = surface(level, body, undefined);
+        const clear = surface(level, body, { clearance: true });
+        legacyTotal += legacy.px;
+        clearTotal += clear.px;
+        if (legacy.reached !== legacy.nodes) stranded++;
+        if (clear.px < SURFACE[seed]) short.push(`${name} ${seed}: ${clear.px} < ${SURFACE[seed]}`);
+      }
     }
-    t.ok(`surface: no seed reaches less than it does today (${clearTotal}px over 12)${short.length ? ` — ${short.join(", ")}` : ""}`, short.length === 0);
+    t.ok(`surface: no seed reaches less than it does today (${clearTotal}px over 12, both bodies)${short.length ? ` — ${short.join(", ")}` : ""}`, short.length === 0);
     t.ok("surface: the unfiltered graph still reaches every node it builds", stranded === 0);
     // Not a floor — the gap S3 and S4 exist to close, recorded so it moves in
     // view. Two of the twelve seeds lose over three quarters of the level.
