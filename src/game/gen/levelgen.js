@@ -384,17 +384,21 @@ function auditGeometry(ground, groups, env, exit) {
   // wrong graph.
   const graph = buildGraph(plats, { ...SOLDIER_PROFILE, envelope: env });
 
-  // Spawn → the rest of the level, following edge direction.
-  const start = graph.nodes.find((n) => n.plat === ground && n.a <= SPAWN_X && SPAWN_X <= n.b + SOLDIER_W);
+  // Spawn → the rest of the level, following edge direction. A node covers every
+  // platform of its surface since S2, so these three tests ask whether the
+  // ground is AMONG them rather than whether it is the one.
+  const start = graph.nodes.find((n) => n.plats.includes(ground) && n.a <= SPAWN_X && SPAWN_X <= n.b + SOLDIER_W);
   const reached = reachableFrom(graph, start ? start.id : null);
   const reachedNodes = [...reached].map((id) => graph.nodes[id]);
 
   // Offenders are the ORIGINAL platform objects: generateLevel culls by identity
   // (`groups.findIndex((g) => g.includes(offenders[0]))`), so a copy breaks it.
-  const reachedPlats = new Set(reachedNodes.map((n) => n.plat));
+  // A platform merged into a reached surface is reached — dropping the rest of
+  // the set here is what would cull structures the player can plainly walk onto.
+  const reachedPlats = new Set(reachedNodes.flatMap((n) => n.plats));
   const offenders = plats.slice(1).filter((p) => !reachedPlats.has(p));
   const traversable = reachedNodes.some(
-    (n) => n.plat === ground && n.b + SOLDIER_W >= exit.x && n.a <= exit.x + exit.w
+    (n) => n.plats.includes(ground) && n.b + SOLDIER_W >= exit.x && n.a <= exit.x + exit.w
   );
   return { traversable, unreachable: offenders.length, offenders };
 }

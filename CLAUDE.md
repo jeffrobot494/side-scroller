@@ -131,22 +131,33 @@ section + the tests are the source of truth for what currently exists):
   before, 0 after**, one more agent making progress, and 21% of hop/jump edges
   pruned; a graph build goes 0.09ms → 0.69ms (3.12ms worst). The attempt cap and
   the ban ledger stay — static clearance cannot predict a knockback mid-flight.
-  **Those numbers are true and were the wrong ones.** In play this cost **22% of
-  the reachable node span** and 256 of 813 above-ground spots: an agent under a
-  perch declines a climb it can make. **`nav.js` node spans are the defect.**
-  `collideAxis` puts a body on a platform on ANY overlap; `buildNodes` requires
-  the body to fit WHOLLY on it, so the graph models ~55% of the standable surface
-  (measured against `stepActor`: a 100px perch supports 128px of positions and
-  the span is 70). The predictor takes off from, aims at and lands on spans, so
-  **70% of the climbs it removed are flyable**. The same fact makes a column and
-  the slab flush against it two nodes with a fake gap, so agents jump over solid
-  floor (594 such edges across 30 levels; merging co-planar surfaces takes it to
-  11) — that one and the blind reflex hop off the graph (15.8% of ground under an
-  overhang) both PRE-DATE this work. Generation is not implicated. Full evidence,
-  and how a first pass at this got it badly wrong by measuring through the graph
-  instead of the integrator, in `tech/nav-clearance.md` "Regressions found in
-  play". **The spec is being rewritten; do not build on C2's contract as it
-  stands.**
+  **Those numbers are true and were the wrong ones.** In play this cost 22% of
+  the reachable node span: an agent under a perch declines a climb it can make.
+  **`nav.js` node spans were the defect** — `collideAxis` puts a body on a
+  platform on ANY overlap while `buildNodes` required it to fit WHOLLY on one, so
+  the graph modelled ~55% of the standable surface, and the predictor took off
+  from, aimed at and landed on those spans. Full evidence, and how a first pass
+  got it badly wrong by measuring through the graph instead of the integrator, in
+  `tech/nav-clearance.md` "Regressions found in play". **The spec was rewritten;
+  S0–S2 of it are built, S3–S5 are not, and the reported faults are not all fixed
+  yet.**
+  **S0 (guards) + S1 (solid extent) + S2 (a node is a SURFACE) — built.** A node
+  is now every position the physics supports, `[p.x - w, p.x + p.w]` open at both
+  ends, and co-planar platforms whose supported extents overlap (a gap narrower
+  than the body) are ONE node carrying every platform it covers — so `node.plat`
+  is `node.plats`, and the column/slab join is somewhere you stand rather than
+  two places with a fake gap between them (nodes 1,058 → 977 over 30 levels, hop
+  edges 594 → 434). `solidLeft`/`solidRight` answer "where is this platform
+  solid", which is a different question from the span and the one every footprint
+  test asks. `settleX` answers a third — "where does a body come to REST" — and
+  is what an aim uses, because a span endpoint is a real place to stand and a
+  target a fraction of a pixel wide. Reachable surface is +26% and back to 77% of
+  the unfiltered graph. **Still open: the reported faults themselves.** S3
+  (clearance measured against the physics, the "won't climb" one), S4 (the
+  predictor flies a RUNNING launch, the one failed jump), S5 (off the graph,
+  never hop blind). Two guards now exist and are the bar: node spans are pinned
+  against `stepActor` in `test/nav.test.mjs`, and reachable surface is frozen per
+  seed in `test/navigation.test.mjs` so a graph change that shrinks it reddens.
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,

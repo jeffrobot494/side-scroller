@@ -22,6 +22,7 @@
 import {
   bodyProfile, buildGraph, graphKey, nodeUnder, nearestNode, route, bestPartial, costsFrom, edgeKey,
   takeoffX, landingX, footprintClear, airborneAimX, driveV, takeoffTolerance,
+  settleX,
 } from "../game/nav.js";
 import { bodyJump } from "./locomotion.js";
 import { config } from "../game/config.js";
@@ -256,7 +257,12 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // ground slab it is already standing on is the best partial path. Walking
   // underneath and stopping is the behaviour the design asks for.
   if (nav.path.length === 1) {
-    const want = clamp(destX, here.a, here.b);
+    // `settleX`, not a clamp into the span: the span's far end is the last
+    // position the physics supports, and a body cannot HOLD it. A soldier reads
+    // the sign of a drive request and crosses its target, so parking it on the
+    // last supported pixel walks it off the ledge, and the reroute walks it
+    // back — an agent orbiting a spot it had already arrived at (S2).
+    const want = settleX(here, destX, ent.w);
     if (Math.abs(want - ent.x) <= config.navArriveRadius) return { kind: "stop" };
     return drive(ent, want, speed, dt);
   }
@@ -299,6 +305,9 @@ export function routeRequest(ent, dest, speed, scene, dt) {
     // next grounded frame, and a walk-off takes many grounded frames, so every
     // one of them would be booked as a failed attempt and three would ban a
     // perfectly good edge.
+    // A body width past the span's end. Since S2 the span already reaches the
+    // platform's edge, so anything past it does; a body width is simply far
+    // enough that the request is at full speed rather than a crawl.
     const toX = right ? here.b + ent.w : here.a - ent.w;
     nav.stepOff = toX;
     return drive(ent, toX, speed, dt);

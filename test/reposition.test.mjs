@@ -418,9 +418,12 @@ export default async function run(t) {
       { x: 0, y: 500, w: 1400, h: 40 },
       { x: 600, y: 400, w: 200, h: 20 }, // the target stands here
       { x: 1000, y: 420, w: 200, h: 20 }, // a perch level-ish with it
-      // 34 wide, so neither is standable itself (34 - 30 is under MIN_SEGMENT)
-      { x: 960, y: 400, w: 34, h: 20 }, // roofs the perch's near takeoff (970)
-      { x: 1190, y: 400, w: 34, h: 20 }, // ...and its far one
+      // Undersides at 400, so they roof the perch's two takeoffs; 300 tall so
+      // their own tops are 400px up and out of reach. Since S2 a 34-wide slab is
+      // a standable surface like any other, so a low one would be offered as the
+      // firing position itself and the case would prove nothing.
+      { x: 960, y: 100, w: 34, h: 300 }, // roofs the perch's near takeoff (970)
+      { x: 1190, y: 100, w: 34, h: 300 }, // ...and its far one
     ];
     const tp = { x: 700, y: 400 - 23 };
     const see = (x, y) => losBetween(x, y, tp.x, tp.y, ROOFED_PERCH);

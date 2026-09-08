@@ -17,7 +17,7 @@ import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.j
 import { Soldier, stepActor } from "../src/mission/entities.js";
 import { WEAPONS } from "../src/game/content.js";
 import { profileFor, graphFor, routeRequest, invalidateNavGraphs, navState, abortRoute } from "../src/mission/navigation.js";
-import { buildGraph, graphKey, bodyProfile, reachableFrom, nodeUnder } from "../src/game/nav.js";
+import { buildGraph, graphKey, bodyProfile, reachableFrom, nodeUnder, footprintClear, solidLeft } from "../src/game/nav.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { config, resetConfig } from "../src/game/config.js";
 
@@ -351,7 +351,10 @@ export default async function run(t) {
       if (leg && !prevLeg) {
         const g = [...sc.navGraphs.values()][0];
         const to = g.nodes[leg.to];
-        const under = wasFeet > to.y && wasX < to.b + c.w && wasX + c.w > to.a;
+        // "Under it" is a fact about the destination's PLATFORM, not its span —
+        // a span reaches a body width past the platform at each end since S2, so
+        // reading one here would call a clear takeoff a bad one.
+        const under = wasFeet > to.y && !footprintClear(wasX, to, c.w);
         if (under) badTakeoff = badTakeoff || { x: +wasX.toFixed(1), leg: `${leg.from}->${leg.to}` };
       }
       prevLeg = leg;
@@ -645,9 +648,12 @@ export default async function run(t) {
   // offers exactly one way up, and it is the one on the far side of the perch:
   // an agent approaching from the left has to walk past its destination.
   //
-  // The overhang is 34 wide on purpose: a body needs `MIN_SEGMENT` of span to
-  // stand anywhere, and 34 - 30 = 4 is under it, so this piece of terrain roofs
-  // the takeoff without becoming a step up to the perch by another route.
+  // The overhang is standable in its own right since S2 — every platform is,
+  // however narrow — but nothing can get ONTO it: at 120px up it is inside
+  // maxRise and the horizontal budget that high is a few pixels, so clearance
+  // refuses both of its takeoffs. It roofs 670 without opening a second way up,
+  // which is what this scene needs; it just does it by being unflyable rather
+  // than by being too small to stand on.
   const ONE_WAY_UP = [
     { x: 0, y: 500, w: 1400, h: 40 },
     { x: 700, y: 400, w: 300, h: 20 },
@@ -658,7 +664,7 @@ export default async function run(t) {
     const c = chaser(200, 474);
     const g = graphFor(sc, profileFor(c, sc, 210));
     const ground = g.nodes.find((n) => n.y === 500);
-    const perch = g.nodes.find((n) => n.y === 400 && n.a === 700);
+    const perch = g.nodes.find((n) => n.y === 400 && solidLeft(n) === 700);
     const edge = g.edges[ground.id].find((e) => e.to === perch.id);
     t.ok("takeoff: the climb survives with one validated takeoff", !!edge);
     t.eq("takeoff: and it is the far side, not the roofed near one", edge.takeoffs, [1000]);
@@ -734,10 +740,16 @@ export default async function run(t) {
       { x: 1000, y: 380, w: 34, h: 20 }, // ...and over 1000
     ];
     {
+      // Asked of the GROUND node, not of the whole graph: since S2 the two lids
+      // are standable surfaces in their own right, and there is a jump between
+      // them and the perch. Neither is reachable from the floor, which is the
+      // claim — "is there a way up from here", not "is there a jump anywhere".
       const sc = scene(ROOFED_BOTH);
       const probe = soldierAgent(200, 500);
+      const g = graphFor(sc, profileFor(probe, sc, config.runSpeed));
+      const floor = g.nodes.find((n) => n.y === 500);
       t.eq("soldier: clearance rejects this climb — both takeoffs are roofed",
-        graphFor(sc, profileFor(probe, sc, config.runSpeed)).edges.flat().some((e) => e.kind === "jump"), false);
+        g.edges[floor.id].some((e) => e.kind === "jump"), false);
     }
     noClearance(() => {
       const sc = scene(ROOFED_BOTH);
@@ -849,9 +861,9 @@ export default async function run(t) {
   // The floors are today's values. A slice that raises one raises the frozen
   // number in the same commit; a slice that lowers one has to say why.
   {
-    const SURFACE = { // seed: reachable px with clearance ON, as shipped
-      11: 9220, 22: 2340, 33: 9800, 44: 8850, 55: 1590, 66: 5219,
-      77: 8950, 88: 9100, 99: 2360, 110: 9200, 121: 6578, 132: 9150,
+    const SURFACE = { // seed: reachable px with clearance ON. Raised by S2.
+      11: 10660, 22: 2790, 33: 11480, 44: 10290, 55: 1770, 66: 6179,
+      77: 10530, 88: 10510, 99: 11070, 110: 10400, 121: 7578, 132: 10680,
     };
     const body = bodyProfile({
       w: 30, h: 46, gravity: config.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed,

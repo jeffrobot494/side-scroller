@@ -11,10 +11,13 @@
 // also why the graph is per-BODY: a node is a span where a specific body fits,
 // so a 30x46 soldier and a 26x44 duelist do not share one.
 //
-// Geometry model (unchanged from the flood fill this replaces):
-//   - a NODE is a standable span of one platform, in body-LEFT-EDGE space:
-//     [x, x + w - bodyW], minus any span where a piece overhead leaves less
-//     than the body's headroom.
+// Geometry model:
+//   - a NODE is a standable span of one SURFACE, in body-LEFT-EDGE space: every
+//     position `collideAxis` supports, minus any span where a piece overhead
+//     leaves less than the body's headroom.
+//   - a SURFACE is every platform a body can walk across without leaving the
+//     ground — co-planar tops whose supported extents meet. A column and the
+//     slab butted against it are one place, not two with a gap in between.
 //   - an EDGE is DIRECTED, because dropping off a ledge is one-way: platforms
 //     are solid, so a route that plans "drop to C, climb back to A" plans a move
 //     that does not exist.
@@ -42,6 +45,14 @@ import { jumpEnvelope } from "./gen/reach.js";
 // auditGeometry.
 const HEADROOM_MARGIN = 4; // clearance above the body needed to stand/walk
 const MIN_SEGMENT = 6; // a span narrower than this is not worth standing on
+// The supported extent is an OPEN interval: `overlaps` is strict, so a body
+// whose right edge is exactly the platform's left edge is not supported. Spans
+// are closed [a, b], so the endpoints come in by the smallest amount that keeps
+// them inside it. NOT a settle margin — a body with a fraction of a pixel of
+// foot on a ledge IS standing on it, and the design says it may (see "What
+// standable has to mean" in tech/nav-clearance.md). Far below `driveV`'s own
+// deadband of one frame's travel, so no follower can tell it is there.
+const SUPPORT_EPS = 1e-6;
 
 // ---- profiles -------------------------------------------------------------
 
@@ -71,20 +82,55 @@ function cutSegs(segs, lo, hi) {
   return out;
 }
 
-// Standable spans, one platform at a time. `plat` holds the ORIGINAL platform
-// object, not a copy — callers identify offenders by object identity.
+// The walkable surfaces in a platform list, for a body of width `w`.
+//
+// Two co-planar platforms are one surface when a body can be supported
+// continuously across them — which is not "their edges touch" but "their
+// supported extents overlap", i.e. the gap between them is narrower than the
+// body. A 30px body bridges a 10px gap without ever losing the ground; at
+// exactly 30 there is one position, the far edge of the left platform, that
+// nothing holds up, and that is a real gap.
+function surfaces(platforms, w) {
+  const byTop = new Map(); // insertion order, so the ground stays first
+  for (const p of platforms) {
+    if (!byTop.has(p.y)) byTop.set(p.y, []);
+    byTop.get(p.y).push(p);
+  }
+  const out = [];
+  for (const [y, list] of byTop) {
+    let cur = null;
+    for (const p of [...list].sort((a, b) => a.x - b.x)) {
+      if (cur && p.x - w < cur.hi) { // supported extents overlap: the same floor
+        cur.plats.push(p);
+        cur.hi = Math.max(cur.hi, p.x + p.w);
+      } else {
+        cur = { y, lo: p.x, hi: p.x + p.w, plats: [p] }; // sorted, so this is the leftmost
+        out.push(cur);
+      }
+    }
+  }
+  return out;
+}
+
+// Standable spans, one surface at a time. `plats` holds the ORIGINAL platform
+// objects, not copies — callers identify offenders by object identity.
+//
+// The span is every position `collideAxis` supports, which is any box overlap
+// at all: a body with one foot on a ledge is standing on it. Requiring the body
+// to fit WHOLLY on the platform is what this replaces, and it cost a body width
+// at each end of every node (tech/nav-clearance.md, S2).
 export function buildNodes(platforms, profile) {
   const { w, h } = profile;
   const headroom = h + HEADROOM_MARGIN;
   const nodes = [];
-  for (const p of platforms) {
-    let segs = [[p.x, p.x + p.w - w]];
+  for (const surf of surfaces(platforms, w)) {
+    let segs = [[surf.lo - w + SUPPORT_EPS, surf.hi - SUPPORT_EPS]];
     for (const q of platforms) {
-      if (q === p || q.y >= p.y) continue; // only pieces strictly above can block
-      if (p.y - (q.y + q.h) >= headroom) continue; // clears the body: no cut
+      if (q.y >= surf.y) continue; // only pieces strictly above can block, and co-planar ones are the surface
+      if (surf.y - (q.y + q.h) >= headroom) continue; // clears the body: no cut
       segs = cutSegs(segs, q.x - w, q.x + q.w);
     }
-    for (const [a, b] of segs) if (b - a >= MIN_SEGMENT) nodes.push({ id: nodes.length, plat: p, a, b, y: p.y });
+    for (const [a, b] of segs) if (b - a >= MIN_SEGMENT) nodes.push({ id: nodes.length, plats: surf.plats, a, b, y: surf.y });
   }
   return nodes;
 }
@@ -217,11 +263,15 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 // footprint tests independent of the span before it moves, and independent of
 // the body: a platform's edge is where it is whoever is jumping at it.
 export function solidLeft(node) {
-  return node.plat.x;
+  let lo = Infinity;
+  for (const p of node.plats) if (p.x < lo) lo = p.x;
+  return lo;
 }
 
 export function solidRight(node) {
-  return node.plat.x + node.plat.w;
+  let hi = -Infinity;
+  for (const p of node.plats) if (p.x + p.w > hi) hi = p.x + p.w;
+  return hi;
 }
 
 // The ordinary directed lip: the closest point on `from`'s span to `to`. `x` is
@@ -235,6 +285,22 @@ export function lipToward(from, to, x) {
 // The nearest standable x on a node, in body-left-edge space.
 export function landingX(node, x) {
   return clamp(x, node.a, node.b);
+}
+
+// Where a body in the air aims to come DOWN on `node`, which is not the same
+// question (tech/nav-clearance.md, S2). A body may STAND with a fraction of a
+// pixel of foot on a ledge — the design says it may — but steering at the last
+// supported position is steering at a target that narrow, and `driveV`'s
+// deadband means it never arrives: it holds beside the surface and falls past.
+//
+// So aim at the nearest position that puts the whole body on the surface, and
+// at the middle of what there is when the surface is narrower than the body.
+// On anything at least a body wide this is exactly where the aim pointed before
+// spans widened, which is why no landing moved.
+export function settleX(node, x, w) {
+  const lo = solidLeft(node);
+  const hi = solidRight(node) - w;
+  return landingX(node, lo <= hi ? clamp(x, lo, hi) : (lo + hi) / 2);
 }
 
 // Is a body at left-edge `x` clear of `to`'s footprint? Platforms are solid from
@@ -308,7 +374,7 @@ export function airborneAimX(to, x, w, feetY) {
     const hi = solidRight(to);
     return x < (lo + hi) / 2 ? lo : hi;
   }
-  return landingX(to, x);
+  return settleX(to, x, w);
 }
 
 // Full-speed horizontal toward a left-edge target, signed, or 0 once there.
@@ -424,7 +490,7 @@ function flies(from, to, profile, platforms, x, up) {
   // horizontal drive (it is standing clear of the destination precisely because
   // the takeoff guard insisted, and steering at the landing point would walk it
   // straight back under), a hop drives at its landing point.
-  let vx = up ? 0 : driveV(landingX(to, x) - x, runSpeed, dt);
+  let vx = up ? 0 : driveV(settleX(to, x, w) - x, runSpeed, dt);
 
   // A hop returns to takeoff height at exactly `airtime` and an upward jump
   // lands sooner, so a flight still going after that has missed. Four frames of
@@ -478,7 +544,7 @@ function landsOn(box, { hit, prev }, to, h) {
     if (p.y < top) top = p.y;
   }
   if (Math.abs(top - to.y) > LAND_TOL) return false; // came down on another level
-  if (!hit.includes(to.plat)) return false; // ...or another platform entirely
+  if (!to.plats.some((p) => hit.includes(p))) return false; // ...or another surface entirely
   return box.x >= to.a - LAND_TOL && box.x <= to.b + LAND_TOL;
 }
 

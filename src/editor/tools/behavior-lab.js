@@ -116,7 +116,14 @@ export function createLabModel(seed = (Math.random() * 1e9) | 0, rng = Math.rand
   // somewhere it can legitimately route from.
   const graph = graphFor(scene, profileFor(agent, scene, config.runSpeed));
   const n = graph.nodes.length ? graph.nodes[Math.min(graph.nodes.length - 1, (rng() * graph.nodes.length) | 0)] : null;
-  soldier.x = n ? n.a + rng() * (n.b - n.a) : scene.world.width / 2;
+  // Clamped to the WORLD, not just to the node. Since S2 a span covers every
+  // position the terrain supports, which on the ground slab is a body width past
+  // each end of the level — positions `stepActor` clamps away on the first frame
+  // and the camera cannot look at. The graph is terrain-only and has no world;
+  // this is the caller that does.
+  soldier.x = n
+    ? Math.max(0, Math.min(scene.world.width - soldier.w, n.a + rng() * (n.b - n.a)))
+    : scene.world.width / 2;
   soldier.y = n ? n.y - soldier.h : 0;
   soldier.onGround = !!n;
 

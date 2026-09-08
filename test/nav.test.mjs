@@ -18,7 +18,7 @@ import {
   bodyProfile, profileKey, buildGraph, buildNodes, linkBetween,
   reachableFrom, route, costsFrom, nearestNode,
   lipToward, landingX, footprintClear, clearTakeoffs, takeoffX, takeoffCandidates, airborneAimX, driveV,
-  solidLeft, solidRight,
+  solidLeft, solidRight, settleX,
 } from "../src/game/nav.js";
 import { stepActor } from "../src/mission/entities.js";
 
@@ -65,7 +65,7 @@ const edgeTo = (graph, from, to) => graph.edges[from].find((e) => e.to === to) |
 // The manoeuvre cases below used to hand-write the span alone, which was fine
 // while the footprint tests derived the platform's edges from it (S1) and is a
 // span no platform could produce as soon as they stop.
-const nodeOn = (plat, w) => ({ id: 0, plat, a: plat.x, b: plat.x + plat.w - w, y: plat.y });
+const nodeOn = (plat, w) => ({ id: 0, plats: [plat], a: plat.x, b: plat.x + plat.w - w, y: plat.y });
 
 export default async function run(t) {
   // ---- envelope sanity: the numbers this file is authored against ---------
@@ -75,11 +75,11 @@ export default async function run(t) {
 
   // ---- S0: the span the graph builds, beside the surface the body has -----
   //
-  // A CHARACTERIZATION, not a target. It records the gap as it is today so the
-  // slices that close it are visible as this block changing; it does not assert
-  // the gap away. `collideAxis` stands a body on a platform on ANY box overlap,
-  // while `buildNodes` requires it to fit WHOLLY on one, so the model is short
-  // by a body width at each end.
+  // Until S2 these recorded a GAP: `collideAxis` stands a body on a platform on
+  // any box overlap, while `buildNodes` wanted it to fit wholly on one, so the
+  // model was short by a body width at each end and covered 55% of a perch.
+  // They now record the two agreeing, which is what S2 changed and where it
+  // shows. The measurement is the same one either way — drop a real body.
   {
     const g = ground(1200);
     const perch = { x: 500, y: 400, w: 100, h: 20 };
@@ -88,31 +88,31 @@ export default async function run(t) {
     const [plo, phi] = supportedAt(plats, SOLDIER, perch.y, 400, 700);
     t.ok(`S0: the physics supports 471..599 on a 100px perch (got ${plo}..${phi})`, plo === 471 && phi === 599);
 
-    const span = buildNodes(plats, SOLDIER).find((n) => n.plat === perch);
-    t.ok(`S0: the graph's span is 500..570 (got ${span.a}..${span.b})`, span.a === 500 && span.b === 570);
-    t.ok("S0: the shortfall is exactly a body width at each end", span.a - (plo - 1) === SOLDIER.w && (phi + 1) - span.b === SOLDIER.w);
-
-    const modelled = (span.b - span.a) / (phi - plo);
-    t.ok(`S0: so the graph models 55% of the perch (${(modelled * 100).toFixed(0)}%)`, Math.round(modelled * 100) === 55);
+    const span = buildNodes(plats, SOLDIER).find((n) => n.plats.includes(perch));
+    t.ok(`S0: and the span covers every one of them (${span.a.toFixed(3)}..${span.b.toFixed(3)})`,
+      Math.ceil(span.a) === plo && Math.floor(span.b) === phi);
+    // Open at both ends: a body whose right edge is exactly the platform's left
+    // edge is not supported, and `overlaps` is strict about it.
+    t.ok("S0: open at both ends, because the physics is", span.a > 470 && span.b < 600);
+    t.ok("S0: by less than the follower's own deadband, so nothing can tell", span.a - 470 < 1 / 60 && 600 - span.b < 1 / 60);
   }
   {
-    // Not a constant: the shortfall is a body width at each end whatever the
-    // platform is, so it is ruinous on a perch and nearly free on a 1000px
-    // slab. Perches are where climbing happens, which is why 55% is the number
-    // that matters. (Held off the left wall — `stepActor` clamps x to the world,
-    // so a slab at x 0 cannot show its left-hand loss.)
+    // The old shortfall was two body widths whatever the platform, so it was
+    // ruinous on a perch and nearly free on a 1000px slab. Both are exact now.
+    // (Held off the left wall — `stepActor` clamps x to the world, so a slab at
+    // x 0 cannot show its left-hand support.)
     const wide = { x: 100, y: 500, w: 1000, h: 40 };
     const [glo, ghi] = supportedAt([wide], SOLDIER, wide.y, 0, 1150);
     const span = buildNodes([wide], SOLDIER)[0];
-    t.ok(`S0: the same body width at each end (${glo}..${ghi} vs ${span.a}..${span.b})`, span.a - (glo - 1) === SOLDIER.w && (ghi + 1) - span.b === SOLDIER.w);
-    t.ok("S0: which on a 1000px slab is 94%, not 55%", Math.round(100 * (span.b - span.a) / (ghi - glo)) === 94);
+    t.ok(`S0: a 1000px slab too (${glo}..${ghi} vs ${span.a.toFixed(3)}..${span.b.toFixed(3)})`,
+      Math.ceil(span.a) === glo && Math.floor(span.b) === ghi);
   }
   {
-    // The same fact, seen from the other side: a 40px column with a slab butted
-    // against its top is ONE continuous floor at y 390. The body can stand
-    // anywhere across the join. The graph sees two spans with 30px of nothing
-    // between them, and `kindOf` calls that a hop — regression #2, and what S2
-    // removes by making a node a surface rather than a rectangle.
+    // The same fact seen from the other side, and regression #2: a 40px column
+    // with a slab butted against its top is ONE continuous floor at y 390, and
+    // the body can stand anywhere across the join. It used to be two spans with
+    // 30px of invented gap between them, which `kindOf` called a hop — so agents
+    // jumped over solid floor.
     const g = ground(1200);
     g.y = 540;
     const col = { x: 300, y: 390, w: 40, h: 150 };
@@ -123,8 +123,13 @@ export default async function run(t) {
     t.ok(`S0: the physics supports one unbroken 271..539 across the join (got ${lo}..${hi})`, lo === 271 && hi === 539);
 
     const nodes = buildNodes(plats, SOLDIER).filter((n) => n.y === 390);
-    t.eq("S0: the graph makes it two nodes", nodes.length, 2);
-    t.ok(`S0: with a fake 30px gap over solid floor (${nodes[0].b} -> ${nodes[1].a})`, nodes[1].a - nodes[0].b === 30);
+    t.eq("S0: and the graph makes it one node", nodes.length, 1);
+    t.ok(`S0: covering the whole of it (${nodes[0].a.toFixed(3)}..${nodes[0].b.toFixed(3)})`,
+      Math.ceil(nodes[0].a) === lo && Math.floor(nodes[0].b) === hi);
+    t.ok("S0: carrying both platforms, so nothing downstream loses one", nodes[0].plats.includes(col) && nodes[0].plats.includes(slab));
+    const g2 = buildGraph(plats, SOLDIER);
+    t.eq("S0: with no edge across the join, because walking it is not a manoeuvre",
+      g2.edges.flat().filter((e) => g2.nodes[e.to].y === 390).length, 0);
   }
 
   // ---- nodes -------------------------------------------------------------
@@ -132,14 +137,15 @@ export default async function run(t) {
     const g = ground(1200);
     const nodes = buildNodes([g], SOLDIER);
     t.eq("node: a bare platform yields one span", nodes.length, 1);
-    t.ok("node: span is in body-LEFT-EDGE space ([0, w - bodyW])", nodes[0].a === 0 && nodes[0].b === 1170);
-    t.ok("node: carries the ORIGINAL platform object, not a copy", nodes[0].plat === g);
+    t.ok("node: span is in body-LEFT-EDGE space, and covers the overhang at each end",
+      near(nodes[0].a, -30, 1e-3) && near(nodes[0].b, 1200, 1e-3));
+    t.ok("node: carries the ORIGINAL platform objects, not copies", nodes[0].plats.length === 1 && nodes[0].plats[0] === g);
   }
   {
     // a ceiling 20px above the floor: nowhere near enough to stand under
     const g = ground(1200);
     const lid = { x: 300, y: 460, w: 100, h: 20 }; // clearance 500 - 480 = 20
-    const nodes = buildNodes([g, lid], SOLDIER).filter((n) => n.plat === g);
+    const nodes = buildNodes([g, lid], SOLDIER).filter((n) => n.plats.includes(g));
     t.eq("node: a low ceiling splits the floor in two", nodes.length, 2);
     t.ok("node: the cut is [q.x - bodyW, q.x + q.w]", nodes[0].b === 270 && nodes[1].a === 400);
   }
@@ -147,38 +153,46 @@ export default async function run(t) {
     // the same ceiling raised until it clears the body: no cut at all
     const g = ground(1200);
     const lid = { x: 300, y: 430, w: 100, h: 20 }; // clearance 500 - 450 = 50 = 46 + 4
-    const nodes = buildNodes([g, lid], SOLDIER).filter((n) => n.plat === g);
+    const nodes = buildNodes([g, lid], SOLDIER).filter((n) => n.plats.includes(g));
     t.eq("node: clearance exactly at the margin does NOT cut", nodes.length, 1);
   }
   {
     // 49px of clearance: the soldier (needs 50) is blocked, a 44-tall body is not
     const g = ground(1200);
     const lid = { x: 300, y: 431, w: 100, h: 20 }; // clearance 49
-    const forSoldier = buildNodes([g, lid], SOLDIER).filter((n) => n.plat === g);
-    const forDuelist = buildNodes([g, lid], DUELIST).filter((n) => n.plat === g);
+    const forSoldier = buildNodes([g, lid], SOLDIER).filter((n) => n.plats.includes(g));
+    const forDuelist = buildNodes([g, lid], DUELIST).filter((n) => n.plats.includes(g));
     t.eq("node: 49px clearance blocks a 46-tall body", forSoldier.length, 2);
     t.eq("node: the same gap passes a 44-tall body", forDuelist.length, 1);
     t.ok("profile: distinct bodies get distinct cache keys", profileKey(SOLDIER) !== profileKey(DUELIST));
   }
   {
-    // narrower than the body plus the minimum span: not standable at all
-    const tiny = { x: 0, y: 500, w: 34, h: 20 }; // span = 34 - 30 = 4 < MIN_SEGMENT 6
-    t.eq("node: a span narrower than the body yields nothing", buildNodes([tiny], SOLDIER).length, 0);
+    // MIN_SEGMENT only bites on a SLIVER left between two cuts now. A platform
+    // narrower than the body is standable — a body with one foot on a 34px ledge
+    // is on it — where before it was modelled as nowhere at all.
+    const tiny = { x: 0, y: 500, w: 34, h: 20 };
+    t.eq("node: a platform narrower than the body is still standable", buildNodes([tiny], SOLDIER).length, 1);
+    const g2 = ground(1200);
+    const lidA = { x: 300, y: 460, w: 100, h: 20 }; // cuts [270, 400]
+    const lidB = { x: 434, y: 460, w: 100, h: 20 }; // cuts [404, 534]
+    const between = buildNodes([g2, lidA, lidB], SOLDIER).filter((n) => n.a >= 400 && n.b <= 404);
+    t.eq("node: a 4px sliver between two cuts is not worth standing on", between.length, 0);
   }
 
   // ---- the reject boundary: gaps ----------------------------------------
-  // Two 200-wide slabs at the same height. Node spans are [x, x+170], so the
-  // measured gap is (second.x - 170).
+  // Two 200-wide slabs at the same height. A span reaches a body width PAST its
+  // platform's left edge, so the gap the graph measures is the distance the body
+  // actually has to cross: (second.x - 30) - 200.
   {
     const pair = (x2) => buildGraph([{ x: 0, y: 500, w: 200, h: 40 }, { x: x2, y: 500, w: 200, h: 40 }], SOLDIER);
-    const within = pair(370); // gap 200 <= flatReach 230.4
-    const beyond = pair(430); // gap 260 >  flatReach 230.4
+    const within = pair(370); // gap 140 <= flatReach 230.4
+    const beyond = pair(500); // gap 270 >  flatReach 230.4
     t.ok("edge: a gap inside flatReach links", !!edgeTo(within, 0, 1));
     t.ok("edge: a gap beyond flatReach does NOT link", edgeTo(beyond, 0, 1) === null);
     t.eq("edge: a level gap is a hop", edgeTo(within, 0, 1).kind, "hop");
     // and the boundary itself, to the pixel
-    const exact = pair(170 + 230); // gap 230 <= 230.4
-    const over = pair(170 + 231); // gap 231 >  230.4
+    const exact = pair(230 + 230); // gap 230 <= 230.4
+    const over = pair(230 + 231); // gap 231 >  230.4
     t.ok("edge: gap 230 links, gap 231 does not", !!edgeTo(exact, 0, 1) && edgeTo(over, 0, 1) === null);
   }
 
@@ -201,15 +215,21 @@ export default async function run(t) {
   }
   {
     // horizontal budget SHRINKS with height: maxRunTo(120) is 146.55, well under
-    // flatReach, so a gap legal on the flat is illegal onto a perch.
-    const g = buildGraph([{ x: 0, y: 500, w: 200, h: 40 }, { x: 370, y: 380, w: 200, h: 20 }], SOLDIER);
-    t.ok("edge: a 200px gap that is fine on the flat fails onto a 120px perch", edgeTo(g, 0, 1) === null);
+    // flatReach, so a crossing legal on the flat is illegal onto a perch. 150px
+    // of travel here: legal flat, and 3.5px too far uphill.
+    const g = buildGraph([{ x: 0, y: 500, w: 200, h: 40 }, { x: 380, y: 380, w: 200, h: 20 }], SOLDIER);
+    t.ok("edge: a crossing that is fine on the flat fails onto a 120px perch", edgeTo(g, 0, 1) === null);
+    const flat = buildGraph([{ x: 0, y: 500, w: 200, h: 40 }, { x: 380, y: 500, w: 200, h: 40 }], SOLDIER);
+    t.ok("edge: ...and the same distance on the flat is fine", !!edgeTo(flat, 0, 1));
   }
 
   // ---- costs are seconds, and monotonic ---------------------------------
   {
+    // `gap` is what the BODY crosses, so the second slab sits a body width
+    // further out than that. Below 30 the two are one surface and there is no
+    // hop to cost at all.
     const flat = (gap) => {
-      const g = buildGraph([{ x: 0, y: 500, w: 200, h: 40 }, { x: 170 + gap, y: 500, w: 200, h: 40 }], SOLDIER);
+      const g = buildGraph([{ x: 0, y: 500, w: 200, h: 40 }, { x: 230 + gap, y: 500, w: 200, h: 40 }], SOLDIER);
       return edgeTo(g, 0, 1).cost;
     };
     // flatReach is DEFINED as runSpeed x airtime, so for any hop the graph
@@ -299,7 +319,9 @@ export default async function run(t) {
   // case rather than a passing one.
   function edgeUnder(plats, profile, from, to, clearance) {
     const g = buildGraph(plats, profile, clearance ? { clearance: true } : undefined);
-    const at = ([y, a]) => g.nodes.find((n) => n.y === y && Math.abs(n.a - a) < 0.5);
+    // By the surface's own left edge, not by the span: a span is body-relative
+    // and moves whenever the model of standing does, which is what S2 changed.
+    const at = ([y, x]) => g.nodes.find((n) => n.y === y && Math.abs(solidLeft(n) - x) < 0.5);
     const na = at(from);
     const nb = at(to);
     if (!na || !nb) return null;
@@ -323,7 +345,7 @@ export default async function run(t) {
     // Positives first, because over-pruning is the failure that would not
     // announce itself: an agent simply stops going places, and nothing errors.
     const flat = accepts("an unobstructed flat hop", [HOP_A, HOP_B], [500, 0], [500, 370]);
-    t.eq("clearance: ...taking off from the directed lip", flat.takeoffs, [170]);
+    t.ok(`clearance: ...taking off from the directed lip (${flat.takeoffs})`, flat.takeoffs.length === 1 && near(flat.takeoffs[0], 200, 1e-3));
     const up = accepts("an unobstructed jump onto a perch", [GROUND, PERCH], [500, 0], [400, 700]);
     t.eq("clearance: ...from either clear side of its footprint", up.takeoffs, [670, 1000]);
 
@@ -374,13 +396,13 @@ export default async function run(t) {
     accepts("a 20-tall body under the same lid", [HOP_A, HOP_B, LID], [500, 0], [500, 370], SHORT);
   }
   {
-    // WALKS AND DROPS ARE UNTOUCHED. The addendum adds hop and upward-jump
-    // clearance and nothing else; a drop is a fall this predictor does not model
-    // and does not claim to. Compared as sets rather than by count, so a drop
-    // quietly turning into a different drop would show.
+    // DROPS ARE UNTOUCHED. The addendum adds hop and upward-jump clearance and
+    // nothing else; a drop is a fall this predictor does not model and does not
+    // claim to. Compared as sets rather than by count, so a drop quietly turning
+    // into a different drop would show.
     const MIX = [
-      { x: 0, y: 500, w: 200, h: 40 }, // ground left  — span [0,170]
-      { x: 160, y: 500, w: 200, h: 40 }, // ...touching it: a WALK, gap 0
+      { x: 0, y: 500, w: 200, h: 40 }, // ground left
+      { x: 160, y: 500, w: 200, h: 40 }, // ...overlapping it: the SAME surface
       { x: 500, y: 500, w: 400, h: 40 },
       { x: 200, y: 380, w: 300, h: 20 }, // a ledge to drop off
       { x: 270, y: 300, w: 20, h: 200 }, // and a column that breaks hops
@@ -391,9 +413,13 @@ export default async function run(t) {
       g.edges.forEach((list, i) => list.forEach((e) => { if (e.kind === "walk" || e.kind === "drop") out.push(`${i}->${e.to}:${e.kind}`); }));
       return out.sort().join(" ");
     };
-    t.ok(`clearance: the scene has walks and drops to lose (${kinds(false)})`,
-      kinds(false).includes("walk") && kinds(false).includes("drop"));
+    t.ok(`clearance: the scene has drops to lose (${kinds(false)})`, kinds(false).includes("drop"));
     t.eq("clearance: and it loses none of them", kinds(true), kinds(false));
+    // And the join between the first two is not an edge of any kind — it is one
+    // node, so crossing it is not a manoeuvre a route has to plan (S2).
+    const joined = buildGraph(MIX, SOLDIER).nodes.filter((n) => n.plats.includes(MIX[0]));
+    t.ok("clearance: the overlapping pair is one surface", joined.every((n) => n.plats.includes(MIX[1])));
+    t.ok("clearance: with no walk edge left to make", !kinds(false).includes("walk"));
   }
   {
     // THE SEAM, and it throws rather than approximating. `auditGeometry` builds
@@ -505,8 +531,9 @@ export default async function run(t) {
     const g = ground(1200);
     const plat = { x: 400, y: 400, w: 230, h: 20 };
     const lid = { x: 500, y: 360, w: 50, h: 20 }; // 20px of headroom over `plat`
-    const cut = buildNodes([g, plat, lid], SOLDIER).filter((n) => n.plat === plat);
-    t.eq("S1: the overhang cuts the destination's own span", cut.map((n) => [n.a, n.b]), [[400, 470], [550, 600]]);
+    const cut = buildNodes([g, plat, lid], SOLDIER).filter((n) => n.plats.includes(plat));
+    t.ok(`S1: the overhang cuts the destination's own span (${cut.map((n) => `${n.a.toFixed(0)}..${n.b.toFixed(0)}`)})`,
+      cut.length === 2 && cut[0].b === 470 && cut[1].a === 550);
     t.ok("S1: whose left piece ends 130px short of the platform", cut[0].b + SOLDIER.w === 500 && solidRight(cut[0]) === 630);
     t.ok("S1: a takeoff at 520 is under the platform, not clear of it", !footprintClear(520, cut[0], SOLDIER.w));
     t.ok("S1: and 630 still is", footprintClear(630, cut[0], SOLDIER.w));
