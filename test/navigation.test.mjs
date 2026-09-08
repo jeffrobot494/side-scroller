@@ -17,7 +17,8 @@ import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.j
 import { Soldier, stepActor } from "../src/mission/entities.js";
 import { WEAPONS } from "../src/game/content.js";
 import { profileFor, graphFor, routeRequest, invalidateNavGraphs, navState, abortRoute } from "../src/mission/navigation.js";
-import { buildGraph, graphKey } from "../src/game/nav.js";
+import { buildGraph, graphKey, bodyProfile, reachableFrom, nodeUnder } from "../src/game/nav.js";
+import { generateLevel } from "../src/game/gen/levelgen.js";
 import { config, resetConfig } from "../src/game/config.js";
 
 const STEP = 1 / 60;
@@ -830,6 +831,59 @@ export default async function run(t) {
     a.nav.banned.add("0->1");
     t.ok("identity: one agent's ban is its own", !b.nav.banned.has("0->1"));
     t.ok("identity: and both are still routing on the one shared graph", sc.navGraphs.size === 1);
+  }
+
+  // ---- S0: reachable standable surface, frozen (tech/nav-clearance.md) ------
+  //
+  // The second of S0's two guards. nav.test.mjs pins the MODEL against the
+  // integrator; this pins that a change to the model does not quietly cost the
+  // agent places it could reach. C2 shipped on "failed jumps 207 -> 0" and
+  // "agents making progress 169 -> 170", and both moved the right way while
+  // this fell 22%, because both sweeps sent agents the length of a level where
+  // ground travel dominates.
+  //
+  // Measured through the graph, and therefore blind in the way the whole
+  // rewrite is about — but blind on BOTH sides of every comparison, so it is
+  // honest as a floor even though no number here is an absolute.
+  //
+  // The floors are today's values. A slice that raises one raises the frozen
+  // number in the same commit; a slice that lowers one has to say why.
+  {
+    const SURFACE = { // seed: reachable px with clearance ON, as shipped
+      11: 9220, 22: 2340, 33: 9800, 44: 8850, 55: 1590, 66: 5219,
+      77: 8950, 88: 9100, 99: 2360, 110: 9200, 121: 6578, 132: 9150,
+    };
+    const body = bodyProfile({
+      w: 30, h: 46, gravity: config.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed,
+    });
+    // Reachable span, in px, from the node the player spawns on.
+    const surface = (level, opts) => {
+      const g = buildGraph(level.platforms, body, opts);
+      const at = nodeUnder(g, level.playerSpawn.x, level.platforms[0].y);
+      const seen = reachableFrom(g, at ? at.id : null);
+      let px = 0;
+      for (const id of seen) px += g.nodes[id].b - g.nodes[id].a;
+      return { px: Math.round(px), reached: seen.size, nodes: g.nodes.length };
+    };
+
+    let legacyTotal = 0;
+    let clearTotal = 0;
+    let stranded = 0;
+    let short = [];
+    for (const seed of Object.keys(SURFACE).map(Number)) {
+      const { level } = generateLevel({ seed, difficulty: "high", length: "long" });
+      const legacy = surface(level, undefined);
+      const clear = surface(level, { clearance: true });
+      legacyTotal += legacy.px;
+      clearTotal += clear.px;
+      if (legacy.reached !== legacy.nodes) stranded++;
+      if (clear.px < SURFACE[seed]) short.push(`${seed}: ${clear.px} < ${SURFACE[seed]}`);
+    }
+    t.ok(`surface: no seed reaches less than it does today (${clearTotal}px over 12)${short.length ? ` — ${short.join(", ")}` : ""}`, short.length === 0);
+    t.ok("surface: the unfiltered graph still reaches every node it builds", stranded === 0);
+    // Not a floor — the gap S3 and S4 exist to close, recorded so it moves in
+    // view. Two of the twelve seeds lose over three quarters of the level.
+    t.ok(`surface: clearance holds ${(100 * clearTotal / legacyTotal).toFixed(0)}% of the unfiltered surface`, clearTotal <= legacyTotal);
   }
 
   // ---- senses ---------------------------------------------------------------

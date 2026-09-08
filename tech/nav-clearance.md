@@ -195,6 +195,8 @@ One mismatch that costs everybody, independent of the above: the graph's `maxRis
 
 Both sides of that comparison use the same node model, so the delta is a fair measure of what clearance removed — but both understate the real surface by about 45%, so neither number is an absolute.
 
+**As built, S0 — the average hides the failures.** The frozen guard measures reachable span from the player's spawn over 12 generated levels (high, long). Clearance holds **72%** of the unfiltered surface across all twelve, close to the −22% above, but the per-seed spread is what the aggregate was concealing: five seeds lose more than 30%, and three lose about three quarters — seed 55 keeps 6 of 41 nodes, seed 22 keeps 11 of 42, seed 99 keeps 9 of 36. Two seeds lose nothing at all. The unfiltered graph reaches every node it builds on all twelve, so the loss is entirely the filter and not the terrain.
+
 ### There is no crouch escape hatch
 
 `Soldier.applyMovement` returns early while crouched: `move` only sets facing, and `vx` decays at friction. A kneeling body cannot travel, so crouching cannot reach a space a standing body cannot. Worth stating because the headroom cut in `buildNodes` looks like it might have one.

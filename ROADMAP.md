@@ -65,7 +65,6 @@ leaving them in "Next" hides the fact that the blocker is a choice, not effort.
 
 | Item | Situation | Decision needed |
 |---|---|---|
-| Nav clearance C1–C2 | Built and green, and it made the game worse in play — agents decline climbs they can make, because the predictor takes off from and lands on node spans and a span is ~45% narrower than the surface the physics supports. 70% of the climbs it removed are flyable. Evidence in `tech/nav-clearance.md` "Regressions found in play" | None outstanding. Bo has said not to flip `navClearance` off; the fix is the node model, and generation is NOT implicated |
 | Locomotor L4+ | L1–L3 built; `wheeled`/`limbed`/`crawler` deliberately deferred. | None for now — deferred on purpose, listed so it is not mistaken for an oversight |
 
 ## Shipped
@@ -101,12 +100,12 @@ description of what the game does today; this is only the index.
 | `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
 | Flyers can grind against terrain — steering pushes in while resolution pushes out | out of scope in `sprints/2026-08.md` |
 | Grounded bodies guess when a steering intent implies a jump, from a 40px heuristic with no terrain knowledge | fixed by `tech/agent-navigation.md` N3 |
-| A jump edge tests where it lands, not the arc, so a column or an overhang is only found by failing at it | `tech/nav-clearance.md` C2 addressed this and regressed reachability doing it — see below |
+| A jump edge tests where it lands, not the arc, so a column or an overhang is only found by failing at it | addressed in `tech/nav-clearance.md`, and it cost reachability doing it; the rewritten spec is what corrects that |
 | A nav node span is where a body fits WHOLLY on a platform; `collideAxis` supports it on any overlap, so the graph models ~55% of the standable surface | `tech/nav-clearance.md` "The root cause of #1 and #2" |
 | A column and the slab flush against its top are two nodes with a fake gap, so agents jump over solid floor | `tech/nav-clearance.md` "Regressions found in play" #2 — pre-dates C2 |
 | Off the graph, the router hands back to a reflex that hops at anything above it with no terrain knowledge | `tech/nav-clearance.md` "Regressions found in play" #3 — pre-dates C2 |
 | The graph's `maxRise` is the continuous 122.5px where a 1/60 integration reaches 116.67px, so edges in that band are offered to everyone and flyable by nobody | `tech/nav-clearance.md` "What the rejections actually are" |
-| Nothing in the suite asserts that a graph change does not shrink where an agent can go, or that node spans match what `stepActor` supports | `tech/nav-clearance.md` "How this was measured wrong" |
+| Nothing in the suite asserts that a graph change does not shrink where an agent can go, or that node spans match what `stepActor` supports | fixed by `tech/nav-clearance.md` |
 | Two enemy jump impulses disagree, and the reflex hop out-jumps the deliberate jump | fixed by `tech/agent-navigation.md` N2 |
 | No coyote time — a jump one frame after leaving a ledge is silently dropped | fixed by `tech/agent-navigation.md` N2 |
 

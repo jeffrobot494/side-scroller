@@ -19,12 +19,43 @@ import {
   reachableFrom, route, costsFrom, nearestNode,
   lipToward, landingX, footprintClear, clearTakeoffs, takeoffX, takeoffCandidates, airborneAimX, driveV,
 } from "../src/game/nav.js";
+import { stepActor } from "../src/mission/entities.js";
 
 const SOLDIER = bodyProfile({ w: 30, h: 46, gravity: 2000, jumpSpeed: 720, runSpeed: 320 });
 // a smaller body: 44 tall needs 48 of headroom where the soldier needs 50
 const DUELIST = bodyProfile({ w: 26, h: 44, gravity: 2000, jumpSpeed: 720, runSpeed: 320 });
 
 const near = (a, b, tol = 1e-6) => Math.abs(a - b) <= tol;
+
+// ---- the integrator, asked directly (tech/nav-clearance.md, S0) ------------
+//
+// Everything else in this file asks nav.js what it believes. These two ask the
+// PHYSICS. C1-C2 shipped green because every measurement behind them was taken
+// through the graph's own model of where a body can stand, and a model cannot
+// detect its own definition being wrong.
+
+// Drop a real body at `x` and report where its feet come to rest, or null if it
+// never lands. Straight down, so nothing but support is being measured.
+function dropFeet(platforms, profile, x, fromY) {
+  const a = { x, y: fromY, w: profile.w, h: profile.h, vx: 0, vy: 0, onGround: false };
+  const world = { width: 1e6, gravity: profile.gravity };
+  for (let i = 0; i < 240 && !a.onGround; i++) stepActor(a, 1 / 60, world, platforms);
+  return a.onGround ? a.y + a.h : null;
+}
+
+// The integer positions stepActor actually supports at height `y`, over [from,
+// to]. Whole pixels: `overlaps` is strict, so the real set is an open interval
+// and its endpoints are not standable — 471..599 below means (470, 600).
+function supportedAt(platforms, profile, y, from, to) {
+  let lo = null;
+  let hi = null;
+  for (let x = from; x <= to; x++) {
+    if (dropFeet(platforms, profile, x, y - profile.h - 60) !== y) continue;
+    if (lo === null) lo = x;
+    hi = x;
+  }
+  return [lo, hi];
+}
 const ground = (w = 1200) => ({ x: 0, y: 500, w, h: 40 });
 const edgeTo = (graph, from, to) => graph.edges[from].find((e) => e.to === to) || null;
 
@@ -33,6 +64,60 @@ export default async function run(t) {
   const env = SOLDIER.envelope;
   t.ok(`envelope: maxRise 129.6 (got ${env.maxRise})`, near(env.maxRise, 129.6, 1e-9));
   t.ok(`envelope: flatReach 230.4 (got ${env.flatReach.toFixed(3)})`, near(env.flatReach, 230.4, 1e-9));
+
+  // ---- S0: the span the graph builds, beside the surface the body has -----
+  //
+  // A CHARACTERIZATION, not a target. It records the gap as it is today so the
+  // slices that close it are visible as this block changing; it does not assert
+  // the gap away. `collideAxis` stands a body on a platform on ANY box overlap,
+  // while `buildNodes` requires it to fit WHOLLY on one, so the model is short
+  // by a body width at each end.
+  {
+    const g = ground(1200);
+    const perch = { x: 500, y: 400, w: 100, h: 20 };
+    const plats = [g, perch];
+
+    const [plo, phi] = supportedAt(plats, SOLDIER, perch.y, 400, 700);
+    t.ok(`S0: the physics supports 471..599 on a 100px perch (got ${plo}..${phi})`, plo === 471 && phi === 599);
+
+    const span = buildNodes(plats, SOLDIER).find((n) => n.plat === perch);
+    t.ok(`S0: the graph's span is 500..570 (got ${span.a}..${span.b})`, span.a === 500 && span.b === 570);
+    t.ok("S0: the shortfall is exactly a body width at each end", span.a - (plo - 1) === SOLDIER.w && (phi + 1) - span.b === SOLDIER.w);
+
+    const modelled = (span.b - span.a) / (phi - plo);
+    t.ok(`S0: so the graph models 55% of the perch (${(modelled * 100).toFixed(0)}%)`, Math.round(modelled * 100) === 55);
+  }
+  {
+    // Not a constant: the shortfall is a body width at each end whatever the
+    // platform is, so it is ruinous on a perch and nearly free on a 1000px
+    // slab. Perches are where climbing happens, which is why 55% is the number
+    // that matters. (Held off the left wall — `stepActor` clamps x to the world,
+    // so a slab at x 0 cannot show its left-hand loss.)
+    const wide = { x: 100, y: 500, w: 1000, h: 40 };
+    const [glo, ghi] = supportedAt([wide], SOLDIER, wide.y, 0, 1150);
+    const span = buildNodes([wide], SOLDIER)[0];
+    t.ok(`S0: the same body width at each end (${glo}..${ghi} vs ${span.a}..${span.b})`, span.a - (glo - 1) === SOLDIER.w && (ghi + 1) - span.b === SOLDIER.w);
+    t.ok("S0: which on a 1000px slab is 94%, not 55%", Math.round(100 * (span.b - span.a) / (ghi - glo)) === 94);
+  }
+  {
+    // The same fact, seen from the other side: a 40px column with a slab butted
+    // against its top is ONE continuous floor at y 390. The body can stand
+    // anywhere across the join. The graph sees two spans with 30px of nothing
+    // between them, and `kindOf` calls that a hop — regression #2, and what S2
+    // removes by making a node a surface rather than a rectangle.
+    const g = ground(1200);
+    g.y = 540;
+    const col = { x: 300, y: 390, w: 40, h: 150 };
+    const slab = { x: 340, y: 390, w: 200, h: 20 };
+    const plats = [g, col, slab];
+
+    const [lo, hi] = supportedAt(plats, SOLDIER, 390, 250, 600);
+    t.ok(`S0: the physics supports one unbroken 271..539 across the join (got ${lo}..${hi})`, lo === 271 && hi === 539);
+
+    const nodes = buildNodes(plats, SOLDIER).filter((n) => n.y === 390);
+    t.eq("S0: the graph makes it two nodes", nodes.length, 2);
+    t.ok(`S0: with a fake 30px gap over solid floor (${nodes[0].b} -> ${nodes[1].a})`, nodes[1].a - nodes[0].b === 30);
+  }
 
   // ---- nodes -------------------------------------------------------------
   {
