@@ -206,6 +206,24 @@ export function graphKey(profile, opts) {
 
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
+// A node's SOLID x-extent — where its platform stops a body — as against `a`/`b`,
+// which say where a body can STAND on it (tech/nav-clearance.md, S1). Two
+// different questions, and today's span formula answers both with the same
+// numbers: `a === p.x` and `b + w === p.x + p.w`, so every footprint test below
+// could read the span, scaled by a body width, and be right.
+//
+// That coincidence holds only while a span is "where the body fits WHOLLY on the
+// platform", which is the definition S2 replaces. Reading the platform makes the
+// footprint tests independent of the span before it moves, and independent of
+// the body: a platform's edge is where it is whoever is jumping at it.
+export function solidLeft(node) {
+  return node.plat.x;
+}
+
+export function solidRight(node) {
+  return node.plat.x + node.plat.w;
+}
+
 // The ordinary directed lip: the closest point on `from`'s span to `to`. `x` is
 // only consulted when the two spans OVERLAP, where "closest" is underfoot.
 export function lipToward(from, to, x) {
@@ -220,10 +238,11 @@ export function landingX(node, x) {
 }
 
 // Is a body at left-edge `x` clear of `to`'s footprint? Platforms are solid from
-// below, so a body standing anywhere in (to.a - w, to.b + w) that jumps drives
-// its head into the underside and never rises.
+// below, so a body standing anywhere under the destination that jumps drives its
+// head into the underside and never rises. Clear means wholly to one side of it:
+// right edge at or before its left, or left edge at or after its right.
 export function footprintClear(x, to, w) {
-  return x <= to.a - w || x >= to.b + w;
+  return x <= solidLeft(to) - w || x >= solidRight(to);
 }
 
 // The standable positions on `from` that clear `to`'s footprint, left then
@@ -231,8 +250,8 @@ export function footprintClear(x, to, w) {
 // rejecting a usable far side because the near one is roofed is a route lost.
 export function clearTakeoffs(from, to, w) {
   const out = [];
-  const left = to.a - w;
-  const right = to.b + w;
+  const left = solidLeft(to) - w;
+  const right = solidRight(to);
   if (left >= from.a && left <= from.b) out.push(left);
   if (right >= from.a && right <= from.b) out.push(right);
   return out;
@@ -285,8 +304,8 @@ export function takeoffCandidates(from, to, w, up) {
 // budget is priced from takeoff, not from the apex.
 export function airborneAimX(to, x, w, feetY) {
   if (to.y < feetY) {
-    const lo = to.a - w;
-    const hi = to.b + w;
+    const lo = solidLeft(to) - w;
+    const hi = solidRight(to);
     return x < (lo + hi) / 2 ? lo : hi;
   }
   return landingX(to, x);
@@ -378,8 +397,8 @@ function takeoffBand(from, to, profile, x, up) {
 // tests per sample, and the Lab rebuilds the whole graph on every pointer move.
 function nearbyPlatforms(from, to, profile, platforms, x) {
   const env = profile.envelope;
-  const lo = Math.min(x, to.a) - env.flatReach - profile.w;
-  const hi = Math.max(x + profile.w, to.b + profile.w) + env.flatReach;
+  const lo = Math.min(x, solidLeft(to)) - env.flatReach - profile.w;
+  const hi = Math.max(x + profile.w, solidRight(to)) + env.flatReach;
   const top = Math.min(from.y, to.y) - env.maxRise - profile.h;
   // `<=` on the bottom, not `<`: the destination's own surface sits exactly at
   // this line, and dropping the platform the body is trying to land on out of

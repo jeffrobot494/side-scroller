@@ -18,6 +18,7 @@ import {
   bodyProfile, profileKey, buildGraph, buildNodes, linkBetween,
   reachableFrom, route, costsFrom, nearestNode,
   lipToward, landingX, footprintClear, clearTakeoffs, takeoffX, takeoffCandidates, airborneAimX, driveV,
+  solidLeft, solidRight,
 } from "../src/game/nav.js";
 import { stepActor } from "../src/mission/entities.js";
 
@@ -58,6 +59,13 @@ function supportedAt(platforms, profile, y, from, to) {
 }
 const ground = (w = 1200) => ({ x: 0, y: 500, w, h: 40 });
 const edgeTo = (graph, from, to) => graph.edges[from].find((e) => e.to === to) || null;
+
+// A destination node exactly as buildNodes would make it: the span is where a
+// body of width `w` fits wholly on the platform, and `plat` is the platform.
+// The manoeuvre cases below used to hand-write the span alone, which was fine
+// while the footprint tests derived the platform's edges from it (S1) and is a
+// span no platform could produce as soon as they stop.
+const nodeOn = (plat, w) => ({ id: 0, plat, a: plat.x, b: plat.x + plat.w - w, y: plat.y });
 
 export default async function run(t) {
   // ---- envelope sanity: the numbers this file is authored against ---------
@@ -424,9 +432,10 @@ export default async function run(t) {
     t.eq("landing: and no move at all when already on it", landingX(right, 500), 500);
   }
   {
-    // Footprint clearance in body-LEFT-EDGE space: (to.a - w, to.b + w) is the
-    // band from which a rising body hits the destination's underside.
-    const to = { a: 400, b: 600, y: 400 };
+    // Footprint clearance in body-LEFT-EDGE space: (400 - w, 630) is the band
+    // from which a rising body hits this destination's underside — the platform's
+    // own edges, one taken back by a body width because `x` is a left edge.
+    const to = nodeOn({ x: 400, y: 400, w: 230, h: 20 }, 30);
     t.ok("footprint: a body a full width left of the span is clear", footprintClear(370, to, 30));
     t.ok("footprint: exactly a width out is clear — the boundary is inclusive", footprintClear(370, to, 30) && footprintClear(630, to, 30));
     t.ok("footprint: one pixel inside is not", !footprintClear(371, to, 30));
@@ -434,8 +443,10 @@ export default async function run(t) {
   }
   {
     // A ledge whose clear sides are 370 and 630. Which of them a node offers is
-    // a fact about the node's span, and BOTH count when both are standable.
-    const to = { a: 400, b: 600, y: 400 };
+    // a fact about the SOURCE node's span; where they are is a fact about the
+    // destination's platform. BOTH count when both are standable.
+    const to = nodeOn({ x: 400, y: 400, w: 230, h: 20 }, 30);
+    const far = nodeOn({ x: 1200, y: 500, w: 230, h: 20 }, 30);
     t.eq("takeoff: both sides on a wide node", clearTakeoffs({ a: 0, b: 900, y: 500 }, to, 30), [370, 630]);
     t.eq("takeoff: only the near one when the node stops short", clearTakeoffs({ a: 0, b: 500, y: 500 }, to, 30), [370]);
     t.eq("takeoff: only the far one when the node starts late", clearTakeoffs({ a: 500, b: 900, y: 500 }, to, 30), [630]);
@@ -451,19 +462,19 @@ export default async function run(t) {
     const under = { a: 420, b: 580, y: 500 };
     t.eq("takeoff: no clear side falls back to the lip, so the attempt happens", takeoffX(under, to, 500, 30, true), 500);
     // A hop never consults the footprint — it is not rising into anything.
-    t.eq("takeoff: a hop uses the plain directed lip", takeoffX(wide, { a: 1200, b: 1400, y: 500 }, 100, 30, false), 900);
+    t.eq("takeoff: a hop uses the plain directed lip", takeoffX(wide, far, 100, 30, false), 900);
 
     // The candidate list is position-free: it is what C2 VALIDATES, and a
     // candidate set that moved with the body could not be stored on an edge.
     t.eq("candidates: an up-edge offers every clear standable side", takeoffCandidates(wide, to, 30, true), [370, 630]);
     t.eq("candidates: none when the ledge roofs the whole node", takeoffCandidates(under, to, 30, true), []);
-    t.eq("candidates: a hop offers its one directed lip", takeoffCandidates(wide, { a: 1200, b: 1400, y: 500 }, 30, false), [900]);
+    t.eq("candidates: a hop offers its one directed lip", takeoffCandidates(wide, far, 30, false), [900]);
     // A lip that is ALREADY clear is the candidate; the sides are off-span here.
     t.eq("candidates: a far lip that already clears the footprint counts",
-      takeoffCandidates({ a: 0, b: 200, y: 500 }, { a: 400, b: 600, y: 400 }, 30, true), [200]);
+      takeoffCandidates({ a: 0, b: 200, y: 500 }, to, 30, true), [200]);
   }
   {
-    const to = { a: 400, b: 600, y: 400 };
+    const to = nodeOn({ x: 400, y: 400, w: 230, h: 20 }, 30);
     // Rising: aim at the nearer edge of the footprint, never into it.
     t.eq("airborne: below the surface, close on the near footprint edge", airborneAimX(to, 300, 30, 470), 370);
     t.eq("airborne: from the far side, the far edge", airborneAimX(to, 700, 30, 470), 630);
@@ -471,6 +482,36 @@ export default async function run(t) {
     t.eq("airborne: once the feet clear it, head for the landing point", airborneAimX(to, 300, 30, 400), 400);
     t.eq("airborne: and stay put when already over it", airborneAimX(to, 500, 30, 380), 500);
   }
+  // ---- S1: the platform is solid where the platform is ---------------------
+  // The footprint tests used to read the span, scaled by a body width, and that
+  // is right only while a span is exactly "where the body fits WHOLLY on the
+  // platform" — the definition S2 replaces. Two places it is already not right.
+  {
+    const plat = { x: 400, y: 400, w: 230, h: 20 };
+    const wide = nodeOn(plat, 30);
+    const narrow = nodeOn(plat, 10);
+    t.ok("S1: a platform's solid extent is its own x and w", solidLeft(wide) === 400 && solidRight(wide) === 630);
+    t.ok("S1: the same for any body on it", solidLeft(narrow) === solidLeft(wide) && solidRight(narrow) === solidRight(wide));
+    // The right-hand footprint edge is the platform's right edge whoever is
+    // jumping. The left one moves with the body only because `x` is a LEFT edge.
+    t.ok("S1: a wide body and a narrow one share a right-hand footprint edge",
+      footprintClear(630, wide, 30) && !footprintClear(629, wide, 30) && footprintClear(630, narrow, 10) && !footprintClear(629, narrow, 10));
+  }
+  {
+    // A destination whose span is CUT by something overhead. Its left piece ends
+    // at 470, so the old arithmetic put the destination's right-hand footprint
+    // edge at 500 — 130px inside a platform that is solid out to 630, and a body
+    // told to take off at 520 rises straight into its underside.
+    const g = ground(1200);
+    const plat = { x: 400, y: 400, w: 230, h: 20 };
+    const lid = { x: 500, y: 360, w: 50, h: 20 }; // 20px of headroom over `plat`
+    const cut = buildNodes([g, plat, lid], SOLDIER).filter((n) => n.plat === plat);
+    t.eq("S1: the overhang cuts the destination's own span", cut.map((n) => [n.a, n.b]), [[400, 470], [550, 600]]);
+    t.ok("S1: whose left piece ends 130px short of the platform", cut[0].b + SOLDIER.w === 500 && solidRight(cut[0]) === 630);
+    t.ok("S1: a takeoff at 520 is under the platform, not clear of it", !footprintClear(520, cut[0], SOLDIER.w));
+    t.ok("S1: and 630 still is", footprintClear(630, cut[0], SOLDIER.w));
+  }
+
   {
     // The distance clamp: full speed while there is ground to cover, never more
     // than what remains, and a halt inside a pixel-per-second of arriving.
