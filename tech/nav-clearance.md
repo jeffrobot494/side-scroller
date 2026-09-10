@@ -302,8 +302,11 @@ fail, so the recovered edges are flyable rather than gambled on. The build got
 *cheaper* because a takeoff that flies stops the run-up ladder that a rejected
 one starts. **This one change is worth more reachable surface than S2 and S3
 together** — the two seeds that "lose over three quarters of the level" under
-S0's guard are now whole, and the "21.1% of hop and jump edges do not survive
-the predictor" in "As built" below is superseded: it is 11% now.
+S0's guard are now whole. The prune rate falls with it: **38.4% of hop and jump
+edges did not survive the predictor, and 30.0% do not now** (938 of 3,123 over
+these 60 levels on the soldier profile). That is not the same measurement as the
+"21.1%" in "As built" below, which was 40 levels on pre-S2 spans, and the two
+should not be read as a series.
 
 **A stuck-agent sweep is what found it, and it is not in the bar.** 1,354 runs
 over 40 levels, an agent on every node sent to the far end, counting those that

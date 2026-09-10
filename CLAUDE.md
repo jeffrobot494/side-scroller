@@ -152,7 +152,8 @@ section + the tests are the source of truth for what currently exists):
   is what an aim uses, because a span endpoint is a real place to stand and a
   target a fraction of a pixel wide. Reachable surface is +26% and back to 77% of
   the unfiltered graph, and **that is what fixed the reported "won't climb"** —
-  see S3.
+  see S3. (100% since the head-contact fix of 2026-09-09; that regression and its
+  numbers are in `tech/nav-clearance.md`.)
   **S3 (clearance measured against the physics) — built, and it found that S2
   had already done the work.** Three of the four things S3 names were shipped by
   S2 and C2 (landing acceptance became a supported-position test the moment the
@@ -168,9 +169,11 @@ section + the tests are the source of truth for what currently exists):
   the measurement says so**: 82 hop/jump edges added over 60 levels, 0 removed, 0
   existing takeoffs moved, +5 reachable node pairs in one seed, the frozen
   surface guard unmoved, the 60-level agent sweep byte-identical, build 0.75 →
-  1.06ms. The headline number is the re-measurement it forced: **91% of what
+  1.06ms. The headline number is the re-measurement it forced: **82% of what
   clearance still drops is not flyable from anywhere at any launch speed** (the
-  spec's old "70% are flyable" was measured on the pre-S2 spans), 22 edges over
+  spec's old "70% are flyable" was measured on the pre-S2 spans; the 91% this
+  replaces was measured before the 2026-09-09 head-contact fix, through a
+  predictor that called a survivable bonk unflyable), 22 edges over
   60 levels want a running launch, and the seeds that still lose most of their
   surface lose it to real geometry — a head-bonk under a shelf no arc reaches.
   **S4 (the predictor flies the launch the body performs) — built, and the
@@ -235,30 +238,6 @@ section + the tests are the source of truth for what currently exists):
   (walk off a lip 110px from a shelf 39px down and you are on the floor before
   you are over it) — no falling trajectory is validated, so S5 makes that
   visible rather than causing it. The graph itself does not move.
-  **A HEAD CONTACT IS NOT A FAILED FLIGHT (fixed 2026-09-09, after S5).** The
-  predictor's contract is that it mirrors `stepActor`, and on one case it did
-  not: `collideAxis` answers an upward contact by putting the box back under the
-  surface, zeroing `vy` and letting gravity carry on, while `flies` returned
-  false and deleted the edge. The bonk is frequently the SECOND HALF of the
-  manoeuvre rather than a failure — it leaves the feet above the destination,
-  which is the exact test `airborneAimX` switches on, from holding the footprint
-  edge to settling on the landing span — so the body bonks, stops rising, and
-  then drops onto the ledge. In play this read as an agent standing against a
-  platform slightly too low to walk under: with the only clear takeoff flush
-  against the ledge, the launch is straight up, the head meets whatever is above,
-  and the ground node was left with NO way up. Only a DOWNWARD contact resolves a
-  flight now; a rising one is resolved the way the integrator resolves it and the
-  arc continues. A side contact still rejects, which is the last approximation
-  left in `flies`. Measured over 60 levels, both bodies: **reachable surface
-  74.5% → 100.0% legged and 72.6% → 99.6% soldier**, hop/jump edges 1,809 → 2,048
-  and 1,925 → 2,185, with S4's failed-leg rate unmoved at 3 (of 250 legs, then
-  282) — 32 more legs flown, the same three failures, so the recovered edges are
-  flyable rather than gambled on. Builds got CHEAPER (3.10 → 1.90ms legged),
-  because a takeoff that flies stops the run-up ladder a rejected one starts. A
-  stuck-agent sweep of 1,354 runs went 70 → 1; the survivor is the documented
-  46–49px off-graph pocket, not this. **This is worth more reachable surface than
-  S2 and S3 together, and it supersedes the spec's "21.1% of hop/jump edges do
-  not survive the predictor" — it is 11% now.**
 - **Sound (Slices 1–3 of `tech/sound.md`):** `src/audio/` — a cue catalog
   (`cues.js`), a PURE procedural sample renderer (`synth.js`), the bank
   (`bank.js`: cue id → synth params + gain/pitch-jitter/cooldown/voice cap,
