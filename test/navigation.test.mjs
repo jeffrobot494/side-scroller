@@ -939,6 +939,46 @@ export default async function run(t) {
     }
   }
 
+  // ---- a shelf under a ceiling: the body walks up to it and stops -----------
+  //
+  // The regression Bo found in play on 2026-09-09, and the reason it belongs
+  // HERE rather than in a file of its own: the block above is the same shape one
+  // platform simpler, and it is the case that missed this. A perch alone is
+  // climbed off a run-up; put a second platform 82px above the perch and the
+  // predictor rejected every takeoff, because it treated the head contact on the
+  // way up as a failed flight. `collideAxis` does not: it spends vy and lets the
+  // body fall, and the contact is what lifts the feet clear of the shelf top, so
+  // `airborneAimX` switches from holding the footprint edge to settling on the
+  // span and the body lands. With the edge gone the ground node had no way up at
+  // all, and the agent walked to `shelf.x - w` and stood there — which reads in
+  // play as getting stuck against a platform slightly too low to walk under.
+  //
+  // Geometry is seed 5 at x 4220, moved to the origin. The gap under the shelf is
+  // 42px against a 46-tall body, so walking under it is not the answer either.
+  {
+    const FLOOR = { x: 0, y: 500, w: 1400, h: 40 };
+    const SHELF = { x: 400, y: 438, w: 190, h: 20 };
+    const CEILING = { x: 310, y: 356, w: 120, h: 20 };
+    for (const dt of [STEP, 1 / 50, 1 / 120]) {
+      const sc = scene([FLOOR, SHELF, CEILING]);
+      const a = soldierAgent(150, 500);
+      const s = a.soldier;
+      a.motion = { type: "moveTo", target: [560, 438 - 23], speed: config.runSpeed };
+      for (let i = 0; i < Math.round(8 / dt); i++) {
+        a.x = s.x; a.y = s.y; a.w = s.w; a.h = s.h;
+        a.vx = s.vx; a.vy = s.vy; a.onGround = s.onGround; a.facing = s.facing;
+        updateSpecEnemy(a, dt, sc, ctx);
+        stepActor(s, dt, sc.world, sc.platforms);
+      }
+      const n = Math.round(1 / dt);
+      t.ok(`ceiling: a real Soldier climbs a shelf roofed 82px above it at dt=1/${n} (feet ${feet(s).toFixed(0)})`,
+        Math.abs(feet(s) - 438) < 1);
+      // The failure mode was standing still at the footprint edge, so pin that
+      // it is not merely somewhere else on the floor.
+      t.ok(`ceiling: ...rather than stopping at the shelf's footprint edge (x ${s.x.toFixed(0)})`, s.x > 400);
+    }
+  }
+
   // ---- S4: jumps attempted versus jumps arrived -----------------------------
   //
   // The measurement S4 exists to move, and the only one that can see it: a
@@ -1084,9 +1124,13 @@ export default async function run(t) {
   // The floors are today's values. A slice that raises one raises the frozen
   // number in the same commit; a slice that lowers one has to say why.
   {
-    const SURFACE = { // seed: reachable px with clearance ON. Raised by S2.
-      11: 10660, 22: 2790, 33: 11480, 44: 10290, 55: 1770, 66: 6179,
-      77: 10530, 88: 10510, 99: 11070, 110: 10400, 121: 7578, 132: 10680,
+    const SURFACE = { // seed: reachable px with clearance ON. Raised by S2, and
+      // again on 2026-09-09 when the predictor stopped treating a head contact as
+      // a failed flight. That one change is worth more here than S2 and S3 put
+      // together: seeds 22 and 55 were the two that "lose over three quarters of
+      // the level", and both are now whole.
+      11: 12000, 22: 11770, 33: 11480, 44: 10630, 55: 12380, 66: 10900,
+      77: 10850, 88: 10850, 99: 11070, 110: 10400, 121: 11230, 132: 11050,
     };
     const BOX = { w: 30, h: 46, gravity: config.gravity, jumpSpeed: config.jumpSpeed, runSpeed: config.runSpeed };
     // Since S4 the same box is two graphs: a body whose velocity is its drive
@@ -1125,8 +1169,11 @@ export default async function run(t) {
     }
     t.ok(`surface: no seed reaches less than it does today (${clearTotal}px over 12, both bodies)${short.length ? ` — ${short.join(", ")}` : ""}`, short.length === 0);
     t.ok("surface: the unfiltered graph still reaches every node it builds", stranded === 0);
-    // Not a floor — the gap S3 and S4 exist to close, recorded so it moves in
-    // view. Two of the twelve seeds lose over three quarters of the level.
+    // Not a floor — recorded so it moves in view. It reads 100% today: every
+    // node the unfiltered graph reaches, the filtered one reaches too, on all
+    // twelve seeds and both bodies. That is the ceiling of what this number can
+    // say, so what guards against LOOSENING is the failed-leg rate below and the
+    // real-Soldier climbs above, not this.
     t.ok(`surface: clearance holds ${(100 * clearTotal / legacyTotal).toFixed(0)}% of the unfiltered surface`, clearTotal <= legacyTotal);
   }
 

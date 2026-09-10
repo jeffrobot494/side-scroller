@@ -146,6 +146,7 @@ Two questions the model has collapsed into one number. Separating them is the su
 | The launch velocity is a range, not a number | A follower can arrive at a takeoff at any speed up to its run. As built the range is sampled at its two ends — full run and a standstill — and a takeoff is kept only if BOTH fly, so a jump that is legal at one approach speed and not another is refused rather than gambled on. The ends are what bind: a speed between them puts the body between two arcs that both arrive. Measured at 128 edges over 60 levels for the standing end alone, against 59 failed jumps it prevents |
 | Soldier actuation is matched, not modelled exactly | Soldiers accelerate at 2600px/s², brake on friction and read the sign of a drive request, and S4 flies all of that — the launch and every frame after it. What it still does not model is anything that changes mid-flight: a slow field, a knockback, a reload. Nothing static predicts those, and the attempt cap is what catches them |
 | A takeoff good from one side is not attempted from the other | The predictor records which way a body must be travelling when it launches, and the follower commits only to a takeoff it will reach from that side. Where no takeoff on the edge is reachable from the side the body is on, it attempts the nearest one anyway rather than leaning on a lip forever, and the attempt cap retires the edge — the same answer `takeoffX` gives when no clear side exists. Reaching a takeoff from the far side means walking PAST it and turning around, which nothing does; measured at the residual 0.58% of route legs |
+| A side contact still ends the flight | `collideAxis` answers a horizontal contact the way it answers a vertical one — position resolved, velocity zeroed, body carries on — and the predictor rejects instead. Unlike the head contact (fixed 2026-09-09), a body that stalls against a wall mid-jump usually does drop where it started, so this rejects few real manoeuvres; it is an approximation rather than a mirror, and it is the last one in `flies` |
 | Numerical stepping | Swept sampling prevents thin-terrain tunnelling; it does not make a bounded simulation continuous. The graph's `maxRise` is the continuous 122.5px where a 1/60 integration reaches 116.67px, so edges in that band are offered and flyable by nothing. Clearance removes them at runtime; the audit keeps them deliberately, so generation does not move |
 | Off the graph, an agent steers rather than routes | `buildNodes` deletes floor wherever something overhead leaves less than body height + 4px, so floor with 46–49px of clearance is walkable and invisible. A body standing there gets no route and drives straight at its destination. S5 removes the jump and leaves the walk, so "get as close as you can along a **clear route**" is not delivered in that pocket — and the pocket is not rare: over 60 levels with an elevated destination, a soldier body spends enough time in one to take 3,663 blind hops against 2,859 routed jumps. What it may not do there is guess |
 | The graph knows terrain, not the world | A span covers every position the terrain supports, which at the two ends of a level is a body width past the ground slab. `stepActor` clamps a body to the world and no drive target lands out there — `settleX` aims at the solid extent, and the ground's solid extent is the world's — but a caller that samples a raw span directly has to clamp for itself, as the Behavior Lab's spawn now does |
@@ -159,7 +160,7 @@ Two questions the model has collapsed into one number. Separating them is the su
 | Addendum outcome | Delivery |
 |---|---|
 | Clear route around a column without failed probes | S3's filtering over S2's surfaces, and S4 so an accepted route is not then failed in the air |
-| Ceiling excludes an otherwise reachable jump | Whole-body flight checks, source and destination undersides included |
+| Ceiling excludes an otherwise reachable jump | Whole-body flight checks, source and destination undersides included — a ceiling excludes a jump when it caps the arc short of the destination, not merely when the head touches it. See "Regressions found in play — 2026-09-09" |
 | Body-dependent routes | Per-body profiles and the full collision box |
 | Least-time alternative over the graph | Existing routing, unchanged |
 | The closest reachable stop | Delivered **on** the graph by existing partial routing. Not delivered off it — see the off-graph row in Approximations |
@@ -244,6 +245,93 @@ The first pass at this section then made a worse error. Every follow-up measurem
 
 The rule the rewrite needs: **a claim about what a body can do is measured against the integrator, never against the graph.** A guard belongs in `test/nav.test.mjs` pinning node spans against `stepActor`'s actual support, and one in `test/navigation.test.mjs` pinning that a graph change does not shrink reachable surface.
 
+
+## Regressions found in play — 2026-09-09
+
+Bo: *"when there is a floating horizontal platform that's just a few pixels too
+low for the agent to walk under it, it gets stuck on it. It doesn't realize it
+needs to jump over it."*
+
+**Cause: `flies` treated a head contact as a failed flight; `collideAxis` does
+not.** The predictor's own contract is that it mirrors `stepActor` — gravity
+before motion, x before y, strict overlap, a landing only on a downward contact.
+It did not mirror the other vertical case. `collideAxis` answers an upward
+contact by putting the box back under the surface, zeroing `vy` and letting
+gravity carry on; the predictor returned false and deleted the edge.
+
+**A head contact is frequently the second half of the manoeuvre, not a failure.**
+The contact leaves the feet ABOVE the destination surface, and that is the exact
+test `airborneAimX` switches on: from holding the destination's footprint edge
+while climbing, to settling on the landing span. So the body bonks, stops
+rising, and *then* drives at the ledge and drops onto it.
+
+The reported shape is seed 5 at x 4220 — a shelf 62px up with a second platform
+82px above it, and 42px of clearance under the shelf against a 46-tall body:
+
+| | |
+|---|---|
+| Floor node | `[3890, 4190]`, ending exactly at the shelf's footprint edge |
+| Shelf node | `[4190, 4410]` at y 438, 62px up — well inside `maxRise` 122.5 |
+| Only clear takeoff | 4190, flush against the shelf, so the launch is straight up |
+| Predicted | Head into the platform at y 356 on frame 8 → edge rejected → **the floor node has no way up at all** |
+| `stepActor` | Head contact frame 8 at feet 422, aim switches, lands on the shelf frame 16 |
+
+With the edge gone the follower does the only thing left: walks to `shelf.x - w`
+and stops. Walking under is not the alternative — 42px against a 46-tall body —
+so the agent stands against the platform indefinitely.
+
+**Fix.** In `flies`, only a DOWNWARD contact resolves the flight. A rising
+contact is resolved the way the integrator resolves it — box pushed clear of the
+deepest surface it touched, `vy = 0` — and the arc continues. A side contact
+still rejects, unchanged.
+
+**Measured**, 60 generated levels at high difficulty, long, both bodies:
+
+| | Before | After |
+|---|---|---|
+| Hop/jump edges, legged | 1,809 | 2,048 |
+| Hop/jump edges, soldier | 1,925 | 2,185 |
+| Reachable surface, legged | 74.5% | **100.0%** |
+| Reachable surface, soldier | 72.6% | **99.6%** |
+| Reachable px over the 12 frozen seeds, both bodies | 207,874 | **269,220** |
+| Route legs failing in the air (S4's rate guard) | 3 of 250 | 3 of 282 |
+| Graph build, legged / soldier | 3.10 / 9.18ms | 1.90 / 6.52ms |
+
+The failure rate is the honesty check: 32 more legs are flown and the same three
+fail, so the recovered edges are flyable rather than gambled on. The build got
+*cheaper* because a takeoff that flies stops the run-up ladder that a rejected
+one starts. **This one change is worth more reachable surface than S2 and S3
+together** — the two seeds that "lose over three quarters of the level" under
+S0's guard are now whole, and the "21.1% of hop and jump edges do not survive
+the predictor" in "As built" below is superseded: it is 11% now.
+
+**A stuck-agent sweep is what found it, and it is not in the bar.** 1,354 runs
+over 40 levels, an agent on every node sent to the far end, counting those that
+end stationary with a platform overhead within a body width: **70 before, 1
+after.** The survivor is the documented off-graph pocket (47px of headroom —
+walkable, and invisible to the graph), not this.
+
+**Guards.** Both in the suites that already covered the subsystem and next to the
+cases that missed it: `test/nav.test.mjs` gains "a hop that bounces off the
+ceiling" and "a climb whose only takeoff rises into a ceiling" (the reported
+geometry) beside the positives that did not catch it, and `test/navigation.test.mjs`
+gains a real `Soldier` climbing that shelf at three frame steps, beside S4's own
+real-Soldier climbs. Four existing rejection fixtures asserted the pre-fix model
+and were corrected against `stepActor` rather than against the graph — each moved
+to the ceiling height where the block is real, which is a *measured* boundary and
+was not before:
+
+| Fixture | Was | Now | Why |
+|---|---|---|---|
+| a hop under a low ceiling | underside 350 | underside 380 | at 350 the body bounces and crosses; 380 caps the arc short of the far platform |
+| a jump under an overhang | one slab over the whole approach, underside 340 | both flanks roofed, underside 360 | at 340 the body bounces onto the perch; at 360 it caps below the perch top, so the aim never switches |
+| a jump whose near takeoff is roofed | underside 340 | underside 360 | same, and this is the case that keeps the far takeoff |
+| a 46-tall body under a lid | underside 340 | underside 380 | the body-size contrast is now about how early the lid caps the arc, not whether the head touches it |
+
+**`test/mission.golden.json` regenerated.** One agent (root 5) takes a newly
+available edge; maximum displacement 29px, and no soldier, projectile or other
+root moves. The twice-run self-check passes, so this is routing, not a new
+unseeded draw.
 
 ## As built
 

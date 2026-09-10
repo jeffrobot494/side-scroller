@@ -601,9 +601,19 @@ function nearbyPlatforms(from, to, profile, platforms, x) {
 //
 // The integration mirrors `stepActor` in src/mission/entities.js: gravity before
 // motion, x resolved before y, strict overlap, and a landing only on a DOWNWARD
-// contact with a platform top. Anything else the body touches — a column's side,
-// a slab's underside, a platform that is not the destination — rejects this
-// candidate, because that is a jump the follower would fly and fail.
+// contact with a platform top. A column's side, or coming down on a platform
+// that is not the destination, rejects this candidate — that is a jump the
+// follower would fly and fail.
+//
+// A HEAD CONTACT IS NOT ONE OF THOSE. `collideAxis` does not end a body's flight
+// on an underside: it puts the box back below the surface, zeroes vy and lets
+// gravity carry on, so the rest of the arc is a real arc the follower will fly.
+// It is frequently the second half of the manoeuvre rather than a failure,
+// because the contact leaves the feet ABOVE the destination surface, and that is
+// the exact test `airborneAimX` switches on — from holding the footprint edge
+// while climbing to settling on the landing span. Bouncing off a ceiling and
+// dropping onto the ledge beside it is one of the ordinary ways a soldier gets
+// up (see "Regressions found in play", 2026-09-09).
 //
 // `vArrive` is the horizontal velocity the body walks in with (S4). It is not
 // the launch velocity: the launch frame is a frame of ordinary actuation over
@@ -632,7 +642,14 @@ function flies(from, to, profile, platforms, x, up, vArrive) {
     if (vy > MAX_FALL) vy = MAX_FALL;
     if (sweep(box, "x", vx * dt, near)) return false; // a side: solid either way
     const hit = sweep(box, "y", vy * dt, near);
-    if (hit) return vy > 0 && landsOn(box, hit, to, h);
+    if (hit && vy > 0) return landsOn(box, hit, to, h);
+    if (hit) {
+      // Rising into an underside, resolved the way the integrator resolves it:
+      // pushed clear of everything it touched, vertical velocity spent. The
+      // deepest of them, because `collideAxis` applies every overlap in turn.
+      box.y = Math.max(...hit.hit.map((p) => p.y + p.h));
+      vy = 0;
+    }
     vx = actuate(profile, vx, driveV(airborneAimX(to, box.x, w, box.y + h) - box.x, runSpeed, dt), dt);
   }
   return false; // never came down anywhere: not a manoeuvre this body performs

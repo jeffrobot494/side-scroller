@@ -317,6 +317,12 @@ export default async function run(t) {
   // so a 30-wide body's clear takeoffs are 670 and 1000.
   const GROUND = { x: 0, y: 500, w: 1400, h: 40 };
   const PERCH = { x: 700, y: 400, w: 300, h: 20 };
+  // The perch with BOTH clear takeoffs roofed at an underside of 360. A body
+  // launched from either one caps out with its feet at 406 — still below the
+  // perch top, so `airborneAimX` never switches from holding the footprint edge
+  // to settling on the span, and it comes straight back down. Verified against
+  // `stepActor`: both takeoffs fall.
+  const ROOFED = [GROUND, PERCH, { x: 640, y: 340, w: 80, h: 20 }, { x: 1000, y: 340, w: 80, h: 20 }];
 
   // The edge from the node at (y, a) to the node at (y, a), or false. Null when
   // the geometry did not produce the nodes the case is about, which is a broken
@@ -356,6 +362,27 @@ export default async function run(t) {
     // A column in the gap is not on its own a reason to refuse the crossing —
     // the design says so in as many words. 40px tall, and the arc is 130 up.
     accepts("a hop over a low column", [HOP_A, HOP_B, { x: 270, y: 460, w: 20, h: 40 }], [500, 0], [500, 370]);
+
+    // A CEILING THE BODY BOUNCES OFF, which is what this block missed until
+    // 2026-09-09 and is why an agent stopped dead under a shelf in play. The arc
+    // rises into an underside at 370 and `collideAxis` answers that the way it
+    // answers every head contact: box pushed back under the surface, vy spent,
+    // gravity carries on. The flight is not over — the body is 104px up with the
+    // whole descent still to fly, and it lands on HOP_B. The predictor used to
+    // return false at the contact, so this edge and 25% of the reachable surface
+    // of a generated level did not exist.
+    accepts("a hop that bounces off the ceiling", [HOP_A, HOP_B, { x: 150, y: 350, w: 300, h: 20 }], [500, 0], [500, 370]);
+
+    // The shape from the report, and the one that matters most: a shelf 62px up
+    // with a second platform 82px above IT. The only takeoff is the one flush
+    // against the shelf's footprint, so the body rises straight up, puts its head
+    // into the platform overhead, and drops onto the shelf — the contact is what
+    // lifts its feet clear of the shelf top, which is the exact test
+    // `airborneAimX` switches on. Rejecting it left the ground node with no way
+    // up at all. Geometry is seed 5 at x 4220, moved to the origin.
+    accepts("a climb whose only takeoff rises into a ceiling",
+      [{ x: 0, y: 500, w: 1400, h: 40 }, { x: 400, y: 438, w: 190, h: 20 }, { x: 310, y: 356, w: 120, h: 20 }],
+      [500, 0], [438, 400]);
   }
   {
     // A 200px column: the body's whole box is inside it at the apex.
@@ -365,11 +392,17 @@ export default async function run(t) {
     // inside each frame is what catches it. If this ever goes green-by-accident
     // the tall column above will not notice.
     rejects("a hop into a 2px column", [HOP_A, HOP_B, { x: 279, y: 300, w: 2, h: 200 }], [500, 0], [500, 370]);
-    // A ceiling across the gap, which the arc rises into.
-    rejects("a hop under a low ceiling", [HOP_A, HOP_B, { x: 150, y: 330, w: 300, h: 20 }], [500, 0], [500, 370]);
-    // An overhang over the perch: the landing surface is well inside maxRise and
-    // the body still cannot get to it, which is the addendum's second outcome.
-    rejects("a jump under an overhang", [GROUND, PERCH, { x: 600, y: 320, w: 400, h: 20 }], [500, 0], [400, 700]);
+    // A ceiling across the gap, low enough that the arc it caps no longer
+    // reaches. 380 is the boundary and it is measured, not assumed: at an
+    // underside of 370 this same body crosses (the case above it), because
+    // `collideAxis` does not end a flight on a head contact — see "a hop that
+    // bounces off the ceiling" in the positives.
+    rejects("a hop under a low ceiling", [HOP_A, HOP_B, { x: 150, y: 360, w: 300, h: 20 }], [500, 0], [500, 370]);
+    // An overhang over each flank of the perch: the landing surface is well
+    // inside maxRise and the body still cannot get to it, which is the
+    // addendum's second outcome. Both flanks, because roofing one leaves the
+    // other flyable — that is the case two blocks below.
+    rejects("a jump under an overhang", ROOFED, [500, 0], [400, 700]);
   }
   {
     // DIRECTION. Clearance filters directed edges, so an up-edge it rejects
@@ -378,16 +411,15 @@ export default async function run(t) {
     // arcs cover the same span at the same heights, so an obstacle that blocks
     // one blocks the other. The asymmetry lives on up-edges, where the takeoff
     // must clear a footprint and the return is a fall.)
-    const roofed = [GROUND, PERCH, { x: 600, y: 320, w: 400, h: 20 }];
-    t.eq("clearance: the blocked climb is gone", edgeUnder(roofed, SOLDIER, [500, 0], [400, 700], true), false);
-    const down = edgeUnder(roofed, SOLDIER, [400, 700], [500, 0], true);
+    t.eq("clearance: the blocked climb is gone", edgeUnder(ROOFED, SOLDIER, [500, 0], [400, 700], true), false);
+    const down = edgeUnder(ROOFED, SOLDIER, [400, 700], [500, 0], true);
     t.ok("clearance: and the drop off the same perch survives it", !!down && down.kind === "drop");
   }
   {
     // A blocked NEAR takeoff must not condemn a clear far one. The overhang sits
     // over 670 only; 1000 is in open air, and the edge keeps exactly that.
     const one = accepts("a jump whose near takeoff is roofed",
-      [GROUND, PERCH, { x: 640, y: 320, w: 80, h: 20 }], [500, 0], [400, 700]);
+      [GROUND, PERCH, { x: 640, y: 340, w: 80, h: 20 }], [500, 0], [400, 700]);
     t.eq("clearance: ...and only the far takeoff is kept", txs(one), [1000]);
   }
   {
@@ -476,10 +508,13 @@ export default async function run(t) {
   }
 
   {
-    // BODY SIZE. Same envelope, different box: the arc's apex puts a 46-tall
-    // body's head at 324.4 and a 20-tall body's at 350.4, and the lid's underside
-    // is at 340. "A gap admits one body but not another", from the design table.
-    const LID = { x: 200, y: 320, w: 140, h: 20 };
+    // BODY SIZE. Same envelope, different box, and the contrast is now about how
+    // early the lid CAPS the arc rather than whether the head touches it at all:
+    // at an underside of 380 the 46-tall body stops rising 74px up and falls
+    // short of the far platform, while the 20-tall body has 26px more room, keeps
+    // climbing to its own apex and clears the gap. "A gap admits one body but not
+    // another", from the design table. Both verified against `stepActor`.
+    const LID = { x: 200, y: 360, w: 140, h: 20 };
     const SHORT = bodyProfile({ w: 30, h: 20, gravity: 2000, jumpSpeed: 720, runSpeed: 320 });
     rejects("a 46-tall body under a lid", [HOP_A, HOP_B, LID], [500, 0], [500, 370]);
     accepts("a 20-tall body under the same lid", [HOP_A, HOP_B, LID], [500, 0], [500, 370], SHORT);
