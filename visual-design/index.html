@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>After Hours — city stage study</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#060d14;color:#e2e9e8;font-family:Arial,sans-serif;overflow:hidden}canvas{display:block;touch-action:none}header{position:fixed;top:36px;left:42px;pointer-events:none}header small{font-size:10px;letter-spacing:4px;color:#99babd}h1{font-size:32px;letter-spacing:7px;font-weight:400;margin:12px 0}header p{font-size:11px;color:#8aa3aa;letter-spacing:2px}.badge{position:fixed;right:38px;top:40px;color:#a3b8ba;font:10px monospace;letter-spacing:2px}.badge:before{content:'●';color:#72b7b5;margin-right:10px}footer{position:fixed;bottom:26px;left:34px;right:34px;display:flex;justify-content:space-between;align-items:end;gap:20px}.hint{font:10px monospace;letter-spacing:1px;color:#93aaaf;line-height:2}.controls{display:flex;gap:19px;align-items:center;background:#08131bd9;border:1px solid #49616c55;padding:13px 17px;backdrop-filter:blur(12px);font:10px monospace;letter-spacing:1px}label{display:flex;align-items:center;gap:10px}input{width:85px;accent-color:#89c9c5}button{border:0;background:transparent;color:#d0e3e4;cursor:pointer;font:inherit;letter-spacing:inherit;padding:5px}button:hover{color:#eeb975}button:focus-visible{outline:1px solid #89c9c5}#status{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font:13px monospace;color:#b4d3d6;max-width:80%;text-align:center}body.clean header,body.clean footer,body.clean .badge{display:none}@media(max-width:650px){header{left:22px;top:22px}h1{font-size:23px}.badge{display:none}footer{left:15px;right:15px;bottom:15px}.hint{display:none}.controls{width:100%;justify-content:space-between;gap:8px}input{width:65px}}
+    #fps{position:fixed;top:12px;right:18px;z-index:2;padding:6px 9px;background:#08131bd9;border:1px solid #49616c55;color:#89c9c5;font:12px monospace;font-variant-numeric:tabular-nums;pointer-events:none}body.clean #fps{display:none}
+  </style>
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script>
+</head>
+<body>
+  <header><small>VISUAL DEVELOPMENT / 001</small><h1>AFTER HOURS</h1><p>DOWNTOWN · RAIN STUDY</p></header>
+  <div class="badge">3D SIDE-SCROLLER STAGE</div>
+  <div id="fps" aria-label="Frames per second">— FPS</div>
+  <div id="status" role="status">Lighting the city…</div>
+  <footer><div class="hint">DRAG / ← → &nbsp; EXPLORE THE STREET<br>H &nbsp; HIDE INTERFACE</div><div class="controls"><label>RAIN <input id="rain" type="range" min="0" max="1" step="0.01" value="0.7" aria-label="Rain intensity"></label><button id="tour" aria-pressed="false">AUTO PAN</button><button id="pause" aria-pressed="false">PAUSE</button><button id="reset">RESET</button></div></footer>
+  <script type="module" src="./street.js?v=3-batched"></script>
+  <script>window.addEventListener('error',()=>{document.getElementById('status').textContent='The scene could not load. Check your connection and WebGL support, then reload.'});</script>
+</body>
+</html>
