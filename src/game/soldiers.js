@@ -17,6 +17,12 @@
 //     speed:  movement + reaction speed        (1-10)
 //     nerve:  composure under fire; low nerve = panics, freezes, breaks (1-10)
 //   }
+//   primary, secondary: attribute ids (aim | health | speed | nerve) that grow
+//             fastest on level up — see src/game/progression.js. Drawn uniformly
+//             and independently, repeats allowed, and fixed for life. The
+//             authored recruits were rolled once and committed.
+//   xp:       lifetime XP (absent = the progression definition's startXp).
+//             Level and bonuses are derived from it; `stats` is never written.
 //   traits:   short tags that flavor behavior and story (e.g. "Reckless")
 //   cost:     credits to hire
 //   status:   "recruit" | "roster" | "deployed" | "dead"
@@ -47,6 +53,8 @@ export const RECRUIT_POOL = [
     origin: "Detroit, USA",
     bio: "Ex-SWAT breacher, discharged for putting a captain through a third-floor window. Nobody on Earth is better at a doorway. Nobody is worse at taking an order she disagrees with.",
     stats: { aim: 8, health: 6, speed: 5, nerve: 6 },
+    primary: "aim",
+    secondary: "aim",
     traits: ["Steady Hands", "Insubordinate"],
     cost: 320,
     status: "recruit",
@@ -60,6 +68,8 @@ export const RECRUIT_POOL = [
     origin: "Accra, Ghana",
     bio: "A UN field medic who watched a hospital vanish under alien fire and decided the species was being tested. He walks into the open like the bullets are someone else's business. He does not flinch. Ever.",
     stats: { aim: 5, health: 7, speed: 4, nerve: 10 },
+    primary: "health",
+    secondary: "speed",
     traits: ["Fearless", "Zealot"],
     cost: 300,
     status: "recruit",
@@ -73,6 +83,8 @@ export const RECRUIT_POOL = [
     origin: "Osaka, Japan",
     bio: "Drone-racing world champion who got bored winning. The fastest hands on the roster and the shortest attention span. Treats incoming fire as a suggestion.",
     stats: { aim: 7, health: 4, speed: 9, nerve: 4 },
+    primary: "speed",
+    secondary: "speed",
     traits: ["Reckless", "Fast Hands"],
     cost: 260,
     status: "recruit",
@@ -86,6 +98,8 @@ export const RECRUIT_POOL = [
     origin: "Unknown",
     bio: "Twenty years a mercenary across four continents. Won't give you his real name, his real age, or a straight answer. Worth every credit — and he is the first to remind you of it.",
     stats: { aim: 9, health: 8, speed: 3, nerve: 8 },
+    primary: "speed",
+    secondary: "nerve",
     traits: ["Veteran", "Mercenary"],
     cost: 480,
     status: "recruit",
@@ -99,6 +113,8 @@ export const RECRUIT_POOL = [
     origin: "Manila, Philippines",
     bio: "Lost her whole family in the first raid on the harbor district. Signed the enlistment papers the next morning, still in yesterday's clothes. She is not here for the money.",
     stats: { aim: 7, health: 6, speed: 6, nerve: 7 },
+    primary: "health",
+    secondary: "nerve",
     traits: ["Vengeful", "Loyal"],
     cost: 240,
     status: "recruit",
@@ -112,6 +128,8 @@ export const RECRUIT_POOL = [
     origin: "Unknown",
     bio: "A cyber-orphan who grew up in the city's dead networks. Can talk any machine into opening, but can barely hold a rifle steady. Cheap, green, and quietly terrified.",
     stats: { aim: 3, health: 4, speed: 7, nerve: 3 },
+    primary: "aim",
+    secondary: "speed",
     traits: ["Green", "Tech-Savvy"],
     cost: 120,
     status: "recruit",
