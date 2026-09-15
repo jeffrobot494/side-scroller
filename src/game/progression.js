@@ -289,3 +289,13 @@ export function resolveSoldier(def, soldier) {
   }
   return { ...info, bonus, stats, hpBonus: bonus.hp };
 }
+
+/**
+ * A shallow copy of the soldier carrying effective `stats` and `hpBonus` in
+ * place of its authored stats — the shape `soldierMaxHp` and every stat readout
+ * take. The copy is for reading; the roster soldier itself is never changed.
+ */
+export function effectiveSoldier(def, soldier) {
+  const r = resolveSoldier(def, soldier);
+  return { ...soldier, stats: r.stats, hpBonus: r.hpBonus };
+}

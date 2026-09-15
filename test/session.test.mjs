@@ -100,7 +100,9 @@ export default async function run(t) {
       [
         "armory", "building", "campaignHealth", "completedMissions", "day",
         "elsewhere", "leads", "log", "money", "outcome", "pending", "playerId",
-        "recruits", "roster", "stores", "taskForce",
+        // The campaign's progression rules (tech/soldier-progression.md P2), so
+        // the hub grows stats with the authority's numbers, not its own.
+        "progression", "recruits", "roster", "stores", "taskForce",
       ]
     );
     /* Three fields that are not a projection of this player's campaign:
@@ -275,7 +277,9 @@ export default async function run(t) {
     t.eq(
       "...carrying exactly what the mission and the results screen read",
       Object.keys(disp("lead_1").squad[0].data).sort(),
-      ["callsign", "id", "name", "stats", "wounds"]
+      // `hpBonus` since progression P2: `stats` are GROWN stats and this is the
+      // flat level-up HP, both resolved here so the mission never reads rules.
+      ["callsign", "hpBonus", "id", "name", "stats", "wounds"]
     );
     t.ok("...and not the soldier's career record", disp("lead_1").squad[0].data.record === undefined);
     // J5: and WHO COMMANDS IT. The mission has partitioned by owner since J1;
@@ -792,6 +796,46 @@ export default async function run(t) {
     DOOM.forEach((k, i) => { config[k] = doom[i]; });
   }
 
+  // ---- soldier XP on a joint lead (tech/soldier-progression.md, P2) --------
+  // XP is the COMMANDER'S half: each is paid off their own report, so the
+  // first report of a joint lead pays its survivors at once — unlike the
+  // world's reward above — and does not stop the second commander's. The
+  // answer carries the award whether or not it turned the day.
+  {
+    const world = createWorld();
+    const s = createSession({ world, players: ["usa", "china"] });
+    const [usa, china] = ["usa", "china"].map((id) => s.view(id));
+    for (const id of ["usa", "china"]) s.command(id, { type: "hire", recruitId: s.view(id).recruits[0].id });
+    const [a, b] = [usa.roster[0], china.roster[0]];
+    a.xp = 25; // 5 short of level 3: one Low mission (5 XP) crosses it
+    world.leads.push({ ...fakeLead("xp"), difficulty: "low", xpReward: 5 });
+    s.command("usa", { type: "deploy", leadId: "xp", soldierIds: [a.id] });
+    s.command("china", { type: "deploy", leadId: "xp", soldierIds: [b.id] });
+    s.command("usa", { type: "ready" });
+    s.command("china", { type: "ready" });
+    const round = s.takeRound();
+    const mine = round.find((d) => d.playerId === "usa");
+    t.eq("a dispatch carries GROWN stats for a levelled soldier",
+      mine.squad[0].data.stats.aim, a.stats.aim + (a.primary === "aim" ? 1 : 0) + (a.secondary === "aim" ? 1 : 0));
+    t.eq("...and the flat level-up HP", mine.squad[0].data.hpBonus, 10);
+
+    const report = (d) => s.command(d.playerId, {
+      type: "missionResult",
+      dispatchId: d.dispatchId,
+      result: { success: true, missionId: "xp", casualties: [], survivors: [d.squad[0].data.id], loot: [], killsBySoldier: [] },
+    });
+    const first = report(mine);
+    t.eq("the first report of a joint lead pays its own survivor", a.xp, 30);
+    t.ok("...on an answer that did not turn the day", !first.dayTurned && first.award.length === 1);
+    t.eq("...naming the level crossed", [first.award[0].fromLevel, first.award[0].toLevel], [2, 3]);
+    const again = report(mine);
+    t.eq("a repeated report pays nothing", [a.xp, again.award.length], [30, 0]);
+    const last = report(round.find((d) => d.playerId === "china"));
+    t.eq("...and did not block the other commander's", b.xp, 5);
+    t.ok("the last report carries its award beside the day", last.dayTurned === true && last.award.length === 1);
+    t.ok("the view carries the campaign's rules", usa.progression === world.progression);
+  }
+
   // ---- a finished campaign cannot turn another day ------------------------
   // The rule that REPLACED "the mission that ends the campaign is never charged
   // a day" — that was a fact about a charge S4 deleted. This is the gate's own.
@@ -870,7 +914,10 @@ export default async function run(t) {
       type: "missionResult",
       result: { success: true, missionId: "none", casualties: [], survivors: [], loot: [], killsBySoldier: [] },
     });
-    t.eq("missionResult reports ok and nothing else", res, { ok: true });
+    // `award` since progression P2: the soldiers this report paid XP to, on
+    // every answer, because the answer is the results screen. Nobody survived
+    // this one, so nobody was paid.
+    t.eq("missionResult reports ok and the XP it paid, nothing else", res, { ok: true, award: [] });
     t.ok("...and does not hand back the state", res !== campaign && res.roster === undefined);
   }
 
@@ -911,7 +958,8 @@ export default async function run(t) {
 
     t.eq("a projected lead carries exactly what Operations draws",
       Object.keys(usa.leads[0]).sort(),
-      ["brief", "daysLeft", "difficulty", "id", "name", "sharedBy", "sharedWith", "winsCampaign"]);
+      // `xpReward` since progression P2: the briefing prints it.
+      ["brief", "daysLeft", "difficulty", "id", "name", "sharedBy", "sharedWith", "winsCampaign", "xpReward"]);
     t.ok("...and not the generated level, which is the session's alone",
       usa.leads.every((l) => l.level === undefined && l.report === undefined));
     t.ok("...nor who ELSE can see it", usa.leads.every((l) => l.seenBy === undefined));

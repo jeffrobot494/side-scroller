@@ -467,6 +467,7 @@ export default async function run(t) {
     }
 
     const leadId = rooms.snapshot(a.token).leads[0].id;
+    const advertised = rooms.snapshot(a.token).leads[0].xpReward;
     for (const s of seats) {
       rooms.command(s.token, { type: "hire", recruitId: rooms.snapshot(s.token).recruits[0].id });
       rooms.command(s.token, { type: "deploy", leadId, soldierIds: [rooms.snapshot(s.token).roster[0].id] });
@@ -497,10 +498,18 @@ export default async function run(t) {
     const endA = heard.get(a.playerId).filter((x) => x.event === "missionEnd").pop();
     t.ok("report: the reporting commander is pushed their results screen", !!endA && endA.data.result.success === true);
     t.ok("report: ...and nobody else is", !heard.get(b.playerId).some((x) => x.event === "missionEnd"));
+    // Soldier progression P2, through the room: XP is settled on the server,
+    // reaches the seat's snapshot, and rides the pushed results screen.
+    const paidA = rooms.snapshot(a.token).roster[0];
+    t.ok("xp: the extracting commander's soldier is paid by the room, what the lead advertised",
+      advertised > 0 && paidA.xp === advertised);
+    t.ok("xp: ...and the pushed results carry the award", endA.data.turn.award.length === 1 && endA.data.turn.award[0].id === paidA.id);
+    t.ok("xp: the snapshot carries the campaign's rules", rooms.snapshot(a.token).progression.maxLevel === 10);
 
     flight.report(b.playerId, result(rooms.snapshot(b.token).roster[0].id, false));
     const endB = heard.get(b.playerId).filter((x) => x.event === "missionEnd").pop();
     t.ok("report: the second commander gets theirs", !!endB && endB.data.result.success === false);
+    t.eq("xp: a wiped commander's award is empty", endB.data.turn.award, []);
     t.ok("report: ...carrying the day summary the command answered with, which no page could have seen",
       endB.data.turn && endB.data.turn.dayTurned === true);
     t.ok("report: the day turned on the last report", rooms.snapshot(a.token).day > before);
@@ -844,7 +853,8 @@ async function configRoutes(t) {
       else if (r.status === 403) refused++;
       else broke++;
     }
-    t.eq("config: a whole exported config applies its 48 server keys", applied, 48);
+    // 52 since progression P2 added the four server-scoped xpReward* knobs.
+    t.eq("config: a whole exported config applies its 52 server keys", applied, 52);
     t.eq("config: ...drops the other 24", refused, 24);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");
@@ -864,7 +874,7 @@ async function configRoutes(t) {
 //
 // ITS OWN SPAWN, AND ITS OWN CONFIG SOURCE. Two reasons, and both are load
 // bearing. Section 5 deliberately leaves its server dirty — a clamped gravity,
-// a whole 48-key import — so "written where it differs and nowhere else" on
+// a whole 52-key import — so "written where it differs and nowhere else" on
 // that spawn would be a claim about leftovers. And this suite starts the REAL
 // `server.mjs` against the REAL checkout, so a route that wrote its default
 // target would edit `src/game/config.js` under every other suite in the run.

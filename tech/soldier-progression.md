@@ -50,7 +50,7 @@ Each slice lands alone. P1 is pure and imported by nothing else. P2 is complete 
 | `src/game/soldiers.js` | `primary`/`secondary` on each recruit. `soldierMaxHp` includes the flat bonus. Schema comment updated | P1, P2 |
 | `src/game/gen/levelgen.js` | Stamp `xpReward` beside `threatReward`. The boss lead is `difficulty: "extreme"` and is paid the Extreme reward (unlike `threatReward`, which is zeroed for it) | P2 |
 | `src/game/config.js` | Four `xpReward*` range knobs, `scope: "server"` | P2 |
-| `src/game/state.js` | Definition snapshot on the world, `xpReward` in `missionOf`, the award inside the success guard, health policy, award report returned to the caller (the only caller, `session.js`, discards today's return value) | P2 |
+| `src/game/state.js` | Definition snapshot on the world, `xpReward` in `missionOf`, the award inside the success guard, health policy, award report handed to the caller | P2 |
 | `src/game/session.js` | Effective stats and HP bonus in `projectDispatch`; `xpReward` in `projectLead`; `progression` on the view; the award report on **all three** `missionResult` returns (not last report, last report with day turned, last report with `dayHeld`) | P2 |
 | `src/hub/hub.js`, `src/hub/hub.css` | P2: stat bars and HP read effective values. P3: the readouts in the table above and `showResults` holding the award report whether or not the day turned | P2, P3 |
 | `src/editor/tools/progression.js` (new), `src/editor/editor.js` | The P4 panel, registered in `TOOLS`, `MOUNTABLE` and the factory map; `applyProgressionOverrides()` called at editor load, like `applyWeaponOverrides()` | P4 |
@@ -78,6 +78,7 @@ Settlement rules the builder must keep:
 - **Idempotence is the existing guard.** XP is paid inside `if (!state.completedMissions.includes(result.missionId))`. That list is per commander, so on a joint lead each commander's survivors are paid from their own report and neither report blocks the other. A repeated report for the same mission pays nothing.
 - **Order inside settlement:** casualties marked dead → survivors' wounds written back → XP added → levels crossed → health policy applied on the level-up delta. The policy works on max HP before and after the award, so wounds that were just written back are what `preserveWounds` keeps.
 - **Level, XP into level and bonuses are always recomputed from `xp`.** A soldier stores lifetime `xp` and nothing derived from it.
+- **As built (P2): the award report leaves `applyMissionResult` through an `onAward` option, not its return value.** The plan was to change the return; it stays the campaign, because a return-shape change is invisible to every caller that ignores it and the one caller that wants the report (`session.js`) can ask for it explicitly.
 - **A soldier with no `xp` field is at the definition's starting XP.** That covers every test fixture and the Behavior Lab's stub soldier.
 
 ## Must not regress

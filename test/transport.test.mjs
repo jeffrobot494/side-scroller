@@ -335,9 +335,10 @@ export default async function run(t) {
     t.ok("round: and not who else has seen the lead", d.mission.seenBy === undefined);
     t.ok("round: the level crosses whole, and once", !!d.level.platforms && d.mission.level === undefined);
     t.eq(
-      "round: a soldier crosses as the seven fields the mission reads",
+      "round: a soldier crosses as the fields the mission reads",
       Object.keys(d.squad[0].data).sort(),
-      ["callsign", "id", "name", "stats", "wounds"]
+      // `hpBonus`: progression P2's flat level-up HP, resolved before the wire.
+      ["callsign", "hpBonus", "id", "name", "stats", "wounds"]
     );
     t.ok("round: with the whole weapon", !!d.squad[0].weapon && typeof d.squad[0].weapon.name === "string");
     t.ok("round: and the routing the page sequences on", typeof d.dispatchId === "string" && d.playerId === "p1");

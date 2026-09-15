@@ -22,6 +22,7 @@ import { BLUEPRINTS } from "../game/content.js";
 import { config } from "../game/config.js";
 import { labelFor } from "../game/enemycost.js";
 import { soldierMaxHp } from "../game/soldiers.js";
+import { defaultProgression, effectiveSoldier } from "../game/progression.js";
 
 const LOCATIONS = [
   { id: "barracks", label: "Barracks", icon: "🪖", staff: "Sgt. Bishop" },
@@ -353,8 +354,16 @@ export class Hub {
       </section>`;
   }
 
-  _soldierCard(s, hireable) {
+  // A soldier as the campaign's rules have grown them: effective stats and the
+  // flat progression HP, read off the view's `progression` so a room's hub uses
+  // the server's numbers. A copy for display; the roster soldier is untouched.
+  _grown(s) {
+    return effectiveSoldier(this.game.progression || defaultProgression(), s);
+  }
+
+  _soldierCard(raw, hireable) {
     const g = this.game;
+    const s = this._grown(raw);
     const affordable = g.money >= s.cost;
     const displayName = s.callsign
       ? `${s.name} <span class="callsign">"${s.callsign}"</span>`
@@ -619,7 +628,8 @@ export class Hub {
     const sel = this.deploy.selected;
 
     const cards = roster
-      .map((s) => {
+      .map((raw) => {
+        const s = this._grown(raw);
         const chosen = sel.has(s.id);
         const wId = this.deploy.weapons[s.id] || s.weaponId || "carbine";
         const options = g.armory
@@ -1042,7 +1052,7 @@ function statBar(key, value) {
   return `
     <div class="stat">
       <span class="stat-label">${STAT_LABELS[key]}</span>
-      <span class="stat-track"><span class="stat-fill" style="width:${value * 10}%"></span></span>
+      <span class="stat-track"><span class="stat-fill" style="width:${Math.min(100, value * 10)}%"></span></span>
       <span class="stat-num">${value}</span>
     </div>`;
 }

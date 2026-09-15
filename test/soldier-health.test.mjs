@@ -6,6 +6,8 @@ import { Soldier, STAND_H } from "../src/mission/entities.js";
 import { soldierMaxHp } from "../src/game/soldiers.js";
 import { createState, applyMissionResult, advanceDay } from "../src/game/state.js";
 import { config } from "../src/game/config.js";
+import { generateLevel } from "../src/game/gen/levelgen.js";
+import { effectiveSoldier } from "../src/game/progression.js";
 
 const rifle = { id: "rifle", name: "R", fireMode: "projectile", fireRate: 7, projectile: { speed: 900, w: 12, h: 4, color: "#fff", life: 1 }, effects: [] };
 
@@ -100,6 +102,82 @@ export default async function run(t) {
       t.eq("healPerDay 0 → no healing", hurt.wounds, 4);
     } finally {
       config.healPerDay = prev;
+    }
+  }
+
+  // ---- soldier progression P2: XP paid at settlement, HP grows with it ------
+  // tech/soldier-progression.md. Wounds are damage taken, so the default
+  // policy (preserveWounds) needs no write: the maximum rises and current HP
+  // rises with it.
+  {
+    const lead = (g, id, xpReward, extra = {}) => {
+      g.leads.push({ id, name: id, difficulty: "low", threatReward: 0, xpReward, ...extra });
+      return id;
+    };
+    const report = (g, missionId, over = {}) =>
+      applyMissionResult(g, { success: true, missionId, survivors: [], casualties: [], woundsBySoldier: [], killsBySoldier: [], loot: [], kills: 0, ...over });
+    const trooper = (id, xp, wounds = 0) => ({ ...rosterSoldier(id, 5, wounds), primary: "aim", secondary: "health", xp }); // Health gains nothing at level 3, so an HP delta there is the flat grant alone
+
+    // Each difficulty's reward, stamped on the lead at generation.
+    const want = { low: 5, medium: 10, high: 20, extreme: 50 };
+    for (const [difficulty, xp] of Object.entries(want)) {
+      t.eq(`a ${difficulty} lead advertises ${xp} XP`, generateLevel({ seed: 7, difficulty }).mission.xpReward, xp);
+    }
+    t.eq("the boss lead is Extreme and advertises Extreme XP", generateLevel({ seed: 7, boss: true }).mission.xpReward, 50);
+    {
+      const prev = config.xpRewardLow;
+      const stamped = generateLevel({ seed: 7, difficulty: "low" }).mission;
+      config.xpRewardLow = 99;
+      const g = createState();
+      const s = trooper("st", 0);
+      g.roster.push(s);
+      g.leads.push({ ...stamped, id: "stamped" });
+      report(g, "stamped", { survivors: ["st"] });
+      t.eq("settlement pays the ADVERTISED reward, not the retuned knob", s.xp, 5);
+      config.xpRewardLow = prev;
+    }
+
+    // Who is paid.
+    {
+      const g = createState();
+      const alive = trooper("alive", 0);
+      const kia = trooper("kia", 0);
+      const benched = trooper("bench", 0);
+      g.roster.push(alive, kia, benched);
+      const before = JSON.stringify(alive.stats);
+      report(g, lead(g, "m1", 50), { survivors: ["alive"], casualties: ["kia"] });
+      t.eq("a survivor is paid the full reward", alive.xp, 50);
+      t.eq("a benched soldier is paid nothing", benched.xp, 0);
+      t.ok("the dead are not paid, and stay dead", !g.roster.some((s) => s.id === "kia") && kia.status === "dead");
+      t.eq("authored stats are never written by an award", JSON.stringify(alive.stats), before);
+      report(g, "m1", { survivors: ["alive"] });
+      t.eq("a repeated report of the same mission pays nothing", alive.xp, 50);
+
+      const lost = trooper("lost", 0);
+      g.roster.push(lost);
+      report(g, lead(g, "m2", 50), { success: false, survivors: ["lost"] });
+      t.eq("a failed mission pays nothing", lost.xp, 0);
+    }
+
+    // Max HP and the three level-up health policies. 25 XP → 30 crosses to 3.
+    {
+      const cross = (policy) => {
+        const g = createState();
+        g.world.progression.levelUpHealthPolicy = policy;
+        const s = trooper("p", 25, 6);
+        g.roster.push(s);
+        const maxBefore = soldierMaxHp(effectiveSoldier(g.world.progression, s));
+        report(g, lead(g, "hp", 5), { survivors: ["p"], woundsBySoldier: [{ id: "p", wounds: 6 }] });
+        const maxAfter = soldierMaxHp(effectiveSoldier(g.world.progression, s));
+        return { s, maxBefore, maxAfter };
+      };
+      const keep = cross("preserveWounds");
+      t.eq("a level-up adds its flat HP to the maximum", keep.maxAfter - keep.maxBefore, 10);
+      t.eq("preserveWounds keeps the damage, so current HP rises by the increase", keep.s.wounds, 6);
+      const same = cross("preserveCurrentHp");
+      t.eq("preserveCurrentHp keeps current HP where it was", same.maxAfter - same.s.wounds, same.maxBefore - 6);
+      t.eq("fullHeal clears the wounds", cross("fullHeal").s.wounds, 0);
+      t.eq("a soldier with no hpBonus gets none", soldierMaxHp(rosterSoldier("raw", 5, 0)), config.soldierBaseHp + 5 * config.soldierHpPerHealth);
     }
   }
 }

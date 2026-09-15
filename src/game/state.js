@@ -18,7 +18,8 @@
 // multiplayer construct through the same path rather than two.
 // ---------------------------------------------------------------------------
 
-import { RECRUIT_POOL } from "./soldiers.js";
+import { RECRUIT_POOL, soldierMaxHp } from "./soldiers.js";
+import { defaultProgression, effectiveSoldier, resolveSoldier, xpOf, addXp } from "./progression.js";
 import { WEAPONS, BLUEPRINTS, TUNING } from "./content.js";
 import { config } from "./config.js";
 import { listCustomWeapons } from "./customcontent.js";
@@ -88,6 +89,13 @@ export function createWorld(commanders = []) {
     // that ever existed, and it is what makes a stray repeat report a no-op
     // rather than a second payout.
     reports: new Map(),
+
+    // The progression rules THIS campaign runs (tech/soldier-progression.md).
+    // Copied once, here, so every commander over this world levels on the same
+    // numbers and nothing that changes later — a retuned default, an editor
+    // save — moves a campaign already under way. Nothing reads the live
+    // definition after this line.
+    progression: defaultProgression(),
   };
   seedBoard(world);
   return world;
@@ -691,6 +699,7 @@ function missionOf(state, missionId) {
     name: lead.name,
     difficulty: lead.difficulty,
     threatReward: lead.threatReward,
+    xpReward: lead.xpReward,
     winsCampaign: !!lead.winsCampaign,
     success: false, // set by any report that succeeded
   };
@@ -698,8 +707,9 @@ function missionOf(state, missionId) {
   return entry;
 }
 
-export function applyMissionResult(state, result, { last = true } = {}) {
+export function applyMissionResult(state, result, { last = true, onAward = null } = {}) {
   const world = worldOf(state);
+  let award = [];
   const mission = missionOf(state, result.missionId);
   if (mission && result.success) mission.success = true;
 
@@ -737,7 +747,10 @@ export function applyMissionResult(state, result, { last = true } = {}) {
       // High lead earned nothing toward their own finale; it reads the ledger
       // now and both earn it.
       if (mission && mission.difficulty === "high") state.highWins += 1;
+      if (mission) award = awardXp(state, result, mission, "success");
     }
+  } else if (mission) {
+    award = awardXp(state, result, mission, "failure");
   }
   // The mission's line is the REPORTING COMMANDER'S, not the world's: it names
   // what they recovered, and on a joint lead one squad can walk out while the
@@ -803,7 +816,57 @@ export function applyMissionResult(state, result, { last = true } = {}) {
   // charge. See tech/multiplayer-state.md, S4.
   placeBossIfEarned(state);
 
+  // The award goes back through a callback rather than the return value, which
+  // stays the campaign — src/game/session.js is the one caller that wants it.
+  if (onAward) onAward(award);
   return state;
+}
+
+// ---- soldier XP (tech/soldier-progression.md, P2) ---------------------------
+// Paid by the report, per commander: the survivors named on THIS result, at the
+// reward the lead advertised when it was offered. On success this runs inside
+// the `completedMissions` guard, which is what makes a repeated report pay
+// nothing. A failure has no guard and needs none today: a squad fails only when
+// it is wiped, so there is nobody on `survivors` to pay.
+//
+// Returns one entry per soldier paid — what the results screen prints.
+function awardXp(state, result, mission, outcome) {
+  const def = worldOf(state).progression || defaultProgression();
+  const reward = mission.xpReward || 0;
+  if (!def.eligibility.outcomes.includes(outcome) || reward <= 0) return [];
+  const out = [];
+  for (const id of result.survivors) {
+    const s = state.roster.find((r) => r.id === id && r.status !== "dead");
+    if (!s) continue;
+    const before = resolveSoldier(def, s);
+    const maxBefore = soldierMaxHp(effectiveSoldier(def, s));
+    s.xp = addXp(def, xpOf(def, s), reward);
+    const after = resolveSoldier(def, s);
+    if (after.level > before.level) {
+      // Wounds are damage taken, so preserveWounds is already true of them:
+      // the new maximum raises current HP by itself. The other two policies
+      // are the ones that write.
+      const maxAfter = soldierMaxHp(effectiveSoldier(def, s));
+      if (def.levelUpHealthPolicy === "fullHeal") s.wounds = 0;
+      else if (def.levelUpHealthPolicy === "preserveCurrentHp") {
+        s.wounds = Math.min(Math.max(0, maxAfter - 1), (s.wounds || 0) + (maxAfter - maxBefore));
+      }
+    }
+    const gains = { hp: after.bonus.hp - before.bonus.hp, attrs: {} };
+    for (const a of Object.keys(after.bonus.attrs)) gains.attrs[a] = after.bonus.attrs[a] - before.bonus.attrs[a];
+    out.push({
+      id: s.id,
+      name: s.name,
+      xp: reward,
+      fromLevel: before.level,
+      toLevel: after.level,
+      intoLevel: after.intoLevel,
+      nextCost: after.nextCost,
+      max: after.max,
+      gains,
+    });
+  }
+  return out;
 }
 
 export { uid };

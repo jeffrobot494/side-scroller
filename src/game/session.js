@@ -44,6 +44,7 @@ import {
 import { dealRecruits } from "./soldiers.js";
 import { WEAPONS } from "./content.js";
 import { config } from "./config.js";
+import { defaultProgression, effectiveSoldier } from "./progression.js";
 
 // The campaign fields a player can see. `highWins` is deliberately absent —
 // nothing in the hub reads it (only state.js's own finale gate does), and S7
@@ -110,6 +111,8 @@ function projectLead(lead, playerId, nameOf) {
     name: lead.name,
     brief: lead.brief,
     difficulty: lead.difficulty,
+    // The soldier XP this lead advertised, fixed when it was generated.
+    xpReward: lead.xpReward,
     daysLeft: lead.daysLeft,
     winsCampaign: !!lead.winsCampaign,
     // Who handed it to you, or null. Never who ELSE holds it.
@@ -151,7 +154,12 @@ function projectLead(lead, playerId, nameOf) {
 //     SQUAD is never disclosed (design/multiplayer.md), and under the
 //     server-authoritative architecture a browser never needs it — the room
 //     builds the scene.
-function projectDispatch(d, joint) {
+// `progression` is the campaign's rules, and this is the ONE place a soldier's
+// effective stats are resolved for a mission (tech/soldier-progression.md):
+// `stats` below are grown stats and `hpBonus` is the flat progression HP, so
+// src/mission/ reads them exactly as it read authored stats and never learns
+// progression exists.
+function projectDispatch(d, joint, progression) {
   const out = {
     dispatchId: d.dispatchId,
     playerId: d.playerId,
@@ -160,27 +168,33 @@ function projectDispatch(d, joint) {
     // the pressure scale, which makeLead draws and does not keep — see
     // Approximation 7.
     level: d.level,
-    squad: d.squad.map((s) => ({
-      // The commander this soldier answers to, which is the dispatch's own:
-      // a squad is committed by one commander and crosses to that one seat.
-      owner: d.playerId,
-      // The weapon whole: the reload path, the sound layer and every effect in
-      // combat.js read it.
-      weapon: s.weapon,
-      // Seven fields. `record` is deliberately not among them — nothing in
-      // src/mission/ touches it, and it is the soldier's whole career.
-      data: {
-        id: s.data.id,
-        name: s.data.name,
-        callsign: s.data.callsign,
-        wounds: s.data.wounds || 0,
-        stats: {
-          health: s.data.stats.health,
-          aim: s.data.stats.aim,
-          speed: s.data.stats.speed,
+    squad: d.squad.map((s) => {
+      const eff = effectiveSoldier(progression, s.data);
+      return {
+        // The commander this soldier answers to, which is the dispatch's own:
+        // a squad is committed by one commander and crosses to that one seat.
+        owner: d.playerId,
+        // The weapon whole: the reload path, the sound layer and every effect in
+        // combat.js read it.
+        weapon: s.weapon,
+        // Six fields. `record` is deliberately not among them — nothing in
+        // src/mission/ touches it, and it is the soldier's whole career. Nor are
+        // `xp`, `primary` or `secondary`: they are already folded into `stats`
+        // and `hpBonus`.
+        data: {
+          id: s.data.id,
+          name: s.data.name,
+          callsign: s.data.callsign,
+          wounds: s.data.wounds || 0,
+          stats: {
+            health: eff.stats.health,
+            aim: eff.stats.aim,
+            speed: eff.stats.speed,
+          },
+          hpBonus: eff.hpBonus,
         },
-      },
-    })),
+      };
+    }),
   };
   // Absent, not null: a commander flying alone is handed the shape they have
   // always been handed, and `joint` in a payload MEANS somebody else is there.
@@ -210,6 +224,13 @@ function makeView(campaign, player, players, round) {
         // commander's name is a display detail the view is the last place to
         // know about.
         .map((l) => projectLead(l, player.id, (id) => (id && players.get(id) ? players.get(id).name : null))),
+    enumerable: true,
+  });
+  // The campaign's progression rules, so a readout derives levels and grown
+  // stats with the numbers the authority settles XP on — in a room, the
+  // server's, never whatever this browser ships. Read through, like the rest.
+  Object.defineProperty(v, "progression", {
+    get: () => campaign.world.progression,
     enumerable: true,
   });
   Object.defineProperty(v, "taskForce", {
@@ -547,7 +568,7 @@ export function createSession(opts = {}) {
       // nothing new, since the view already names every seat in `taskForce`.
       jointOf.set(leadId, on.map((d) => ({ playerId: d.playerId, name: players.get(d.playerId).name })));
     }
-    const outbound = dispatches.map((d) => projectDispatch(d, jointOf.get(d.mission.id)));
+    const outbound = dispatches.map((d) => projectDispatch(d, jointOf.get(d.mission.id), world.progression || defaultProgression()));
     round.flight = { dispatches: outbound, outstanding: new Set(outbound.map((d) => d.dispatchId)), taken: false };
     // After the flight exists, never before: a report arriving during the
     // announcement has to find one.
@@ -690,7 +711,11 @@ export function createSession(opts = {}) {
           );
         // applyMissionResult returns the state object itself; returning that
         // would hand the campaign back through the seam we just built.
-        applyMissionResult(campaign, cmd.result, { last });
+        // The soldiers this report paid XP to. On every answer below, not only
+        // the one that turns the day: a non-last report on a joint lead is still
+        // this commander's results screen.
+        let award = [];
+        applyMissionResult(campaign, cmd.result, { last, onAward: (a) => { award = a; } });
 
         // ...and this is where the day comes from since S5. A round owes one
         // day, and it is spent when the LAST of that round's missions has
@@ -702,13 +727,13 @@ export function createSession(opts = {}) {
         // An unknown or missing dispatch id is applied and otherwise ignored:
         // a second report for the same dispatch cannot drive the count past
         // zero, and a bare result outside a round is what several suites send.
-        if (!flight || !flight.outstanding.delete(cmd.dispatchId)) return { ok: true };
-        if (flight.outstanding.size) return { ok: true };
+        if (!flight || !flight.outstanding.delete(cmd.dispatchId)) return { ok: true, award };
+        if (flight.outstanding.size) return { ok: true, award };
 
         const turn = endRound(player);
         return turn.ok
-          ? { ok: true, dayTurned: true, finished: turn.finished, expired: turn.expired, arrived: turn.arrived }
-          : { ok: true, dayTurned: false, dayHeld: turn.reason };
+          ? { ok: true, dayTurned: true, finished: turn.finished, expired: turn.expired, arrived: turn.arrived, award }
+          : { ok: true, dayTurned: false, dayHeld: turn.reason, award };
       }
       default:
         return fail("Unknown command.");

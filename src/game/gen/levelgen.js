@@ -71,6 +71,15 @@ const threatRewardFor = (difficulty) =>
     extreme: config.threatRewardExtreme,
   })[difficulty] ?? 20;
 
+// Soldier XP by the same difficulty id, same stamping rule.
+const xpRewardFor = (difficulty) =>
+  ({
+    low: config.xpRewardLow,
+    medium: config.xpRewardMedium,
+    high: config.xpRewardHigh,
+    extreme: config.xpRewardExtreme,
+  })[difficulty] ?? config.xpRewardLow;
+
 // ---- main -----------------------------------------------------------------
 // params: { seed, difficulty="medium", length="medium", biome?, roster?,
 //           scale=1, boss=false }
@@ -154,6 +163,10 @@ export function generateLevel(params = {}) {
     difficulty,
     brief: writeBrief(biome, site, difficulty, params.boss),
     threatReward: params.boss ? 0 : threatRewardFor(difficulty),
+    // Soldier XP per extracting survivor, stamped like threatReward so the lead
+    // keeps what it advertised. NOT zeroed for the boss: it is Extreme, and the
+    // design's reward table has no exception.
+    xpReward: xpRewardFor(difficulty),
     winsCampaign: !!params.boss,
     seed,
   };

@@ -38,10 +38,16 @@ import { config } from "./config.js";
 import { shuffle } from "./gen/rng.js";
 
 // Max HP a soldier can have, derived from their Health stat and the config knobs
-// (defaults: 10 + 2×stat → 12–30 hp for a 1–10 stat). Kept here so the mission
-// entity, the hub display, and any HP readout all share one formula.
+// (defaults: 15 + 2×stat), plus the flat HP progression grants. Kept here so the
+// mission entity, the hub display, and any HP readout all share one formula.
+//
+// It takes an ALREADY-RESOLVED soldier: `stats` are effective and `hpBonus` is
+// the flat progression HP (src/game/progression.js `effectiveSoldier`). It looks
+// up no progression rules itself, which is what keeps the mission — handed a
+// dispatch that is resolved already — from ever importing them. A soldier with
+// no `hpBonus` (a raw roster soldier, a test fixture) gets none.
 export function soldierMaxHp(soldier) {
-  return config.soldierBaseHp + soldier.stats.health * config.soldierHpPerHealth;
+  return config.soldierBaseHp + soldier.stats.health * config.soldierHpPerHealth + (soldier.hpBonus || 0);
 }
 
 export const RECRUIT_POOL = [
