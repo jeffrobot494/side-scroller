@@ -4,137 +4,151 @@ category: game-data
 status: unbuilt
 resolution: sharp
 needs: []
-related: [soldier-progression, server-settings]
+related: [soldier-progression, server-settings, multiplayer-session, multiplayer-missions]
 ---
 
 # Soldier progression
 
-Store progression as versioned, serializable data and derive soldier growth from original stats and lifetime XP.
+How soldiers earn XP on a successful extraction and grow from it, built as a pure derivation from authored stats and lifetime XP over the campaign's rules.
 
 ## Slices
 
-| Slice | Deliverable | Runtime behavior |
+| Slice | Deliverable | Runtime behaviour |
 |---|---|---|
-| 1 | Validated progression definition, profile assignments, pure level/bonus calculation, representative checks | None until integrated |
-| 2 | Campaign rules snapshot, soldier progression state, explicit legacy migration | Existing soldiers remain unchanged at migration |
-| 3 | Award XP during result settlement; use effective stats and maximum HP throughout hub and combat | Enables progression |
-| 4 | Editor tables, preview/rebase, briefing and results feedback | Makes progression editable and visible |
+| P1 | `src/game/progression.js`: the shipped definition, its validator, and the pure derivation (lifetime XP → level, XP into level, next cost or MAX; level → grants; cumulative bonuses; effective stats). Every recruit in `RECRUIT_POOL` carries an authored primary and secondary. `test/progression.test.mjs` | **None.** Nothing reads it yet |
+| P2 | The campaign earns. The world holds a copy of the definition taken when it is created. Each lead gets its XP reward stamped on it when generated (four new server-scoped `SCHEMA` knobs). `applyMissionResult` pays each eligible survivor, once, and applies the level-up health policy. `soldierMaxHp` adds the flat HP bonus. `projectDispatch` sends effective stats and the resolved HP bonus. The hub's stat bars and HP lines (Barracks and Deploy cards) read effective stats. Every `missionResult` answer carries the award report. The view carries the campaign's definition, and each projected lead carries `xpReward` | **Yes.** Soldiers level up and get stronger in missions. The hub's existing numbers change; nothing new is printed |
+| P3 | The player sees it. Barracks cards show level, XP into this level, XP to next or MAX, and primary/secondary labels. Recruit and Deploy cards show the labels. A **soldier details** readout (new: starting stats, progression bonuses, final stats, next level's gains) opens from a Barracks card. The Ops lead row and Deploy header print the XP reward. Results print XP earned, old → new level and combined gains per survivor | **Yes, visible** |
+| P4 | Editor Tools → **Progression**: edit the curve (per-transition costs, start level and XP, max level), growth rules (add/remove/edit rows), per-level overrides, attribute caps, recruit assignments, eligibility, keep-XP-at-cap, health policy. Base HP and HP per Health shown and edited through `config.js`'s own override path (not a second copy of either default). Live preview of the full level table, cumulative bonuses and an example soldier. Field-level errors, and invalid data never replaces working data. A guarded localStorage override store applied before the world's snapshot is taken, Revert, and Copy JSON to make it permanent | **Yes**, for campaigns started after a save |
+
+Each slice lands alone. P1 is pure and imported by nothing else. P2 is complete without any new UI because the existing HP and stat readouts already show the growth. P3 reads only what P2 produces. P4 edits a definition that P1–P3 already read from one place.
 
 ## Reuses
 
-| Existing component | Reuse |
+| Existing | Reuse |
 |---|---|
-| `src/game/soldiers.js` | Soldier attributes and shared maximum-HP calculation |
-| `src/game/state.js` | Authoritative roster changes and mission-result settlement |
-| `src/game/config.js` | Settings schema, persistence, import/export conventions; existing HP knobs |
-| `src/editor/` | Existing editor surface; add structured progression editing |
-| `test/soldier-health.test.mjs` | Persistent-wound and shared-health behavior checks |
-
-The current settings schema supports scalar controls. A nested progression table needs structured editing and validation; it must not become a second independent set of numeric defaults.
+| `src/game/soldiers.js` | `soldierMaxHp` stays the one HP formula for the hub and `Soldier` (`src/mission/entities.js`); P2 adds the flat progression HP to it (see The seam for how it gets the bonus without a definition). `RECRUIT_POOL` holds the authored primary/secondary. `dealRecruits` deep-clones, so the new fields reach every base with no change |
+| `src/game/state.js` `applyMissionResult` | Where settlement already happens, per commander. Casualties are marked dead before the survivor loop and filtered out after it, and an award keyed off `result.survivors` never touches a casualty. The `completedMissions.includes` guard is already "once per commander per mission". XP is paid inside it |
+| `src/game/state.js` `missionOf` | Already copies the fields settlement reads off the lead (`difficulty`, `threatReward`) into `world.reports`, so a joint mission's second report still finds them. `xpReward` is one more copied field |
+| `src/game/gen/levelgen.js` `threatRewardFor` | The precedent for "fixed when offered": a per-difficulty knob stamped onto the lead at generation. XP rewards use the same shape |
+| `src/game/state.js` `createWorld` / `createPlayerState` | `createWorld` is where a copy of the definition is taken, once for all commanders. `createPlayerState` runs `applyWeaponOverrides()` and `applyEnemyRoster()`, but `createState()` calls `createWorld()` **first**, so P4's `applyProgressionOverrides()` must run in `createWorld` before the copy, not beside the other two |
+| `wounds` (damage taken, not current HP) | The default `preserveWounds` policy needs no code: max HP rises and `maxHp - wounds` rises with it. `Soldier` already clamps a deploying soldier to at least 1 HP |
+| `src/game/session.js` `projectDispatch` | Already the only path soldier data takes into a mission. Single-player and hot-seat get the projected dispatch from `takeRound`, and rooms get it through `toWire`. Effective stats replace authored stats here, and the mission never learns progression exists |
+| `src/game/session.js` `projectLead` | The Ops row and Deploy header read projected leads. `xpReward` is added to the projection (its key list is pinned in `test/session.test.mjs`) |
+| `src/game/session.js` `makeView` / `src/net/rooms.js` `toWire(session.view)` | The roster already crosses whole, so `xp`, `primary` and `secondary` reach room clients. A new `progression` view field carries the campaign's definition so the hub derives with the authority's rules |
+| `src/game/config.js` `SCHEMA` (`scope: "server"`) | `xpRewardLow/Medium/High/Extreme` go beside `threatReward*`. They are tunable in a room through `editor.html?server=1` (`src/editor/remote-config.js`) |
+| `src/game/weaponoverrides.js` | The shape of P4's store: defaults in source, a patch in guarded localStorage, applied at load, Revert to the pristine copy, Copy JSON to make it permanent |
+| `src/editor/editor.js` `TOOLS` / `MOUNTABLE`, `src/editor/tools/weapon-designer.js` | P4 is a Tools-tab panel under the `createX(container, onBack) → { dispose() }` convention, reusing `wd-*`/`cfg-*` CSS |
+| `src/hub/hub.js` `_soldierCard`, the Deploy cards, `_resultsScreen`, the Ops lead row, the Deploy header | Every P3 surface but soldier details already exists and reads the view. `showResults` keeps `turn` only when `turn.dayTurned`, so P3 must keep the award report independently of the day summary |
+| `src/game/enemycost.js` `labelFor` | Difficulty id → display name for the briefing line |
+| `test/hub-refresh.test.mjs` | Already mounts a real `Hub` over a session headlessly, so P3's readouts can be checked without a browser |
 
 ## Where the code goes
 
-| Location | Responsibility |
-|---|---|
-| `src/game/progression.js` (new) | Definition defaults, validation, level thresholds, growth calculation |
-| `src/game/soldiers.js` | Starting stats, growth-profile assignments, effective-stat and HP integration |
-| `src/game/state.js` | Snapshot selection, migration, XP settlement and duplicate protection |
-| `src/game/config.js` | Register progression settings with existing import/export and editor conventions |
-| `src/editor/` | Table/rule editing, curve preview, campaign rebase preview |
-| `src/hub/` | Barracks, briefing, and result readouts |
-| `test/progression.test.mjs` (new) | Calculation, settlement, validation and migration coverage |
+| Location | Change | Slice |
+|---|---|---|
+| `src/game/progression.js` (new) | Shipped definition, validation with field paths, derivation. DOM-free and storage-free (P4's guarded store lives in the same module or beside it, like `weaponoverrides.js`) | P1, P4 |
+| `src/game/soldiers.js` | `primary`/`secondary` on each recruit. `soldierMaxHp` includes the flat bonus. Schema comment updated | P1, P2 |
+| `src/game/gen/levelgen.js` | Stamp `xpReward` beside `threatReward`. The boss lead is `difficulty: "extreme"` and is paid the Extreme reward (unlike `threatReward`, which is zeroed for it) | P2 |
+| `src/game/config.js` | Four `xpReward*` range knobs, `scope: "server"` | P2 |
+| `src/game/state.js` | Definition snapshot on the world, `xpReward` in `missionOf`, the award inside the success guard, health policy, award report returned to the caller (the only caller, `session.js`, discards today's return value) | P2 |
+| `src/game/session.js` | Effective stats and HP bonus in `projectDispatch`; `xpReward` in `projectLead`; `progression` on the view; the award report on **all three** `missionResult` returns (not last report, last report with day turned, last report with `dayHeld`) | P2 |
+| `src/hub/hub.js`, `src/hub/hub.css` | P2: stat bars and HP read effective values. P3: the readouts in the table above, soldier details, and `showResults` holding the award report whether or not the day turned | P2, P3 |
+| `src/editor/tools/progression.js` (new), `src/editor/editor.js` | The P4 panel, registered in `TOOLS`, `MOUNTABLE` and the factory map; `applyProgressionOverrides()` called at editor load, like `applyWeaponOverrides()` | P4 |
+| `test/progression.test.mjs` (new) | Derivation and validation. A new file because nothing tests this subsystem | P1 |
+| `test/soldier-health.test.mjs` | Award and health-policy cases next to the existing write-back cases | P2 |
+| `test/session.test.mjs` | Update the pinned dispatch, view and projected-lead key lists; joint and replay awards; award report on a non-last report | P2 |
+| `test/hub-refresh.test.mjs` | Readout presence (level, MAX, labels, reward, results gains) | P3 |
+| `test/tools.test.mjs` | `mountable(t, "progression", …)` | P4 |
+
+Conventions that apply: guard every `localStorage` access; one synchronous `draw()` at mount; new gameplay state crosses the wire in the same commit (`xp`, `primary`, `secondary` go on the roster, `progression` on the view, and the award report in the command answer, which `src/net/rooms.js` already forwards as `missionEnd.turn`).
 
 ## The seam
 
-- Progression owns XP, level calculation, and progression bonuses. It does not overwrite original attributes or absorb equipment, wounds, bonds, or other modifiers.
-- Mission settlement selects eligible soldiers and awards the mission's snapshotted reward. Combat does not award XP directly.
-- In multiplayer the authority selects the rules and persists rewards. Clients display the same resolved data; local editor values cannot change earned XP.
-- Effective stats are calculated centrally so combat and hub readouts agree.
+| Owns | Does not touch |
+|---|---|
+| `progression.js`: what a level is, what it grants, and what a soldier's effective stats are, given (authored stats, lifetime XP, primary, secondary, definition) | Authored `stats` are **never written**. Effective stats are derived on every read and stored nowhere |
+| `applyMissionResult`: who is eligible and how much they get. XP is the mission's stamped `xpReward`, never the live knob | Combat, kills, damage, squad size: the mission computes nothing about XP |
+| The world's definition snapshot: every level and bonus in a campaign is computed from it | Nothing reads the live definition after `createWorld`. The editor store changes the next campaign, never the running one |
+| `projectDispatch`: the only place effective stats are resolved for a mission | `src/mission/` reads `data.stats` and `soldierMaxHp(data)` exactly as it does today |
+| `soldierMaxHp`: a formula over a soldier's **already-resolved** Health and flat HP bonus, looking up no definition, so `soldiers.js` (imported by `entities.js`) never imports `progression.js` | Callers holding a raw roster soldier resolve first with the campaign's definition: the hub from `view.progression`, `state.js` from the world snapshot. The dispatch carries both resolved. A soldier with no bonus field has 0 |
+| The view's `progression` field: the one set of rules the hub derives with | The hub never imports the shipped definition for a campaign readout. P4's editor preview is the only place that reads it directly |
+
+Settlement rules the builder must keep:
+
+- **Idempotence is the existing guard.** XP is paid inside `if (!state.completedMissions.includes(result.missionId))`. That list is per commander, so on a joint lead each commander's survivors are paid from their own report and neither report blocks the other. A repeated report for the same mission pays nothing.
+- **Order inside settlement:** casualties marked dead → survivors' wounds written back → XP added → levels crossed → health policy applied on the level-up delta. The policy works on max HP before and after the award, so wounds that were just written back are what `preserveWounds` keeps.
+- **Level, XP into level and bonuses are always recomputed from `xp`.** A soldier stores lifetime `xp` and nothing derived from it.
+- **A soldier with no `xp` field is at the definition's starting XP.** That covers every test fixture and the Behavior Lab's stub soldier.
 
 ## Must not regress
 
-- Preserve wounds, permadeath, shared maximum-HP calculations, ownership of rosters, and independent extraction results.
-- Run `test/soldier-health.test.mjs` and the relevant mission-result and multiplayer suites when implementing.
-- Add cases for exact XP boundaries, surplus XP, multiple levels, level cap, all difficulty rewards, ineligible soldiers, and replayed settlement.
-- Check level 6 stacks each attribute exactly once, and twice where primary and secondary name the same attribute; level 10 totals are +90 flat HP, +9 primary, +5 secondary, +3 per other attribute.
-- Check unchanged base stats after recalculation, JSON round trips, invalid imports, saved revision isolation, legacy migration, and rebasing in both directions.
+| Guard | What it pins |
+|---|---|
+| `test/soldier-health.test.mjs` | `soldierMaxHp` formula (a level-1 soldier gets no bonus, so the existing equality still holds), wounds seeding `Soldier`, write-back, healing |
+| `test/session.test.mjs` | The dispatch's `data` key list, the view's key list and the projected lead's key list. **All three change in P2 on purpose.** Update them in that commit and say why next to them |
+| `test/mission-golden.test.mjs` | A level-1 squad plays byte-identically, since a zero bonus changes nothing the mission reads |
+| `test/levelgen-golden.test.mjs` | A generated level does not move when `xpReward` is added to the mission metadata |
+| `test/mission-net.test.mjs` | Room missions still start, step and report. Its hand-built squads have no `xp` and must still deploy |
+| `test/wiring.test.mjs`, `test/service.test.mjs`, `test/transport.test.mjs` | Command answers and views still cross `toWire`: the award report and definition are plain data |
+| `test/tools.test.mjs` | Every existing tool still mounts after P4 registers one |
+| `test/docs.test.mjs` | This spec's citations |
+
+New cases, in their slice:
+
+| Slice | Cases |
+|---|---|
+| P1 | Every row of the design's XP table (lifetime thresholds 0…5,110) at exact boundary and one below; surplus kept; two levels crossed at once (the Extreme example: 50 XP → level 3, 20/40); MAX at 5,110 and beyond; the design's cumulative table at levels 2–10; level 6 grants each attribute once, and twice where primary = secondary; primary = secondary reaches +14 at level 10; an override replaces a level's grants and an empty override grants nothing; validation rejects every class in "Validation" below with the field path, and accepts zero rewards and zero grants |
+| P2 | Each difficulty's reward; the reward is the stamped value after the knob changes; casualties get nothing; a failed report pays nothing; replaying a success pays nothing; two commanders on one lead both get paid; a boss clear pays the Extreme reward; all three health policies; a dead soldier stays dead; authored `stats` unchanged after awards; dispatch carries effective stats |
+| P3 | Rendered strings contain level, MAX at cap, labels on a recruit, the reward on a lead, and results gains |
+| P4 | Mount; an invalid edit leaves the stored definition untouched; Revert restores the shipped one |
 
 ## Approximations
 
-| Choice | Limit / safeguard |
+| Where it is not exact | What catches it |
 |---|---|
-| Small declarative rule vocabulary | Supports numeric grants and schedules; adding a new effect type requires code, changing any supplied value does not |
-| Derived progression | Rebase can lower levels and stats; explicit before/after preview prevents silent changes |
-| Legacy soldiers | No historical XP is inferred from missions or kills; preserve current stats as starting stats |
-| Attribute effects | Audit consumers for assumptions that stats cannot exceed 10 before enabling growth |
+| **No rebase, and no campaign-rules migration.** No campaign save exists: a single-player or hot-seat campaign ends with the page, and editor changes are read at load, which starts a new campaign. A room's server has no localStorage and always runs the shipped definition. So no campaign can outlive a change to its rules, and rebase has nothing to act on. The snapshot on the world is still taken, so rebase can be added when campaigns start to persist | A campaign save spec has to take this up. It is not in the bar |
+| **Editor edits don't reach rooms.** P4 stores to browser localStorage, which a room never reads. The four reward knobs are the exception because they are `SCHEMA` server knobs. Copy JSON into `progression.js` is how a curve change reaches a room | Nothing in the bar; a room playtest shows the shipped curve |
+| **Eligibility settings can't change anything yet.** A failed mission has no survivors, since a squad fails only when wiped. When one soldier reaches the exit, the whole living squad extracts. So "survived" and "extracted" are the same set, and a failure has nobody to pay. The flags are stored and validated but no value moves an award | A test pins "failed report pays nothing" so a later partial-extraction change turns red here |
+| **Aim and Speed stop mattering above 10.** `aimAccuracy` and `speedT` (`src/mission/ai.js`) clamp to the 1–10 range, so +1 Aim at 10 shows on the card and does nothing in a mission. Health has no clamp. Nerve has no consumer at all. `statBar` draws `value × 10%`, which overflows the track above 10. P2 clamps the bar's fill and prints the real number | Nothing in the bar; visible on a card above 10 |
+| **Base HP and HP per Health stay live `SCHEMA` knobs**, not part of the campaign snapshot. The Progression tool edits them through `config.js`, but a running campaign sees a change on its next load, as it does today | None; same as every other HP change today |
+| **Attribute registry is fixed at four.** Caps are per attribute and editable; adding a fifth attribute is code, because every stat consumer names its attribute | Validation rejects an unknown attribute id |
 
-## Recommended data model
+## Background: definition data
 
-Use one JSON-compatible progression definition containing these fields. Ship default data with the game and include it in settings import/export.
+One JSON-compatible object. Shipped in `progression.js`, copied onto the world at `createWorld`, carried on the view, and edited as a whole by P4.
 
-| Field | Default / meaning |
+| Field | Default |
 |---|---|
-| `schemaVersion` | 1; changes when the data format changes |
-| `revision` | Stable content revision; changes when tuning changes |
 | `startLevel`, `startXp`, `maxLevel` | 1, 0, 10 |
-| `xpCostByLevel` | Destination keys 2–10 → 10, 20, 40, 80, 160, 320, 640, 1280, 2560 |
-| `missionXpByDifficulty` | low: 5, medium: 10, high: 20, extreme: 50 |
-| `eligibility` | Outcome allowlist plus require-survival and require-extraction flags |
-| `retainXpAtCap` | true |
-| `attributes` | Stable IDs aim, health, speed, nerve; optional per-attribute caps |
-| `profiles` | Authored primary/secondary pairs referenced by soldiers |
-| `growthRules` | Ordered rows shown below |
-| `levelOverrides` | Empty by default; complete replacement grant lists for particular destination levels |
-| `levelUpHealthPolicy` | preserveWounds; alternatives preserveCurrentHp and fullHeal |
+| `xpCost` | Destination level → XP from the previous level: 2→10, 3→20, 4→40, 5→80, 6→160, 7→320, 8→640, 9→1,280, 10→2,560 |
+| `eligibility` | `{ outcomes: ["success"], requireSurvival: true, requireExtraction: true }` |
+| `retainXpAtCap` | `true` |
+| `attributes` | `aim`, `health`, `speed`, `nerve`, each with optional `cap` (none) |
+| `growthRules` | Rows below |
+| `levelOverrides` | `{}`. Destination level → complete replacement grant list |
+| `levelUpHealthPolicy` | `preserveWounds` · `preserveCurrentHp` · `fullHeal` |
 
-| Rule ID | Target | Amount | First level | Every N levels | Last level |
+| Rule | Target | Amount | First | Every | Last |
 |---|---|---:|---:|---:|---|
-| hp | flatMaxHp | 10 | 2 | 1 | cap |
+| hp | flat max HP | 10 | 2 | 1 | cap |
 | primary | primary | 1 | 2 | 1 | cap |
 | secondary | secondary | 1 | 2 | 2 | cap |
-| others | otherAttributes | 1 | 3 | 3 | cap |
+| others | every attribute that is neither | 1 | 3 | 3 | cap |
 
-A rule matches when the destination is within its bounds and its distance from the first level is divisible by the interval. All matching grants add together. An override replaces the entire generated grant list for that level; an empty list deliberately grants nothing. The editor shows the resolved table so replacement cannot silently hide an expected bonus.
+A rule matches a destination level when it falls within [first, last] and (level − first) is divisible by the interval. Matching grants add. Primary = secondary gets both rows. XP rewards are not in this object: they are `SCHEMA` knobs stamped per lead.
 
-Profiles contain primary and secondary IDs, which may name the same attribute. A soldier may have an explicit authored pair instead of a profile reference. Remaining registered attributes form the other group.
+Soldier fields added: `xp` (lifetime, non-negative integer), `primary`, `secondary` (attribute ids). `stats` keeps its meaning: the authored starting attributes.
 
-## Soldier and campaign storage
+## Background: validation
 
-| Saved data | Purpose |
+| Class | Rule |
 |---|---|
-| Soldier `baseStats` | Original attributes, separate from calculated bonuses |
-| Soldier `xpTotal` | Nonnegative lifetime XP; never repeatedly subtract thresholds from this value |
-| Soldier resolved primary/secondary IDs | Stable growth identity |
-| Campaign progression snapshot and revision | Reproduce the same levels and growth after reload, even if shipped defaults change |
-| Settled mission-attempt receipts | Unique attempt ID, soldier IDs, reward amounts and reward revision; prevent duplicate awards |
-| Mission reward snapshot | Advertised difficulty, XP amount, revision, and eligibility policy saved when offered |
+| Curve | Integer levels; `1 ≤ startLevel ≤ maxLevel`; exactly one positive-integer cost per transition above `startLevel` up to `maxLevel`; `startXp` a non-negative integer below the first threshold; cumulative total a safe integer |
+| Rules | Unique ids; known target; amount finite and ≥ 0, integer for attribute targets; positive-integer first/interval; last ≥ first when present |
+| Overrides | Keys within `(startLevel, maxLevel]`; grants valid as rule targets and amounts |
+| Attributes | Known ids only; cap a positive integer when present |
+| Assignments | Both ids registered |
+| Policy / eligibility | Known values only |
+| HP | The resulting max HP of every recruit is positive |
 
-Level, XP within the current level, and total progression bonuses are derived. Optional caches must identify their source revision and be discardable. Do not store only repeatedly mutated final stats: that loses the distinction between recruitment stats and growth, making safe rebalancing difficult.
-
-Compute cumulative thresholds by adding transition costs above the configured starting level. Starting XP is lifetime XP and must remain below the first transition threshold so recruits actually start at the configured level. Levels at or below the starting level grant nothing. The starting level and cap may be equal, in which case there is no next threshold.
-
-Persist the XP update and settlement receipt together as one authoritative state change. A replayed mission attempt cannot grant XP again, even after a reload. Multiplayer receipt keys include the soldier identity, so one commander's extraction cannot suppress another's award.
-
-## Revision changes and migration
-
-| Action | Behavior |
-|---|---|
-| Edit defaults | Validate and save a new revision; existing campaigns retain their snapshots |
-| Load existing campaign | Use its snapshot, without consulting newer balance defaults |
-| Rebase campaign | Preview recalculation from unchanged XP and base stats; explicitly adopt new snapshot |
-| Change mission rewards | Affects newly offered missions; no retroactive XP changes |
-| Increase cap | Retained XP can immediately unlock levels on rebase |
-| Rebase health | Preserve wound damage; clamp a living soldier's current HP to at least 1 and at most the new maximum; dead status stays dead |
-| Migrate legacy soldier | Copy current attributes to base stats, initialize configured starting XP, assign its growth pair, preserve wounds and status |
-
-Migration is versioned and runs once. Missing growth assignments are never chosen by current ranking. The default level-1 migration grants no bonuses and preserves existing health.
-
-## Validation and editor requirements
-
-- Levels and intervals are positive integers; start level cannot exceed cap. Transition costs are positive integers and cover every reachable transition exactly once.
-- XP rewards and starting XP are nonnegative integers. Growth amounts are finite nonnegative numbers; attribute increments are integers. HP settings must yield positive maximum HP.
-- Reject unknown difficulties, attribute IDs, targets, policies, duplicate rule IDs, profile pairs naming unregistered attributes, and out-of-range overrides. Zero rewards or grants are valid tuning choices.
-- Optional caps must be valid for their attribute. Reject non-finite values and values exceeding safe numeric arithmetic, including cumulative XP totals.
-- The editor provides add/remove/edit controls for rules and levels, not merely fixed controls for today's nine transitions. It shows threshold totals and per-level and cumulative grants.
-- Validate imports atomically; on failure retain the previous working definition and report exact fields. Reset and export operate on the full definition.
-- Existing base-HP and HP-per-Health settings remain the sole defaults for those values. Campaign progression evaluation must use a consistent saved or authoritative set of these HP settings as well.
+A failed validation returns every error with its field path, and the caller keeps its previous definition.
