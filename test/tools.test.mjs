@@ -5,6 +5,11 @@ import { createWeaponDesigner } from "../src/editor/tools/weapon-designer.js";
 import { createEnemyDesigner } from "../src/editor/tools/enemy-designer.js";
 import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
 import { createFiringRoom } from "../src/editor/tools/firing-room.js";
+import { createProgressionEditor } from "../src/editor/tools/progression.js";
+import { activeProgression, activeAssignments, shippedAssignments } from "../src/game/progressionstore.js";
+import { defaultProgression } from "../src/game/progression.js";
+import { createState } from "../src/game/state.js";
+import { RECRUIT_POOL } from "../src/game/soldiers.js";
 import { createSoundPage } from "../src/editor/sound-page.js";
 import { controlsTabsHTML, showControlsTab } from "../src/editor/controls.js";
 import { serverTarget, createRemoteConfig } from "../src/editor/remote-config.js";
@@ -38,6 +43,47 @@ export default async function run(t) {
   mountable(t, "enemy-designer", createEnemyDesigner);
   mountable(t, "level-generator", createLevelGenerator);
   mountable(t, "firing-room", createFiringRoom);
+  mountable(t, "progression", createProgressionEditor);
+
+  // The Progression tool (tech/soldier-progression.md, P4), driven through its
+  // verbs: the harness DOM dispatches no events.
+  {
+    installDom();
+    const pg = createProgressionEditor(makeEl(), () => {});
+    const shipped = JSON.stringify(defaultProgression());
+
+    pg.edit("xpCost.3", "0", "number");
+    t.ok("progression: an invalid edit refuses to save", !pg.save().ok);
+    t.eq("...and leaves the stored rules untouched", JSON.stringify(activeProgression()), shipped);
+
+    pg.edit("xpCost.3", "25", "number");
+    pg.edit("maxLevel", "12", "number");
+    t.eq("raising max level adds a cost per new transition", Object.keys(pg.draft().definition.xpCost).length, 11);
+    pg.addRule();
+    pg.edit("growthRules.4.amount", "5", "number");
+    pg.addOverride(4);
+    pg.addOverrideGrant("4");
+    pg.edit("levelOverrides.4.0.target", "nerve");
+    pg.edit("levelOverrides.4.0.amount", "2", "number");
+    pg.edit(`@assign.${RECRUIT_POOL[0].id}.primary`, "nerve");
+    t.ok("progression: a valid draft saves", pg.save().ok);
+    t.eq("...and is what the store hands out", [activeProgression().maxLevel, activeProgression().xpCost[3]], [12, 25]);
+
+    const g = createState();
+    t.eq("a campaign started after the save snapshots the saved rules", g.world.progression.maxLevel, 12);
+    t.eq("...and deals the saved primary", g.recruits.find((r) => r.id === RECRUIT_POOL[0].id).primary, "nerve");
+
+    const before = JSON.stringify(pg.draft().definition);
+    t.ok("progression: an invalid import is refused", !pg.importJson('{"definition":{"maxLevel":0}}').ok);
+    t.eq("...and changes nothing in the draft", JSON.stringify(pg.draft().definition), before);
+    t.ok("...a valid one is taken", pg.importJson(pg.exportJson()).ok);
+
+    pg.revert();
+    t.eq("progression: Revert restores the shipped rules", JSON.stringify(activeProgression()), shipped);
+    t.eq("...and the shipped recruit pairs", activeAssignments()[RECRUIT_POOL[0].id].primary, shippedAssignments()[RECRUIT_POOL[0].id].primary);
+    t.eq("...on the live pool too", RECRUIT_POOL[0].primary, shippedAssignments()[RECRUIT_POOL[0].id].primary);
+    pg.dispose();
+  }
   // The Sound page is not a Tools-tab panel but follows the same
   // createX(container) → { dispose() } contract, so it gets the same bar.
   mountable(t, "sound-page", createSoundPage);

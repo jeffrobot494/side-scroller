@@ -22,8 +22,10 @@ import { createLevelGenerator } from "./tools/level-generator.js";
 import { createFiringRoom } from "./tools/firing-room.js";
 import { createBehaviorLab } from "./tools/behavior-lab.js";
 import { createControlsMapper } from "./tools/controls-mapper.js";
+import { createProgressionEditor } from "./tools/progression.js";
 import { createSoundPage } from "./sound-page.js";
 import { applyWeaponOverrides } from "../game/weaponoverrides.js";
+import { applyProgressionOverrides } from "../game/progressionstore.js";
 import { applyEnemyRoster } from "../game/enemyspecs.js";
 import { audio } from "../audio/engine.js";
 
@@ -32,6 +34,9 @@ import { audio } from "../audio/engine.js";
 // ARSENAL straight from arsenal.js, so without this the tool that authored an
 // override would sit on a page that doesn't show it.
 applyWeaponOverrides();
+// The recruits' saved primary/secondary, so the Progression tool's example soldier
+// and any recruit this page shows carry them.
+applyProgressionOverrides();
 
 // And the enemy roster, for the same reason: the Level Generator previews
 // placements without ever building a game state, so without this the tool that
@@ -98,6 +103,7 @@ const TOOLS = [
   { id: "levelgen", label: "Level Generator", desc: "Generate procedural missions from a seed; preview the layout and check the threat budget." },
   { id: "firing", label: "Firing Room", desc: "Fire any weapon at respawning dummies or waves of real enemies on a platformed range." },
   { id: "behaviorlab", label: "Behavior Lab", desc: "Watch one agent navigate: click anywhere on a generated level to send it there and see whether it can get there." },
+  { id: "progression", label: "Progression", desc: "Soldier XP curve, level-up growth, overrides and recruit primary/secondary — with a level table and an example soldier." },
   { id: "controls", label: "Controls", desc: "Rebind keyboard controls (move, jump, fire, reload, …); gamepad uses built-in defaults." },
   { label: "Level Editor", desc: "Place platforms, spawns, loot, and the exit on a canvas." },
 ];
@@ -112,7 +118,7 @@ function disposeTool() {
 function render() {
   disposeTool();
 
-  const MOUNTABLE = ["weapon", "enemy", "levelgen", "firing", "behaviorlab", "controls"];
+  const MOUNTABLE = ["weapon", "enemy", "levelgen", "firing", "behaviorlab", "progression", "controls"];
   let body;
   if (tab === "settings") body = settingsView();
   else if (tab === "sound") body = `<div id="tool-host" class="tool-host"></div>`;
@@ -148,7 +154,7 @@ function render() {
   if (tab === "tools" && MOUNTABLE.includes(toolId)) {
     const host = document.getElementById("tool-host");
     const back = () => { toolId = null; render(); };
-    const factory = { weapon: createWeaponDesigner, enemy: createEnemyDesigner, levelgen: createLevelGenerator, firing: createFiringRoom, behaviorlab: createBehaviorLab, controls: createControlsMapper }[toolId];
+    const factory = { weapon: createWeaponDesigner, enemy: createEnemyDesigner, levelgen: createLevelGenerator, firing: createFiringRoom, behaviorlab: createBehaviorLab, progression: createProgressionEditor, controls: createControlsMapper }[toolId];
     activeTool = factory(host, back);
   }
 }

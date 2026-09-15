@@ -1,7 +1,7 @@
 ---
 type: tech
 category: game-data
-status: unbuilt
+status: built
 resolution: sharp
 needs: []
 related: [soldier-progression, server-settings, multiplayer-session, multiplayer-missions]
@@ -46,7 +46,8 @@ Each slice lands alone. P1 is pure and imported by nothing else. P2 is complete 
 
 | Location | Change | Slice |
 |---|---|---|
-| `src/game/progression.js` (new) | Shipped definition, validation with field paths, derivation. DOM-free and storage-free (P4's guarded store lives in the same module or beside it, like `weaponoverrides.js`) | P1, P4 |
+| `src/game/progression.js` (new) | Shipped definition, validation with field paths, derivation. DOM-free and storage-free | P1 |
+| `src/game/progressionstore.js` (new) | P4's guarded localStorage store: the saved definition and recruit pairs, `applyProgressionOverrides()` (called by `createWorld` before the copy, and by the editor at boot). **As built:** a separate module rather than inside `progression.js`, so the derivation stays storage-free; a stored definition that no longer validates is ignored in favour of the shipped one | P4 |
 | `src/game/soldiers.js` | `primary`/`secondary` on each recruit. `soldierMaxHp` includes the flat bonus. Schema comment updated | P1, P2 |
 | `src/game/gen/levelgen.js` | Stamp `xpReward` beside `threatReward`. The boss lead is `difficulty: "extreme"` and is paid the Extreme reward (unlike `threatReward`, which is zeroed for it) | P2 |
 | `src/game/config.js` | Four `xpReward*` range knobs, `scope: "server"` | P2 |

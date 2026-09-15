@@ -20,6 +20,7 @@
 
 import { RECRUIT_POOL, soldierMaxHp } from "./soldiers.js";
 import { defaultProgression, effectiveSoldier, resolveSoldier, xpOf, addXp } from "./progression.js";
+import { applyProgressionOverrides } from "./progressionstore.js";
 import { WEAPONS, BLUEPRINTS, TUNING } from "./content.js";
 import { config } from "./config.js";
 import { listCustomWeapons } from "./customcontent.js";
@@ -50,6 +51,11 @@ const WORLD_FIELDS = ["day", "campaignHealth", "leads", "log", "cleared"];
 // all — which `canSee` reads as visible to everyone. An empty list would be
 // PRESENT and would black out every single-player board.
 export function createWorld(commanders = []) {
+  // Editor edits to the progression rules and recruit pairs, applied BEFORE the
+  // rules are copied below and before any base is dealt recruits — createState
+  // builds the world first, so applying these beside applyWeaponOverrides in
+  // createPlayerState would snapshot the shipped rules instead.
+  const progression = applyProgressionOverrides();
   const world = {
     day: 1,
     campaignHealth: TUNING.startCampaignHealth,
@@ -95,7 +101,7 @@ export function createWorld(commanders = []) {
     // numbers and nothing that changes later — a retuned default, an editor
     // save — moves a campaign already under way. Nothing reads the live
     // definition after this line.
-    progression: defaultProgression(),
+    progression,
   };
   seedBoard(world);
   return world;

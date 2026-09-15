@@ -393,6 +393,21 @@ section + the tests are the source of truth for what currently exists):
   not reproducible**: `Mission` polls input once per *rendered* frame and steps a
   variable number of times, so the same inputs at a different frame rate are a
   different mission — decoupling that is M3's, not this.
+- **Soldier progression (`tech/soldier-progression.md` P1–P4 — built).** A
+  soldier stores authored `stats` (never written), lifetime `xp`, and a
+  `primary`/`secondary`; level, bonuses and grown stats are DERIVED by
+  `src/game/progression.js` on every read. The rules are data, copied onto the
+  world at `createWorld` (after `applyProgressionOverrides()` from
+  `src/game/progressionstore.js`), carried on the view as `progression`.
+  `applyMissionResult` pays survivors the lead's stamped `xpReward` (four
+  server-scoped `xpReward*` knobs) inside the `completedMissions` guard, so a
+  repeated report pays nothing and each commander is paid off their own report;
+  the award leaves through an `onAward` option and rides every `missionResult`
+  answer. `projectDispatch` resolves grown `stats` + `hpBonus`, so `src/mission/`
+  never reads progression; `soldierMaxHp` adds `hpBonus`. Hub cards, Ops, Deploy
+  and Results print it; editor Tools → **Progression** edits the rules and the
+  recruits' pairs with a live preview. No rebase: no campaign outlives a rules
+  change, and a room server always runs the shipped rules.
 - **Player2 is partially wired:** the Enemy Designer's Generate button uses
   `src/player2/client.js` chat completions (needs the app + a client id in the
   config `player2GameClientId`). Image gen and the rest remain unused — still
