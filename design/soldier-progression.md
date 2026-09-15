@@ -63,9 +63,22 @@ Costs are individually editable. Doubling is the initial curve, not a required f
 
 The mission briefing displays its XP reward. Difficulty and reward are fixed when the mission is offered; later tuning changes do not alter that advertised reward.
 
-## Attribute growth
+## Primary and secondary attributes
 
-Each soldier has one explicitly assigned primary attribute and one distinct secondary attribute. The remaining attributes are their other attributes. Assignments are authored per soldier or through an editable profile, never inferred from whichever stat is currently highest.
+Every soldier carries a primary and a secondary attribute, drawn at random when the soldier is created and fixed for life.
+
+| Rule | Default |
+|---|---|
+| Selection | Primary and secondary are drawn independently and uniformly from the four attributes |
+| Repeats | The same attribute may be drawn for both. That soldier is primary and secondary in it, and has three other attributes instead of two |
+| Other attributes | The attributes that are neither primary nor secondary |
+| Permanence | An assignment never changes — not on level up, not on rebase, not through any campaign action |
+| Visibility | Shown wherever a soldier is inspected, including in the recruit list before hire |
+| Soldier generation | Does not exist. The current recruits carry their assignments as authored data |
+
+A soldier drawn the same attribute twice gains it on both schedules, reaching +14 in it by level 10 against the +9 and +5 that two separate attributes receive.
+
+## Attribute growth
 
 | Grant | Amount | Destination levels |
 |---|---:|---|
@@ -74,7 +87,7 @@ Each soldier has one explicitly assigned primary attribute and one distinct seco
 | Secondary attribute | +1 | 2, 4, 6, 8, 10 |
 | Each other attribute | +1 | 3, 6, 9 |
 
-Rules stack when their schedules coincide. At level 6, a soldier gets +10 maximum HP and +1 to every attribute. The other-attribute rule excludes primary and secondary, so neither gains twice.
+Rules stack when their schedules coincide. At level 6, a soldier gets +10 maximum HP and +1 to every attribute — +2 to an attribute that is both their primary and their secondary. The other-attribute rule excludes primary and secondary, so neither is granted again as an other attribute.
 
 | Reached level | Total flat HP bonus | Primary bonus | Secondary bonus | Bonus to each other attribute |
 |---|---:|---:|---:|---:|
@@ -123,6 +136,7 @@ An existing campaign keeps its saved progression rules until the designer explic
 | Surface | Information |
 |---|---|
 | Barracks | Level, XP progress within this level, XP needed for next level, primary and secondary labels |
+| Recruits available | Primary and secondary labels before hire |
 | Soldier details | Starting stats, progression bonuses, final stats, next level's gains |
 | Mission briefing | Flat XP reward per eligible soldier |
 | Results | XP earned, old and new levels, combined gains across all crossed levels |
