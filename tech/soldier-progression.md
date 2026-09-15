@@ -50,14 +50,13 @@ The current settings schema supports scalar controls. A nested progression table
 - Mission settlement selects eligible soldiers and awards the mission's snapshotted reward. Combat does not award XP directly.
 - In multiplayer the authority selects the rules and persists rewards. Clients display the same resolved data; local editor values cannot change earned XP.
 - Effective stats are calculated centrally so combat and hub readouts agree.
-- This document supports [the gameplay design](../design/soldier-progression.md); this task adds documentation only.
 
 ## Must not regress
 
 - Preserve wounds, permadeath, shared maximum-HP calculations, ownership of rosters, and independent extraction results.
 - Run `test/soldier-health.test.mjs` and the relevant mission-result and multiplayer suites when implementing.
 - Add cases for exact XP boundaries, surplus XP, multiple levels, level cap, all difficulty rewards, ineligible soldiers, and replayed settlement.
-- Check level 6 stacks each attribute exactly once; level 10 totals are +90 flat HP, +9 primary, +5 secondary, +3 per other attribute.
+- Check level 6 stacks each attribute exactly once, and twice where primary and secondary name the same attribute; level 10 totals are +90 flat HP, +9 primary, +5 secondary, +3 per other attribute.
 - Check unchanged base stats after recalculation, JSON round trips, invalid imports, saved revision isolation, legacy migration, and rebasing in both directions.
 
 ## Approximations
@@ -97,7 +96,7 @@ Use one JSON-compatible progression definition containing these fields. Ship def
 
 A rule matches when the destination is within its bounds and its distance from the first level is divisible by the interval. All matching grants add together. An override replaces the entire generated grant list for that level; an empty list deliberately grants nothing. The editor shows the resolved table so replacement cannot silently hide an expected bonus.
 
-Profiles contain explicit distinct primary and secondary IDs. A soldier may have an explicit authored pair instead of a profile reference. Resolve and save the pair at recruitment; profile edits affect new recruits unless existing soldiers are explicitly reassigned through a rebase. Remaining registered attributes form the other group.
+Profiles contain primary and secondary IDs, which may name the same attribute. A soldier may have an explicit authored pair instead of a profile reference. Remaining registered attributes form the other group.
 
 ## Soldier and campaign storage
 
@@ -126,15 +125,15 @@ Persist the XP update and settlement receipt together as one authoritative state
 | Change mission rewards | Affects newly offered missions; no retroactive XP changes |
 | Increase cap | Retained XP can immediately unlock levels on rebase |
 | Rebase health | Preserve wound damage; clamp a living soldier's current HP to at least 1 and at most the new maximum; dead status stays dead |
-| Migrate legacy soldier | Copy current attributes to base stats, initialize configured starting XP, assign an explicit authored growth pair, preserve wounds and status |
+| Migrate legacy soldier | Copy current attributes to base stats, initialize configured starting XP, assign its growth pair, preserve wounds and status |
 
-Migration is versioned and runs once. Missing growth assignments require an authoring fix or a deliberately configured fallback profile; never choose attributes by current ranking. The default level-1 migration grants no bonuses and preserves existing health.
+Migration is versioned and runs once. Missing growth assignments are never chosen by current ranking. The default level-1 migration grants no bonuses and preserves existing health.
 
 ## Validation and editor requirements
 
 - Levels and intervals are positive integers; start level cannot exceed cap. Transition costs are positive integers and cover every reachable transition exactly once.
 - XP rewards and starting XP are nonnegative integers. Growth amounts are finite nonnegative numbers; attribute increments are integers. HP settings must yield positive maximum HP.
-- Reject unknown difficulties, attribute IDs, targets, policies, duplicate rule IDs, invalid profile pairs, and out-of-range overrides. Zero rewards or grants are valid tuning choices.
+- Reject unknown difficulties, attribute IDs, targets, policies, duplicate rule IDs, profile pairs naming unregistered attributes, and out-of-range overrides. Zero rewards or grants are valid tuning choices.
 - Optional caps must be valid for their attribute. Reject non-finite values and values exceeding safe numeric arithmetic, including cumulative XP totals.
 - The editor provides add/remove/edit controls for rules and levels, not merely fixed controls for today's nine transitions. It shows threshold totals and per-level and cumulative grants.
 - Validate imports atomically; on failure retain the previous working definition and report exact fields. Reset and export operate on the full definition.
