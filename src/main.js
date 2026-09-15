@@ -328,7 +328,7 @@ function playNext() {
   // _lastSquad, so noting the squad before it would throw the names away. In a
   // room the owner is always this seat, so this never fires.
   if (current.playerId !== you) swapTo(current.playerId);
-  hub.noteDispatch(current.squad);
+  hub.noteDispatch(current.squad, current.mission.id);
   showScene("mission");
   // THE ROOM MAY BE HOLDING THIS ONE (J8), and `hosted` is the only thing the
   // page forks on. With it, a socket is opened and the mission plays viewer:

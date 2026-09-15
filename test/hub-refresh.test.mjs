@@ -98,6 +98,48 @@ export default async function run(t) {
     t.ok("...and says why", /no longer on the board/.test(root.innerHTML));
   }
 
+  // ---- soldier progression readouts (tech/soldier-progression.md, P3) -----
+  // Presence, not looks: the fact under test is that each surface prints what
+  // the design says it prints, off the view's rules.
+  {
+    const { p1, hub, root } = twoSeats();
+    hub.location = "barracks";
+    hub.render();
+    t.ok("a recruit card shows its primary/secondary before hire", /Primary/.test(root.innerHTML));
+    await new Promise((d) => p1.send({ type: "hire", recruitId: p1.view().recruits[0].id }, d));
+    await settle();
+    hub.render();
+    t.ok("a roster card shows level and XP to next", root.innerHTML.includes("Level 1 · 0/10 XP"));
+    t.ok("...and the next level's gains", /Next level: \+10 HP/.test(root.innerHTML));
+    const capped = hub._soldierCard({ ...hub.game.roster[0], xp: 9999 }, false);
+    t.ok("...MAX at the cap", capped.includes("Level 10 · MAX"));
+    t.ok("...with no next-level line", !/Next level/.test(capped));
+
+    hub.location = "operations";
+    hub.render();
+    const lead = hub.game.leads[0];
+    t.ok("an Ops lead shows its XP reward", root.innerHTML.includes(`+${lead.xpReward} XP`));
+    hub.mode = "deploy";
+    hub.deploy = { missionId: lead.id, selected: new Set(), weapons: {} };
+    hub.render();
+    t.ok("the Deploy header shows the reward", root.innerHTML.includes(`+${lead.xpReward} XP for every soldier who extracts`));
+    t.ok("...and each Deploy card the level and labels", root.innerHTML.includes("Level 1 · 0/10 XP") && /Primary/.test(root.innerHTML));
+    hub.mode = "hub";
+    hub.deploy = null;
+
+    hub.noteDispatch([], lead.id);
+    hub.showResults(
+      { success: true, casualties: [], survivors: ["s"], loot: [], kills: 0 },
+      { ok: true, award: [{ id: "s", name: "Vance", xp: 50, fromLevel: 1, toLevel: 3, intoLevel: 20, nextCost: 40, max: false,
+        gains: { hp: 20, attrs: { aim: 2, health: 1, speed: 1, nerve: 1 } } }] }
+    );
+    t.ok("results show the mission's reward", root.innerHTML.includes(`Mission reward: ${lead.xpReward} XP`));
+    t.ok("...XP earned and the levels crossed", /Vance <b>\+50 XP<\/b>/.test(root.innerHTML) && root.innerHTML.includes("Level 1 → 3"));
+    t.ok("...and the combined gains", root.innerHTML.includes("+20 HP, +2 Aim, +1 Health, +1 Speed, +1 Nerve"));
+    hub.showResults({ success: false, casualties: [], survivors: [], loot: [], kills: 0 }, { ok: true, award: [] });
+    t.ok("a report that paid nobody says so", root.innerHTML.includes("No XP earned."));
+  }
+
   // ---- setView still destroys, because it is a seat swap ------------------
   {
     const { p2, hub } = twoSeats();

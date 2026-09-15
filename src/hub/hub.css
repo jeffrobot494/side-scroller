@@ -279,7 +279,7 @@ body::after {
 
 /* stat bars */
 .stats { display: flex; flex-direction: column; gap: 6px; }
-.stat { display: grid; grid-template-columns: 52px 1fr 20px; align-items: center; gap: 8px; }
+.stat { display: grid; grid-template-columns: 52px 1fr 44px; align-items: center; gap: 8px; }
 .stat-label { font-size: 12px; color: var(--muted); }
 .stat-track { height: 7px; border-radius: 2px; background: var(--track); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5); }
 .stat-fill { display: block; height: 100%; background: linear-gradient(90deg, #3a6ea5, var(--accent)); }
@@ -397,6 +397,7 @@ body::after {
 /* How long the lead has left. Reads as a clock, not a threat, until it's short. */
 .tag-life { background: #23282f; color: var(--muted); }
 .tag-life.urgent { background: #3a1c1c; color: #e59090; }
+.tag-xp { background: #1f2a1f; color: #9fd49f; }
 
 /* ---- Deploy screen ---- */
 .deploy-card.chosen { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 3px 10px rgba(0,0,0,0.45); }
@@ -789,3 +790,11 @@ body::after {
 .lobby-go { border-color: var(--accent); color: var(--light); }
 .lobby-copy:hover, .lobby-go:hover { background: var(--concrete-hi); }
 .lobby-warn { color: var(--light); font-size: 12.5px; line-height: 1.6; max-width: 62ch; opacity: 0.85; }
+
+/* Soldier progression (tech/soldier-progression.md, P3) */
+.stat-bonus { margin-left: 4px; font-size: 10px; color: #9fd49f; }
+.traits.growth { gap: 4px; }
+.growth-tag { font-size: 10px; opacity: 0.85; }
+.level-line { color: var(--text); }
+.xp-results { margin: 12px 0; }
+.xp-list li { gap: 12px; }

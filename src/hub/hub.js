@@ -22,7 +22,7 @@ import { BLUEPRINTS } from "../game/content.js";
 import { config } from "../game/config.js";
 import { labelFor } from "../game/enemycost.js";
 import { soldierMaxHp } from "../game/soldiers.js";
-import { defaultProgression, effectiveSoldier } from "../game/progression.js";
+import { defaultProgression, effectiveSoldier, resolveSoldier, gainsAt } from "../game/progression.js";
 
 const LOCATIONS = [
   { id: "barracks", label: "Barracks", icon: "🪖", staff: "Sgt. Bishop" },
@@ -46,6 +46,8 @@ export class Hub {
     this.deploy = null; // { missionId, selected:Set, weapons:{soldierId:weaponId} }
     this.result = null;
     this.turn = null; // the day summary a round's last mission report carried
+    this.award = []; // soldiers the report paid XP to (soldier progression P3)
+    this.lastReward = null; // XP the dispatched lead advertised, for the results screen
     this.shareOpen = null; // lead id whose "Share with" list is open (S6)
     this.pending = null; // { action, id } while a command is in flight (W1)
 
@@ -78,6 +80,8 @@ export class Hub {
     this.deploy = null;
     this.result = null;
     this.turn = null;
+    this.award = [];
+    this.lastReward = null;
     this.sold = false;
     this.shareOpen = null;
     this._lastSquad = null;
@@ -90,8 +94,14 @@ export class Hub {
   // drops the dead from the roster before this screen renders, and the seat
   // follows the mission between each of a round's missions — so writing it at
   // commit would name the dead of the round's first mission and nobody after.
-  noteDispatch(squad) {
+  //
+  // The lead's XP reward is noted HERE too, for the same reason: the lead leaves
+  // the board on the mission's first report, and a wiped squad's results screen
+  // still says what the mission was worth.
+  noteDispatch(squad, missionId = null) {
     this._lastSquad = squad.map((x) => x.data);
+    const lead = missionId && this.game.leads.find((l) => l.id === missionId);
+    this.lastReward = lead && typeof lead.xpReward === "number" ? lead.xpReward : null;
   }
 
   // `turn` is the missionResult command's answer. Since S5 the round's day is
@@ -142,6 +152,9 @@ export class Hub {
   showResults(result, turn) {
     this.result = result;
     this.turn = turn && turn.dayTurned ? turn : null;
+    // Kept apart from the day summary: a report that did not turn the day (the
+    // first of a joint lead) still paid its own survivors.
+    this.award = (turn && turn.award) || [];
     this.sold = false;
     this.mode = "results";
     this.render();
@@ -358,12 +371,23 @@ export class Hub {
   // flat progression HP, read off the view's `progression` so a room's hub uses
   // the server's numbers. A copy for display; the roster soldier is untouched.
   _grown(s) {
-    return effectiveSoldier(this.game.progression || defaultProgression(), s);
+    return effectiveSoldier(this._rules(), s);
+  }
+
+  _rules() {
+    return this.game.progression || defaultProgression();
+  }
+
+  // "Level 3 · 20/40 XP" or "Level 10 · MAX".
+  _levelLine(raw) {
+    const p = resolveSoldier(this._rules(), raw);
+    return `Level ${p.level} · ${p.max ? "MAX" : `${p.intoLevel}/${p.nextCost} XP`}`;
   }
 
   _soldierCard(raw, hireable) {
     const g = this.game;
     const s = this._grown(raw);
+    const prog = resolveSoldier(this._rules(), raw);
     const affordable = g.money >= s.cost;
     const displayName = s.callsign
       ? `${s.name} <span class="callsign">"${s.callsign}"</span>`
@@ -389,7 +413,14 @@ export class Hub {
           </div>
         </div>
         <p class="bio">${s.bio}</p>
-        <div class="stats">${Object.keys(STAT_LABELS).map((k) => statBar(k, s.stats[k])).join("")}</div>
+        ${growthLabels(raw)}
+        ${hireable ? "" : `<div class="record level-line">${this._levelLine(raw)}</div>`}
+        <div class="stats">${Object.keys(STAT_LABELS).map((k) => statBar(k, s.stats[k], prog.bonus.attrs[k])).join("")}</div>
+        ${
+          hireable || prog.max
+            ? ""
+            : `<div class="record next-gains">Next level: ${formatGains(gainsAt(this._rules(), prog.level + 1, raw)) || "nothing"}</div>`
+        }
         <div class="traits">${s.traits.map((t) => `<span class="trait">${t}</span>`).join("")}</div>
         ${hp}
         ${rec}
@@ -474,7 +505,9 @@ export class Hub {
     const rows = g.leads.length
       ? g.leads
           .map((m) => {
-            const status = `<span class="tag tag-diff-${m.difficulty}">${labelFor(m.difficulty)} threat</span>`;
+            const status = `<span class="tag tag-diff-${m.difficulty}">${labelFor(m.difficulty)} threat</span>${
+              typeof m.xpReward === "number" ? ` <span class="tag tag-xp">+${m.xpReward} XP</span>` : ""
+            }`;
             // Leads rot. The boss carries no lifespan and shows no clock.
             const life =
               typeof m.daysLeft === "number"
@@ -644,6 +677,8 @@ export class Hub {
               <div class="who">
                 <div class="name">${s.name}</div>
                 <div class="sub">Aim ${s.stats.aim} · Health ${s.stats.health} · Speed ${s.stats.speed} · HP ${soldierMaxHp(s) - (s.wounds || 0)}/${soldierMaxHp(s)}</div>
+                <div class="sub">${this._levelLine(raw)}</div>
+                ${growthLabels(raw)}
               </div>
             </div>
             <div class="deploy-controls">
@@ -674,6 +709,7 @@ export class Hub {
       <div class="location-header">
         <h1>🛰️ Deploy — ${mission.name}</h1>
         <p class="staff-line">${mission.brief}</p>
+        ${typeof mission.xpReward === "number" ? `<p class="muted xp-reward">+${mission.xpReward} XP for every soldier who extracts.</p>` : ""}
       </div>
       <section class="squad-block">
         <h2>Choose up to 3 <span class="count">${sel.size}/3</span></h2>
@@ -754,9 +790,26 @@ export class Hub {
       ? `<div class="dayturn">A new day — day ${g.day}. ${parts.join(" ")}</div>`
       : "";
 
+    // Soldier progression: what the mission was worth, and what it paid.
+    const paid = this.award.length
+      ? `<ul class="plain-list xp-list">${this.award
+          .map(
+            (a) => `<li><span>${a.name} <b>+${a.xp} XP</b></span><span>${
+              a.toLevel > a.fromLevel ? `Level ${a.fromLevel} → ${a.toLevel} · ${formatGains(a.gains)}` : `Level ${a.toLevel}`
+            } · ${a.max ? "MAX" : `${a.intoLevel}/${a.nextCost} XP`}</span></li>`
+          )
+          .join("")}</ul>`
+      : `<p class="empty">No XP earned.</p>`;
+    const xpBlock = `<div class="xp-results">
+        <h2>Experience</h2>
+        ${this.lastReward != null ? `<p class="muted">Mission reward: ${this.lastReward} XP per extracting soldier.</p>` : ""}
+        ${paid}
+      </div>`;
+
     return `
       ${ribbon}
       ${dayline}
+      ${xpBlock}
       <div class="results-body">
         <div class="result-col">
           <h2>Casualties</h2>
@@ -1048,13 +1101,34 @@ export class Hub {
 
 // ---- shared helpers -------------------------------------------------------
 
-function statBar(key, value) {
+// `bonus` is what progression added on top of the authored stat, shown beside
+// the final value — so the bar reads starting stat, bonus and final at once.
+function statBar(key, value, bonus = 0) {
   return `
     <div class="stat">
       <span class="stat-label">${STAT_LABELS[key]}</span>
       <span class="stat-track"><span class="stat-fill" style="width:${Math.min(100, value * 10)}%"></span></span>
-      <span class="stat-num">${value}</span>
+      <span class="stat-num">${value}${bonus ? `<span class="stat-bonus">+${bonus}</span>` : ""}</span>
     </div>`;
+}
+
+// Primary and secondary, as small labels. A soldier drawn the same attribute
+// twice gets one label saying so. Nothing for a soldier with no assignment.
+function growthLabels(s) {
+  if (!STAT_LABELS[s.primary] || !STAT_LABELS[s.secondary]) return "";
+  const tags =
+    s.primary === s.secondary
+      ? [`Primary + secondary: ${STAT_LABELS[s.primary]}`]
+      : [`Primary: ${STAT_LABELS[s.primary]}`, `Secondary: ${STAT_LABELS[s.secondary]}`];
+  return `<div class="traits growth">${tags.map((t) => `<span class="trait growth-tag">${t}</span>`).join("")}</div>`;
+}
+
+// "+20 HP, +2 Aim, +1 Speed" — zeros left out.
+function formatGains(g) {
+  const parts = [];
+  if (g.hp) parts.push(`+${g.hp} HP`);
+  for (const k of Object.keys(STAT_LABELS)) if (g.attrs[k]) parts.push(`+${g.attrs[k]} ${STAT_LABELS[k]}`);
+  return parts.join(", ");
 }
 
 function initials(s) {
