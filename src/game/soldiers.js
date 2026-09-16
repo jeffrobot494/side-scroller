@@ -120,7 +120,7 @@ export const RECRUIT_POOL = [
     bio: "Lost her whole family in the first raid on the harbor district. Signed the enlistment papers the next morning, still in yesterday's clothes. She is not here for the money.",
     stats: { aim: 7, health: 6, speed: 6, nerve: 7 },
     primary: "health",
-    secondary: "nerve",
+    secondary: "aim",
     traits: ["Vengeful", "Loyal"],
     cost: 240,
     status: "recruit",

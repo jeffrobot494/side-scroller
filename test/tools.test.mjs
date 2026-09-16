@@ -5,6 +5,7 @@ import { createWeaponDesigner } from "../src/editor/tools/weapon-designer.js";
 import { createEnemyDesigner } from "../src/editor/tools/enemy-designer.js";
 import { createLevelGenerator } from "../src/editor/tools/level-generator.js";
 import { createFiringRoom } from "../src/editor/tools/firing-room.js";
+import { createAimLab, aimSpreadTerm, coneOf, sampleOffset, kickScale, sweptHits, recoverStep } from "../src/editor/tools/aim-lab.js";
 import { createProgressionEditor } from "../src/editor/tools/progression.js";
 import { activeProgression, activeAssignments, shippedAssignments } from "../src/game/progressionstore.js";
 import { defaultProgression } from "../src/game/progression.js";
@@ -43,6 +44,35 @@ export default async function run(t) {
   mountable(t, "enemy-designer", createEnemyDesigner);
   mountable(t, "level-generator", createLevelGenerator);
   mountable(t, "firing-room", createFiringRoom);
+  mountable(t, "aim-lab", createAimLab);
+
+  // Aim Lab's candidate models. "game" must stay today's aimAccuracy so the
+  // lab's baseline is the real one; "curve" must keep paying past 10.
+  {
+    t.eq("aim-lab: game model is dead from Aim 10", aimSpreadTerm(14, "game", 0.12, 0.8), 0);
+    t.ok("aim-lab: game model at Aim 5 matches aimAccuracy", Math.abs(aimSpreadTerm(5, "game", 0.12, 0.8) - (1 - 4 / 9) * 0.12) < 1e-12);
+    t.ok("aim-lab: curve still shrinks from 14 to 15", aimSpreadTerm(15, "curve", 0.12, 0.8) < aimSpreadTerm(14, "curve", 0.12, 0.8) && aimSpreadTerm(20, "curve", 0.12, 0.8) > 0);
+    t.eq("aim-lab: off model ignores Aim", aimSpreadTerm(1, "off", 0.12, 0.8), 0);
+    t.ok("aim-lab: uniform cone adds, gaussian adds in quadrature", Math.abs(coneOf(0.03, 0.04, 0, "uniform") - 0.07) < 1e-12 && Math.abs(coneOf(0.03, 0.04, 0, "gaussian") - 0.05) < 1e-12);
+    let inside = 0, maxAbs = 0;
+    let seed = 7;
+    const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < 4000; i++) { const o = sampleOffset(0.1, "gaussian", rng); if (Math.abs(o) <= 0.1) inside++; maxAbs = Math.max(maxAbs, Math.abs(o)); }
+    t.ok("aim-lab: gaussian puts ~95% inside the cone, never past 3σ", inside / 4000 > 0.93 && inside / 4000 < 0.97 && maxAbs <= 0.15 + 1e-12);
+    t.ok("aim-lab: uniform never leaves the cone", Array.from({ length: 500 }, () => sampleOffset(0.1, "uniform", rng)).every((o) => Math.abs(o) <= 0.1));
+    t.eq("aim-lab: kick is untouched at Aim 1", kickScale(1, 0.85), 1);
+    {
+      const held = recoverStep(0.1, 0.5, 0.2, 4);
+      t.ok("aim-lab: recoil does not recover inside the delay", held.recoil === 0.1 && Math.abs(held.hold - 0.3) < 1e-12);
+      const split = recoverStep(0.1, 0.05, 0.2, 4);
+      t.ok("aim-lab: only the time past the delay recovers", Math.abs(split.recoil - 0.1 * Math.exp(-4 * 0.15)) < 1e-12 && split.hold === 0);
+      t.ok("aim-lab: no delay recovers the whole step", Math.abs(recoverStep(0.1, 0, 0.2, 4).recoil - 0.1 * Math.exp(-0.8)) < 1e-12);
+    }
+    const p = { x: 100, y: 100, w: 12, h: 4, vx: 950, vy: 0 };
+    t.ok("aim-lab: a level shot at head height passes the head box", sweptHits(p, { x: 130, y: 96, w: 16, h: 12 }, 20, 80));
+    t.ok("aim-lab: the same shot misses a box below it", !sweptHits(p, { x: 130, y: 130, w: 16, h: 12 }, 20, 80));
+    t.ok("aim-lab: a box behind the shot's reach is not hit", !sweptHits(p, { x: 400, y: 96, w: 16, h: 12 }, 20, 80));
+  }
   mountable(t, "progression", createProgressionEditor);
 
   // The Progression tool (tech/soldier-progression.md, P4), driven through its

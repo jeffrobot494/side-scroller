@@ -70,7 +70,9 @@ section + the tests are the source of truth for what currently exists):
 - **Editor tools** (`editor.html` → Tools): Weapon Designer, Enemy Designer,
   Level Generator (seed → schematic preview), Firing Room (bigger platformed
   range: fire any weapon at respawning dummies OR waves of real enemies — an
-  Aim slider + auto-fire/manual drive), **Behavior Lab**, Controls (rebind keys).
+  Aim slider + auto-fire/manual drive), **Aim Lab** (feel test for Aim: spread
+  model, recoil, weak points, view distance ×1/×3/×5 — lab-only, changes nothing
+  in the game), **Behavior Lab**, Controls (rebind keys).
   Settings tab is schema-driven config; the **Sound tab** is the mixer + the cue
   bank.
 - **Behavior Lab v2 (`tech/behavior-lab.md` B1–B3 — built):** *can that

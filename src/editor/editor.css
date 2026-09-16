@@ -650,3 +650,19 @@
 .pg .pg-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .pg .pg-override { border-left: 2px solid var(--line); padding-left: 10px; margin-bottom: 10px; }
 .pg .ed-note ul { margin: 6px 0 0 18px; padding: 0; }
+
+/* ---- Aim Lab: wide range + knob panels ---- */
+.wd.al { width: 96vw; max-width: 1640px; margin-left: 50%; transform: translateX(-50%); }
+.al-bar { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; margin-bottom: 14px; }
+.al-bar .lg-field select { min-width: 200px; }
+.al-views { display: flex; gap: 6px; }
+.al-canvas { outline: none; cursor: crosshair; }
+.al-canvas:focus { border-color: var(--accent); }
+.al-report { margin-bottom: 16px; }
+.al-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.al-panel { display: flex; flex-direction: column; gap: 10px; background: var(--track); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; }
+.al-panel h4 { margin: 0 0 2px; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text); }
+.al-panel .lg-field select { width: 100%; }
+.al-panel .lg-field input[type="range"] { width: 100%; min-width: 0; }
+.al-note { margin: 0; font-size: 11px; color: var(--muted); }
+@media (max-width: 1240px) { .wd.al { width: 100%; max-width: none; margin-left: 0; transform: none; } }
