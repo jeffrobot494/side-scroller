@@ -48,13 +48,16 @@ Two behaviours, and it is always in one of them.
 
 | | What it does | Leaves when |
 |---|---|---|
-| **Escorting** | Walks, over and over, to a fixed spot a short way to your left. Keeps a loose standoff so it does not body-block you | A hostile comes within engagement range |
+| **Escorting** | Keeps station near you: it walks to a spot a short way off, to one side or the other, and stands there. The spot moves with you continuously, so the squadmate closes the distance in one smooth run and settles when it arrives. Each squadmate keeps its own station, so a squad gathers around you rather than stacking on one point | A hostile comes within engagement range |
 | **Fighting** | Holds a firing standoff from the nearest hostile — closes if too far, backs off if too close — and fires on a loop whenever it can see the target | The nearest hostile is far enough away again |
 
 Details that matter to how it reads on screen:
 
 | | |
 |---|---|
+| **It keeps station rather than chasing you** | The spot it walks to tracks your position as you move. It never walks to where you used to be |
+| **It settles when it arrives** | Standing at its station is the resting state. It moves again when you have moved far enough that the station has |
+| **No two squadmates share a station** | Each takes its own side and its own distance within the escort range, and keeps them for as long as it is escorting, so the squad spreads out without shuffling on the spot |
 | **It breaks off to fight on distance alone** | A hostile close enough is engaged whether or not there is a clear shot at it. Cover cannot pin a squadmate in escort |
 | **It only pulls the trigger on something it can see** | A squadmate under a ledge holds fire rather than shooting into it |
 | **It repositions when it cannot shoot** | With no sight line, or stuck outside its standoff, it walks to somewhere it can shoot from and commits to going there. If the ground defeats it, it gives up and fights from where it stands |
@@ -129,8 +132,8 @@ not deliver.
 | **A squadmate never kneels except to dodge** | Ducking covers reacting to incoming fire. Kneeling to clear your line of fire, or to make itself small on approach, does not exist |
 | **Nerve does nothing** | Described as composure under fire — panic, freezing, breaking — and none of it exists. Speed reaches exactly one behaviour, the duck |
 | **Traits do nothing** | "Reckless", "Fearless", "Green" and the rest are printed beside soldiers who behave identically |
-| **The escort position is fixed, and always to your left** | Not behind you — a literal fixed offset, so walking left puts your squad in front of you. It does not vary by facing, weapon, soldier, or situation |
-| **Squadmates take no account of each other** | Two will hold the same standoff from the same hostile in the same place. No spreading out, no roles, no flanking |
+| **The escort position takes no account of where you are going** | A squadmate stands to one side of you, and which side is its own. It is never behind you, because there is no behind — the station does not move when you turn or change direction, so walking into your own squad walks through it |
+| **Squadmates take no account of each other in a fight** | Two will hold the same standoff from the same hostile in the same place. No roles, no flanking. Escorting spreads them out, but by each keeping a station of its own rather than by noticing the others |
 | **Your own Aim stat widens your shots** | Manual aim is precise, then the stat scatters it — the player aims by hand and is corrected by a number |
 | **Wounds are invisible in the mission** | A soldier deploys with reduced health and nothing on screen says why |
 | **Nothing reacts to a squadmate dying** | No morale, no reaction, no acknowledgement — see `design/bonds.md` |
