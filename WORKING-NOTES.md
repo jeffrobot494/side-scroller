@@ -102,7 +102,7 @@ of writing.
 The line: Claude may **move** design that exists and **attack** design Bo wrote.
 Claude may not **originate** it.
 
-**The failure this comes from (2026-08-02).** Claude wrote `sprints/2026-08.md`
+**The failure this comes from (2026-08-02).** Claude wrote a sprint doc
 containing "the four questions this sprint answers" — presented as if derived
 from the codebase. They were invented. So was the "open questions" section in
 `tech/agent-navigation.md` they were lifted from. Bo spent a session reading and

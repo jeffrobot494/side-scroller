@@ -40,7 +40,7 @@ export default async function run(t) {
   // ---- parsing -----------------------------------------------------------
   const d = parse("tech/THING.md", [
     "---", "type: tech", "category: artificial-intelligence", "status: building",
-    "resolution: sharp", "sprint: 2026-08", "tags: [a, b]", "---", "",
+    "resolution: sharp", "sprint: 2099-01", "tags: [a, b]", "---", "",
     "# Thing", "", "Depends on `tech/SOUND.md` and `ROADMAP.md`.",
     "", "```", "ignore tech/FAKE.md in code", "```",
   ].join("\n"));
@@ -53,7 +53,7 @@ export default async function run(t) {
   t.eq("category", d.category, "artificial-intelligence");
   t.eq("status", d.status, "building");
   t.eq("resolution", d.resolution, "sharp");
-  t.eq("sprint", d.sprint, "2026-08");
+  t.eq("sprint", d.sprint, "2099-01");
   t.ok("frontmatter stripped from body", !d.body.includes("type: tech"));
   t.ok("links found", d.links.includes("tech/sound.md") && d.links.includes("roadmap.md"));
   t.ok("code fences excluded from links", !d.links.join(" ").includes("fake"));
@@ -98,7 +98,7 @@ export default async function run(t) {
   const spec = (status, parts = SECTIONS, needs = "[nav]") =>
     `---\ntype: tech\ncategory: scenes\nstatus: ${status}\nneeds: ${needs}\n---\n# T\n`
     + parts.map((s) => `## ${s}\n\nx\n`).join("\n");
-  const design = "---\ntype: design\ncategory: scenes\nsprint: 2026-08\n---\n# Thing\n";
+  const design = "---\ntype: design\ncategory: scenes\nsprint: 2099-01\n---\n# Thing\n";
 
   index([parse("design/thing.md", design), parse("tech/thing.md", spec("unbuilt"))]);
   t.eq("a complete spec passes", lint().length, 0);

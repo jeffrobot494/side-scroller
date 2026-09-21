@@ -3,7 +3,6 @@ type: design
 category: artificial-intelligence
 status: unbuilt
 resolution: sharp
-sprint: 2026-08
 ---
 
 # Agent navigation

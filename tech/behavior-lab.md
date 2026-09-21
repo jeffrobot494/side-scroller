@@ -3,7 +3,6 @@ type: tech
 category: development-tools
 status: built
 resolution: sharp
-sprint: 2026-08
 needs: [agent-navigation]
 related: [locomotion, level-generation]
 ---

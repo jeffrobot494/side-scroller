@@ -3,7 +3,6 @@ type: design
 category: development-tools
 status: built
 resolution: sharp
-sprint: 2026-08
 ---
 
 # Behavior Lab

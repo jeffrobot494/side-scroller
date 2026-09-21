@@ -38,8 +38,7 @@ that culls a different structure produces a different level for the same seed an
 passes every existing assertion. Without N0, "behaviour-preserving" is a claim
 with nothing behind it.
 
-The Behavior Lab (`design/behavior-lab.md`) is how N3 is evaluated by eye, and is
-scheduled alongside it in `sprints/2026-08.md`.
+The Behavior Lab (`design/behavior-lab.md`) is how N3 is evaluated by eye.
 
 **N4 exists because N3 shipped a defect, found by measurement.** On seed 2026 a
 `husk_charger` stands on a ground slab split in two by a 91px pillar. The graph
@@ -200,7 +199,8 @@ not.** This is a scope line, not an oversight:
 | Flyer kinematics (`hover`, `home`, `orbit`, `static`) | No graph at all | Not routed |
 
 Choosing which node satisfies "220–380px from the player" is **destination
-scoring under combat weights**, which `sprints/2026-08.md` cuts to September.
+scoring under combat weights**, which is unscheduled work
+(`idea/advanced-agent-navigation.md`).
 Pulling it into N3 would import the whole of that item through the back door.
 
 The cost is stated plainly: of the three grounded roster enemies, N3 reaches

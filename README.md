@@ -73,8 +73,8 @@ under consideration:
 The mechanical skeleton is built and playable end to end: hub, generated missions,
 permadeath, the economy, an enemy-authoring system, and a winnable campaign. The
 setting above describes the target, not the current build — missions are sectors
-rather than centuries today. The story layer is this month's work; see
-`sprints/2026-08.md`.
+rather than centuries today. The story layer is not built yet; see
+`ROADMAP.md`.
 
 ## Run it
 

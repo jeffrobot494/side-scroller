@@ -3,7 +3,6 @@ type: tech
 category: artificial-intelligence
 status: built
 resolution: sharp
-sprint: 2026-08
 needs: [locomotion]
 related: [soldier-behavior, ranged-repositioning, behavior-lab]
 ---

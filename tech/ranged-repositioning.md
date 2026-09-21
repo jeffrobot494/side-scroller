@@ -3,7 +3,6 @@ type: tech
 category: artificial-intelligence
 status: built
 resolution: sharp
-sprint: 2026-08
 needs: [agent-navigation]
 related: [behavior-lab, locomotion]
 ---
@@ -28,8 +27,8 @@ band's outer edge: line of sight is **already clear in 61%** of placements. A
 gunner that can see you is working as intended — it shoots. This spec addresses
 the other 39%, plus agents wedged where they cannot hold their band at all. The
 remaining cases — bad angle, no elevation, clumped fire — are weights, and weights
-are `idea/advanced-agent-navigation.md`'s destination scoring, cut to September by
-`sprints/2026-08.md`. **Anyone reading this expecting ranged enemies to start
+are `idea/advanced-agent-navigation.md`'s destination scoring, which is
+unscheduled. **Anyone reading this expecting ranged enemies to start
 using terrain intelligently will be disappointed; it stops them standing in
 places from which they can do nothing.**
 

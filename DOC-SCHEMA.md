@@ -9,7 +9,7 @@ type: tech                    # design | tech | idea | sprint
 category: artificial-intelligence
 status: building              # unbuilt | designed | building | built | superseded | reference
 resolution: sharp             # vague | sharp
-sprint: 2026-08               # optional — which sprint it is in scope for
+sprint: YYYY-MM               # optional — which sprint it is in scope for
 related: [behavior-lab, locomotion]   # optional — slugs, not paths
 ---
 ```
