@@ -123,6 +123,50 @@ export function invalidateNavGraphs(scene) {
   scene.navGen = (scene.navGen || 0) + 1;
 }
 
+// ---- the escort station (tech/soldier-behavior.md, E1) --------------------
+
+// Where a squadmate stands while it is escorting: a fixed distance to one side
+// of its leader, on the surface the LEADER is standing on.
+//
+// Two absences are the whole point of it. It reads the leader and nothing else
+// — not the follower's position, not its velocity — so walking cannot move the
+// destination; the escort offset it replaces was measured along the
+// follower→leader line, which made the goal a function of the body chasing it
+// (tech/nav-audit.md §2a). And it names the surface itself instead of handing a
+// floating point to `nearestNode`, whose "which surface did you mean" scoring
+// has no memory of its last answer and flips as a body crosses the midpoint
+// between two of them — the other half of the same oscillation.
+//
+// `side` is -1 or 1. The point comes back as a CENTRE, which is what
+// routeRequest is handed everywhere else.
+export function stationPoint(ent, lead, side, standoff, scene, speed) {
+  const x = lead.x + side * standoff;
+  const graph = navGraph(ent, scene, speed);
+  // Spans are in body-left-edge space, so the leader's x is converted into it
+  // the same way routeRequest converts a destination.
+  const surface = graph && surfaceUnder(graph, lead.x - ent.w / 2, lead.y);
+  if (!surface) return { x, y: lead.y };
+  const left = Math.min(Math.max(x - ent.w / 2, surface.a), surface.b);
+  return { x: left + ent.w / 2, y: surface.y };
+}
+
+// The standable surface directly below a point: the highest node top at or
+// under it whose span covers that x.
+//
+// Deliberately not `nodeUnder`, which needs a body's feet and answers null for
+// anything airborne. A leader spends a second of every jump off the ground, and
+// "no surface while airborne" would hand the station back to floating-point
+// scoring for exactly that second, once per jump. The surface under a jumping
+// leader is the one it is about to land on or near, and it does not move.
+function surfaceUnder(graph, x, y) {
+  let best = null;
+  for (const n of graph.nodes) {
+    if (n.y < y || x < n.a || x > n.b) continue;
+    if (!best || n.y < best.y) best = n;
+  }
+  return best;
+}
+
 // ---- per-agent route state -----------------------------------------------
 
 function newNav(scene, graph) {

@@ -27,14 +27,25 @@ const DEFAULT_COMPANION = {
     visual: { shape: "box", size: [30, 46], color: "#6fcf97" },
     body: { locomotor: "soldier", gravity: 1 },
     health: { max: 1 }, // formality — the Soldier owns the real HP
-    motion: { type: "static" },
+    // The escort controller, authored TWICE on purpose: a brain state's `enter`
+    // steps run on switchState only, so the START state's never fire (brain.js)
+    // and a companion would spend its first escort on the root's motion. The
+    // state's setMotion below is what restores this one on the way back from
+    // combat; this is what it starts on.
+    motion: { type: "follow", leader: "anchor", standoff: 90, speed: 320 },
     emitters: { weapon: { at: [0, -6], projectile: { speed: 700, damage: 1, life: 1 } } },
   },
   brain: {
     start: "escort",
     states: {
-      // Follow the leader (sense.anchor* = the controlled soldier), holding a
-      // loose ~90px standoff so we don't body-block. Engage on RANGE alone. The
+      // Keep station near the leader (sense.anchor* = the controlled soldier),
+      // 90px to one side so we don't body-block. NO TRACK: the `follow`
+      // controller is re-asked every frame and resolves its own point, where the
+      // moveTo/wait loop this replaces walked to a snapshot of the leader,
+      // stopped on a 0.6s timeout and waited — which is what made a squadmate
+      // follow in bursts (tech/nav-audit.md §1, tech/soldier-behavior.md E1).
+      //
+      // Engage on RANGE alone. The
       // old ±40px band (sense.playerAbove/Below) was inherited from
       // updateCompanion, which could only shoot horizontally; a companion that
       // aims in 2D has no reason to ignore the alien on the ledge.
@@ -44,11 +55,7 @@ const DEFAULT_COMPANION = {
       // sight line (tech/ranged-repositioning.md). Requiring the sight line to
       // engage would mean cover permanently pins a companion in escort.
       escort: {
-        enter: [{ setMotion: { type: "static" } }],
-        tracks: [{ id: "follow", loop: true, steps: [
-          { moveTo: { target: "anchor", offset: [-90, 0], speed: 320, timeout: 0.6 } },
-          { wait: 0.12 },
-        ] }],
+        enter: [{ setMotion: { type: "follow", leader: "anchor", standoff: 90, speed: 320 } }],
         transitions: [{ when: "sense.dist < 520", to: "combat" }],
       },
       // Hold a firing standoff from the nearest enemy (keepDistance) and shoot on

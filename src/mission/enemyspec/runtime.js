@@ -21,7 +21,7 @@
 
 import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
-import { routeRequest, holdPoint, abortRoute, navState, navGraph } from "../navigation.js";
+import { routeRequest, holdPoint, abortRoute, navState, navGraph, stationPoint } from "../navigation.js";
 import { tickBrain } from "./brain.js";
 import { updateSense, nearestHostile, losBetween } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
@@ -381,6 +381,18 @@ function controllerRequest(root, ent, m, dt, scene, target) {
     case "moveTo": {
       const at = resolveTargetPoint(root, ent, m.target, scene, target, m.offset);
       if (!at) return { kind: "coast" };
+      return routeRequest(ent, at, m.speed, scene, dt)
+        || { kind: "steer", point: at, speed: m.speed, hopToward: reflexHop(ent, scene, m.speed, at) };
+    }
+    case "follow": {
+      // The leader's point, with NO offset: resolveTargetPoint's own offset is
+      // measured along the follower→target line, which is the one input a
+      // movement decision must not read. The station is applied after, off the
+      // leader alone (navigation.js).
+      const lead = resolveTargetPoint(root, ent, m.leader, scene, target, null);
+      if (!lead) return { kind: "stopX" };
+      // One fixed side, so a squad stacks on one station until E2 rolls it.
+      const at = stationPoint(ent, lead, -1, m.standoff, scene, m.speed);
       return routeRequest(ent, at, m.speed, scene, dt)
         || { kind: "steer", point: at, speed: m.speed, hopToward: reflexHop(ent, scene, m.speed, at) };
     }

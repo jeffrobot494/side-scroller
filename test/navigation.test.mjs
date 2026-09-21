@@ -1188,22 +1188,29 @@ export default async function run(t) {
     t.eq("sense: and is not blocked", c.sense.navBlocked, false);
   }
 
-  // ---- E0: what escorting does today (tech/soldier-behavior.md) -------------
-  // The baseline a continuous follow controller has to beat. A real Soldier on
-  // DEFAULT_COMPANION_SPEC behind a scripted leader, over three terrains, driven
-  // the way mission.js drives a squad. Three numbers each:
+  // ---- E1: keeping station (tech/soldier-behavior.md) ----------------------
+  // A real Soldier on DEFAULT_COMPANION_SPEC behind a scripted leader, over
+  // three terrains, driven the way mission.js drives a squad. Three numbers
+  // each, and E0 recorded them against the escort loop this replaces:
+  //
+  //             gap    stops  crossings
+  //   flat     85.7      6        0
+  //   step     86.7      6        1
+  //   ledge    26.0      0       19
   //
   //   gap        centre-to-centre distance to the leader on the last frame,
-  //              after both have stood still for four seconds
+  //              after both have stood still for four seconds. E0's three were
+  //              not stations: the escort offset was measured along the
+  //              follower→leader line, so it moved with the body chasing it,
+  //              and the ledge scene never came to rest at all. The claim now
+  //              is the design's — it settles AT its station
   //   stops      times it fell from full run speed to a dead stop while the
   //              leader kept walking — the burst (tech/nav-audit.md §1)
   //   crossings  times it changed which surface it stands on while the leader
   //              stood still — the oscillating goal (§2a)
   //
-  // Recorded as they are, not as they should be, so this lands green on the
-  // defect. They are pinned rather than bounded because any movement in them is
-  // a behaviour change worth seeing; E1 replaces the values with its own and
-  // turns `stops` and `crossings` into ceilings.
+  // `stops` and `crossings` are ceilings, so a later slice may lower them and
+  // may not raise them. The numbers and the scenes are E0's, unchanged.
   {
     // The leader runs off an input trace and the squadmate off the real
     // companion path, each stepped once per frame — the pairing in mission.js.
@@ -1243,35 +1250,47 @@ export default async function run(t) {
     };
 
     const GROUND = { x: 0, y: 500, w: 1400, h: 40 };
+    // The authored station (companionspecs.js), and what a settled gap is
+    // measured against. The band is wide enough for the overshoot a soldier
+    // cannot avoid: it reads the SIGN of a drive request, so a body arriving at
+    // a run needs ~17px to stop against a 14px arrival radius.
+    const STATION = 90;
+    const settled = (r, what) => {
+      t.ok(`${what}: settles ${r.gap.toFixed(1)}px from the leader, at its ${STATION}px station`, Math.abs(r.gap - STATION) <= 6);
+      t.ok(`${what}: ...at a dead stop, so the gap is a resting value`, Math.abs(r.comp.vx) < 1);
+    };
 
-    // Flat ground. Nothing to climb, so every stop belongs to the order loop:
-    // moveTo (0.6s timeout) → stop → wait 0.12 → re-accelerate.
+    // Flat ground. Every stop E0 recorded here belonged to the order loop:
+    // moveTo (0.6s timeout) → stop → wait 0.12 → re-accelerate, six times in
+    // three seconds. A controller re-asked every frame has no such seam.
     const flat = escort([GROUND], 150, 200, (i) => ({ move: i < 180 ? 1 : 0, jump: false }), 7);
-    t.eq(`E0 flat: standstills in the 3s the leader walked (${flat.stops})`, flat.stops, 6);
-    t.eq("E0 flat: and one surface, so nothing to cross", flat.crossings, 0);
-    t.ok(`E0 flat: settles ${flat.gap.toFixed(1)}px from the leader`, Math.abs(flat.gap - 85.7) < 1.5);
-    t.ok("E0 flat: ...at a dead stop, so that gap is a resting value", Math.abs(flat.comp.vx) < 1);
+    t.eq(`E1 flat: standstills in the 3s the leader walked (was 6)`, flat.stops, 0);
+    t.eq("E1 flat: and one surface, so nothing to cross", flat.crossings, 0);
+    settled(flat, "E1 flat");
 
     // One elevation change: the leader jumps a 60px step and stands on top.
     const STEP_UP = [GROUND, { x: 900, y: 440, w: 500, h: 100 }];
     const step = escort(STEP_UP, 300, 350,
       (i, l) => ({ move: i < 180 ? 1 : 0, jump: i < 180 && l.onGround && l.x > 845 && l.x < 900 }), 7);
-    t.eq(`E0 step: standstills in the 3s the leader walked (${step.stops})`, step.stops, 6);
-    t.eq("E0 step: one crossing, which is the climb it makes to arrive", step.crossings, 1);
-    t.ok(`E0 step: settles ${step.gap.toFixed(1)}px from the leader, on the step`, Math.abs(step.gap - 86.7) < 1.5);
-    t.ok("E0 step: ...at a dead stop", Math.abs(step.comp.vx) < 1);
+    // The one that is left is not a burst: it is the frame the climb's air
+    // control reverses through zero, sampled as it lands on the step. A stop in
+    // this count is any frame at rest, and a body turning around in the air is
+    // momentarily at rest horizontally.
+    t.ok(`E1 step: standstills in the 3s the leader walked (${step.stops}, was 6)`, step.stops <= 1);
+    t.ok("E1 step: crossings — the climb it makes to arrive, and no more", step.crossings <= 1);
+    settled(step, "E1 step");
 
-    // tech/nav-audit.md §2a, the geometry it was found on. The escort offset is
-    // measured along the follower→leader line, so walking moves the destination:
-    // on the ground the point scores onto the ledge, on the ledge it scores back
-    // onto the ground, and neither choice has any memory of the last one.
+    // tech/nav-audit.md §2a, the geometry it was found on. E0 recorded 19
+    // crossings in 20 seconds under a leader that never moved, on a cycle that
+    // never decayed: standing on the ground the old escort point scored onto the
+    // ledge, standing on the ledge it scored back onto the ground. The station
+    // is a function of the leader alone and names its surface outright, so
+    // neither half of that is reachable.
     const LEDGE = [GROUND, { x: 885, y: 445, w: 178, h: 20 }];
     const ledge = escort(LEDGE, 829, 855, () => ({ move: 0, jump: false }), 20);
-    t.eq(`E0 ledge: surface crossings under a leader that never moved (${ledge.crossings} in 20s)`, ledge.crossings, 19);
-    t.eq("E0 ledge: no standstill is booked, because the leader never walks", ledge.stops, 0);
-    // NOT a resting value — this scene never rests. It is one sample of a
-    // ~120-frame cycle, and that it can be sampled at 26px while the escort
-    // standoff is 90px is the finding, not the number.
-    t.ok(`E0 ledge: gap ${ledge.gap.toFixed(1)}px, sampled mid-cycle`, Math.abs(ledge.gap - 26.0) < 1.5);
+    t.eq("E1 ledge: surface crossings under a leader that never moved (was 19)", ledge.crossings, 0);
+    t.eq("E1 ledge: and no standstill, because the leader never walks", ledge.stops, 0);
+    t.eq("E1 ledge: it stays on the leader's own surface", Math.round(feet(ledge.comp)), 500);
+    settled(ledge, "E1 ledge");
   }
 }

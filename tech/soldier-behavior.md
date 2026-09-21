@@ -9,7 +9,7 @@ related: [nav-audit, behavior-lab, ranged-repositioning]
 
 # Soldier behavior
 
-How a squadmate escorts you: one continuous route to a station that tracks you, instead of a scripted walk to a snapshot. Implements the Escorting rows of [Soldier behavior](../design/soldier-behavior.md#what-a-squadmate-does-on-its-own). Nothing else in that design doc changes, with one exception it contradicts: its Undecided row "The escort position is fixed, and always to your left" is what E1 and E2 delete.
+How a squadmate escorts you: one continuous route to a station that tracks you, instead of a scripted walk to a snapshot. Implements the Escorting rows of [Soldier behavior](../design/soldier-behavior.md#what-a-squadmate-does-on-its-own). Nothing else in that design doc changes, with one exception it contradicts: its Undecided row "The escort position is fixed, and always to your left" is what **E2** deletes. **As built:** E1 does not. The offset it replaces was measured along the follower→leader line, so it sat on whichever side the squadmate happened to be; a fixed side is what E1 introduces, and that row describes E1 exactly.
 
 ## Slices
 
@@ -25,6 +25,17 @@ How a squadmate escorts you: one continuous route to a station that tracks you, 
 |---|---|
 | The §2a scene has no settled gap | It never rests. Its gap is one sample of a ~120-frame cycle, recorded as that — the finding is that a 90px standoff can be sampled at 26px |
 | The step scene books one surface crossing | That crossing is the climb the squadmate makes to arrive, not oscillation. One is the ceiling, not zero |
+
+**As built (E1).** Four things the slice had to decide differently:
+
+| | |
+|---|---|
+| The thing followed is a `leader` param, not `target` | `setMotion` reserves `target` for the entity it acts on and strips it from the params (`runtime.js`), so a controller with a `target` param cannot be set from a brain state at all |
+| The controller is authored twice — on the spec root AND in the escort state's `enter` | A brain state's `enter` steps run from `switchState` only (`src/mission/enemyspec/brain.js`), so the START state's never fire. Nothing had noticed, because escort's old `enter` set the motion the root already carried. The `enter` is what restores escort on the way back from combat; the root is what the first escort runs on |
+| The station's surface is the standable surface directly below the leader, airborne or not | This replaces the approximation below it. "No surface while the leader is in the air" would hand the station back to `nearestNode`'s floating-point scoring for the length of every jump the leader makes — reintroducing, once per jump, the half of §2a that E1 exists to remove |
+| One of the nine numbers did not go to zero | The step scene keeps one standstill. It is the frame the climb's air control reverses through zero, sampled as the body lands; a horizontal turnaround in the air is momentarily at rest. It is a ceiling, not a target |
+
+Measured on E0's three scenes: standstills while the leader walked 6 → 0 (flat) and 6 → 1 (step); surface crossings under a motionless leader 19 → 0 on the audit's §2a geometry. All three scenes now settle within 6px of the authored 90px station, where E0's gaps were not stations at all.
 
 E1 owns both halves of the audit's §2a oscillation — the follower-dependent offset and the surface flip — because E0 makes the crossing count a ceiling at E1. E2 changes where squadmates stand, not whether they oscillate.
 
@@ -99,7 +110,7 @@ E1 owns both halves of the audit's §2a oscillation — the follower-dependent o
 | The legacy companion (`config.companionBrain: "legacy"`) keeps the old walk-and-wait follow. It is a fallback nothing defaults to | `test/companion-aim.test.mjs` drives the spec path only |
 | Where a squadmate ends up when the station is unreachable is unchanged: the closest reachable point, then stop (`design/agent-navigation.md`) | `test/navigation.test.mjs`'s partial-path cases |
 | A station is rolled on entering the controller, so a squadmate that leaves escort to fight and comes back takes a new one. "Keeps them for as long as it is escorting" is read as one escort period | E0's scenes hold one behaviour at a time; nothing pins re-entry |
-| A leader in mid-air has no surface to clamp to, so the station is the raw offset until it lands | E0's scenes keep the leader grounded |
+| ~~A leader in mid-air has no surface to clamp to, so the station is the raw offset until it lands~~ **As built:** the station clamps to the surface below the leader whether it is grounded or not, so it does not move during a jump | E0's scenes keep the leader grounded; the step scene's leader jumps |
 
 ## Why a controller and not a longer order
 
