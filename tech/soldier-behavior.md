@@ -37,6 +37,17 @@ How a squadmate escorts you: one continuous route to a station that tracks you, 
 
 Measured on E0's three scenes: standstills while the leader walked 6 → 0 (flat) and 6 → 1 (step); surface crossings under a motionless leader 19 → 0 on the audit's §2a geometry. All three scenes now settle within 6px of the authored 90px station, where E0's gaps were not stations at all.
 
+**As built (E2).** The roll is two draws off `root.rng` — a side, then a distance within `spread` of `standoff` — taken when a NEW motion object arrives on the entity. `setMotion` builds one per call, so object identity is what "entering the controller" means and no lifecycle hook is needed; a squadmate that breaks off to fight and comes back gets a new object and a new station. `companionspecs.js` authors `standoff: 90, spread: 40`, so a squadmate stands 50–130px out on either side.
+
+Two things the slice forced on the tests, both kept:
+
+| | |
+|---|---|
+| Every escort scene runs on BOTH sides | A rolled side means a claim that holds only to the left is not a claim about escorting. Each scene is driven twice, off a constant stream — constant so the station does not depend on which of `instantiate`'s draws the roll happens to be — and the side that comes out is asserted, not assumed |
+| A station can land somewhere nothing can stand | On the §2a geometry a right-hand station falls in the ledge's shadow, where `buildNodes` cuts the floor for want of headroom (35px against a 46px body). The squadmate stops at the near end of the floor that is there, short of its station and settled — `design/agent-navigation.md`'s "get as close as you can, then stop", which a fixed left-hand station never reached |
+
+`test/reposition.test.mjs` measured escort progress against a hard-coded `leader − 90`. It now reads the station the squadmate actually rolled; the same change deleted two stale claims there about escort being a move order with a timeout.
+
 E1 owns both halves of the audit's §2a oscillation — the follower-dependent offset and the surface flip — because E0 makes the crossing count a ceiling at E1. E2 changes where squadmates stand, not whether they oscillate.
 
 ## Reuses
@@ -103,7 +114,7 @@ E1 owns both halves of the audit's §2a oscillation — the follower-dependent o
 
 | Approximation | What catches it |
 |---|---|
-| **Two squadmates can roll the same side and a similar distance.** The design row is titled "No two squadmates share a station"; independent rolls make collision unlikely, not impossible, and nothing enforces exclusivity | E0's scenes with a two-soldier squad. Nothing automated proves separation |
+| **Two squadmates can roll the same side and a similar distance.** The design row is titled "No two squadmates share a station"; independent rolls make collision unlikely, not impossible, and nothing enforces exclusivity. **As built:** two sides and an 80px band, so two of them share a side half the time and are then a mean 27px apart against a 30px body | E0's scenes with a two-soldier squad. Nothing automated proves separation |
 | **A squadmate overshoots its station by about 3px and rests there.** `SOLDIER.apply` reduces the drive request to its sign, so a body arriving at a run needs ~17px to stop against a 14px arrival radius. It comes to rest just past the station rather than chattering, because the halt holds until the station moves | E0's settled-gap number, and the standstill count would catch it if it chattered |
 | **Smoothness is measured, not seen:** a settled gap, a count of standstills, a count of surface crossings. A jerk shorter than a full stop is invisible to the bar | Playing it. `tech/nav-audit.md` §4, "Test coverage gaps" |
 | Arrival keeps `config.navArriveRadius`, the same tolerance every routed agent stops on. No separate escort tolerance is introduced | E0's settled-gap number |

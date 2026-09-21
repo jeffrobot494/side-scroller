@@ -1188,7 +1188,7 @@ export default async function run(t) {
     t.eq("sense: and is not blocked", c.sense.navBlocked, false);
   }
 
-  // ---- E1: keeping station (tech/soldier-behavior.md) ----------------------
+  // ---- E1 + E2: keeping station (tech/soldier-behavior.md) -----------------
   // A real Soldier on DEFAULT_COMPANION_SPEC behind a scripted leader, over
   // three terrains, driven the way mission.js drives a squad. Three numbers
   // each, and E0 recorded them against the escort loop this replaces:
@@ -1202,23 +1202,24 @@ export default async function run(t) {
   //              after both have stood still for four seconds. E0's three were
   //              not stations: the escort offset was measured along the
   //              follower→leader line, so it moved with the body chasing it,
-  //              and the ledge scene never came to rest at all. The claim now
-  //              is the design's — it settles AT its station
+  //              and the ledge scene never came to rest at all
   //   stops      times it fell from full run speed to a dead stop while the
   //              leader kept walking — the burst (tech/nav-audit.md §1)
   //   crossings  times it changed which surface it stands on while the leader
   //              stood still — the oscillating goal (§2a)
   //
   // `stops` and `crossings` are ceilings, so a later slice may lower them and
-  // may not raise them. The numbers and the scenes are E0's, unchanged.
+  // may not raise them. Every scene runs on BOTH sides, because E2 rolls the
+  // side per squadmate and a claim that only holds on one of them is not a
+  // claim about escorting.
   {
     // The leader runs off an input trace and the squadmate off the real
     // companion path, each stepped once per frame — the pairing in mission.js.
-    // Nothing here draws from the scene stream yet; it is installed so these
-    // numbers cannot drift onto Math.random later without the drift being ours.
-    const escort = (platforms, leaderX, compX, drive, seconds) => {
+    // `rng` is the scene's stream, which is also the agent's: the companion is
+    // built lazily off it (ai.js) and its station is rolled from it (E2).
+    const escort = (platforms, leaderX, compX, drive, seconds, rng) => {
       const sc = scene(platforms);
-      sc.rng = () => 0.5;
+      sc.rng = rng;
       const top = (x) => platforms.reduce((best, p) => (x >= p.x && x <= p.x + p.w && p.y < best ? p.y : best), sc.world.height);
       const leader = new Soldier({ ...AGENT_DATA, id: "lead" }, WEAPONS.carbine, leaderX, top(leaderX + 15) - STAND_H);
       const comp = new Soldier({ ...AGENT_DATA, id: "mate" }, WEAPONS.carbine, compX, top(compX + 15) - STAND_H);
@@ -1249,48 +1250,105 @@ export default async function run(t) {
       return { gap: Math.abs((comp.x + comp.w / 2) - (leader.x + leader.w / 2)), stops, crossings, comp, leader };
     };
 
-    const GROUND = { x: 0, y: 500, w: 1400, h: 40 };
-    // The authored station (companionspecs.js), and what a settled gap is
-    // measured against. The band is wide enough for the overshoot a soldier
-    // cannot avoid: it reads the SIGN of a drive request, so a body arriving at
-    // a run needs ~17px to stop against a 14px arrival radius.
-    const STATION = 90;
-    const settled = (r, what) => {
-      t.ok(`${what}: settles ${r.gap.toFixed(1)}px from the leader, at its ${STATION}px station`, Math.abs(r.gap - STATION) <= 6);
-      t.ok(`${what}: ...at a dead stop, so the gap is a resting value`, Math.abs(r.comp.vx) < 1);
+    // A CONSTANT stream, so a scene pins one station without depending on which
+    // draw of instantiate's the roll happens to be. 0.25 takes the left side and
+    // the near end of the spread; 0.75 the right side and the far end. The side
+    // that comes out is asserted, never assumed.
+    const LEFT = () => 0.25;
+    const RIGHT = () => 0.75;
+
+    // Every claim the design makes about escorting, asserted the same way in
+    // every scene. `reaches` is false where the station is somewhere a body
+    // cannot stand, and the claim narrows to "gets as close as it can, and
+    // stops" — which is design/agent-navigation.md's rule, not a new one.
+    const keepsStation = (r, what, { side, stops, crossings, reaches = true }) => {
+      const st = r.comp.agent.station;
+      const near = Math.round(st.standoff);
+      t.eq(`${what}: the roll picked a side and the station is on it`, st.side, side);
+      t.ok(`${what}: standstills while the leader walked (${r.stops})`, r.stops <= stops);
+      t.ok(`${what}: surface crossings while it stood still (${r.crossings})`, r.crossings <= crossings);
+      t.ok(`${what}: it is at rest at the end, so the gap is a resting value`, Math.abs(r.comp.vx) < 1);
+      t.ok(`${what}: never past its ${near}px station (gap ${r.gap.toFixed(1)}px)`, r.gap <= st.standoff + 6);
+      if (reaches) t.ok(`${what}: ...and reaches it`, r.gap >= st.standoff - 6);
     };
 
-    // Flat ground. Every stop E0 recorded here belonged to the order loop:
-    // moveTo (0.6s timeout) → stop → wait 0.12 → re-accelerate, six times in
-    // three seconds. A controller re-asked every frame has no such seam.
-    const flat = escort([GROUND], 150, 200, (i) => ({ move: i < 180 ? 1 : 0, jump: false }), 7);
-    t.eq(`E1 flat: standstills in the 3s the leader walked (was 6)`, flat.stops, 0);
-    t.eq("E1 flat: and one surface, so nothing to cross", flat.crossings, 0);
-    settled(flat, "E1 flat");
-
-    // One elevation change: the leader jumps a 60px step and stands on top.
+    const GROUND = { x: 0, y: 500, w: 1400, h: 40 };
     const STEP_UP = [GROUND, { x: 900, y: 440, w: 500, h: 100 }];
-    const step = escort(STEP_UP, 300, 350,
-      (i, l) => ({ move: i < 180 ? 1 : 0, jump: i < 180 && l.onGround && l.x > 845 && l.x < 900 }), 7);
-    // The one that is left is not a burst: it is the frame the climb's air
-    // control reverses through zero, sampled as it lands on the step. A stop in
-    // this count is any frame at rest, and a body turning around in the air is
-    // momentarily at rest horizontally.
-    t.ok(`E1 step: standstills in the 3s the leader walked (${step.stops}, was 6)`, step.stops <= 1);
-    t.ok("E1 step: crossings — the climb it makes to arrive, and no more", step.crossings <= 1);
-    settled(step, "E1 step");
-
-    // tech/nav-audit.md §2a, the geometry it was found on. E0 recorded 19
-    // crossings in 20 seconds under a leader that never moved, on a cycle that
-    // never decayed: standing on the ground the old escort point scored onto the
-    // ledge, standing on the ledge it scored back onto the ground. The station
-    // is a function of the leader alone and names its surface outright, so
-    // neither half of that is reachable.
+    // tech/nav-audit.md §2a, the geometry it was found on.
     const LEDGE = [GROUND, { x: 885, y: 445, w: 178, h: 20 }];
-    const ledge = escort(LEDGE, 829, 855, () => ({ move: 0, jump: false }), 20);
-    t.eq("E1 ledge: surface crossings under a leader that never moved (was 19)", ledge.crossings, 0);
-    t.eq("E1 ledge: and no standstill, because the leader never walks", ledge.stops, 0);
-    t.eq("E1 ledge: it stays on the leader's own surface", Math.round(feet(ledge.comp)), 500);
-    settled(ledge, "E1 ledge");
+
+    for (const [name, rng, side] of [["left", LEFT, -1], ["right", RIGHT, 1]]) {
+      // Flat ground. Every stop E0 recorded here belonged to the order loop:
+      // moveTo (0.6s timeout) → stop → wait 0.12 → re-accelerate, six times in
+      // three seconds. A controller re-asked every frame has no such seam.
+      keepsStation(
+        escort([GROUND], 150, 200, (i) => ({ move: i < 180 ? 1 : 0, jump: false }), 7, rng),
+        `E1 flat ${name}`, { side, stops: 0, crossings: 0 });
+
+      // One elevation change: the leader jumps a 60px step and stands on top.
+      // The standstills left are not bursts — they are the frames the climb's
+      // air control reverses through zero. A stop in this count is any frame at
+      // rest, and a body turning round in the air is momentarily at rest.
+      keepsStation(
+        escort(STEP_UP, 300, 350,
+          (i, l) => ({ move: i < 180 ? 1 : 0, jump: i < 180 && l.onGround && l.x > 845 && l.x < 900 }), 7, rng),
+        `E1 step ${name}`, { side, stops: 2, crossings: 1 });
+
+      // E0 recorded 19 crossings in 20 seconds here under a leader that never
+      // moved, on a cycle that never decayed: standing on the ground the old
+      // escort point scored onto the ledge, standing on the ledge it scored back
+      // onto the ground. The station is a function of the leader alone and names
+      // its surface outright, so neither half of that is reachable.
+      //
+      // A station on the right lands in the ledge's shadow, where `buildNodes`
+      // cuts the floor for want of headroom (500 - 465 = 35px against a 46px
+      // body). There is nowhere to stand at it, so the squadmate stops at the
+      // near end of the floor that IS there, short of the station and settled.
+      const ledge = escort(LEDGE, 829, 855, () => ({ move: 0, jump: false }), 20, rng);
+      keepsStation(ledge, `E1 ledge ${name}`, { side, stops: 0, crossings: 0, reaches: side < 0 });
+      t.eq(`E1 ledge ${name}: it stays on the leader's own surface`, Math.round(feet(ledge.comp)), 500);
+    }
+
+    // ---- E2: a station per squadmate ---------------------------------------
+    // Two squadmates behind one leader, on streams of their own, must not stand
+    // in the same place. The rig above drives ONE companion, so this drives two
+    // in one scene — which is also the only case where the roll being per-body
+    // rather than per-spec is observable.
+    {
+      const sc = scene([GROUND]);
+      const leader = new Soldier({ ...AGENT_DATA, id: "lead" }, WEAPONS.carbine, 600, 500 - STAND_H);
+      const a = new Soldier({ ...AGENT_DATA, id: "a" }, WEAPONS.carbine, 300, 500 - STAND_H);
+      const b = new Soldier({ ...AGENT_DATA, id: "b" }, WEAPONS.carbine, 320, 500 - STAND_H);
+      leader.onGround = a.onGround = b.onGround = true;
+      sc.soldiers = [leader, a, b];
+      // Distinct streams, because the agents are built off the SCENE's one and a
+      // scene has exactly one. Installed per tick, which is the only seam that
+      // exists: what matters is that two bodies draw different numbers, not when.
+      for (let i = 0; i < 420; i++) {
+        for (const [c, r] of [[a, LEFT], [b, RIGHT]]) {
+          sc.rng = r;
+          updateCompanionSpec(c, STEP, sc, leader, ctx);
+          stepActor(c, STEP, sc.world, sc.platforms);
+        }
+      }
+      t.ok(`E2: the two rolled different sides (${a.agent.station.side} / ${b.agent.station.side})`,
+        a.agent.station.side !== b.agent.station.side);
+      t.ok(`E2: and different distances (${Math.round(a.agent.station.standoff)} / ${Math.round(b.agent.station.standoff)})`,
+        Math.abs(a.agent.station.standoff - b.agent.station.standoff) > 1);
+      const apart = Math.abs((a.x + a.w / 2) - (b.x + b.w / 2));
+      t.ok(`E2: so they settle ${Math.round(apart)}px apart rather than on one point`, apart > a.w);
+      t.ok("E2: both at rest", Math.abs(a.vx) < 1 && Math.abs(b.vx) < 1);
+      // The lifetime rule: a station is rolled on entering the controller and
+      // held. Nothing about refreshing the point may re-roll it, or a squad
+      // shuffles on the spot.
+      const held = { ...a.agent.station };
+      for (let i = 0; i < 120; i++) {
+        sc.rng = () => 0.99; // a stream that would roll something else entirely
+        updateCompanionSpec(a, STEP, sc, leader, ctx);
+        stepActor(a, STEP, sc.world, sc.platforms);
+      }
+      t.eq("E2: the station is not re-rolled while it is being held", a.agent.station.side, held.side);
+      t.eq("E2: ...either half of it", a.agent.station.standoff, held.standoff);
+    }
   }
 }

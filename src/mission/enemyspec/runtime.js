@@ -367,6 +367,28 @@ function reflexHop(ent, scene, speed, point) {
   return navGraph(ent, scene, speed) ? undefined : point;
 }
 
+// The station one body holds for as long as it is escorting: which side of the
+// leader it stands on, and how far off. Rolled ONCE, on entry, off the tree's
+// own stream so a seeded mission still replays (tech/mission-determinism.md).
+//
+// Entry is the arrival of a new motion OBJECT. `setMotion` builds one per call
+// and clears only `moveOrder`/`dash`, never per-controller state, so this is
+// also the only thing that could notice — and it reads a squadmate that broke
+// off to fight and came back as a new escort period, which takes a new station.
+// Nothing else re-rolls it: a station re-rolled per frame, or once per refresh
+// of the point, is squadmates shuffling on the spot.
+function followStation(root, ent, m) {
+  if (!ent.station || ent.station.m !== m) {
+    const spread = m.spread || 0;
+    ent.station = {
+      m,
+      side: root.rng() < 0.5 ? -1 : 1,
+      standoff: Math.max(0, (m.standoff || 0) + rand(root, -spread, spread)),
+    };
+  }
+  return ent.station;
+}
+
 // Translate one of the 10 standing controllers into a MotionRequest. Steering
 // controllers resolve a concrete point here; kinematic styles (flyer-only)
 // pass their pre-resolved params for the locomotor to apply verbatim.
@@ -391,8 +413,8 @@ function controllerRequest(root, ent, m, dt, scene, target) {
       // leader alone (navigation.js).
       const lead = resolveTargetPoint(root, ent, m.leader, scene, target, null);
       if (!lead) return { kind: "stopX" };
-      // One fixed side, so a squad stacks on one station until E2 rolls it.
-      const at = stationPoint(ent, lead, -1, m.standoff, scene, m.speed);
+      const st = followStation(root, ent, m);
+      const at = stationPoint(ent, lead, st.side, st.standoff, scene, m.speed);
       return routeRequest(ent, at, m.speed, scene, dt)
         || { kind: "steer", point: at, speed: m.speed, hopToward: reflexHop(ent, scene, m.speed, at) };
     }

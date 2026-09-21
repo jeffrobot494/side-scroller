@@ -54,7 +54,7 @@ export const MOTIONS = {
   // of it, on the surface the LEADER is standing on, and stand there. The thing
   // followed is `leader`, not `target`, because `setMotion` reserves `target`
   // for the entity it acts on and would eat it (runtime.js).
-  follow:       { params: { leader: "anchor", standoff: 90, speed: 120 } },
+  follow:       { params: { leader: "anchor", standoff: 90, spread: 0, speed: 120 } },
   home:         { params: { speed: 180, turnRate: 3 } }, // rad/s steering toward player
   orbit:        { params: { around: "parent", radius: 90, degPerSec: 90 } },
   // bob + slow drift toward the player's x, holding `altitude` px between the
@@ -225,6 +225,7 @@ const MOTION_PARAM = {
   range: { label: "Patrol range", min: 20, max: 600, step: 10, unit: "px" },
   leader: { label: "Follows", type: "enum", options: MOTION_TARGETS },
   standoff: { label: "Escort distance", min: 0, max: 600, step: 10, unit: "px" },
+  spread: { label: "Station spread", min: 0, max: 300, step: 5, unit: "px" },
   min: { label: "Hold at least", min: 0, max: 900, step: 10, unit: "px" },
   max: { label: "Hold at most", min: 0, max: 1200, step: 10, unit: "px" },
   turnRate: { label: "Turn rate", min: 0, max: 12, step: 0.1, unit: "rad/s" },

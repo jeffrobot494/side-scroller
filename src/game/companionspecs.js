@@ -32,7 +32,7 @@ const DEFAULT_COMPANION = {
     // and a companion would spend its first escort on the root's motion. The
     // state's setMotion below is what restores this one on the way back from
     // combat; this is what it starts on.
-    motion: { type: "follow", leader: "anchor", standoff: 90, speed: 320 },
+    motion: { type: "follow", leader: "anchor", standoff: 90, spread: 40, speed: 320 },
     emitters: { weapon: { at: [0, -6], projectile: { speed: 700, damage: 1, life: 1 } } },
   },
   brain: {
@@ -55,7 +55,7 @@ const DEFAULT_COMPANION = {
       // sight line (tech/ranged-repositioning.md). Requiring the sight line to
       // engage would mean cover permanently pins a companion in escort.
       escort: {
-        enter: [{ setMotion: { type: "follow", leader: "anchor", standoff: 90, speed: 320 } }],
+        enter: [{ setMotion: { type: "follow", leader: "anchor", standoff: 90, spread: 40, speed: 320 } }],
         transitions: [{ when: "sense.dist < 520", to: "combat" }],
       },
       // Hold a firing standoff from the nearest enemy (keepDistance) and shoot on

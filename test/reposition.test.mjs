@@ -509,11 +509,12 @@ export default async function run(t) {
   }
 
   // ---- escorting under fire (tech/soldier-ducking.md, D1) --------------------
-  // A duck costs a squadmate its legs, and escort is a move order with a
-  // wall-clock timeout that keeps ticking while the body cannot move. So a duck
-  // does interrupt escorting and the held route is discarded rather than
-  // resumed — the squadmate re-issues from where it now stands. This case is
-  // here to make that cost visible and bounded, not to deny it.
+  // A duck costs a squadmate its legs: kneeling locks movement, so every frame
+  // spent down is a frame not spent closing. Escort is a motion controller now
+  // (tech/soldier-behavior.md, E1), re-asked every frame, so nothing is
+  // discarded and nothing has to be re-issued — the squadmate simply resumes
+  // the moment it stands. This case is here to make the cost visible and
+  // bounded, not to deny it.
   {
     // The gunner sits past the 640px break-off, so the companion stays in
     // ESCORT the whole way and never turns to fight it.
@@ -549,7 +550,10 @@ export default async function run(t) {
           if (comp.crouched) kneeled++;
           states.add(comp.agent.brainState.current);
         }
-        return { comp, kneeled, states, gap: Math.abs(cx(comp) - (cx(leader) - 90)) };
+        // Measured against the station this squadmate actually rolled (E2),
+        // not a fixed offset: the side and the distance are its own.
+        const st = comp.agent.station;
+        return { comp, kneeled, states, gap: Math.abs(cx(comp) - (cx(leader) + st.side * st.standoff)) };
       } finally {
         Math.random = real;
       }
@@ -569,17 +573,13 @@ export default async function run(t) {
     t.ok(`escort: ducking costs real progress (${Math.round(under.gap)}px short vs ${Math.round(standing.gap)}px)`,
       under.gap > standing.gap);
 
-    // …and it is a delay, not a deadlock. The escort loop settles at a stable
-    // station of its own (the moveTo/wait cycle, not this feature), so the
-    // baseline is that station rather than zero: given longer under the same
-    // fire, a ducking squadmate still reaches it.
-    // …and it is a delay, not a deadlock. The escort loop settles on a station
-    // of its own (its moveTo/wait cycle, not this feature), so the baseline is
-    // that station rather than zero: unshot at the squadmate is there in ~3s,
-    // under this fire in ~6s. D1 — where every reaction was certain and
-    // immediate — left it crawling instead, still 300px short after twenty
-    // seconds. The Speed dice are what make ducking while escorting affordable,
-    // which is the risk approximation 4 named.
+    // …and it is a delay, not a deadlock. The baseline is the station rather
+    // than zero, because a squadmate that has arrived stands AT its station and
+    // not on its leader: unshot at it is there in ~3s, under this fire later.
+    // D1 — where every reaction was certain and immediate — left it crawling
+    // instead, still 300px short after twenty seconds. The Speed dice are what
+    // make ducking while escorting affordable, which is the risk approximation
+    // 4 named.
     const station = escortRun(6, false).gap;
     const late = escortRun(20, true).gap;
     t.ok(`escort: unshot at it settles on a station (${Math.round(station)}px off the offset)`, station < under.gap);
