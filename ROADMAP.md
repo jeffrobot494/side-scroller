@@ -21,17 +21,8 @@ is a roadmap where nothing is.
 
 ## Now
 
-**A submitted game-jam build — `sprints/2026-08.md`.** An external deadline, so the
-scope moves and the date does not.
-
-In scope: agent navigation and the Behavior Lab, AI companions, an intelligent
-enemy on the companion brain, campaign structure, the story generator, cutscenes,
-enemy dialogue. Each is a design task and an implement task.
-
-Dates, the task list, and what was cut live in the sprint doc. They are not
-repeated here.
-
-Nothing outside the sprint starts until it closes.
+**Companion navigation.** The audit of what is wrong with it, with measurements,
+is `tech/nav-audit.md`; each fix is a design row, a `/spec`, and a build.
 
 ## Next
 
@@ -85,6 +76,7 @@ description of what the game does today; this is only the index.
 | Behavior Lab v2 B1–B3 — one agent on a generated level, click to set a goal, 1:1 panned view, graph + path overlays, draggable platforms (v1 deleted) | `design/behavior-lab.md` · `tech/behavior-lab.md` |
 | Campaign pacing C1–C5 — the day is the only currency, leads expire and arrive on the clock, the finale is gated on High wins | `design/campaign-pacing.md` · `tech/campaign-pacing.md` |
 | Soldier ducking D1–D2 — squadmates kneel under a round a knee would dodge, and the Speed stat decides whether and how fast | `design/soldier-behavior.md` · `tech/soldier-ducking.md` |
+| Squadmate escort E0–E2 — a squadmate keeps station instead of walking to a snapshot of you: one continuous controller whose point is a function of the leader alone, resolved onto the leader's own surface, and a side and distance rolled per squadmate so a squad spreads | `design/soldier-behavior.md` · `tech/soldier-behavior.md` |
 | Multiplayer campaign state, Phase 1 S1–S7 — one authoritative session, per-commander views, a shared world with a base each, a dealt recruit pool, one round per day, per-lead visibility and disclosure, and a finale that forks a win from a defeat. Hot-seat only: no transport, no joint missions | `tech/multiplayer-state.md` · `tech/multiplayer.md` |
 | Mission determinism D1–D3 — a mission replays from its seed given the same input trace at a fixed step; one PRNG for the whole repo | `tech/mission-determinism.md` |
 | Multiplayer missions, Phase 3 J0–J8 — a soldier has an owner, ends are independent, one lead takes two results, input is sampled per step, a dispatch is joint, a mission runs with no browser, input arrives per commander, and the room holds the simulation and broadcasts it. Two commanders on one level, server-authoritative | `tech/multiplayer-missions.md` |
@@ -99,7 +91,7 @@ description of what the game does today; this is only the index.
 | Issue | Where |
 |---|---|
 | `on.spawn` handlers run without a scene, so `fire`/`spawn`/`sound` are silently skipped | `tech/sound.md` "Known issues" |
-| Flyers can grind against terrain — steering pushes in while resolution pushes out | out of scope in `sprints/2026-08.md` |
+| Flyers can grind against terrain — steering pushes in while resolution pushes out | unscheduled |
 | Grounded bodies guess when a steering intent implies a jump, from a 40px heuristic with no terrain knowledge | fixed by `tech/agent-navigation.md` N3 |
 | A jump edge tests where it lands, not the arc, so a column or an overhang is only found by failing at it | addressed in `tech/nav-clearance.md`, and it cost reachability doing it; the rewritten spec is what corrects that |
 | A nav node span is where a body fits WHOLLY on a platform; `collideAxis` supports it on any overlap, so the graph models ~55% of the standable surface | `tech/nav-clearance.md` "The root cause of #1 and #2" |

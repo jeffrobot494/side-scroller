@@ -323,6 +323,35 @@ section + the tests are the source of truth for what currently exists):
   companions keep the forced stand and never duck); and a round aimed at a
   standing centre is NOT duckable — the crouched box top is 1px below it — so what
   a knee answers is a round arriving in the upper half of the body.
+- **Squadmates keep station (`tech/soldier-behavior.md` E0–E2 — built).**
+  Escorting was a brain TRACK — `moveTo` at a snapshot of the leader with a 0.6s
+  timeout, `stop`, `wait 0.12`, repeat — so a squadmate followed in bursts, and
+  the point it walked to moved when IT moved. It is a motion CONTROLLER now
+  (`follow`, in the EnemySpec vocabulary): re-asked every frame, resolving its own
+  point, never ending. `stationPoint` (`src/mission/navigation.js`) is the one
+  answer to where a squadmate stands — a fixed distance to one side of the
+  leader, clamped onto the surface the LEADER is standing on. **Two absences are
+  the point of it:** it reads the leader and nothing else, where the offset it
+  replaces was measured along the follower→leader line and so was a function of
+  the body chasing it; and it names the surface outright instead of handing a
+  floating point to `nearestNode`, whose "which surface did you mean" scoring has
+  no memory and flips as a body crosses the midpoint between two of them. Those
+  are `tech/nav-audit.md` §1 and §2a. **The station is rolled per squadmate**
+  off `root.rng` when the controller is entered — a side, then a distance within
+  `spread` of `standoff` (`companionspecs.js` authors 90 ± 40) — and held for
+  that escort period, so a squad gathers around you rather than stacking on one
+  point. Entry is the arrival of a new motion OBJECT, because `setMotion` builds
+  one per call and clears only `moveOrder`/`dash`. Measured on three terrains and
+  both sides: standstills while the leader walked **6 → 0** on flat ground and
+  **6 → 1** over a step, surface crossings under a motionless leader **19 → 0**
+  on the audit's one-ledge geometry, and every scene settles at its station.
+  Two things worth knowing before building on it: a brain state's `enter` steps
+  run from `switchState` only, so a START state's never fire — which is why the
+  controller is authored on the spec root AND in escort's `enter`; and a rolled
+  station can land where nothing can stand (a headroom-cut pocket under a ledge),
+  where the squadmate stops at the near end of the floor that IS there and
+  settles, which is `design/agent-navigation.md`'s "get as close as you can, then
+  stop". The rest of `tech/nav-audit.md` is untouched.
 - **Enemy creation system (EnemySpec):** a full entity-composition enemy format
   + runtime (`src/game/enemyspec/` = schema/expr/validate/normalize/templates/
   dryrun/generate; `src/mission/enemyspec/` = runtime/brain/perception/render):
