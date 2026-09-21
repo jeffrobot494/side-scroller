@@ -1,0 +1,76 @@
+soldier progression: weapon skill
+character creator:
+	- portrait
+	- attributes
+	- background
+	- personality
+	- fears
+	- competencies
+	- sprite
+	- voice
+	- sex
+	- race
+	- quips
+	- bodytype
+prompt to create a new soldier in the character creator
+enemies that can infect your soldiers and turn them against you
+	- base sabotage or murder
+	- mission sabotage
+	- ear worm: falls onto your soldier from above, hard to see. 24 hours later, make a check.
+soldiers can be captured by the enemy
+	- can be rescued
+	- occasionally break free or escape
+companion commands
+	- move here
+	- attack that
+	- follow me
+	- retreat
+bigger guns aim slower
+two weapons: primary, secondary
+voice commands to companions and drones
+companion intelligence, brain, survivability
+drones
+weapon designer v2
+equipment designer
+space levels
+buildings
+spaceship levels
+better enemy visuals
+better player visuals
+better environment visuals
+setting details
+character details
+soldier dialogue
+	- in missions
+	- on base
+pause mission
+exit mission
+save and load campaign
+design visual that looks awesome
+design dynamic campaign/plot
+design bosses that build in real-time
+design enemy knowledge and communication system
+design weapon research/design gameplay system
+design alien interrogations
+traitors
+create general campaign setting
+design animated entity system/pipeline
+work on barracks visual redesign
+work on operations visual redesign
+design robot companions
+additional soldier recruitment
+design enemy campaign evolution system
+design item system
+	- drones
+	- grenades
+	- stimpacks
+design gravity v2
+design atmosphere
+design level generation v2
+	- gravity
+	- atmosphere
+	- environment
+	- structure/setting?
+	- tileset?
+	- is there a ground or in space?
+design equipment selection in deployment
