@@ -17,12 +17,20 @@ import { createSession } from "../src/game/session.js";
 import { createLoopback } from "../src/net/loopback.js";
 import { connect } from "../src/net/client.js";
 import { Hub } from "../src/hub/hub.js";
-import { resetConfig } from "../src/game/config.js";
+import { config, resetConfig } from "../src/game/config.js";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 // The page, in miniature: a transport, two seats, and a hub bound to the first.
+//
+// EVERY SEAT SEES EVERY LEAD, because a day-1 board is ONE lead (config.seedLeads)
+// and `rollVisibility` decides per commander, off Math.random, at a default 0.5 —
+// so p1 missed the only lead on ~19% of runs and every assertion reading
+// `leads[0]` threw. The visibility roll is state.js's business and has its own
+// cover; what this suite is asking is what the hub PRINTS about a lead, which
+// needs a lead on the board to print.
 function twoSeats() {
+  config.leadVisibility = 1;
   const transport = createLoopback((announce, changed) =>
     createSession({
       players: [{ id: "p1", name: "USA" }, { id: "p2", name: "China" }],
