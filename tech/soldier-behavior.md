@@ -19,6 +19,13 @@ How a squadmate escorts you: one continuous route to a station that tracks you, 
 | E1 | **A `follow` controller.** One motion controller, re-asked every frame, routing at a station that is a function of the LEADER alone — never of the follower's own position, which is what makes today's goal oscillate. On one fixed side, at an authored distance. Where the leader is grounded, the station is resolved onto the surface the leader is standing on, so a leader near a ledge does not send its escort to the floor below. `companionspecs.js`'s escort state sets the controller and drops its track. All three of E0's numbers become ceilings | Yes. Squadmates close in one run, settle, and stop crossing surfaces under a standing leader |
 | E2 | **A station per squadmate.** Each rolls its own side and its own distance within the controller's bounds when it enters the controller, off its own seeded stream, and holds them until it leaves | Yes. A squad spreads around you instead of stacking |
 
+**As built (E0).** The nine numbers live in `test/navigation.test.mjs`, pinned exactly rather than bounded, so any movement in them is visible. Two are not the quantity the slice assumed:
+
+| | |
+|---|---|
+| The §2a scene has no settled gap | It never rests. Its gap is one sample of a ~120-frame cycle, recorded as that — the finding is that a 90px standoff can be sampled at 26px |
+| The step scene books one surface crossing | That crossing is the climb the squadmate makes to arrive, not oscillation. One is the ceiling, not zero |
+
 E1 owns both halves of the audit's §2a oscillation — the follower-dependent offset and the surface flip — because E0 makes the crossing count a ceiling at E1. E2 changes where squadmates stand, not whether they oscillate.
 
 ## Reuses

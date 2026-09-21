@@ -14,7 +14,8 @@
 
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
-import { Soldier, stepActor, SOLDIER_TUNING } from "../src/mission/entities.js";
+import { Soldier, stepActor, STAND_H, SOLDIER_TUNING } from "../src/mission/entities.js";
+import { updateCompanionSpec } from "../src/mission/ai.js";
 import { WEAPONS } from "../src/game/content.js";
 import { profileFor, graphFor, routeRequest, invalidateNavGraphs, navState, abortRoute } from "../src/mission/navigation.js";
 import { buildGraph, graphKey, bodyProfile, reachableFrom, nodeUnder, footprintClear, solidLeft } from "../src/game/nav.js";
@@ -1185,5 +1186,92 @@ export default async function run(t) {
     t.ok(`sense: routeSteps counts the edges left (${c.sense.routeSteps})`, c.sense.routeSteps === 2);
     t.eq("sense: a reachable destination reads reachable", c.sense.routeReachable, true);
     t.eq("sense: and is not blocked", c.sense.navBlocked, false);
+  }
+
+  // ---- E0: what escorting does today (tech/soldier-behavior.md) -------------
+  // The baseline a continuous follow controller has to beat. A real Soldier on
+  // DEFAULT_COMPANION_SPEC behind a scripted leader, over three terrains, driven
+  // the way mission.js drives a squad. Three numbers each:
+  //
+  //   gap        centre-to-centre distance to the leader on the last frame,
+  //              after both have stood still for four seconds
+  //   stops      times it fell from full run speed to a dead stop while the
+  //              leader kept walking — the burst (tech/nav-audit.md §1)
+  //   crossings  times it changed which surface it stands on while the leader
+  //              stood still — the oscillating goal (§2a)
+  //
+  // Recorded as they are, not as they should be, so this lands green on the
+  // defect. They are pinned rather than bounded because any movement in them is
+  // a behaviour change worth seeing; E1 replaces the values with its own and
+  // turns `stops` and `crossings` into ceilings.
+  {
+    // The leader runs off an input trace and the squadmate off the real
+    // companion path, each stepped once per frame — the pairing in mission.js.
+    // Nothing here draws from the scene stream yet; it is installed so these
+    // numbers cannot drift onto Math.random later without the drift being ours.
+    const escort = (platforms, leaderX, compX, drive, seconds) => {
+      const sc = scene(platforms);
+      sc.rng = () => 0.5;
+      const top = (x) => platforms.reduce((best, p) => (x >= p.x && x <= p.x + p.w && p.y < best ? p.y : best), sc.world.height);
+      const leader = new Soldier({ ...AGENT_DATA, id: "lead" }, WEAPONS.carbine, leaderX, top(leaderX + 15) - STAND_H);
+      const comp = new Soldier({ ...AGENT_DATA, id: "mate" }, WEAPONS.carbine, compX, top(compX + 15) - STAND_H);
+      leader.onGround = comp.onGround = true;
+      sc.soldiers = [leader, comp];
+
+      let stops = 0, crossings = 0, atSpeed = false, surface = null;
+      for (let i = 0; i < Math.round(seconds * 60); i++) {
+        const d = drive(i, leader);
+        leader.applyMovement(STEP, d.move, d.jump);
+        stepActor(leader, STEP, sc.world, sc.platforms);
+        updateCompanionSpec(comp, STEP, sc, leader, ctx);
+        stepActor(comp, STEP, sc.world, sc.platforms);
+
+        const walking = Math.abs(leader.vx) > 1;
+        const v = Math.abs(comp.vx);
+        // A stop is only a burst if the leader was still going somewhere.
+        if (!walking) atSpeed = false;
+        else if (v >= config.runSpeed * 0.9) atSpeed = true;
+        else if (atSpeed && v <= 1) { stops++; atSpeed = false; }
+        // ...and a crossing is only oscillation if the goal was not moving.
+        if (!walking && comp.onGround) {
+          const s = Math.round(feet(comp));
+          if (surface === null) surface = s;
+          else if (s !== surface) { crossings++; surface = s; }
+        }
+      }
+      return { gap: Math.abs((comp.x + comp.w / 2) - (leader.x + leader.w / 2)), stops, crossings, comp, leader };
+    };
+
+    const GROUND = { x: 0, y: 500, w: 1400, h: 40 };
+
+    // Flat ground. Nothing to climb, so every stop belongs to the order loop:
+    // moveTo (0.6s timeout) → stop → wait 0.12 → re-accelerate.
+    const flat = escort([GROUND], 150, 200, (i) => ({ move: i < 180 ? 1 : 0, jump: false }), 7);
+    t.eq(`E0 flat: standstills in the 3s the leader walked (${flat.stops})`, flat.stops, 6);
+    t.eq("E0 flat: and one surface, so nothing to cross", flat.crossings, 0);
+    t.ok(`E0 flat: settles ${flat.gap.toFixed(1)}px from the leader`, Math.abs(flat.gap - 85.7) < 1.5);
+    t.ok("E0 flat: ...at a dead stop, so that gap is a resting value", Math.abs(flat.comp.vx) < 1);
+
+    // One elevation change: the leader jumps a 60px step and stands on top.
+    const STEP_UP = [GROUND, { x: 900, y: 440, w: 500, h: 100 }];
+    const step = escort(STEP_UP, 300, 350,
+      (i, l) => ({ move: i < 180 ? 1 : 0, jump: i < 180 && l.onGround && l.x > 845 && l.x < 900 }), 7);
+    t.eq(`E0 step: standstills in the 3s the leader walked (${step.stops})`, step.stops, 6);
+    t.eq("E0 step: one crossing, which is the climb it makes to arrive", step.crossings, 1);
+    t.ok(`E0 step: settles ${step.gap.toFixed(1)}px from the leader, on the step`, Math.abs(step.gap - 86.7) < 1.5);
+    t.ok("E0 step: ...at a dead stop", Math.abs(step.comp.vx) < 1);
+
+    // tech/nav-audit.md §2a, the geometry it was found on. The escort offset is
+    // measured along the follower→leader line, so walking moves the destination:
+    // on the ground the point scores onto the ledge, on the ledge it scores back
+    // onto the ground, and neither choice has any memory of the last one.
+    const LEDGE = [GROUND, { x: 885, y: 445, w: 178, h: 20 }];
+    const ledge = escort(LEDGE, 829, 855, () => ({ move: 0, jump: false }), 20);
+    t.eq(`E0 ledge: surface crossings under a leader that never moved (${ledge.crossings} in 20s)`, ledge.crossings, 19);
+    t.eq("E0 ledge: no standstill is booked, because the leader never walks", ledge.stops, 0);
+    // NOT a resting value — this scene never rests. It is one sample of a
+    // ~120-frame cycle, and that it can be sampled at 26px while the escort
+    // standoff is 90px is the finding, not the number.
+    t.ok(`E0 ledge: gap ${ledge.gap.toFixed(1)}px, sampled mid-cycle`, Math.abs(ledge.gap - 26.0) < 1.5);
   }
 }
