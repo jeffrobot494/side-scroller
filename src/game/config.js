@@ -243,7 +243,7 @@ export const SCHEMA = [
         label: "Aim mode",
         type: "enum",
         options: ["mouse", "gamepad", "auto", "keyboard"],
-        default: "gamepad",
+        default: "mouse",
         help: "How the controlled soldier aims. mouse = point with the cursor; gamepad = right stick; auto = stick if a pad is active else mouse; keyboard = the old up/forward scheme. Live.",
       },
       {

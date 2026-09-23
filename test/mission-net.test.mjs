@@ -919,7 +919,7 @@ async function configPermanent(t) {
     // `soldierBaseHp` is unmarked, so neither can differ — but the file is what
     // proves it, because a patcher that walked the whole SCHEMA would not care.
     t.ok("permanent: an unmarked key is untouched in the file", after.includes(`default: 15,`));
-    t.ok("permanent: aimMode is untouched too", after.includes(`default: "gamepad",`));
+    t.ok("permanent: aimMode is untouched too", after.includes(`default: "mouse",`));
 
     // ...and only those lines moved.
     const diff = after.split("\n").filter((l, i) => l !== untouched.split("\n")[i]);

@@ -74,3 +74,4 @@ design level generation v2
 	- tileset?
 	- is there a ground or in space?
 design equipment selection in deployment
+share soldiers
