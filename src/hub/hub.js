@@ -23,14 +23,29 @@ import { config } from "../game/config.js";
 import { labelFor } from "../game/enemycost.js";
 import { soldierMaxHp } from "../game/soldiers.js";
 import { defaultProgression, effectiveSoldier, resolveSoldier, gainsAt } from "../game/progression.js";
+import { icon } from "./icons.js";
 
+// `icon` is a name in src/hub/icons.js, not a glyph. A drawn mark takes
+// currentColor, so an active hatch can light its icon with the room; a colour
+// emoji cannot be lit and was the one un-designed thing on the screen.
 const LOCATIONS = [
-  { id: "barracks", label: "Barracks", icon: "🪖", staff: "Sgt. Bishop" },
-  { id: "engineering", label: "Engineering", icon: "🔧", staff: "Dr. Halden" },
-  { id: "operations", label: "Operations", icon: "🛰️", staff: "Cmdr. Voss" },
-  { id: "robotics", label: "Robotics", icon: "🤖", staff: "Icarus" },
-  { id: "warroom", label: "War Room", icon: "🗺️", staff: "The Council" },
+  { id: "barracks", label: "Barracks", icon: "helmet", staff: "Sgt. Bishop" },
+  { id: "engineering", label: "Engineering", icon: "wrench", staff: "Dr. Halden" },
+  { id: "operations", label: "Operations", icon: "dish", staff: "Cmdr. Voss" },
+  { id: "robotics", label: "Robotics", icon: "chassis", staff: "Icarus" },
+  { id: "warroom", label: "War Room", icon: "map", staff: "The Council" },
 ];
+
+// Every room header is this shape: the room's mark, its name, and the officer
+// who speaks for it. It was copied five times with the glyph inlined.
+function roomHeader(id, quote) {
+  const loc = LOCATIONS.find((l) => l.id === id);
+  return `
+      <div class="location-header">
+        <h1><span class="room-mark">${icon(loc.icon)}</span>${loc.label}</h1>
+        <p class="staff-line">${quote || loc.staff}</p>
+      </div>`;
+}
 
 const STAT_LABELS = { aim: "Aim", health: "Health", speed: "Speed", nerve: "Nerve" };
 
@@ -221,7 +236,9 @@ export class Hub {
   _topbar() {
     const g = this.game;
     const h = g.campaignHealth;
-    const color = h > 50 ? "var(--good)" : h > 25 ? "var(--credits)" : "var(--bad)";
+    // A failing display DIMS before it turns hostile: --credits is the
+    // brightest phosphor on the screen and read as healthier than --good here.
+    const color = h > 50 ? "var(--p-hot)" : h > 25 ? "var(--p-dim)" : "var(--r)";
     // Passing a day is global, but only from a room screen: the deploy screen
     // holds a lead by id and would dereference an expired one, and results is
     // mid-resolution. Both render this bar, so the control is disabled there.
@@ -234,7 +251,7 @@ export class Hub {
     const solo = force.length < 2;
     const me = force.find((p) => p.id === g.playerId);
     const lit = !solo && me && me.ready;
-    const label = solo ? "Advance the day ▸" : lit ? "Ready" : "Ready ▸";
+    const label = solo ? "Advance the day ▸" : lit ? `${icon("check", "ico-sm")} Ready` : "Ready ▸";
     // Since S5 the day control is also what RUNS a committed squad — nothing
     // reaches a canvas until the round closes — so the tip says so when there
     // is something held. The label is deliberately unchanged: passing time is
@@ -246,23 +263,38 @@ export class Hub {
         : held ? "Advance the day — your committed squad deploys." : "Advance the day — the invasion advances too."
       : lit ? "Click again to stand down — it releases any deployment you have pending."
         : held ? "The round runs when every commander is ready." : "The day turns when every commander is ready.";
+    // Four readouts, each with its own etched label. They were four loose
+    // spans in a row, which meant the only thing saying what "§ 1,200" was is
+    // the glyph in front of it — and nothing at all said what the bar was.
+    const low = h <= 25 ? " is-critical" : h <= 50 ? " is-warning" : "";
     return `
       <header class="topbar">
-        <div class="brand">XCOM&nbsp;TASK&nbsp;FORCE</div>
+        <div class="brand">XCOM<i class="brand-rule"></i>TASK FORCE</div>
         <div class="resources">
-          <span class="day">Day ${g.day}</span>
-          <span class="health-chip" title="Campaign health — reach 0 and the invasion wins.">
-            Sector
-            <span class="health-track"><span class="health-fill" style="width:${h}%;background:${color}"></span></span>
-            ${h}
-          </span>
-          <span class="credits">§ ${g.money.toLocaleString()}</span>
-          <span class="roster-count">${livingRoster(g).length} on roster</span>
+          <div class="readout">
+            <span class="ro-label">Day</span>
+            <span class="ro-value">${g.day}</span>
+          </div>
+          <div class="readout readout-gauge health-chip${low}" title="Campaign health — reach 0 and the invasion wins.">
+            <span class="ro-label">Sector integrity</span>
+            <span class="ro-row">
+              <span class="health-track"><span class="health-fill" style="width:${h}%;background:${color}"></span></span>
+              <span class="ro-value">${h}</span>
+            </span>
+          </div>
+          <div class="readout">
+            <span class="ro-label">Credits</span>
+            <span class="ro-value credits">§&thinsp;${g.money.toLocaleString()}</span>
+          </div>
+          <div class="readout">
+            <span class="ro-label">Roster</span>
+            <span class="ro-value">${livingRoster(g).length}</span>
+          </div>
           <button class="btn btn-day${lit ? " btn-ready-on" : ""}" data-action="advance" ${canAdvance ? "" : "disabled"}
             title="${tip}">
             ${label}
           </button>
-          <a class="dev-link" href="./editor.html" title="Open the settings & tuning editor">⚙</a>
+          <a class="dev-link" href="./editor.html" title="Open the settings & tuning editor" aria-label="Settings and tuning editor">${icon("gear")}</a>
         </div>
       </header>${this._taskforce(force, g.playerId)}`;
   }
@@ -299,8 +331,8 @@ export class Hub {
   _locButton(loc) {
     const active = loc.id === this.location && this.mode === "hub" ? " active" : "";
     return `
-      <button class="loc${active}" data-action="nav" data-loc="${loc.id}">
-        <span class="loc-icon">${loc.icon}</span>
+      <button class="loc${active}" data-action="nav" data-loc="${loc.id}"${active ? ' aria-current="page"' : ""}>
+        <span class="loc-icon">${icon(loc.icon)}</span>
         <span class="loc-text">
           <span class="loc-label">${loc.label}</span>
           <span class="loc-staff">${loc.staff}</span>
@@ -309,11 +341,7 @@ export class Hub {
   }
 
   _header(loc) {
-    return `
-      <div class="location-header">
-        <h1>${loc.icon} ${loc.label}</h1>
-        <p class="staff-line">${loc.staff}</p>
-      </div>`;
+    return roomHeader(loc.id);
   }
 
   _locationPanel(id) {
@@ -345,15 +373,16 @@ export class Hub {
     const roster = livingRoster(g);
     const recruits = g.recruits;
     return `
-      <div class="location-header">
-        <h1>🪖 Barracks</h1>
-        <p class="staff-line">Sgt. Bishop — "Best recruits I've laid eyes on in twenty years. Give me a squad and we'll hand the planet back to the people who live on it."</p>
-      </div>
+      ${roomHeader("barracks", `Sgt. Bishop — "Best recruits I've laid eyes on in twenty years. Give me a squad and we'll hand the planet back to the people who live on it."`)}
       <section class="squad-block">
         <h2>Your Squad <span class="count">${roster.length}</span></h2>
         ${
           roster.length === 0
-            ? `<p class="empty">No soldiers yet. Bring the best fighters on the planet aboard below.</p>`
+            ? `<div class="empty-state">
+                 <span class="empty-mark">${icon("helmet")}</span>
+                 <p class="empty-title">No soldiers on the roster</p>
+                 <p class="empty-note">Nothing deploys without people. Hire from the recruits below.</p>
+               </div>`
             : `<div class="soldier-grid">${roster.map((s) => this._soldierCard(s, false)).join("")}</div>`
         }
       </section>
@@ -395,44 +424,65 @@ export class Hub {
     const ageOrigin = [s.age ?? "age unknown", s.origin].join(" · ");
     const rec =
       s.record && s.record.missions
-        ? `<div class="record">${s.record.missions} missions · ${s.record.kills} kills</div>`
+        ? `<span class="record">${s.record.missions} missions · ${s.record.kills} kills</span>`
         : "";
     // Roster soldiers carry persistent wounds; recruits are always at full HP.
+    // Condition is a GAUGE now and sits above the attributes, because "who can
+    // I send today" is read off it and it used to be a line of text under
+    // everything else.
     const max = soldierMaxHp(s);
-    const hp =
-      !hireable
-        ? `<div class="record">HP ${max - (s.wounds || 0)} / ${max}</div>`
-        : "";
+    const hp = max - (s.wounds || 0);
+    const hurt = !hireable && hp < max;
+    const condition = hireable
+      ? ""
+      : `<div class="vital${hurt ? " is-hurt" : ""}">
+           <span class="vital-label">Condition</span>
+           <span class="vital-track"><span class="vital-fill" style="width:${Math.max(0, Math.round((hp / max) * 100))}%"></span></span>
+           <span class="vital-num">${hp}<span class="of">/${max}</span></span>
+         </div>`;
+    // The level line keeps its sentence and gains a rail under it — same text,
+    // read at a glance instead of parsed.
+    const xpPct = prog.max ? 100 : Math.round((prog.intoLevel / prog.nextCost) * 100);
+    const level = hireable
+      ? ""
+      : `<div class="record level-line">
+           <span class="ll-text">${this._levelLine(raw)}</span>
+           <span class="xp-rail${prog.max ? " is-max" : ""}"><span class="xp-fill" style="width:${xpPct}%"></span></span>
+         </div>`;
+    const gains =
+      hireable || prog.max
+        ? ""
+        : `<div class="record next-gains">Next level: ${formatGains(gainsAt(this._rules(), prog.level + 1, raw)) || "nothing"}</div>`;
     return `
-      <article class="soldier-card">
-        <div class="card-head">
+      <article class="soldier-card${hurt ? " is-wounded" : ""}">
+        <header class="card-head">
           <div class="portrait" style="background:${portraitColor(s.name)}">${initials(s)}</div>
           <div class="who">
             <div class="name">${displayName}</div>
             <div class="sub">${ageOrigin}</div>
           </div>
-        </div>
+        </header>
         <p class="bio">${s.bio}</p>
+        <div class="gauges">
+          ${level}
+          ${condition}
+          <div class="stats">${Object.keys(STAT_LABELS).map((k) => statBar(k, s.stats[k], prog.bonus.attrs[k])).join("")}</div>
+        </div>
         ${growthLabels(raw)}
-        ${hireable ? "" : `<div class="record level-line">${this._levelLine(raw)}</div>`}
-        <div class="stats">${Object.keys(STAT_LABELS).map((k) => statBar(k, s.stats[k], prog.bonus.attrs[k])).join("")}</div>
-        ${
-          hireable || prog.max
-            ? ""
-            : `<div class="record next-gains">Next level: ${formatGains(gainsAt(this._rules(), prog.level + 1, raw)) || "nothing"}</div>`
-        }
+        ${gains}
         <div class="traits">${s.traits.map((t) => `<span class="trait">${t}</span>`).join("")}</div>
-        ${hp}
-        ${rec}
         ${
           hireable
             ? `<div class="card-foot">
-                 <span class="cost">§ ${s.cost.toLocaleString()}</span>
+                 <span class="cost">§&thinsp;${s.cost.toLocaleString()}</span>
                  <button class="btn" data-action="hire" data-id="${s.id}" ${affordable ? "" : "disabled"}>
                    ${affordable ? "Hire" : "Can't afford"}
                  </button>
                </div>`
-            : `<div class="card-foot enlisted"><span class="enlisted-tag">✓ Enlisted</span></div>`
+            : `<div class="card-foot enlisted">
+                 <span class="enlisted-tag">${icon("check", "ico-sm")} Enlisted</span>
+                 ${rec}
+               </div>`
         }
       </article>`;
   }
@@ -464,7 +514,7 @@ export class Hub {
       else
         btn = `<button class="btn" data-action="commission" data-id="${bp.id}" ${
           affordable ? "" : "disabled"
-        }>${affordable ? `Commission · §${bp.cost}` : "Can't afford"}</button>`;
+        }>${affordable ? `Commission · §&thinsp;${bp.cost}` : "Can't afford"}</button>`;
       return `
         <article class="blueprint">
           <div class="bp-head"><h3>${bp.name}</h3><span class="bp-time">${bp.buildDays}d build</span></div>
@@ -475,10 +525,7 @@ export class Hub {
     }).join("");
 
     return `
-      <div class="location-header">
-        <h1>🔧 Engineering</h1>
-        <p class="staff-line">Dr. Halden — "Describe what you want it to do. I'll turn it into something that fits the budget and won't blow your soldier's hands off. Probably."</p>
-      </div>
+      ${roomHeader("engineering", `Dr. Halden — "Describe what you want it to do. I'll turn it into something that fits the budget and won't blow your soldier's hands off. Probably."`)}
       <section class="squad-block">
         <h2>Commission a Weapon</h2>
         <p class="muted">Fabrication takes time — a build finishes when a day passes. Finished weapons appear in the armory and can be assigned on deploy.</p>
@@ -508,10 +555,11 @@ export class Hub {
             const status = `<span class="tag tag-diff-${m.difficulty}">${labelFor(m.difficulty)} threat</span>${
               typeof m.xpReward === "number" ? ` <span class="tag tag-xp">+${m.xpReward} XP</span>` : ""
             }`;
+            const urgent = typeof m.daysLeft === "number" && m.daysLeft <= 1;
             // Leads rot. The boss carries no lifespan and shows no clock.
             const life =
               typeof m.daysLeft === "number"
-                ? `<span class="tag tag-life${m.daysLeft <= 1 ? " urgent" : ""}">${
+                ? `<span class="tag tag-life${urgent ? " urgent" : ""}">${icon("clock", "ico-sm")}${
                     m.daysLeft === 1 ? "expires tomorrow" : `${m.daysLeft} days left`
                   }</span>`
                 : "";
@@ -555,34 +603,44 @@ export class Hub {
             const action = `<button class="btn${held ? " btn-alt" : ""}" data-action="predeploy" data-id="${m.id}" ${
               canDeploy || held ? "" : "disabled"
             }>${held ? "Review squad" : canDeploy ? "Deploy squad" : "No soldiers"}</button>`;
+            // Bookkeeping left the title row. Threat, reward and the clock are
+            // what the deploy decision is made on; who a lead was shared with
+            // is a fact about it, and six pills of equal weight meant neither
+            // could be scanned.
+            const notes = [
+              held ? `<span class="tag tag-committed">squad committed</span>` : "",
+              shared,
+              gave,
+            ].filter(Boolean).join("");
             return `
-        <article class="mission-row ${m.winsCampaign ? "is-boss" : ""}${held ? " committed" : ""}">
+        <article class="mission-row t-${m.difficulty} ${m.winsCampaign ? "is-boss" : ""}${held ? " committed" : ""}${urgent ? " is-urgent" : ""}">
+          <span class="lead-edge" aria-hidden="true"></span>
           <div class="mission-main">
-            <div class="mission-title">${m.name} ${status} ${life} ${shared} ${gave} ${
-              held ? `<span class="tag tag-committed">squad committed</span>` : ""
-            }</div>
+            <div class="mission-title"><span class="lead-name">${m.name}</span> ${status} ${life}</div>
             <p class="mission-brief">${m.brief}</p>
-            ${m.winsCampaign ? `<div class="win-flag">★ Destroying this ends the invasion in the sector.</div>` : ""}
+            ${notes ? `<div class="lead-notes">${notes}</div>` : ""}
+            ${m.winsCampaign ? `<div class="win-flag">${icon("star", "ico-sm")} Destroying this ends the invasion in the sector.</div>` : ""}
           </div>
           <div class="mission-action">${action}${share}</div>
         </article>`;
           })
           .join("")
-      : `<p class="empty">Ops is still scanning the sector. Pass a day for fresh leads.</p>`;
+      : `<div class="empty-state">
+          <span class="empty-mark">${icon("dish")}</span>
+          <p class="empty-title">No leads on the board</p>
+          <p class="empty-note">Ops is still scanning the sector. Advance the day and more will surface.</p>
+        </div>`;
 
     const stores = g.stores;
     const total = stores.reduce((s, i) => s + i.value, 0);
     const storeList = stores.length
       ? `<ul class="plain-list">${stores
-          .map((i) => `<li><span>${i.name}</span><span class="credits">§${i.value}</span></li>`)
+          .map((i) => `<li><span>${i.name}</span><span class="credits">§&thinsp;${i.value}</span></li>`)
           .join("")}</ul>`
       : `<p class="empty">No recovered loot in stores.</p>`;
 
     return `
-      <div class="location-header">
-        <h1>🛰️ Operations</h1>
-        <p class="staff-line">Cmdr. Voss — "The map's lighting up. Pick your fights, Commander. And bring your people home."</p>
-      </div>
+      ${roomHeader("operations", `Cmdr. Voss — "The map's lighting up. Pick your fights, Commander. And bring your people home."`)}
       <section class="squad-block">
         <h2>Available Operations</h2>
         <div class="mission-list">${rows}</div>
@@ -591,7 +649,7 @@ export class Hub {
         <h2>Stores <span class="count">${stores.length}</span></h2>
         ${storeList}
         <div class="card-foot">
-          <span class="cost">Total value: § ${total.toLocaleString()}</span>
+          <span class="readout-inline"><span class="ri-label">Total value</span><span class="cost">§&thinsp;${total.toLocaleString()}</span></span>
           <button class="btn" data-action="sell" ${stores.length ? "" : "disabled"}>Sell all loot</button>
         </div>
       </section>`;
@@ -628,22 +686,21 @@ export class Hub {
   _warroom() {
     const g = this.game;
     const h = g.campaignHealth;
-    const color = h > 50 ? "var(--good)" : h > 25 ? "var(--credits)" : "var(--bad)";
+    // A failing display DIMS before it turns hostile: --credits is the
+    // brightest phosphor on the screen and read as healthier than --good here.
+    const color = h > 50 ? "var(--p-hot)" : h > 25 ? "var(--p-dim)" : "var(--r)";
     const log = g.log
       .slice(0, 12)
       .map((e) => `<li><span class="muted">Day ${e.day}</span> ${e.text}</li>`)
       .join("");
     return `
-      <div class="location-header">
-        <h1>🗺️ War Room</h1>
-        <p class="staff-line">The Council — "The clock does not stop for grief, Commander. Every day you wait, they dig deeper."</p>
-      </div>
+      ${roomHeader("warroom", `The Council — "The clock does not stop for grief, Commander. Every day you wait, they dig deeper."`)}
       <section class="squad-block">
         <h2>Campaign Health</h2>
         <div class="big-meter"><span class="big-fill" style="width:${h}%;background:${color}"></span></div>
         <p class="muted">Sector integrity at <strong>${h}</strong>. ${this._doomLine()} Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
         <div class="card-foot">
-          <span class="cost">Day ${g.day}</span>
+          <span class="readout-inline"><span class="ri-label">Day</span><span class="ri-value">${g.day}</span></span>
         </div>
       </section>
       <section class="recruit-block">
@@ -671,16 +728,19 @@ export class Hub {
           )
           .join("");
         return `
-          <article class="soldier-card deploy-card ${chosen ? "chosen" : ""}">
+          <article class="soldier-card deploy-card ${chosen ? "chosen" : ""}${(s.wounds || 0) > 0 ? " is-wounded" : ""}">
             <div class="card-head">
               <div class="portrait" style="background:${portraitColor(s.name)}">${initials(s)}</div>
               <div class="who">
                 <div class="name">${s.name}</div>
-                <div class="sub">Aim ${s.stats.aim} · Health ${s.stats.health} · Speed ${s.stats.speed} · HP ${soldierMaxHp(s) - (s.wounds || 0)}/${soldierMaxHp(s)}</div>
                 <div class="sub">${this._levelLine(raw)}</div>
-                ${growthLabels(raw)}
               </div>
             </div>
+            <div class="dstrip">
+              ${["aim", "health", "speed"].map((k) => `<span class="dstat"><span class="dk">${STAT_LABELS[k]}</span><span class="dv">${s.stats[k]}</span></span>`).join("")}
+              <span class="dstat dstat-hp${(s.wounds || 0) > 0 ? " is-hurt" : ""}"><span class="dk">HP</span><span class="dv">${soldierMaxHp(s) - (s.wounds || 0)}<span class="of">/${soldierMaxHp(s)}</span></span></span>
+            </div>
+            ${growthLabels(raw)}
             <div class="deploy-controls">
               <label class="weapon-pick">Weapon
                 <select data-action="weapon" data-id="${s.id}" ${chosen ? "" : "disabled"}>${options}</select>
@@ -707,7 +767,7 @@ export class Hub {
         </div>`;
     return `
       <div class="location-header">
-        <h1>🛰️ Deploy — ${mission.name}</h1>
+        <h1><span class="room-mark">${icon("crosshair")}</span>Deploy — ${mission.name}</h1>
         <p class="staff-line">${mission.brief}</p>
         ${typeof mission.xpReward === "number" ? `<p class="muted xp-reward">+${mission.xpReward} XP for every soldier who extracts.</p>` : ""}
       </div>
@@ -738,12 +798,12 @@ export class Hub {
 
     const lootList = r.loot.length
       ? `<ul class="plain-list">${r.loot
-          .map((i) => `<li><span>${i.name}</span><span class="credits">§${i.value}</span></li>`)
+          .map((i) => `<li><span>${i.name}</span><span class="credits">§&thinsp;${i.value}</span></li>`)
           .join("")}</ul>`
       : `<p class="empty">No loot recovered.</p>`;
 
     const casualtyBlock = casualtyNames.length
-      ? `<ul class="kia-list">${casualtyNames.map((n) => `<li>✝ ${n} — killed in action</li>`).join("")}</ul>`
+      ? `<ul class="kia-list">${casualtyNames.map((n) => `<li>${icon("cross", "ico-sm")}<span>${n} — killed in action</span></li>`).join("")}</ul>`
       : `<p class="all-survived">Everyone came home.</p>`;
 
     const ribbon = r.success
@@ -819,11 +879,11 @@ export class Hub {
           <h2>Recovered <span class="count">${r.loot.length}</span></h2>
           ${lootList}
           <div class="card-foot">
-            <span class="cost">Enemy kills: ${r.kills}</span>
+            <span class="readout-inline"><span class="ri-label">Enemy kills</span><span class="ri-value">${r.kills}</span></span>
             ${
               r.success && r.loot.length
                 ? `<button class="btn" data-action="sell" ${this.sold ? "disabled" : ""}>${
-                    this.sold ? "Sold ✓" : `Sell recovered loot · §${lootTotal}`
+                    this.sold ? `${icon("check", "ico-sm")} Sold` : `Sell recovered loot · §&thinsp;${lootTotal}`
                   }</button>`
                 : ""
             }
@@ -852,17 +912,17 @@ export class Hub {
     const g = this.game;
     const END = {
       won: {
-        badge: "★",
+        badge: icon("star"),
         title: "SECTOR SECURED",
         text: "The hive command node is destroyed. The aliens are driven out of the sector — for now. Your surviving soldiers will be remembered for it.",
       },
       ended: {
-        badge: "—",
+        badge: icon("dash"),
         title: "THE WAR ENDED WITHOUT YOU",
         text: "Another commander reached the hive command node first and destroyed it. The sector is saved. You did not fail, and you did not win.",
       },
       lost: {
-        badge: "☠",
+        badge: icon("skull"),
         title: "SECTOR LOST",
         text: "The invasion overwhelmed the sector before the hive could be reached. The task force is disbanded. This is what the doom clock buys.",
       },
@@ -1104,10 +1164,19 @@ export class Hub {
 // `bonus` is what progression added on top of the authored stat, shown beside
 // the final value — so the bar reads starting stat, bonus and final at once.
 function statBar(key, value, bonus = 0) {
+  // `value` is already grown, so the authored part is what is left when the
+  // bonus is taken off. Drawing them as two segments means the bar says where
+  // the soldier started and what the campaign added, which the single fill and
+  // its "+2" suffix only said in text.
+  const base = Math.max(0, Math.min(100, (value - bonus) * 10));
+  const boost = Math.max(0, Math.min(100 - base, bonus * 10));
   return `
-    <div class="stat">
+    <div class="stat stat-${key}">
       <span class="stat-label">${STAT_LABELS[key]}</span>
-      <span class="stat-track"><span class="stat-fill" style="width:${Math.min(100, value * 10)}%"></span></span>
+      <span class="stat-track">
+        <span class="stat-fill" style="width:${base}%"></span>
+        ${boost ? `<span class="stat-boost" style="width:${boost}%"></span>` : ""}
+      </span>
       <span class="stat-num">${value}${bonus ? `<span class="stat-bonus">+${bonus}</span>` : ""}</span>
     </div>`;
 }
@@ -1137,8 +1206,12 @@ function initials(s) {
   return s.name.slice(0, 2).toUpperCase();
 }
 
+// An ID plate on a two-hue display. The name still picks the colour, so a
+// soldier keeps the same plate for the whole campaign, but it varies inside
+// the phosphor band (136–164°) and by depth rather than across the wheel — a
+// random hue was the one thing on screen belonging to neither register.
 function portraitColor(name) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return `hsl(${h} 45% 32%)`;
+  return `hsl(${136 + (h % 29)} ${34 + (h % 23)}% ${17 + (h % 11)}%)`;
 }

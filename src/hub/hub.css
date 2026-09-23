@@ -1,36 +1,143 @@
-/* Base hub styling — the feeling of looking into carved-out rooms and tunnels
-   deep under an underground command bunker. Concrete, earth, and thin strips of
-   artificial light; each room recedes into the dark via faux one-point
-   perspective. */
+/* ===========================================================================
+   HUB — the targeting computer.
+
+   GUNMETAL IS THE MATERIAL. Every surface — the top bar, the access rail, the
+   room panel, every card and control — is the same cool grey console, lit from
+   above and separated by depth and by 1px seams, not by colour. Text printed
+   on that console is neutral grey too. This is most of what you see, and it is
+   supposed to be.
+
+   PHOSPHOR IS WHAT IS SWITCHED ON. Hue 150°, sampled off the reference
+   photograph, and rationed: the strip under the lintel, the hatch you are
+   standing in, a gauge with a reading in it, a value worth looking at, the
+   affirmative control, the focus ring. Brightness carries the value — a hotter
+   green is a higher number, which is how a monochrome instrument has always
+   said so. If everything glowed, nothing would be lit.
+
+   HOSTILE IS HUE 354°, and it belongs to the invasion: a lead rotting, a
+   wound, a casualty, a threat tier above medium, the doom clock. It is never
+   used for one of your own controls.
+
+   Three rules:
+
+   1. LIGHT IS THE STATE SYSTEM. Anything that needs attention is LIT — a strip
+      with bloom, never a flat coloured border. A 1px seam is a physical join,
+      not a signal.
+   2. LABELS ARE ETCHED, PANELS ARE RAISED. Cut-in text takes a dark fill and a
+      1px highlight below it; anything you can press takes a top highlight and
+      a shadow under it. Nothing is both.
+   3. NUMBERS ARE INSTRUMENTS. Every readout is tabular and monospaced, and
+      every gauge carries its own label.
+
+   Motion is ONE authored moment: the room you just opened rises into place.
+   No loop runs when nothing has happened.
+   =========================================================================== */
 
 :root {
-  --earth: #0b0908;      /* deep soil, page base */
-  --concrete: #171b21;   /* room surfaces */
-  --concrete-hi: #212832;
-  --line: #333d4a;       /* etched concrete seams */
-  --steel: #2a3644;
-  --text: #d8dee9;
-  --muted: #808b99;
-  --accent: #e94560;     /* alert red — interactive */
-  --light: #ffca7a;      /* warm strip lighting */
-  --glow: rgba(160, 200, 255, 0.10); /* cool overhead wash */
-  --credits: #f2c14e;
-  --good: #4caf72;
-  --bad: #e05a5a;
-  --track: #0a0e13;
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  /* ---- gunmetal: the console, and nearly everything you see ---- */
+  --void: #08090a;         /* the page behind the console */
+  --metal: #111415;        /* a panel face — the room you are in */
+  --metal-hi: #181c1d;     /* a plate raised off it — cards, leads, hatches */
+  --metal-top: #1f2325;    /* the lit top of that plate */
+  --pit: #0b0d0e;          /* what a panel recedes into */
+  --well: #060708;         /* the inside of a gauge */
+  --plate: #2f3437;        /* a raised control */
+  --plate-hi: #485156;     /* its lit edge, and the bolts */
+  --line: #373e41;         /* a 1px seam: a join, never a signal */
+  --line-soft: rgba(55, 62, 65, 0.5);
+  --edge: rgba(255, 255, 255, 0.055);
+
+  /* ---- phosphor: hue 150°, and only where something is switched on ----
+     Brightness IS the value scale. --p-core is a stroke's blown-out centre. */
+  --p-core: #8fffca;
+  --p-hot: #56ffa0;
+  --p: #3ae58d;
+  --p-mid: #29a86a;
+  --p-dim: #1c7a4d;
+
+  /* ---- amber: hue ~40°, and only for what you can TOUCH ----
+     Not in the reference photograph, which has two hues. It is here on a
+     different authority: green / amber / red is the instrument-panel
+     convention, and green was doing six unrelated jobs at once. Amber took
+     the controls, so phosphor now means one thing — a reading.
+     --a-mid and --a-dim are fills and edges; neither is ever text. */
+  --a-core: #ffe18f;
+  --a-hot: #ffcb52;
+  --a: #f6af23;
+  --a-mid: #b87c14;
+  --a-dim: #764f13;
+
+  /* ---- hostile: hue 354°, and only for what the invasion is doing ---- */
+  --r-hot: #ff5162;
+  --r: #ff3d52;
+  --r-deep: #d91520;
+  --r-dim: #7a2029;
+
+  /* ---- light ---- */
+  --light: var(--p-hot);   /* ambient console lighting: the strips only */
+  --ctrl: var(--a);        /* anything you can press, focus, or navigate to */
+  --ctrl-hot: var(--a-hot);
+  --light-dim: rgba(86, 255, 160, 0.34);
+  --glow: rgba(86, 255, 160, 0.04);   /* the wash over a room */
+  --accent: var(--r);      /* alert. NOT the primary control — see .btn */
+  --accent-text: var(--r-hot);
+  --accent-deep: #b8101c;  /* a red surface white text sits on */
+
+  /* ---- text: neutral, because it is printed on metal, not glowing ----
+     Measured on --metal-top, the lightest surface any of them lands on.
+     --dim is 3.95 on --plate and so is never placed there; nor are the reds. */
+  --text: #e4e9ec;         /* 12.9:1 — names, values */
+  --body: #b6c1c7;         /*  8.6:1 — prose, briefs, bios */
+  --muted: #97a3ab;        /*  6.1:1 — secondary lines, quotes */
+  --dim: #86929a;          /*  5.0:1 — etched instrument labels */
+
+  /* ---- state ---- */
+  --good: var(--p-hot);
+  --bad: var(--r);
+  --credits: var(--p-core);  /* money is the brightest reading on the console */
+
+  /* ---- type ---- */
+  --font-ui: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Instruments only: HP, credits, days, XP, attribute values. Measurement,
+     not a costume — every glyph here is a digit the commander compares to
+     another digit, which is what tabular monospace is for. */
+  --font-num: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", Menlo, Consolas, monospace;
+
+  --t-micro: 10px;         /* etched caps label */
+  --t-small: 12.5px;
+  --t-body: 14px;
+  --t-lead: 16px;
+  --t-title: 27px;
+
+  /* ---- rhythm ---- */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 22px; --s6: 30px; --s7: 42px; --s8: 60px;
+  --r-sm: 3px; --r-md: 5px; --r-lg: 8px;
+
+  /* ---- elevation: offset + blur, never a zero-offset halo ---- */
+  --e1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --e2: 0 3px 8px -2px rgba(0, 0, 0, 0.65), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --e3: 0 12px 28px -12px rgba(0, 0, 0, 0.85), 0 3px 8px -3px rgba(0, 0, 0, 0.6);
+
+  font-family: var(--font-ui);
+  color-scheme: dark;
+  accent-color: var(--accent);
 }
+
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 
-/* Underground: warm soil, no bright surface. A faint wash at the very top hints
-   at the shaft to the surface far above. */
+/* Underground: warm soil, no bright surface. A faint wash at the very top
+   hints at the shaft to the surface far above. */
 body {
   background:
-    radial-gradient(120% 50% at 50% -20%, rgba(120, 150, 190, 0.06), transparent 55%),
-    linear-gradient(#10120f 0%, var(--earth) 45%, #060504 100%);
+    radial-gradient(120% 50% at 50% -20%, rgba(146, 158, 163, 0.06), transparent 55%),
+    linear-gradient(#060708 0%, var(--void) 45%, #030303 100%);
   color: var(--text);
+  font-size: var(--t-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* Grain/vignette overlay so corners fall into darkness like the far end of a
@@ -44,28 +151,61 @@ body::after {
   background: radial-gradient(130% 100% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
 }
 
+/* ---- browser surfaces ------------------------------------------------------
+   The parts nobody draws still belong to the world: selection, caret, focus
+   ring and scrollbars all ship with a default that was designed for a white
+   page. */
+::selection { background: rgba(86, 255, 160, 0.26); color: var(--text); }
+:root { caret-color: var(--light); }
+
+:where(button, a, select, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--ctrl-hot);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+/* Pointer users never see the ring; keyboard users always do. */
+:where(button, a, select, input):focus:not(:focus-visible) { outline: none; }
+
+* { scrollbar-width: thin; scrollbar-color: var(--plate) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.25); }
+::-webkit-scrollbar-thumb {
+  background: var(--plate);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover { background: #4a5357; background-clip: padding-box; }
+
+a { color: var(--ctrl); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+/* Drawn marks (src/hub/icons.js). Sized in em so every mark scales with the
+   type it sits beside, and coloured by inheritance so a lit thing lights its
+   own icon. */
+.ico { width: 1em; height: 1em; flex-shrink: 0; display: inline-block; vertical-align: -0.125em; }
+.ico-sm { width: 0.92em; height: 0.92em; }
+
 #app { min-height: 100vh; display: flex; flex-direction: column; }
 
-/* Ambient crew canvas: full-viewport, behind the hub DOM. The hub's translucent
-   panel backdrops let the little figures show through where the room opens up. */
-#hub-ambient {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-}
+/* Ambient crew canvas: full-viewport, behind the hub DOM. The hub's
+   translucent panel backdrops let the little figures show through where the
+   room opens up. */
+#hub-ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 #hub-root { position: relative; z-index: 1; }
 
-/* ---- Top bar: a reinforced concrete lintel with a light strip beneath ---- */
+/* ===========================================================================
+   TOP BAR — a reinforced concrete lintel with a light strip beneath it.
+   =========================================================================== */
+
 .topbar {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 26px;
-  background:
-    linear-gradient(180deg, #1c222b, #12161c);
-  border-bottom: 1px solid #05070a;
+  gap: var(--s5);
+  padding: var(--s3) var(--s6);
+  background: linear-gradient(180deg, var(--metal-hi), var(--metal));
+  border-bottom: 1px solid #050606;
   box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.02);
 }
 /* the light strip */
@@ -76,46 +216,99 @@ body::after {
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--light) 20%, var(--light) 80%, transparent);
   opacity: 0.5;
-  box-shadow: 0 0 10px 1px rgba(255, 202, 122, 0.35);
+  box-shadow: 0 0 10px 1px rgba(135, 242, 189, 0.35);
 }
+
+/* Stencilled onto the lintel: cut in, not printed on. */
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
   font-weight: 800;
-  letter-spacing: 4px;
-  font-size: 18px;
-  color: #eef2f7;
-  text-shadow: 0 1px 0 #000;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: #eef2f4;
+  text-shadow: 0 1px 0 #050606, 0 -1px 0 rgba(255, 255, 255, 0.06);
+  white-space: nowrap;
 }
-.resources { display: flex; align-items: center; gap: 18px; }
-.credits { color: var(--credits); font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 0 8px rgba(242, 193, 78, 0.25); }
-.roster-count { color: var(--muted); font-size: 14px; }
+.brand-rule {
+  width: 14px; height: 1px;
+  background: var(--light);
+  opacity: 0.55;
+  box-shadow: 0 0 6px var(--light-dim);
+}
+
+.resources { display: flex; align-items: center; gap: var(--s5); }
+
+/* A readout is a labelled instrument: what it measures, then the measurement.
+   Four loose spans said "§ 1,200" and left the glyph to explain itself. */
+.readout { display: flex; flex-direction: column; gap: 2px; line-height: 1.2; }
+.ro-label {
+  font-size: var(--t-micro);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.ro-value {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.ro-row { display: flex; align-items: center; gap: var(--s2); }
+.readout-gauge .ro-value { min-width: 2.2ch; text-align: right; }
+.credits { color: var(--credits); text-shadow: 0 0 10px rgba(84, 236, 160, 0.22); }
+
+.health-track {
+  width: 84px; height: 6px;
+  border-radius: 2px;
+  background: var(--well);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.health-fill { display: block; height: 100%; transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1); }
+/* Integrity is the one number that ends the campaign, so low integrity lights
+   its own label rather than only tinting the bar. */
+.health-chip.is-warning .ro-label { color: var(--credits); }
+.health-chip.is-critical .ro-label { color: var(--bad); }
+.health-chip.is-critical .health-track { box-shadow: inset 0 0 0 1px rgba(224, 90, 103, 0.5), 0 0 12px -4px var(--bad); }
+
 .dev-link {
-  color: var(--muted); text-decoration: none; font-size: 18px; line-height: 1;
-  opacity: 0.5; transition: opacity 0.15s, transform 0.15s;
+  display: inline-flex;
+  align-items: center;
+  font-size: 17px;
+  color: var(--muted);
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.dev-link:hover { opacity: 1; transform: rotate(45deg); }
+.dev-link:hover { opacity: 1; color: var(--ctrl); transform: rotate(60deg); }
 
-/* ---- Layout ---- */
-.layout { flex: 1; display: grid; grid-template-columns: 250px 1fr; }
+/* ===========================================================================
+   LAYOUT + the access shaft
+   =========================================================================== */
 
-/* ---- Locations: a vertical access shaft lined with room hatches ---- */
+.layout { flex: 1; display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 0; }
+
 .locations {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px 14px;
-  background:
-    linear-gradient(90deg, #05060a 0%, #0e1218 12%, #12161d 100%);
-  border-right: 1px solid #05070a;
+  gap: var(--s2);
+  padding: var(--s5) var(--s3);
+  background: linear-gradient(90deg, #060707 0%, #0e1011 12%, #0b0d0e 100%);
+  border-right: 1px solid #050606;
 }
 /* the shaft: a lit vertical line the hatches branch off of */
 .locations::before {
   content: "";
   position: absolute;
-  top: 24px; bottom: 24px; left: 26px;
+  top: 26px; bottom: 26px; left: 26px;
   width: 2px;
-  background: linear-gradient(180deg, transparent, #3b4658 12%, #3b4658 88%, transparent);
-  box-shadow: 0 0 8px rgba(120, 160, 210, 0.15);
+  background: linear-gradient(180deg, transparent, #3f474b 12%, #3f474b 88%, transparent);
+  box-shadow: 0 0 8px rgba(116, 214, 165, 0.15);
 }
 
 .loc {
@@ -123,47 +316,69 @@ body::after {
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-left: 18px;               /* room branches off the shaft */
-  padding: 13px 14px;
+  gap: var(--s3);
+  margin-left: 18px;               /* the room branches off the shaft */
+  padding: 11px var(--s3);
   border: 1px solid var(--line);
-  border-left: 3px solid #46536604;
-  border-radius: 4px;
-  background: linear-gradient(180deg, var(--concrete-hi), var(--concrete));
+  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--metal-hi), var(--metal));
   color: var(--text);
+  font: inherit;
   cursor: pointer;
   text-align: left;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 6px rgba(0, 0, 0, 0.4);
-  transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+  box-shadow: inset 0 1px 0 var(--edge), var(--e1);
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.16s ease,
+              box-shadow 0.16s ease, background 0.16s ease;
 }
 /* the tunnel stub connecting each hatch to the shaft */
 .loc::before {
   content: "";
   position: absolute;
-  left: -18px;
-  top: 50%;
-  width: 18px;
-  height: 2px;
-  background: #2f3a49;
+  left: -18px; top: 50%;
+  width: 18px; height: 2px;
+  background: #363d40;
+  transition: background 0.16s ease;
 }
-.loc:hover { transform: translateX(2px); border-color: #4a5a70; }
-.loc.active {
-  border-left-color: var(--light);
-  box-shadow: inset 3px 0 12px -4px rgba(255, 202, 122, 0.5), 0 2px 8px rgba(0, 0, 0, 0.5);
-}
-.loc-icon {
-  font-size: 22px;
-  line-height: 1;
-  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
-}
-.loc-text { display: flex; flex-direction: column; }
-.loc-label { font-weight: 600; letter-spacing: 0.5px; }
-.loc-staff { font-size: 12px; color: var(--muted); }
+.loc:hover { transform: translateX(2px); border-color: #515a5f; }
+.loc:hover::before { background: #4d575c; }
 
-/* ---- Panel: the interior of the selected room, receding into the dark ---- */
+/* The active hatch is LIT, not outlined: a strip inside its left edge, and the
+   icon takes the same light because it is drawn in currentColor. */
+.loc.active {
+  background: linear-gradient(90deg, rgba(246, 175, 35, 0.07), var(--metal-hi) 38%, var(--metal));
+  border-color: #6d5526;
+  box-shadow: inset 0 1px 0 var(--edge), var(--e2);
+}
+.loc.active::after {
+  content: "";
+  position: absolute;
+  left: -1px; top: 5px; bottom: 5px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, transparent, var(--ctrl-hot) 16%, var(--ctrl-hot) 84%, transparent);
+  box-shadow: 0 0 10px 0 rgba(255, 203, 82, 0.34);
+}
+.loc.active .loc-icon { color: var(--ctrl-hot); filter: drop-shadow(0 0 7px rgba(255, 203, 82, 0.45)); }
+.loc.active .loc-label { color: #f2f5f7; }
+
+.loc-icon {
+  display: inline-flex;
+  font-size: 21px;
+  color: #8a969d;
+  transition: color 0.16s ease, filter 0.16s ease;
+}
+.loc:hover .loc-icon { color: #c3ced4; }
+.loc-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.loc-label { font-weight: 600; letter-spacing: 0.02em; }
+.loc-staff { font-size: 11.5px; color: var(--muted); }
+
+/* ===========================================================================
+   PANEL — the interior of the selected room, receding into the dark
+   =========================================================================== */
+
 .panel {
   position: relative;
-  padding: 30px 34px;
+  padding: var(--s6) var(--s7) var(--s8);
   overflow-y: auto;
   isolation: isolate;
 }
@@ -177,285 +392,926 @@ body::after {
   background:
     radial-gradient(80% 55% at 50% -8%, var(--glow), transparent 60%),
     linear-gradient(180deg, transparent 55%, rgba(0, 0, 0, 0.4) 100%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'%3E%3Cg fill='none' stroke='%233b4d66' stroke-width='0.18'%3E%3Crect x='35' y='31' width='30' height='28'/%3E%3Cline x1='0' y1='0' x2='35' y2='31'/%3E%3Cline x1='100' y1='0' x2='65' y2='31'/%3E%3Cline x1='0' y1='100' x2='35' y2='59'/%3E%3Cline x1='100' y1='100' x2='65' y2='59'/%3E%3Cline x1='24' y1='78' x2='76' y2='78'/%3E%3Cline x1='30' y1='68' x2='70' y2='68'/%3E%3C/g%3E%3C/svg%3E");
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='xMidYMid slice'%3E%3Cg fill='none' stroke='%231d4d3a' stroke-width='0.18'%3E%3Crect x='35' y='31' width='30' height='28'/%3E%3Cline x1='0' y1='0' x2='35' y2='31'/%3E%3Cline x1='100' y1='0' x2='65' y2='31'/%3E%3Cline x1='0' y1='100' x2='35' y2='59'/%3E%3Cline x1='100' y1='100' x2='65' y2='59'/%3E%3Cline x1='24' y1='78' x2='76' y2='78'/%3E%3Cline x1='30' y1='68' x2='70' y2='68'/%3E%3C/g%3E%3C/svg%3E");
   background-size: cover, cover, cover;
   opacity: 0.85;
 }
 /* lift all real content above the perspective backdrop */
 .panel > * { position: relative; z-index: 1; }
 
-.location-header h1 { margin: 0 0 4px; font-size: 26px; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6); }
-.staff-line { margin: 0 0 8px; color: var(--muted); font-style: italic; }
-
-.placeholder {
-  margin-top: 44px;
-  padding: 48px;
-  border: 1px dashed var(--line);
-  border-radius: 6px;
-  text-align: center;
-  background: linear-gradient(180deg, rgba(20, 25, 32, 0.6), rgba(8, 10, 14, 0.6));
+.location-header { margin-bottom: var(--s5); }
+.location-header h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0 0 var(--s1);
+  font-size: var(--t-title);
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: #eef2f4;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
 }
-.muted { color: var(--muted); }
-
-/* ---- Flash message ---- */
-.flash {
-  margin-bottom: 18px;
-  padding: 10px 14px;
-  border-radius: 4px;
+/* The room's mark on a bolted plate beside its name. */
+.room-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px; height: 38px;
+  font-size: 22px;
+  color: var(--ctrl);
   border: 1px solid var(--line);
-  border-left-width: 3px;
-  font-size: 14px;
-  background: rgba(10, 14, 20, 0.7);
+  border-radius: var(--r-md);
+  background: linear-gradient(180deg, var(--metal-hi), #0b0d0e);
+  box-shadow: inset 0 1px 0 var(--edge), var(--e1);
+  filter: drop-shadow(0 0 8px rgba(135, 242, 189, 0.18));
 }
-.flash-good { border-left-color: var(--good); color: #bfe6cd; }
-.flash-bad { border-left-color: var(--bad); color: #f0c2c2; }
+.staff-line {
+  margin: 0;
+  max-width: 74ch;
+  color: var(--muted);
+  font-style: italic;
+  line-height: 1.55;
+}
 
-/* ---- Section headers: stencilled bunker labels ---- */
-.squad-block, .recruit-block { margin-top: 28px; }
-.squad-block h2, .recruit-block h2 {
-  font-size: 14px;
-  letter-spacing: 2.5px;
+/* ---- section headings: stencilled bunker labels, cut into the wall ---- */
+.squad-block, .recruit-block { margin-top: var(--s7); }
+.squad-block h2, .recruit-block h2, .result-col h2, .xp-results h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s4);
+  padding-bottom: var(--s2);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #9aa6b4;
+  color: #9faab1;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
   border-bottom: 1px solid var(--line);
-  padding-bottom: 8px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025);  /* the engraved lip */
 }
 .count {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 8px;
-  border-radius: 3px;
-  background: #223047;
-  color: var(--text);
-  font-size: 12px;
+  font-family: var(--font-num);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  padding: 2px 7px;
+  border-radius: 2px;
+  background: #1c1f21;
+  border: 1px solid var(--line);
+  color: var(--body);
 }
-.empty { color: var(--muted); font-style: italic; padding: 10px 0; }
 
-/* ---- Soldier cards: dossier plates bolted to the wall ---- */
+.muted { color: var(--muted); }
+.small { font-size: var(--t-small); }
+p.muted { max-width: 74ch; line-height: 1.6; }
+
+/* ---- empty states: a legal state, dressed as one ------------------------
+   A thin board and an empty roster are both reachable by playing correctly
+   (campaign pacing makes the empty board the normal opening), so neither is
+   an error and neither is a blank line of italics. */
+.empty { color: var(--muted); font-style: italic; padding: var(--s2) 0; }
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s7) var(--s5);
+  text-align: center;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(11, 13, 14, 0.55), rgba(9, 10, 10, 0.55));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+.empty-mark {
+  font-size: 30px;
+  /* A dim reading, not a piece of the console: this mark sits on the glass. */
+  color: var(--p-dim);
+  margin-bottom: var(--s2);
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.6));
+}
+.empty-title { margin: 0; font-weight: 600; color: var(--body); letter-spacing: 0.01em; }
+.empty-note { margin: 0; max-width: 46ch; color: var(--muted); font-size: var(--t-small); line-height: 1.6; }
+
+.placeholder {
+  margin-top: var(--s7);
+  padding: var(--s8) var(--s6);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-lg);
+  text-align: center;
+  background: linear-gradient(180deg, rgba(16, 19, 20, 0.6), rgba(10, 11, 12, 0.6));
+}
+.placeholder p { margin: 0 0 var(--s2); }
+.placeholder p:last-child { margin: 0; }
+
+/* ---- flash: a lit rule, not a coloured border ---- */
+.flash {
+  position: relative;
+  margin-bottom: var(--s4);
+  padding: 10px var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: var(--t-small);
+  background: rgba(14, 15, 16, 0.75);
+  box-shadow: var(--e1);
+}
+.flash::before {
+  content: "";
+  position: absolute;
+  left: -1px; top: 4px; bottom: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  box-shadow: 0 0 10px -1px currentColor;
+}
+.flash-good { color: #b1babe; }
+.flash-bad { color: #f0a9b0; }
+
+/* ===========================================================================
+   CONTROLS
+   =========================================================================== */
+
+/* ---- the button system, three tiers on one material --------------------
+   Every control is the same gunmetal plate. What separates them is how much
+   light is on it: a lit LABEL, a lit FILL, or none. Red is not a tier — it is
+   the invasion's colour, and a screen whose commonest control is the enemy's
+   colour has no way left to say "enemy". */
+.btn {
+  position: relative;
+  padding: 8px 17px;
+  border: 1px solid #454f53;
+  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, var(--plate), #262b2e);
+  color: var(--ctrl-hot);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  text-shadow: 0 0 10px rgba(255, 203, 82, 0.25);
+  box-shadow: inset 0 1px 0 var(--edge), var(--e1);
+  transition: border-color 0.14s ease, transform 0.14s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.14s ease, color 0.14s ease;
+}
+/* Hover raises the plate and lets a little of the label's light spill onto its
+   own edge — the surface itself never changes colour. */
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #7a6636;
+  color: var(--a-core);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), 0 0 16px -8px rgba(255, 203, 82, 0.55), var(--e2);
+}
+.btn:active:not(:disabled) { transform: translateY(0); box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5); }
+.btn:disabled {
+  background: #1a1e1f;
+  border-color: var(--line);
+  /* "Can't afford" and "No soldiers" are information, so a disabled control
+     stays readable rather than fading to decoration. The light goes out; the
+     label does not. */
+  color: var(--dim);
+  text-shadow: none;
+  cursor: not-allowed;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+/* Secondary: the same plate with the light off. */
+.btn-alt {
+  background: linear-gradient(180deg, #31383b, #23282a);
+  border-color: var(--line);
+  color: var(--body);
+  text-shadow: none;
+}
+.btn-alt:hover:not(:disabled) { color: var(--text); border-color: #4c5559; box-shadow: inset 0 1px 0 var(--edge), var(--e2); }
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  text-shadow: none;
+  box-shadow: none;
+}
+.btn-ghost:hover:not(:disabled) { color: var(--text); border-color: #515a5f; background: rgba(255, 255, 255, 0.02); }
+/* The affirmative — Commit squad, Return to base. The only control that is a
+   lit SURFACE rather than a lit label, which is what makes it the one thing
+   the eye lands on. Its text is cut out of the light: white on this green is
+   2.0:1. */
+.btn-go {
+  background: linear-gradient(180deg, var(--a-hot), #dd910e);
+  border-color: #ffdb86;
+  color: #1a1205;
+  font-weight: 700;
+  text-shadow: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 14px -3px rgba(246, 175, 35, 0.5), var(--e1);
+}
+.btn-go:hover:not(:disabled) { color: #1a1205; filter: brightness(1.06); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 6px 20px -6px rgba(246, 175, 35, 0.65), var(--e1); }
+.btn-sm { padding: 6px 12px; font-size: 12.5px; }
+.btn-day { padding: 7px 15px; font-size: 13px; }
+
+/* A control whose command is in flight (tech/multiplayer-session.md, W1). It
+   reads as pressed the moment it is clicked and is released when the session
+   answers - the optimistic half of a send. In one process the answer beats the
+   next frame, so this is written for the wire rather than for today. */
+.in-flight {
+  transform: translateY(1px) !important;
+  filter: saturate(0.5) brightness(0.88);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.45);
+}
+
+/* The day control while you are ready — lit, and clicking it stands you down. */
+.btn-ready-on {
+  background: rgba(246, 175, 35, 0.14);
+  border-color: #6d5526;
+  color: var(--a-hot);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 14px -4px rgba(246, 175, 35, 0.55);
+}
+.btn-ready-on:hover:not(:disabled) { background: rgba(246, 175, 35, 0.2); }
+
+select {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 6px 9px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+  transition: border-color 0.14s ease;
+}
+select:hover:not(:disabled) { border-color: #515a5f; }
+select:disabled { color: var(--dim); opacity: 0.6; cursor: not-allowed; }
+
+/* ===========================================================================
+   SOLDIER CARDS — dossier plates bolted to the wall
+   =========================================================================== */
+
 .soldier-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  margin-top: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: var(--s4);
 }
 .soldier-card {
   position: relative;
-  background: linear-gradient(180deg, var(--concrete-hi), #12161d);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  gap: var(--s3);
+  padding: var(--s4) var(--s4) var(--s3);
+  background: linear-gradient(180deg, var(--metal-hi), #0b0d0e);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 1px 0 var(--edge), var(--e2);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, border-color 0.18s ease;
 }
+.soldier-card:hover { transform: translateY(-2px); border-color: #464f54; box-shadow: inset 0 1px 0 var(--edge), var(--e3); }
 /* corner "bolts" */
 .soldier-card::before,
 .soldier-card::after {
   content: "";
   position: absolute;
-  top: 8px;
+  top: 7px;
   width: 4px; height: 4px;
   border-radius: 50%;
-  background: #46536a;
+  background: #3f464a;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.soldier-card::before { left: 7px; }
+.soldier-card::after { right: 7px; }
+/* A wounded soldier is lit down its edge — the one thing you need to see when
+   scanning twelve of these for who can go out today. */
+.soldier-card.is-wounded { border-color: #633136; }
+
+.card-head { display: flex; align-items: center; gap: var(--s3); }
+.portrait {
+  width: 46px; height: 46px;
+  border-radius: var(--r-sm);         /* ID-photo square, not a web avatar */
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-num);
+  font-weight: 700; font-size: 15px; letter-spacing: 0.04em;
+  color: #fff;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.6), var(--e1);
+}
+.who { min-width: 0; }
+.name { font-weight: 700; font-size: var(--t-lead); letter-spacing: -0.005em; }
+.callsign { color: var(--accent-text); font-weight: 600; }
+.sub { font-size: var(--t-small); color: var(--muted); }
+.bio { margin: 0; font-size: 13px; line-height: 1.6; color: var(--body); }
+
+/* ---- the instrument block: level, condition, attributes ---- */
+.gauges {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s3) 0 var(--s1);
+  border-top: 1px solid var(--line-soft);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.level-line { display: flex; flex-direction: column; gap: 5px; }
+.ll-text {
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--body);
+  letter-spacing: -0.01em;
+}
+.xp-rail {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--well);
+  overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
-.soldier-card::before { left: 8px; }
-.soldier-card::after { right: 8px; }
-
-.card-head { display: flex; align-items: center; gap: 12px; }
-.portrait {
-  width: 48px; height: 48px;
-  border-radius: 4px;                 /* ID-photo square, not a web avatar */
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 16px; color: #fff;
-  flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 0 2px rgba(0, 0, 0, 0.4);
+.xp-fill {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, #3c4347, var(--p-mid));
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.name { font-weight: 700; font-size: 16px; }
-.callsign { color: var(--accent); font-weight: 600; }
-.sub { font-size: 12px; color: var(--muted); }
-.bio { margin: 0; font-size: 13px; line-height: 1.5; color: #b3bcc8; }
+.xp-rail.is-max .xp-fill { background: linear-gradient(90deg, var(--p-hot), var(--p-core)); }
 
-/* stat bars */
-.stats { display: flex; flex-direction: column; gap: 6px; }
-.stat { display: grid; grid-template-columns: 52px 1fr 44px; align-items: center; gap: 8px; }
-.stat-label { font-size: 12px; color: var(--muted); }
-.stat-track { height: 7px; border-radius: 2px; background: var(--track); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5); }
-.stat-fill { display: block; height: 100%; background: linear-gradient(90deg, #3a6ea5, var(--accent)); }
-.stat-num { font-size: 12px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.vital { display: grid; grid-template-columns: 58px 1fr auto; align-items: center; gap: var(--s2); }
+.vital-label { font-size: var(--t-micro); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+.vital-track {
+  height: 8px;
+  border-radius: 2px;
+  background: var(--well);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.vital-fill {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--p-mid), var(--p-hot));
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.vital.is-hurt .vital-fill { background: linear-gradient(90deg, var(--r-dim), var(--r)); }
+.vital.is-hurt .vital-num { color: #eda2aa; }
+.vital-num, .stat-num {
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  text-align: right;
+}
+.of { color: var(--dim); font-weight: 400; }
 
-/* traits */
-.traits { display: flex; flex-wrap: wrap; gap: 6px; }
+.stats { display: flex; flex-direction: column; gap: 5px; }
+.stat { display: grid; grid-template-columns: 58px 1fr 46px; align-items: center; gap: var(--s2); }
+.stat-label { font-size: var(--t-micro); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+.stat-track {
+  display: flex;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--well);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6);
+  /* Ten ticks, so a bar can be READ as a value and not just compared. */
+  background-image: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(255, 255, 255, 0.05) calc(10% - 1px) 10%);
+}
+/* Each attribute is its own channel on the display, so each has its own green
+   — hue separates them across 124-170 degrees, grass through sea. Their
+   LUMINANCE is held within four percent of each other on purpose: brightness
+   already means "a higher value" everywhere else in this sheet, and four bars
+   of four brightnesses would read as four readings rather than as four
+   different instruments. */
+.stat-aim { --bar-a: #23852a; --bar-b: #54c95c; }
+.stat-health { --bar-a: #247f45; --bar-b: #53c67d; }
+.stat-speed { --bar-a: #217d5a; --bar-b: #4dc798; }
+.stat-nerve { --bar-a: #227769; --bar-b: #4bc3af; }
+.stat-fill {
+  display: block; height: 100%; flex-shrink: 0;
+  background: linear-gradient(90deg, var(--bar-a, var(--p-dim)), var(--bar-b, var(--p-mid)));
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* What the campaign added, lit warm so growth is visible on the bar itself. */
+.stat-boost {
+  display: block; height: 100%; flex-shrink: 0;
+  background: linear-gradient(90deg, var(--p-hot), var(--p-core));
+  box-shadow: 0 0 10px -2px var(--light-dim);
+}
+.stat-bonus { margin-left: 3px; font-size: 10px; color: var(--light); }
+
+/* traits + progression labels */
+.traits { display: flex; flex-wrap: wrap; gap: 5px; }
 .trait {
   font-size: 11px;
   padding: 3px 8px;
-  border-radius: 3px;
-  background: #202c3d;
-  color: #a9b6c6;
-  border: 1px solid var(--line);
-  letter-spacing: 0.3px;
+  border-radius: 2px;
+  background: #181b1c;
+  color: #a3aeb5;
+  border: 1px solid var(--line-soft);
+  letter-spacing: 0.02em;
 }
+.traits.growth { gap: 4px; }
+.growth-tag { font-size: 10px; background: #151819; color: #8e9aa1; }
+.next-gains, .record { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.next-gains { font-family: var(--font-num); letter-spacing: -0.01em; }
 
-/* card footer */
-.card-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 4px; gap: 12px; }
-.cost { color: var(--credits); font-weight: 700; }
-.record { font-size: 12px; color: var(--muted); }
-
-/* ---- Buttons (shared) ---- */
-.btn {
-  padding: 8px 18px;
-  border: none;
-  border-radius: 4px;
-  background: linear-gradient(180deg, #f4586f, var(--accent));
-  color: #fff;
+.card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: auto;
+  padding-top: var(--s3);
+  gap: var(--s3);
+  border-top: 1px solid var(--line-soft);
+}
+.card-foot.enlisted { justify-content: space-between; }
+.cost {
+  font-family: var(--font-num);
   font-weight: 700;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(233, 69, 96, 0.3);
-  transition: filter 0.12s, transform 0.1s;
+  font-variant-numeric: tabular-nums;
+  color: var(--credits);
 }
-.btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
-.btn:disabled { background: #2c313a; color: #7a808a; cursor: not-allowed; box-shadow: none; }
-/* A control whose command is in flight (tech/multiplayer-session.md, W1). It
-   reads as pressed the moment it is clicked and is released when the session
-   answers - the optimistic half of a send. In one process the answer beats the
-   next frame, so this is written for the wire rather than for today. */
-.in-flight { transform: translateY(1px); filter: saturate(0.55) brightness(0.9); opacity: 0.85; }
-.btn-alt { background: linear-gradient(180deg, #46536a, #2f3a49); box-shadow: none; }
-.btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); box-shadow: none; }
-.btn-go { background: linear-gradient(180deg, #57c98a, #2f9d63); box-shadow: 0 2px 8px rgba(47, 157, 99, 0.35); }
-.card-foot.enlisted { justify-content: flex-start; }
-.enlisted-tag { color: var(--good); font-weight: 700; font-size: 14px; }
-.small { font-size: 12px; }
+/* A labelled value on one line, for a footer that has room for a label but not
+   for a stacked one. `.cost` stays gold and monospaced because it means money;
+   a day count and a kill count are neither. */
+.readout-inline { display: inline-flex; align-items: baseline; gap: var(--s2); }
+.ri-label { font-size: var(--t-micro); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+.ri-value { font-family: var(--font-num); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
 
-/* ---- Top bar additions: day + campaign-health chip ---- */
-.day { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
-.health-chip {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums;
-}
-/* The day control lives in the bar, so it is sized to the bar, not to a card. */
-.btn-day { padding: 6px 14px; font-size: 13px; }
-.health-track { width: 90px; height: 8px; border-radius: 2px; background: var(--track); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.5); }
-.health-fill { display: block; height: 100%; transition: width 0.3s; }
+.enlisted-tag { display: inline-flex; align-items: center; gap: 6px; color: var(--good); font-weight: 600; font-size: 13px; }
 
-/* ---- Plain lists (armory, stores, fabrication) ---- */
-.plain-list { list-style: none; padding: 0; margin: 12px 0 0; }
-.plain-list li {
-  display: flex; justify-content: space-between; padding: 8px 12px;
-  border: 1px solid var(--line); border-radius: 4px; margin-bottom: 6px;
-  background: rgba(20, 25, 32, 0.5);
-}
-.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-.log-list { list-style: none; padding: 0; margin: 12px 0 0; font-size: 13px; }
-.log-list li { padding: 5px 0; border-bottom: 1px solid rgba(51,61,74,0.4); color: #b3bcc8; }
-.log-list .muted { margin-right: 8px; }
+/* ===========================================================================
+   ENGINEERING
+   =========================================================================== */
 
-/* ---- Engineering blueprints ---- */
-.blueprint-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+.blueprint-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: var(--s4); }
 .blueprint {
-  background: linear-gradient(180deg, var(--concrete-hi), #12161d);
-  border: 1px solid var(--line); border-radius: 5px; padding: 16px;
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: var(--s2);
+  padding: var(--s4);
+  background: linear-gradient(180deg, var(--metal-hi), #0b0d0e);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 1px 0 var(--edge), var(--e2);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, border-color 0.18s ease;
 }
-.bp-head { display: flex; justify-content: space-between; align-items: baseline; }
-.bp-head h3 { margin: 0; font-size: 16px; }
-.bp-time { font-size: 12px; color: var(--muted); }
-.bp-prompt { margin: 0; font-style: italic; color: #9fb0c6; font-size: 13px; }
-.bp-stats { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.blueprint:hover { transform: translateY(-2px); border-color: #464f54; box-shadow: inset 0 1px 0 var(--edge), var(--e3); }
+.bp-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); }
+.bp-head h3 { margin: 0; font-size: 15px; letter-spacing: -0.005em; }
+.bp-time { font-family: var(--font-num); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bp-prompt { margin: 0; font-style: italic; color: #a7b3ba; font-size: 13px; line-height: 1.55; }
+.bp-stats {
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  color: var(--body);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
 
-/* ---- Operations mission list ---- */
-.mission-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+/* ---- plain lists (armory, stores, fabrication) ---- */
+.plain-list { list-style: none; padding: 0; margin: 0; }
+.plain-list li {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s3);
+  padding: 9px var(--s3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  margin-bottom: 5px;
+  background: rgba(16, 19, 20, 0.5);
+  font-size: 13px;
+}
+.plain-list .credits, .plain-list .muted { font-family: var(--font-num); font-size: 12px; font-variant-numeric: tabular-nums; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s6); }
+
+.log-list { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.log-list li {
+  display: flex; gap: var(--s3);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--body);
+  line-height: 1.5;
+}
+.log-list li:last-child { border-bottom: none; }
+.log-list .muted {
+  flex-shrink: 0;
+  min-width: 4.5em;
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  padding-top: 1px;
+}
+
+/* ===========================================================================
+   OPERATIONS — the lead board
+   =========================================================================== */
+
+.mission-list { display: flex; flex-direction: column; gap: var(--s3); }
 .mission-row {
-  display: flex; justify-content: space-between; align-items: center; gap: 20px;
-  background: linear-gradient(180deg, var(--concrete-hi), #12161d);
-  border: 1px solid var(--line); border-left: 3px solid var(--steel);
-  border-radius: 5px; padding: 16px 18px;
+  --edge-color: var(--plate);
+  position: relative;
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s5);
+  padding: var(--s4) var(--s5);
+  background: linear-gradient(180deg, var(--metal-hi), #0b0d0e);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 1px 0 var(--edge), var(--e2);
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.16s ease, border-color 0.16s ease;
 }
-.mission-row.is-done { opacity: 0.6; border-left-color: var(--good); }
+/* Threat is the strip along the lead, lit in its own colour. A flat 3px
+   coloured border is the cheap version of this and says nothing about depth. */
+.lead-edge {
+  position: absolute;
+  left: -1px; top: 8px; bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, transparent, var(--edge-color) 14%, var(--edge-color) 86%, transparent);
+  box-shadow: 0 0 12px -1px var(--edge-color);
+  opacity: 0.85;
+}
+.mission-row.t-low { --edge-color: var(--p-dim); }
+.mission-row.t-medium { --edge-color: var(--p); }
+.mission-row.t-high { --edge-color: var(--r-deep); }
+.mission-row.t-extreme { --edge-color: var(--r-hot); }
+.mission-row.is-boss { --edge-color: var(--credits); border-color: #3e464a; }
+.mission-row.committed { --edge-color: var(--accent); border-color: #5e2f33; }
+.mission-row.is-done { opacity: 0.6; --edge-color: var(--good); }
 .mission-row.is-locked { opacity: 0.55; }
-.mission-row.is-boss { border-left-color: var(--credits); box-shadow: 0 0 16px -4px rgba(242,193,78,0.35); }
-.mission-title { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.mission-brief { margin: 6px 0 0; font-size: 13px; color: #b3bcc8; max-width: 620px; line-height: 1.5; }
+.mission-row:not(.is-locked):not(.is-done):hover {
+  transform: translateX(3px);
+  border-color: #515a5f;
+  box-shadow: inset 0 1px 0 var(--edge), var(--e3);
+}
+
+.mission-main { min-width: 0; }
+.mission-title { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.lead-name { font-weight: 700; font-size: var(--t-lead); letter-spacing: -0.005em; margin-right: var(--s1); }
+.mission-brief { margin: 7px 0 0; font-size: 13px; color: var(--body); max-width: 68ch; line-height: 1.6; }
+.lead-notes { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.win-flag {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px;
+  font-size: var(--t-small);
+  color: var(--credits);
+  text-shadow: 0 0 12px rgba(84, 236, 160, 0.35);
+}
 /* Stacked, per mockup §2's .macts: Deploy squad and Share with ▾ sit one above
-   the other, share a width, and the menu drops under both. As a bare block
-   these were two inline-blocks with no whitespace between them, so they
-   touched. */
-.mission-action {
-  flex-shrink: 0; display: flex; flex-direction: column;
-  gap: 6px; align-items: stretch; min-width: 132px;
+   the other, share a width, and the menu drops under both. */
+.mission-action { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 138px; }
+
+/* ---- tags: the decision reads first, the bookkeeping reads second ---- */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  white-space: nowrap;
 }
-.win-flag { margin-top: 8px; font-size: 12px; color: var(--credits); }
-.tag { font-size: 11px; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.5px; font-weight: 600; }
-.tag-done { background: #1c3a2a; color: #7fdca6; }
-.tag-locked { background: #2a2530; color: #b09fc0; }
-.tag-diff-low { background: #1c3040; color: #7fb8dc; }
-.tag-diff-medium { background: #3a3320; color: #dcc47f; }
-.tag-diff-high { background: #3a2a1c; color: #e5b483; }
-.tag-diff-extreme { background: #3a1c1c; color: #e59090; }
+/* Four tiers over two hues: a low threat is a quiet reading on your own
+   display, and an extreme one is the enemy's colour at full brightness. */
+.tag-diff-low { background: #141617; border-color: #383f42; color: #88959b; }
+.tag-diff-medium { background: #1b1e1f; border-color: #2f8055; color: #7dffbe; }
+.tag-diff-high { background: #2a1114; border-color: #75232c; color: #ff9aa5; }
+.tag-diff-extreme { background: #4a121b; border-color: #b0212f; color: #ffd2d6; }
+.tag-xp { background: #1b1f21; border-color: #333a3d; color: #b4bbbf; font-family: var(--font-num); letter-spacing: 0; }
 /* How long the lead has left. Reads as a clock, not a threat, until it's short. */
-.tag-life { background: #23282f; color: var(--muted); }
-.tag-life.urgent { background: #3a1c1c; color: #e59090; }
-.tag-xp { background: #1f2a1f; color: #9fd49f; }
-
-/* ---- Deploy screen ---- */
-.deploy-card.chosen { border-color: var(--good); box-shadow: 0 0 0 1px var(--good), 0 3px 10px rgba(0,0,0,0.45); }
-.deploy-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; }
-.weapon-pick { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
-.weapon-pick select {
-  background: var(--track); color: var(--text); border: 1px solid var(--line);
-  border-radius: 4px; padding: 5px 8px; font-size: 13px;
+.tag-life { background: #131516; border-color: var(--line); color: var(--muted); letter-spacing: 0.04em; }
+.tag-life.urgent {
+  background: #331417;
+  border-color: #7a3037;
+  color: #f0a0a8;
+  box-shadow: 0 0 12px -4px rgba(224, 90, 103, 0.8);
 }
+.mission-row.is-urgent { border-color: #5a2d31; }
+/* Bookkeeping: quieter by construction — no fill, dim rule, lower-case. */
+.lead-notes .tag { text-transform: none; letter-spacing: 0.01em; font-weight: 500; font-size: 11px; background: transparent; }
+.tag-committed { border-color: #2f6b54; color: var(--p); }
+.tag-shared { border-color: #4a5358; color: #9bf1c6; }
+.tag-given { border-color: #424a4e; color: #aeb7bb; }
+.tag-done { background: #212527; border-color: #394044; color: #7be0ae; }
+.tag-locked { background: #30181a; border-color: #5a2c31; color: #cb949a; }
+
+.sharemenu {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px;
+  border: 1px solid #353c3f;
+  border-radius: var(--r-md);
+  background: #101314;
+  box-shadow: var(--e2);
+}
+.sharemenu .btn { width: 100%; text-align: center; }
+
+/* ===========================================================================
+   DEPLOY
+   =========================================================================== */
+
+.deploy-card .card-head { align-items: flex-start; }
+.deploy-card.chosen {
+  border-color: #377d5a;
+  box-shadow: inset 0 1px 0 var(--edge), 0 0 0 1px rgba(72, 179, 126, 0.35), var(--e2);
+}
+/* The one picked-up card in a grid of them: lit along its top edge. Drawn as
+   an inset shadow rather than a pseudo-element, because ::before and ::after
+   are the card's two corner bolts. */
+.deploy-card.chosen {
+  box-shadow:
+    inset 0 2px 0 -1px rgba(116, 234, 175, 0.85),
+    inset 0 1px 0 var(--edge),
+    0 0 0 1px rgba(72, 179, 126, 0.35),
+    0 -6px 18px -12px rgba(72, 179, 126, 0.9),
+    var(--e2);
+}
+.dstrip {
+  display: flex; flex-wrap: wrap; gap: var(--s1);
+  padding: var(--s2) 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+.dstat {
+  display: flex; align-items: baseline; gap: 5px;
+  padding: 2px 8px 2px 0;
+  border-right: 1px solid var(--line-soft);
+}
+.dstat:last-child { border-right: none; }
+.dk { font-size: var(--t-micro); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
+.dv { font-family: var(--font-num); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.dstat-hp.is-hurt .dv { color: #eda2aa; }
+
+.deploy-controls { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s3); margin-top: auto; padding-top: var(--s2); }
+.weapon-pick {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+  font-size: var(--t-micro); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim);
+}
+.weapon-pick select { letter-spacing: 0; text-transform: none; }
+
 .deploy-bar {
-  position: sticky; bottom: 0; margin-top: 24px; padding: 16px 0 4px;
-  display: flex; justify-content: flex-end; gap: 12px;
-  background: linear-gradient(0deg, var(--earth) 40%, transparent);
+  position: sticky; bottom: 0;
+  margin-top: var(--s6);
+  padding: var(--s4) 0 var(--s3);
+  display: flex; justify-content: flex-end; gap: var(--s3);
+  background: linear-gradient(0deg, var(--void) 45%, rgba(5, 5, 5, 0.85) 75%, transparent);
+}
+.xp-reward { font-family: var(--font-num); font-size: 12.5px; color: #b4bbbf; }
+
+.commit-note {
+  position: relative;
+  margin-top: var(--s4);
+  padding: 10px var(--s3) 10px var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.22);
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.commit-note::before {
+  content: "";
+  position: absolute; left: -1px; top: 5px; bottom: 5px;
+  width: 2px; border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px -1px var(--accent);
+}
+.commit-note b { color: var(--text); }
+
+/* ===========================================================================
+   RESULTS + END
+   =========================================================================== */
+
+.result-ribbon {
+  text-align: center;
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  padding: var(--s5);
+  border-radius: var(--r-lg);
+  margin-bottom: var(--s5);
+}
+.result-ribbon.win {
+  background: linear-gradient(180deg, #282d2f, #1a1d1e);
+  color: #97f2c4;
+  border: 1px solid #2ba166;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 40px -18px rgba(43, 161, 102, 0.9);
+  text-shadow: 0 0 20px rgba(151, 242, 196, 0.45);
+}
+.result-ribbon.loss {
+  background: linear-gradient(180deg, #40171b, #2a0e11);
+  color: #f7a3ab;
+  border: 1px solid #a3414b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 40px -18px rgba(163, 65, 75, 0.9);
+  text-shadow: 0 0 20px rgba(244, 118, 131, 0.4);
 }
 
-/* ---- Results screen ---- */
-.result-ribbon { text-align: center; font-size: 26px; font-weight: 800; letter-spacing: 4px; padding: 18px; border-radius: 6px; margin-bottom: 20px; }
-.result-ribbon.win { background: linear-gradient(180deg, #17402c, #0e2a1c); color: #8affc1; border: 1px solid #2f9d63; }
-.result-ribbon.loss { background: linear-gradient(180deg, #401717, #2a0e0e); color: #ff9b9b; border: 1px solid #a34141; }
-.results-body { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-.result-col h2 { font-size: 14px; letter-spacing: 2px; text-transform: uppercase; color: #9aa6b4; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-.kia-list { list-style: none; padding: 0; }
-.kia-list li { color: #e59090; padding: 8px 12px; border: 1px solid #4a2a2a; border-radius: 4px; margin-bottom: 6px; background: rgba(40,15,15,0.4); }
+.dayturn {
+  position: relative;
+  margin: 0 0 var(--s4);
+  padding: 9px var(--s3) 9px var(--s4);
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.dayturn::before {
+  content: "";
+  position: absolute; left: 0; top: 5px; bottom: 5px;
+  width: 2px; border-radius: 2px;
+  background: var(--light);
+  box-shadow: 0 0 10px -1px var(--light-dim);
+}
+
+.xp-results { margin: 0 0 var(--s5); }
+.xp-list li { gap: var(--s3); font-family: var(--font-num); font-size: 12px; letter-spacing: -0.01em; }
+.xp-list b { color: #b4bbbf; }
+
+.results-body { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s6); }
+.kia-list { list-style: none; padding: 0; margin: 0; }
+.kia-list li {
+  display: flex; align-items: center; gap: var(--s2);
+  color: #eda2aa;
+  padding: 9px var(--s3);
+  border: 1px solid #4e262a;
+  border-radius: var(--r-sm);
+  margin-bottom: 6px;
+  background: linear-gradient(90deg, rgba(60, 20, 24, 0.5), rgba(30, 14, 16, 0.35));
+  font-size: 13px;
+}
+.kia-list .ico { color: #c96b74; }
 .all-survived { color: var(--good); font-weight: 600; }
 
-/* ---- War Room big meter ---- */
-.big-meter { height: 18px; border-radius: 4px; background: var(--track); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.5); margin: 14px 0; }
-.big-fill { display: block; height: 100%; transition: width 0.4s; }
+.elsewhere {
+  margin-top: var(--s5);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, 0.18);
+}
+.elsewhere h4 {
+  margin: 0 0 var(--s2);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ewrow { display: flex; gap: var(--s3); font-size: 12.5px; padding: 3px 0; color: var(--muted); }
+.ewrow .who { min-width: 90px; color: var(--text); }
+.ewrow b { color: var(--text); font-weight: 600; }
 
-/* ---- End screen ---- */
-.end-screen { max-width: 640px; margin: 60px auto; text-align: center; padding: 40px; border-radius: 10px; border: 1px solid var(--line); background: linear-gradient(180deg, var(--concrete-hi), #0d1014); }
-.end-screen.won { border-color: #2f9d63; box-shadow: 0 0 60px rgba(47,157,99,0.15); }
-.end-screen.lost { border-color: #a34141; box-shadow: 0 0 60px rgba(163,65,65,0.15); }
+/* ---- War Room big meter ---- */
+.big-meter {
+  position: relative;
+  height: 16px;
+  border-radius: var(--r-sm);
+  background: var(--well);
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 2px 4px rgba(0, 0, 0, 0.5);
+  margin: 0 0 var(--s4);
+  background-image: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(255, 255, 255, 0.045) calc(10% - 1px) 10%);
+}
+.big-fill { display: block; height: 100%; transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1); }
+.big-meter::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 14px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+/* ---- end screen ---- */
+.end-screen {
+  max-width: 620px;
+  margin: var(--s8) auto;
+  text-align: center;
+  padding: var(--s7) var(--s6) var(--s6);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--metal-hi), #090a0b);
+  box-shadow: var(--e3);
+}
+.end-screen.won { border-color: #2ba166; box-shadow: var(--e3), 0 0 80px -30px rgba(43, 161, 102, 0.7); }
+.end-screen.lost { border-color: #a3414b; box-shadow: var(--e3), 0 0 80px -30px rgba(163, 65, 75, 0.7); }
 /* The third outcome (S7, mockup §6): neither a win nor a defeat, so it takes
-   neither colour — the default border and no glow at all. */
+   neither colour and no glow at all. */
 .end-screen.ended { border-color: var(--line); }
+.end-badge { font-size: 50px; line-height: 1; color: var(--muted); }
+.end-screen.won .end-badge { color: #6bdda4; filter: drop-shadow(0 0 22px rgba(82, 206, 144, 0.55)); }
+.end-screen.lost .end-badge { color: #cf707a; filter: drop-shadow(0 0 22px rgba(192, 78, 89, 0.5)); }
+.end-screen h1 {
+  margin: var(--s4) 0 var(--s3);
+  font-size: 26px;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  font-weight: 800;
+}
 .end-screen.ended h1 { color: var(--muted); }
-.end-badge { font-size: 56px; }
-.end-screen h1 { letter-spacing: 6px; margin: 10px 0 16px; }
-.end-text { color: #b3bcc8; line-height: 1.6; }
-.end-stats { display: flex; justify-content: center; gap: 36px; margin: 28px 0; }
-.end-stats div { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-.end-stats span { font-size: 28px; color: var(--text); font-weight: 800; }
+.end-text { color: var(--body); line-height: 1.65; max-width: 52ch; margin: 0 auto; }
+.end-stats { display: flex; justify-content: center; gap: var(--s7); margin: var(--s6) 0; }
+.end-stats div { display: flex; flex-direction: column; gap: var(--s1); font-size: var(--t-micro); color: var(--dim); text-transform: uppercase; letter-spacing: 0.14em; }
+.end-stats span { font-family: var(--font-num); font-size: 26px; color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ===========================================================================
+   MULTIPLAYER FURNITURE
+   =========================================================================== */
+
+/* ---- task-force strip (multiplayer-state S4, mockup §1) -------------------
+   Readiness across the task force, drawn under the top bar. Emitted only at
+   two or more commanders, so single-player renders nothing here at all. */
+.tfstrip {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: 7px var(--s4);
+  background: rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.tflabel { color: var(--dim); text-transform: uppercase; letter-spacing: 0.14em; font-size: var(--t-micro); }
+.tfspacer { flex: 1; }
+.tfnote { color: var(--muted); font-size: 11.5px; }
+.pchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.015);
+}
+.pchip.me { border-color: #6f373c; }
+.pchip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+.pchip.ready .dot { background: var(--good); box-shadow: 0 0 8px rgba(72, 179, 126, 0.9); }
+.pchip .st { color: var(--muted); font-size: 11px; }
+.pchip.ready .st { color: var(--good); }
+
+/* ---- Hot-seat switcher (mockup §7) --------------------------------------
+   Development scaffolding, not a feature: it sits ABOVE the top bar as a thin
+   out-of-world strip so it never reads as part of the bunker. */
+.hotseat {
+  position: relative;
+  z-index: 2;
+  display: flex; align-items: center; gap: var(--s2);
+  padding: 7px var(--s4);
+  background: #111415;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.hotseat select { font-size: 11.5px; padding: 3px 7px; background: var(--plate); }
+.hotseat-note { opacity: 0.7; }
+
+/* ---- the lobby (multiplayer-service V3) -----------------------------------
+   Not a bunker room: it is the screen you are on BEFORE you are a commander,
+   so it borrows the palette and none of the perspective. */
+.lobby { position: relative; z-index: 2; max-width: 860px; margin: 0 auto; padding: var(--s8) var(--s5); }
+.lobby h1 { margin: 0 0 var(--s2); font-size: var(--t-title); letter-spacing: -0.01em; }
+.lobby-lede { margin: 0 0 var(--s5); color: var(--muted); font-size: 13.5px; line-height: 1.65; max-width: 62ch; }
+.lobby-bad { color: var(--bad); font-size: 13.5px; line-height: 1.65; max-width: 62ch; }
+.lobby-seats { list-style: none; margin: 0 0 var(--s5); padding: 0; }
+.lobby-seat {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: 10px var(--s3);
+  background: var(--metal);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  margin-bottom: var(--s2);
+  box-shadow: inset 0 1px 0 var(--edge);
+}
+.lobby-name { min-width: 7em; font-weight: 600; }
+/* The URL is selectable text as well as a copy target — a clipboard write is
+   refused outside a secure context, and this is the fallback that leaves the
+   link reachable when it is. */
+.lobby-url {
+  flex: 1;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--well);
+  border-radius: var(--r-sm);
+  padding: 6px var(--s2);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.lobby-copy, .lobby-go {
+  background: linear-gradient(180deg, #31383b, #23282a);
+  color: var(--text);
+  border: 1px solid #3f464a;
+  border-radius: var(--r-sm);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 var(--edge);
+}
+.lobby-go { border-color: #6d5526; color: var(--ctrl); }
+.lobby-copy:hover, .lobby-go:hover { filter: brightness(1.15); }
+.lobby-warn { color: var(--a); font-size: 12.5px; line-height: 1.65; max-width: 62ch; opacity: 0.85; }
+
+/* ===========================================================================
+   OVERLAYS
+   =========================================================================== */
 
 /* ---- FPS chip ----
    Sits below the topbar rather than in the true corner, which the topbar's own
-   right cluster (credits, roster count, the ⚙ link) already occupies. Fixed and
-   above body::after (100) and #game (101). Borrows .health-chip's pill look;
-   tabular-nums is the hub's numeric-readout idiom — there is no monospace font
-   in this stylesheet. */
+   right cluster already occupies. Fixed and above body::after (100) and
+   #game (101). */
 .fps-meter {
-  position: fixed; top: 62px; right: 26px; z-index: 102;
+  position: fixed; top: 66px; right: var(--s6); z-index: 102;
   pointer-events: none;
-  font-size: 12px; color: var(--muted);
+  font-family: var(--font-num);
+  font-size: 11px;
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
   padding: 3px 9px;
-  border: 1px solid var(--line); border-radius: 20px;
-  background: rgba(8, 12, 18, 0.6);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(12, 13, 14, 0.65);
 }
 
 /* ---- Mission canvas ----
@@ -467,334 +1323,57 @@ body::after {
   position: fixed; inset: 0; margin: auto;
   max-width: 100vw; max-height: 100vh;
   z-index: 101;
-  background: #141726;
-  box-shadow: 0 0 60px rgba(0,0,0,0.6);
+  background: #0b0d0e;
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
 }
 
-@media (max-width: 720px) {
-  .layout { grid-template-columns: 1fr; }
-  .locations { flex-direction: row; overflow-x: auto; }
-  .locations::before { display: none; }
-  .loc { margin-left: 0; }
-  .loc::before { display: none; }
-  .two-col, .results-body { grid-template-columns: 1fr; }
-  .mission-row { flex-direction: column; align-items: flex-start; }
-}
+/* ===========================================================================
+   MOTION — one moment: the room you just opened arrives.
+   Exponential ease-out from a state that is already legible, so a slow machine
+   shows the content rather than an empty panel.
+   =========================================================================== */
 
-/* ==========================================================================
-   POLISH LAYER — animation + depth added on top of the base bunker theme.
-   Purely cosmetic; safe to tweak or drop.
-   ========================================================================== */
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
+@keyframes room-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
 }
-@keyframes barber {
-  from { background-position: 0 0; }
-  to { background-position: 40px 0; }
-}
-@keyframes rise-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes badge-pulse {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px currentColor); }
-  50% { transform: scale(1.08); filter: drop-shadow(0 0 26px currentColor); }
-}
-@keyframes ribbon-sheen {
-  from { background-position: -220% 0; }
-  to { background-position: 220% 0; }
-}
-
-/* the whole panel fades its content up as you switch rooms */
 .panel > .location-header,
 .panel > section,
 .panel > .results-body,
 .panel > .result-ribbon,
 .panel > .end-screen,
-.panel > .deploy-bar { animation: rise-in 0.28s ease both; }
-
-/* animated energy in every health/meter fill */
-.health-fill, .big-fill, .stat-fill {
-  position: relative;
-  background-image: linear-gradient(90deg, rgba(255,255,255,0.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.18) 75%, transparent 75%);
-  background-size: 40px 40px;
-  animation: barber 1s linear infinite;
+.panel > .deploy-bar {
+  animation: room-arrive 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.big-meter { position: relative; }
-.big-meter::after {
-  content: ""; position: absolute; inset: 0; border-radius: 4px;
-  box-shadow: inset 0 0 12px rgba(0,0,0,0.6); pointer-events: none;
-}
-
-/* topbar health chip reads like a live gauge */
-.health-chip { padding: 4px 10px; border: 1px solid var(--line); border-radius: 20px; background: rgba(8,12,18,0.6); }
-
-/* buttons get a moving sheen on hover */
-.btn { position: relative; overflow: hidden; }
-.btn::after {
-  content: ""; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
-  background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent);
-  transform: skewX(-20deg); transition: left 0.5s ease;
-}
-.btn:hover:not(:disabled)::after { left: 130%; }
-
-/* location hatches glow a touch on the active room */
-.loc.active .loc-icon { animation: pulse-glow 2.4s ease-in-out infinite; }
-
-/* mission dossiers lift and light their edge on hover */
-.mission-row { transition: transform 0.14s, border-color 0.14s, box-shadow 0.14s; }
-.mission-row:not(.is-locked):not(.is-done):hover {
-  transform: translateX(3px);
-  border-left-color: var(--accent);
-  box-shadow: -8px 0 18px -10px rgba(233,69,96,0.5), 0 3px 10px rgba(0,0,0,0.5);
-}
-.win-flag { text-shadow: 0 0 10px rgba(242,193,78,0.4); }
-
-/* blueprints + soldier cards lift on hover */
-.blueprint, .soldier-card { transition: transform 0.14s, box-shadow 0.14s, border-color 0.14s; }
-.blueprint:hover, .soldier-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 22px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
-}
-
-/* chosen deploy cards pulse a green rim */
-.deploy-card.chosen { animation: pulse-glow 1.6s ease-in-out infinite; }
-
-/* results ribbon gets a slow light sweep across it */
-.result-ribbon { position: relative; overflow: hidden; }
-.result-ribbon::before {
-  content: ""; position: absolute; inset: 0;
-  background: linear-gradient(100deg, transparent 40%, rgba(255,255,255,0.14) 50%, transparent 60%);
-  background-size: 220% 100%;
-  animation: ribbon-sheen 3.5s linear infinite;
-}
-.result-ribbon.win { text-shadow: 0 0 18px rgba(138,255,193,0.5); }
-.result-ribbon.loss { text-shadow: 0 0 18px rgba(255,107,107,0.4); }
-
-/* end-screen badge breathes */
-.end-screen.won .end-badge { color: #57c98a; animation: badge-pulse 2.4s ease-in-out infinite; }
-.end-screen.lost .end-badge { color: #c0504e; animation: badge-pulse 2.8s ease-in-out infinite; }
-/* No pulse on the third: nothing happened to you. */
-.end-screen.ended .end-badge { color: var(--muted); }
-
-/* KIA entries get a faint danger edge-glow */
-.kia-list li { box-shadow: -6px 0 14px -10px rgba(224,90,90,0.6); }
-
-/* headings feel more "operations terminal" */
-.location-header h1 { letter-spacing: 0.5px; }
-.squad-block h2, .recruit-block h2, .result-col h2 { position: relative; }
-.squad-block h2::before, .recruit-block h2::before, .result-col h2::before {
-  content: "▚"; margin-right: 8px; color: var(--accent); opacity: 0.6; font-size: 12px;
-}
+.panel > section:nth-of-type(2) { animation-delay: 0.05s; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; }
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
-/* ---- Hot-seat switcher (mockup §7) --------------------------------------
-   Development scaffolding, not a feature: it sits ABOVE the top bar as a thin
-   out-of-world strip so it never reads as part of the bunker. Sibling of
-   #hub-root — see src/hub/hotseat.js. Deleted with the module once the session
-   moves off the page. */
-.hotseat {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 18px;
-  background: #0f1319;
-  border-bottom: 1px solid var(--line);
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.hotseat select {
-  background: var(--steel);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 3px 7px;
-  font: inherit;
-  font-size: 11.5px;
-}
-.hotseat-note { opacity: 0.7; }
+/* ===========================================================================
+   NARROW — the hub is built for a desktop; this keeps it usable, not equal.
+   =========================================================================== */
 
-/* ---- task-force strip (multiplayer-state S4, mockup §1) -------------------
-   Readiness across the task force, drawn under the top bar. Emitted only at
-   two or more commanders, so single-player renders nothing here at all. */
-.tfstrip {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 16px;
-  background: rgba(0, 0, 0, 0.22);
-  border-bottom: 1px solid var(--line);
-  font-size: 12px;
-}
-.tflabel { color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 10.5px; }
-.tfspacer { flex: 1; }
-.tfnote { color: var(--muted); font-size: 11.5px; }
-.pchip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-}
-.pchip.me { border-color: var(--accent); }
-.pchip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-.pchip.ready .dot { background: var(--good); }
-.pchip .st { color: var(--muted); font-size: 11px; }
-.pchip.ready .st { color: var(--good); }
-
-/* The day control while you are ready — lit, and clicking it stands you down. */
-.btn-ready-on {
-  background: rgba(76, 175, 114, 0.16);
-  border-color: #3a7a55;
-  color: var(--good);
-  font-weight: 600;
-}
-.btn-ready-on::after { content: " ✔"; }
-
-/* ---- the deploy commit (multiplayer-state S5, mockup §3 and §4) -----------
-   Everything here is emitted only at two or more commanders except the day
-   line on the results screen, which is where a round's turned day lands now
-   that the ready click no longer carries one. */
-.mission-row.committed { border-left-color: var(--accent); }
-.tag-committed { background: #1f2b3a; color: var(--accent); }
-
-.commit-note {
-  margin-top: 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--accent);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.18);
-  font-size: 12.5px;
-  color: var(--muted);
-}
-.commit-note b { color: var(--text); }
-
-/* "Elsewhere today" — one row per other commander, so it does not care how
-   many there are. Which lead they took, and nothing else. */
-.elsewhere {
-  margin-top: 18px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.18);
-}
-.elsewhere h4 {
-  margin: 0 0 8px;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.ewrow { display: flex; gap: 10px; font-size: 12.5px; padding: 2px 0; color: var(--muted); }
-.ewrow .who { min-width: 90px; color: var(--text); }
-.ewrow b { color: var(--text); font-weight: 600; }
-
-.dayturn {
-  margin: 12px 0 0;
-  padding: 8px 12px;
-  border-left: 2px solid var(--accent);
-  background: rgba(0, 0, 0, 0.18);
-  font-size: 12.5px;
-  color: var(--muted);
+@media (max-width: 900px) {
+  .panel { padding: var(--s5) var(--s5) var(--s7); }
+  .two-col, .results-body { grid-template-columns: 1fr; }
 }
 
-/* Lead sharing (S6, mockup §2). The menu sits under the deploy button on the
-   lead's own row; it is absent entirely at one commander. */
-.tag-shared {
-  background: #23303f;
-  border-color: #3d5a7a;
-  color: #9ec5ee;
+@media (max-width: 720px) {
+  .topbar { flex-wrap: wrap; gap: var(--s3); padding: var(--s3) var(--s4); }
+  .resources { gap: var(--s4); flex-wrap: wrap; }
+  .layout { grid-template-columns: 1fr; }
+  .locations { flex-direction: row; overflow-x: auto; padding: var(--s3); gap: var(--s2); }
+  .locations::before { display: none; }
+  .loc { margin-left: 0; flex-shrink: 0; }
+  .loc::before, .loc.active::after { display: none; }
+  .loc.active { border-color: var(--light); }
+  .mission-row { flex-direction: column; align-items: stretch; }
+  .mission-action { min-width: 0; }
+  .end-stats { gap: var(--s5); }
+  .soldier-grid, .blueprint-grid { grid-template-columns: 1fr; }
 }
-/* The other direction: a lead YOU disclosed, on your own board. Deliberately
-   quieter than tag-shared — a lead you were given changes what you can do this
-   day, a lead you gave away does not change your board at all. */
-.tag-given {
-  background: #2a2b23;
-  border-color: #5c5a3a;
-  color: #cfc79a;
-}
-.sharemenu {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px;
-  border: 1px solid #2f3947;
-  border-radius: 6px;
-  background: #171c24;
-}
-.sharemenu .btn {
-  width: 100%;
-  text-align: center;
-}
-
-/* ---- the lobby (multiplayer-service V3) -----------------------------------
-   Not a bunker room: it is the screen you are on BEFORE you are a commander,
-   so it borrows the palette and none of the perspective. See src/hub/lobby.js. */
-.lobby {
-  position: relative;
-  z-index: 2;
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 48px 24px;
-}
-.lobby h1 { margin: 0 0 10px; font-size: 26px; letter-spacing: 0.02em; }
-.lobby-lede { margin: 0 0 22px; color: var(--muted); font-size: 13.5px; line-height: 1.6; max-width: 62ch; }
-.lobby-bad { color: var(--bad); font-size: 13.5px; line-height: 1.6; max-width: 62ch; }
-.lobby-seats { list-style: none; margin: 0 0 22px; padding: 0; }
-.lobby-seat {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  background: var(--concrete);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  margin-bottom: 8px;
-}
-.lobby-name { min-width: 7em; font-weight: 600; }
-/* The URL is selectable text as well as a copy target — a clipboard write is
-   refused outside a secure context, and this is the fallback that leaves the
-   link reachable when it is. */
-.lobby-url {
-  flex: 1;
-  overflow-x: auto;
-  white-space: nowrap;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 11.5px;
-  color: var(--muted);
-  background: var(--track);
-  border-radius: 3px;
-  padding: 5px 8px;
-}
-.lobby-copy, .lobby-go {
-  background: var(--steel);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 5px 11px;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.lobby-go { border-color: var(--accent); color: var(--light); }
-.lobby-copy:hover, .lobby-go:hover { background: var(--concrete-hi); }
-.lobby-warn { color: var(--light); font-size: 12.5px; line-height: 1.6; max-width: 62ch; opacity: 0.85; }
-
-/* Soldier progression (tech/soldier-progression.md, P3) */
-.stat-bonus { margin-left: 4px; font-size: 10px; color: #9fd49f; }
-.traits.growth { gap: 4px; }
-.growth-tag { font-size: 10px; opacity: 0.85; }
-.level-line { color: var(--text); }
-.xp-results { margin: 12px 0; }
-.xp-list li { gap: 12px; }

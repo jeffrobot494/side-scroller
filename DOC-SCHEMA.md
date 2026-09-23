@@ -83,7 +83,25 @@ this is only for links that don't occur naturally in the text.
   they appear — in the map, in a link, in a search result. The filename stays
   plain (`parallax-biomes.md`).
 - **Repo-root files stay uppercase** — `README.md`, `CLAUDE.md`, `ROADMAP.md`,
-  `DOC-SCHEMA.md`. These are metafiles that tools and humans expect to shout.
+  `WORKING-NOTES.md`, `DOC-SCHEMA.md`, `PRODUCT.md`. These are metafiles that
+  tools and humans expect to shout.
+
+## PRODUCT.md is tool context, not a doc type
+
+`PRODUCT.md` at the repo root is the durable product record the `impeccable`
+design skill reads before it touches a DOM surface (`src/hub/`, `src/editor/`).
+It is outside the five folders on purpose: not a sixth `type`, no frontmatter,
+no place in the map.
+
+| | |
+|---|---|
+| Holds | Who each surface is for · the constraints any UI change must survive · the game's terminology · which evidence is real, and what must never be fabricated |
+| Does not hold | **Design** — what the player should experience is `design/`, and `design/art-direction.md` is the binding art direction |
+| Does not hold | **Status** — `ROADMAP.md` owns build state, here as everywhere |
+| Does not hold | A palette, typography, components or page concepts. The skill keeps those in its own `DESIGN.md`, which this repo does not have |
+| Sourcing | Every line traces to a repo file or to an answer Bo gave. A product claim sourced to neither is the `WORKING-NOTES.md` failure in a new place — it reads plausible and Bo then argues with it |
+| Not in the viewer | `ROOT_DOCS` in `src/docmap/app.js` names the four root notes the map carries, and this is not one of them. `test/docs.test.mjs` lints that same set, so nothing checks this file |
+| When it is wrong | Rewrite it. Nothing generates from it and nothing depends on its shape |
 
 ## What a tech spec must answer
 
