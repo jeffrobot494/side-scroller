@@ -439,6 +439,26 @@ section + the tests are the source of truth for what currently exists):
   and Results print it; editor Tools → **Progression** edits the rules and the
   recruits' pairs with a live preview. No rebase: no campaign outlives a rules
   change, and a room server always runs the shipped rules.
+- **The mission has a 3D view (`tech/mission-3d.md` R1–R6 — built).** Same
+  simulation, drawn by Three.js on `#game3d` UNDER the mission canvas, which
+  goes transparent and keeps the tells (health bars, controlled ring + caret,
+  EXTRACT label), nav overlays, vignette and HUD. `config.missionRenderer`
+  (`2d`/`3d`, default 2d, local) picks it; `toggleRenderer` (default V, local-only
+  on the wire) flips it mid-mission. `src/main.js` lazy-imports
+  `src/mission/view3d/` on the first switch and installs it with
+  `mission.setView()` — **mission.js never imports `three`** and stays bare-node
+  importable; a failed CDN load stays 2D with a notice. The view begins per
+  deploy, draws per frame, ends at stop. **The one invariant:**
+  `solveCamera3D` (`src/mission/camera.js`) puts the z=0 plane exactly on the
+  2D camera's pixels, rounded scroll and shake included, so aim, `toWorld()` and
+  the flat layer need no 3D knowledge; `viewY` is the only y-flip. Soldiers and
+  enemy parts map to models by identity; shots and particles come from
+  per-frame pools because a room viewer rebuilds `scene.projectiles` every
+  snapshot. Models: soldiers are the 2D figure's rects given depth (crouch
+  included), enemies detail the four shapes, shots are all six
+  `PROJECTILE_SHAPES`; skyline at real depth with fog anchored behind the play
+  plane. Verified in headless Chromium (SwiftShader), never on a GPU — no
+  performance number exists yet.
 - **Player2 is partially wired:** the Enemy Designer's Generate button uses
   `src/player2/client.js` chat completions (needs the app + a client id in the
   config `player2GameClientId`). Image gen and the rest remain unused — still

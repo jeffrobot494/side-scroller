@@ -87,7 +87,7 @@ export function createView3D(canvas) {
     halos.begin();
     level.soldiers.sync(m, halos);
     level.enemies.sync(m, halos);
-    level.effects.sync(m);
+    level.effects.sync(m, halos);
     halos.end();
 
     composer.render();
