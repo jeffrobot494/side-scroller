@@ -42,6 +42,8 @@ R1 is a pure refactor with a green suite. R2 is where it becomes playable, and w
 | Config schema, Viewport group | `src/game/config.js` (`SCHEMA`) | Where the knob goes: local scope, never `server` |
 | Scene show/hide | `src/main.js` (`showScene`) | Already the one place that decides which surface is visible |
 
+**As built (R3):** fog is linear `THREE.Fog`, not `FogExp2`. Its near and far are re-anchored every frame to the play plane (`camera distance + 50` … `+ 2000`), because the camera's distance changes with zoom and exponential fog measured from the camera put a zoom-dependent haze on the play plane itself. Linear fog anchored at z=0 leaves everything on the plane untouched at any zoom and fades only what is behind it.
+
 ## Where the code goes
 
 | Path | What |
