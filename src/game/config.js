@@ -672,7 +672,7 @@ export const SCHEMA = [
         scope: "server",
         label: "Mission snapshot rate",
         type: "range",
-        default: 20,
+        default: 60,
         min: 5,
         max: 60,
         step: 5,
