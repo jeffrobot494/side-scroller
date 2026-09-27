@@ -1319,12 +1319,22 @@ select:disabled { color: var(--dim); opacity: 0.6; cursor: not-allowed; }
    monitor and letterbox (aspect preserved) on a small one. z-index clears
    body::after, the page vignette, which would otherwise stack a second one on
    top of the mission's own once a big canvas reaches the darkened rim. */
-#game {
+#game, #game3d {
   position: fixed; inset: 0; margin: auto;
   max-width: 100vw; max-height: 100vh;
   z-index: 101;
   background: #0b0d0e;
   box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
+}
+/* The mission's 3D view (tech/mission-3d.md): #game3d sits under #game by page
+   order, and #game drops its opaque fill so the world shows through. */
+#game.over3d { background: transparent; box-shadow: none; }
+.view-notice {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  z-index: 103; pointer-events: none;
+  padding: 6px 14px; border: 1px solid var(--line); border-radius: 20px;
+  background: rgba(12, 13, 14, 0.85); color: var(--muted);
+  font-family: var(--font-num); font-size: 12px;
 }
 
 /* ===========================================================================

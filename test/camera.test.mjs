@@ -5,7 +5,7 @@
 // computed (targetX = s.x + s.w/2 - canvas.width*0.4, clamped to
 // [0, world.width - canvas.width], y always 0). They are the regression bar for
 // "zoom 1 on the classic canvas changes nothing".
-import { solveCamera, parseCanvasSize, DESIGN_W, DESIGN_H } from "../src/mission/camera.js";
+import { solveCamera, solveCamera3D, parseCanvasSize, DESIGN_W, DESIGN_H } from "../src/mission/camera.js";
 import { SCHEMA, config } from "../src/game/config.js";
 
 const WORLD = { width: 6000, height: 540 };
@@ -105,5 +105,47 @@ export default async function run(t) {
     t.ok("the canvas default is one of the offered sizes", byKey.missionCanvas.options.includes(byKey.missionCanvas.default));
     t.ok("the canvas default parses to a real size", parseCanvasSize(byKey.missionCanvas.default).w > 0);
     t.ok("zoom cannot reach 0", byKey.missionZoom.min > 0);
+  }
+
+  // ---- the 3D view's camera (tech/mission-3d.md) --------------------------
+  // The invariant: the perspective camera's z=0 slice IS this frame's 2D view,
+  // rounded scroll and shake included, so a world point on the plane lands on
+  // the pixel the 2D transform puts it on. Projected here by hand through a
+  // straight-on pinhole — the only kind the solve may produce.
+  {
+    const project = (c, W, H, wx, wy) => {
+      const t = Math.tan((c.fov * Math.PI) / 360) * c.position.z;
+      const nx = (wx - c.position.x) / (t * c.aspect);
+      const ny = (-wy - c.position.y) / t;
+      return { x: ((nx + 1) / 2) * W, y: ((1 - ny) / 2) * H };
+    };
+    const screen2d = (cam, z, sx, sy, wx, wy) => ({
+      x: wx * z - Math.round(cam.x * z) + sx,
+      y: wy * z - Math.round(cam.y * z) + sy,
+    });
+    let worst = 0, tilted = 0, cases = 0;
+    for (const preset of ["960x540", "1280x720", "1600x900"]) {
+      const { w: W, h: H } = parseCanvasSize(preset);
+      for (const z of [0.5, 0.75, 1, 1.05, 1.5]) {
+        for (const cam of [{ x: 0, y: 0 }, { x: 1234.567, y: -360.2 }, { x: 4999.3, y: 12.5 }]) {
+          for (const [sx, sy] of [[0, 0], [3.2, -4.7], [-7, 7]]) {
+            const c = solveCamera3D(cam, z, W, H, sx, sy);
+            cases++;
+            if (c.position.x !== c.target.x || c.position.y !== c.target.y || c.target.z !== 0) tilted++;
+            for (const [wx, wy] of [[cam.x, cam.y], [cam.x + 300, cam.y + 200], [cam.x + W / z, cam.y + H / z], [cam.x - 50, cam.y + 90]]) {
+              const a = project(c, W, H, wx, wy), b = screen2d(cam, z, sx, sy, wx, wy);
+              worst = Math.max(worst, Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+            }
+          }
+        }
+      }
+    }
+    t.ok(`3d camera: the z=0 plane lands on the 2D pixels across ${cases} cases (worst ${worst.toExponential(1)}px)`, worst < 1e-6);
+    t.eq("3d camera: it never tilts or yaws — position sits on the target's axis", tilted, 0);
+    const c = solveCamera3D({ x: 100, y: 0 }, 1, 960, 540, 5, 0);
+    const still = solveCamera3D({ x: 100, y: 0 }, 1, 960, 540);
+    t.eq("3d camera: shake moves the camera sideways, not its distance", c.position.z, still.position.z);
+    t.eq("3d camera: ...by exactly the shake, opposite in sign (the view moves, not the world)", still.position.x - c.position.x, 5);
+    t.eq("3d camera: the view rectangle is the 2D one", `${c.view.width}x${c.view.height}`, "960x540");
   }
 }

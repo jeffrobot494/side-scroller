@@ -43,9 +43,11 @@ import { Mission } from "./mission/mission.js";
 import { createHubAmbient } from "./hub/ambient.js";
 import { createFpsMeter } from "./hub/fpsmeter.js";
 import { audio } from "./audio/engine.js";
+import { config, setConfig } from "./game/config.js";
 
 const hubRoot = document.getElementById("hub-root");
 const canvas = document.getElementById("game");
+const canvas3d = document.getElementById("game3d");
 
 // Browsers refuse to start an AudioContext outside a user gesture, so the
 // engine stays dormant until the player's first click or keypress.
@@ -117,6 +119,54 @@ let netSocket = null;
 // The mission scene calls back here when it resolves. No view and no seat, so
 // it is still built up front.
 const mission = new Mission(canvas, onMissionComplete);
+mission.onRendererToggle = () => syncRenderer();
+
+// ---- the 3D view (tech/mission-3d.md) ---------------------------------------
+// Loaded on the first switch to 3D and never before, so a 2D player never
+// fetches Three.js. The mission only ever sees `setView` — this module, not
+// mission.js, is what imports the view, which keeps mission.js bare-node safe.
+let inMission = false;
+let view3d = null;
+let view3dLoading = null;
+
+function loadView3d() {
+  if (!view3dLoading) {
+    view3dLoading = import("./mission/view3d/index.js")
+      .then((mod) => { view3d = mod.createView3D(canvas3d); })
+      .catch((e) => {
+        view3dLoading = null; // a later switch tries again
+        // Never blank: back to 2D, and say why.
+        setConfig("missionRenderer", "2d");
+        viewNotice(`3D view unavailable (${e && e.message ? e.message : "load failed"}) — staying in 2D`);
+      });
+  }
+  return view3dLoading;
+}
+
+// Bring the page in line with config.missionRenderer: load and install the
+// view if 3D is wanted, and show its canvas only while it is drawing.
+function syncRenderer() {
+  const want = config.missionRenderer === "3d";
+  if (want && inMission && !view3d) loadView3d().then(syncRenderer);
+  if (view3d) mission.setView(view3d);
+  const on = inMission && want && !!view3d;
+  canvas3d.style.display = on ? "block" : "none";
+  canvas.classList.toggle("over3d", on);
+}
+
+let noticeEl = null;
+function viewNotice(text) {
+  if (!noticeEl) {
+    noticeEl = document.createElement("div");
+    noticeEl.className = "view-notice";
+    noticeEl.setAttribute("role", "status");
+    document.body.appendChild(noticeEl);
+  }
+  noticeEl.textContent = text;
+  noticeEl.style.display = "block";
+  clearTimeout(viewNotice.t);
+  viewNotice.t = setTimeout(() => { noticeEl.style.display = "none"; }, 5000);
+}
 
 // The hub's FPS chip. Mounted on the body, NOT in #hub-root — Hub.render()
 // replaces that element's innerHTML wholesale on every navigation. The mission
@@ -384,8 +434,9 @@ function onMissionComplete(result, owner) {
 // Toggle which surface is visible. The DOM hub and the canvas never render at
 // the same time, so input never crosses over.
 function showScene(name) {
-  const inMission = name === "mission";
+  inMission = name === "mission";
   canvas.style.display = inMission ? "block" : "none";
+  syncRenderer();
   hubRoot.style.display = inMission ? "none" : "block";
   ambient.setVisible(!inMission);
   fpsMeter.setSceneVisible(!inMission);
