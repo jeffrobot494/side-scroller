@@ -82,6 +82,6 @@ export function burnHalo(halos, x, y, w, time) {
 
 // The muzzle flash: a hot glow at the barrel tip in the shooter's colour.
 export function muzzleHalo(halos, at, css) {
-  putHalo(halos, at.x, at.y, 44, css || "#ffd36a", 0.95, 16);
+  putHalo(halos, at.x, at.y, 34, css || "#ffd36a", 0.9, 16);
   putHalo(halos, at.x, at.y, 12, "#ffffff", 1, 17);
 }
