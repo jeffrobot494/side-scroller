@@ -236,6 +236,14 @@ export default async function run(t) {
   t.ok("rebind: the old debug key was cleared", keyBindings.KeyH === undefined);
   resetKeys();
 
+  // The 2D/3D view toggle is a mission-time action like the overlays: bound,
+  // labelled, rebindable, and never on the wire (test/mission-net.test.mjs).
+  t.ok("controlmap: default KeyV → toggleRenderer", keyBindings.KeyV === "toggleRenderer");
+  t.ok("controlmap: toggleRenderer is an action with a label",
+    ACTIONS.includes("toggleRenderer") && !!ACTION_LABELS.toggleRenderer);
+  t.ok("controlmap: toggleRenderer is appended, so no earlier action's index moved",
+    ACTIONS.indexOf("toggleRenderer") === ACTIONS.length - 1);
+
   // ---- Controls tool mounts headlessly -----------------------------------
   {
     installDom();

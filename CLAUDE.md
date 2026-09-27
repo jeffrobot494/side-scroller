@@ -528,7 +528,7 @@ no process — but reach for it deliberately, not by habit.
   and the ROOM files both `missionResult`s and pushes each commander their own
   day summary. **`tech/server-settings.md` (C1-C3) is how you turn a knob on
   it**: a schema entry carries `scope: "server"` when ONLY the room reads it (52
-  of 76 - not `soldierBaseHp`/`soldierHpPerHealth` or the `doomPer*` family,
+  of 77 - not `soldierBaseHp`/`soldierHpPerHealth` or the `doomPer*` family,
   which the hub also prints, and never `aimMode`), `GET`/`POST /api/config`
   carry those, and **`editor.html?server=1`** points the Settings tab at the
   running server instead of localStorage (`src/editor/remote-config.js` is the

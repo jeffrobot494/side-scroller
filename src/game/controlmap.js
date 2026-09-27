@@ -14,8 +14,10 @@
 // debugGraph/debugPath toggle the mission's nav overlays and are inert unless
 // config.debugOverlays is on — they are bound here rather than hardcoded because
 // nothing in this game hardcodes a key, and being rebindable is what lets them
-// move off a key a player might hit.
-export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload", "debugGraph", "debugPath"];
+// move off a key a player might hit. toggleRenderer flips config.missionRenderer
+// (2D / 3D view) mid-mission; like the overlays it is a fact about the person
+// looking, so it never crosses the wire.
+export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload", "debugGraph", "debugPath", "toggleRenderer"];
 
 // Human labels for the remap UI.
 export const ACTION_LABELS = {
@@ -29,6 +31,7 @@ export const ACTION_LABELS = {
   reload: "Reload",
   debugGraph: "Debug: nav graph",
   debugPath: "Debug: companion paths",
+  toggleRenderer: "Toggle 2D / 3D view",
 };
 
 // Default physical-key → action map (KeyboardEvent.code). Two keys may share an
@@ -50,6 +53,7 @@ export const DEFAULT_KEYS = {
   KeyR: "reload",
   KeyG: "debugGraph",
   KeyH: "debugPath",
+  KeyV: "toggleRenderer",
 };
 
 // Fixed gamepad map (W3C "standard" mapping). Buttons fold into the same held +

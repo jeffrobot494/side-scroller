@@ -25,7 +25,7 @@ import {
 import { drawSpecEnemy } from "./enemyspec/render.js";
 import { solveCamera, parseCanvasSize, DESIGN_W, DESIGN_H } from "./camera.js";
 import { createFpsSampler } from "../game/fps.js";
-import { config } from "../game/config.js";
+import { config, setConfig } from "../game/config.js";
 import { audio } from "../audio/engine.js";
 import { specSound } from "../audio/cues.js";
 
@@ -60,6 +60,40 @@ export class Mission {
     this.running = false;
     this.fps = createFpsSampler(); // outlives a single mission; reset in start()
     this._frame = this._frame.bind(this);
+    // THE EXTERNAL VIEW (tech/mission-3d.md). Something that draws the world
+    // under this canvas — the Three.js view — installed by whoever hosts the
+    // page, never imported here: this module must stay importable in bare
+    // node. It answers begin(mission) once per deploy, draw(mission, frame)
+    // once per rendered frame, end(mission) at stop(). While it is live and
+    // config.missionRenderer is "3d", render() leaves the world to it and
+    // draws only the flat layer on top. `onRendererToggle(value)` tells the
+    // host the toggle key flipped the knob, so it can load or show the view.
+    this.view = null;
+    this._viewLive = false;
+    this.onRendererToggle = null;
+  }
+
+  // Install (or, with null, remove) the external view. Mid-mission it begins at
+  // once, so a toggle that loads the view on first use takes effect this frame.
+  setView(view) {
+    if (this.view === view) return;
+    this._endView();
+    this.view = view || null;
+    if (this.view && this.running && this.hosted) {
+      this.view.begin(this);
+      this._viewLive = true;
+    }
+  }
+
+  _endView() {
+    if (this.view && this._viewLive) this.view.end(this);
+    this._viewLive = false;
+  }
+
+  // Is the 3D view drawing the world this frame? A configured "3d" whose view
+  // has not loaded (or failed to) draws 2D, never nothing.
+  _use3d() {
+    return this._viewLive && config.missionRenderer === "3d";
   }
 
   // `mission` = MISSIONS entry, `level` = the resolved LEVELS entry,
@@ -220,6 +254,12 @@ export class Mission {
     // `running` is set either way: since J2 it means "the scene has not ended",
     // which is a fact about the mission rather than about who is stepping it.
     if (this.hosted) {
+      // A view begins per deploy: its terrain is this level's.
+      if (this.view) {
+        this._endView();
+        this.view.begin(this);
+        this._viewLive = true;
+      }
       this.input.enable(this.canvas); // pass canvas for mouse aim + click-to-fire
       this.lastTime = performance.now();
       requestAnimationFrame(this._frame);
@@ -230,6 +270,7 @@ export class Mission {
 
   stop() {
     this.running = false;
+    this._endView();
     this.input.disable();
     audio.stopAll(); // don't let a tail ring out over the results screen
   }
@@ -455,6 +496,7 @@ export class Mission {
     }
 
     this._handleOverlays();
+    this._handleViewToggle();
 
     // A VIEWER STOPS HERE (J8). Everything above this line is cosmetic state
     // the client owns outright — the clock, the shake, the motes, the intro
@@ -547,6 +589,16 @@ export class Mission {
     if (!config.debugOverlays) return;
     if (this.input.justPressed("debugGraph")) this.debug.graph = !this.debug.graph;
     if (this.input.justPressed("debugPath")) this.debug.path = !this.debug.path;
+  }
+
+  // The 2D/3D toggle. Same reasoning as the overlays — what the person looking
+  // at this canvas wants — so it sits beside them above the viewer's early
+  // return, but it is not a debug tool and has no config gate. A host-free
+  // mission has nobody looking and never writes the knob.
+  _handleViewToggle() {
+    if (!this.hosted || !this.input.justPressed("toggleRenderer")) return;
+    setConfig("missionRenderer", config.missionRenderer === "3d" ? "2d" : "3d");
+    if (this.onRendererToggle) this.onRendererToggle(config.missionRenderer);
   }
 
   // The graph the SQUAD routes on. Soldier bodies all share one profile —
@@ -1053,15 +1105,27 @@ export class Mission {
     const H = this.canvas.height;
     const z = this._zoom();
 
-    this._drawBackground(ctx, W, H, z);
-
-    ctx.save();
+    // The shake offset is rolled ONCE per frame and shared by the 2D world
+    // transform, the flat tells and the 3D view, so the layers shake together.
     let sx = 0, sy = 0;
     if (this.shake > 0) {
       const m = this.shake * 7;
       sx = (Math.random() * 2 - 1) * m;
       sy = (Math.random() * 2 - 1) * m;
     }
+    const use3d = this._use3d();
+
+    if (use3d) {
+      // The view draws the world on its own canvas UNDER this one; this canvas
+      // becomes a transparent layer for the tells, overlays and HUD.
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      this.view.draw(this, { W, H, z, sx, sy });
+    } else {
+      this._drawBackground(ctx, W, H, z);
+    }
+
+    ctx.save();
     // world → screen: (world - camera) * zoom, then screen-space shake.
     // Rounding the SCREEN offset (not camera.x) keeps the scroll snapped to one
     // device pixel at any zoom — rounding world units judders at z < 1.
@@ -1071,7 +1135,7 @@ export class Mission {
       -Math.round(this.camera.y * z) + sy
     );
 
-    this._drawPlatforms(ctx, scene, z);
+    if (!use3d) this._drawPlatforms(ctx, scene, z);
     // Nav overlays sit on the terrain and under everything alive, so bodies and
     // shots stay readable through them. One graph resolution per frame, shared
     // by both toggles.
@@ -1089,13 +1153,17 @@ export class Mission {
       }
       ctx.globalAlpha = 1;
     }
-    this._drawExit(ctx, scene.exit, z);
-    for (const l of scene.loot) this._drawLoot(ctx, l);
-    for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z);
-    for (const p of scene.projectiles) this._drawProjectile(p, z);
     const drivenHere = this.currentSoldier(); // hoisted: an id lookup, and the loop asks per soldier
-    for (const s of scene.soldiers) this._drawSoldier(s, s === drivenHere, z);
-    this._drawParticles(ctx);
+    if (use3d) {
+      this._drawTells(ctx, drivenHere, z);
+    } else {
+      this._drawExit(ctx, scene.exit, z);
+      for (const l of scene.loot) this._drawLoot(ctx, l);
+      for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z);
+      for (const p of scene.projectiles) this._drawProjectile(p, z);
+      for (const s of scene.soldiers) this._drawSoldier(s, s === drivenHere, z);
+      this._drawParticles(ctx);
+    }
 
     ctx.restore();
 
@@ -1211,8 +1279,12 @@ export class Mission {
       ctx.closePath();
       ctx.fill();
     }
-    // The label is signage, not scenery: keep it screen-sized so it stays
-    // readable when zoomed out.
+    this._drawExitLabel(ctx, ex, z);
+  }
+
+  // The label is signage, not scenery: keep it screen-sized so it stays
+  // readable when zoomed out. A tell — flat over the 3D view too.
+  _drawExitLabel(ctx, ex, z = 1) {
     ctx.fillStyle = "#8affc1";
     ctx.font = `bold ${12 / z}px monospace`;
     ctx.textAlign = "center";
@@ -1238,34 +1310,35 @@ export class Mission {
     ctx.restore();
   }
 
+  // The flat layer over the 3D view: every "tell" the world pass would have
+  // drawn in place, positioned by the same transform. Order: exit label, enemy
+  // bars, then per soldier its ring and its bar.
+  _drawTells(ctx, drivenHere, z = 1) {
+    const scene = this.scene;
+    this._drawExitLabel(ctx, scene.exit, z);
+    for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z, { body: false });
+    for (const s of scene.soldiers) {
+      if (!s.alive) continue;
+      const x = this._snap(s.x, z), y = this._snap(s.y, z);
+      if (s === drivenHere) this._drawRing(ctx, s, x, y, z);
+      this._soldierBar(s, x, y, s === drivenHere);
+    }
+  }
+
+  // Snap to a DEVICE pixel, not a world one — rounding world coords at z < 1
+  // makes the walk stutter in multi-pixel steps.
+  _snap(v, z) {
+    return Math.round(v * z) / z;
+  }
+
   _drawSoldier(s, controlled, z = 1) {
     const ctx = this.ctx;
     if (!s.alive) return;
-    // Snap to a DEVICE pixel, not a world one — rounding world coords at z < 1
-    // makes the walk stutter in multi-pixel steps.
-    const snap = (v) => Math.round(v * z) / z;
-    const x = snap(s.x), y = snap(s.y), w = s.w, h = s.h, cx = x + w / 2, dir = s.facing;
+    const x = this._snap(s.x, z), y = this._snap(s.y, z), w = s.w, h = s.h, cx = x + w / 2, dir = s.facing;
 
     this._shadow(ctx, cx, y + h, w * 0.85);
 
-    if (controlled) {
-      // "which one am I" — the ring and caret stay screen-sized, since finding
-      // your soldier is exactly the job they exist for when zoomed out.
-      const p = 0.5 + 0.5 * Math.sin(this.time * 5);
-      ctx.strokeStyle = `rgba(255,211,106,${0.35 + p * 0.4})`;
-      ctx.lineWidth = 2 / z;
-      ctx.beginPath();
-      ctx.ellipse(cx, y + h - 1, w * 0.7, 6 / z, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = "#ffd36a";
-      const cyv = y - (20 + p * 3) / z;
-      ctx.beginPath();
-      ctx.moveTo(cx, cyv + 9 / z);
-      ctx.lineTo(cx - 6 / z, cyv);
-      ctx.lineTo(cx + 6 / z, cyv);
-      ctx.closePath();
-      ctx.fill();
-    }
+    if (controlled) this._drawRing(ctx, s, x, y, z);
 
     const flash = s.hitFlash > 0;
     const base = flash ? "#ffffff" : s.color;
@@ -1322,7 +1395,31 @@ export class Mission {
 
     if (s.muzzleFlash > 0) this._drawMuzzle(ctx, s, this._gunTip(s, cx, gy, gunLen, y));
     if (s.burn) this._drawBurn(ctx, x, y, w, h);
-    this._healthBar(x, y - 8, w, s.health / s.maxHealth, controlled ? "#7ad7ff" : "#6fcf97");
+    this._soldierBar(s, x, y, controlled);
+  }
+
+  // "which one am I" — the ring and caret stay screen-sized, since finding
+  // your soldier is exactly the job they exist for when zoomed out.
+  _drawRing(ctx, s, x, y, z = 1) {
+    const w = s.w, h = s.h, cx = x + w / 2;
+    const p = 0.5 + 0.5 * Math.sin(this.time * 5);
+    ctx.strokeStyle = `rgba(255,211,106,${0.35 + p * 0.4})`;
+    ctx.lineWidth = 2 / z;
+    ctx.beginPath();
+    ctx.ellipse(cx, y + h - 1, w * 0.7, 6 / z, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#ffd36a";
+    const cyv = y - (20 + p * 3) / z;
+    ctx.beginPath();
+    ctx.moveTo(cx, cyv + 9 / z);
+    ctx.lineTo(cx - 6 / z, cyv);
+    ctx.lineTo(cx + 6 / z, cyv);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  _soldierBar(s, x, y, controlled) {
+    this._healthBar(x, y - 8, s.w, s.health / s.maxHealth, controlled ? "#7ad7ff" : "#6fcf97");
   }
 
   // Draw the soldier's gun as a barrel from the shoulder pivot. Manual aim

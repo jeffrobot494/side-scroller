@@ -307,6 +307,14 @@ export const SCHEMA = [
         help: "World scale. 1 = the classic framing; 0.5 shows twice as much level each way. The world is only 540px tall, so vertical gain is empty sky — below ~0.6 the action shrinks into a band at the bottom. Live.",
       },
       {
+        key: "missionRenderer",
+        label: "Mission view",
+        type: "enum",
+        options: ["2d", "3d"],
+        default: "2d",
+        help: "Draw the mission flat (2d) or in Three.js (3d). Same simulation either way; the toggle key (Controls tool) flips it mid-mission. 3d loads Three.js from jsDelivr on first use and stays 2d if that fails. Live.",
+      },
+      {
         key: "showFps",
         label: "Show FPS",
         type: "bool",

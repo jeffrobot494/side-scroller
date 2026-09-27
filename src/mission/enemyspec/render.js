@@ -12,15 +12,26 @@
 // telegraph outline uses it: that outline is the player's "this part is about
 // to attack" tell, so it stays screen-sized rather than thinning to a hairline
 // when the mission is zoomed out.
-export function drawSpecEnemy(ctx, root, time = 0, scale = 1) {
-  drawTree(ctx, root, time, scale);
-  for (const sp of root.spawned) drawTree(ctx, sp, time, scale);
+//
+// `parts` picks what is drawn: `body` (the shape and its cues) and `bars` (the
+// per-part health bars). Both by default, interleaved part by part as they
+// always were — the Firing Room and the Enemy Designer never pass it. The
+// mission's 3D view (tech/mission-3d.md) draws bodies in Three.js and asks for
+// `{ body: false }` to lay the bars flat over them.
+export function drawSpecEnemy(ctx, root, time = 0, scale = 1, parts = BOTH) {
+  drawTree(ctx, root, time, scale, parts);
+  for (const sp of root.spawned) drawTree(ctx, sp, time, scale, parts);
 }
 
-function drawTree(ctx, e, time, scale) {
+const BOTH = { body: true, bars: true };
+
+function drawTree(ctx, e, time, scale, parts) {
   if (!e.alive) return;
-  if (!e.disabled) drawEntity(ctx, e, time, scale);
-  for (const c of e.children) drawTree(ctx, c, time, scale);
+  if (!e.disabled) {
+    if (parts.body !== false) drawEntity(ctx, e, time, scale);
+    if (parts.bars !== false) drawBar(ctx, e);
+  }
+  for (const c of e.children) drawTree(ctx, c, time, scale, parts);
 }
 
 function drawEntity(ctx, e, time, scale = 1) {
@@ -88,8 +99,10 @@ function drawEntity(ctx, e, time, scale = 1) {
   }
 
   if (e.burn) drawBurn(ctx, e, time);
+}
 
-  // health bar on any damaged, damageable part
+// health bar on any damaged, damageable part
+function drawBar(ctx, e) {
   if (e.maxHealth && e.health < e.maxHealth) {
     const frac = Math.max(0, e.health / e.maxHealth);
     ctx.fillStyle = "rgba(0,0,0,0.55)";

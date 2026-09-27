@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { makeEl } from "./harness.mjs";
-import { resetConfig, config } from "../src/game/config.js";
+import { resetConfig, config, setConfig } from "../src/game/config.js";
 import { sampleScene, firstSampleDiff } from "../src/mission/checksum.js";
 
 const GOLDEN = fileURLToPath(new URL("./mission.golden.json", import.meta.url));
@@ -283,6 +283,45 @@ export default async function run(t) {
     t.ok("host-free: and render() is a no-op rather than a crash", (() => { bare.m.render(); return true; })());
     t.ok("host-free: stop() releases an input that never bound a device", (() => { bare.m.stop(); return bare.m.running === false; })());
     }
+  }
+
+  // ---- the external view hook (tech/mission-3d.md R1) ---------------------
+  // The 3D view is installed from outside and draws under the canvas. What this
+  // pins is the lifecycle and the split: begun per deploy, drawn only while
+  // "3d" is on, the 2D world pass skipped exactly then, ended at stop() — and
+  // drawing either way reads nothing back into the simulation.
+  {
+    const g = generateLevel({ seed: SEED, difficulty: "high" });
+    const calls = [];
+    const view = {
+      begin: () => calls.push("begin"),
+      draw: (_m, f) => calls.push(`draw:${f.W}x${f.H}`),
+      end: () => calls.push("end"),
+    };
+    const m = new Mission(makeEl("canvas"), () => {});
+    m.setView(view);
+    t.eq("view: installed before a deploy, nothing begins", calls.join(","), "");
+    m.start(g.mission, g.level, SQUAD);
+    t.eq("view: start() begins it once", calls.join(","), "begin");
+    let world = 0, tells = 0;
+    const plat = m._drawPlatforms, tell = m._drawTells;
+    m._drawPlatforms = (...a) => { world++; return plat.apply(m, a); };
+    m._drawTells = (...a) => { tells++; return tell.apply(m, a); };
+    const before = sampleScene(m.scene);
+    setConfig("missionRenderer", "2d");
+    m.render();
+    t.ok("view: in 2d the world pass runs and the view is not asked", world === 1 && tells === 0 && calls.length === 1);
+    setConfig("missionRenderer", "3d");
+    m.render();
+    t.eq("view: in 3d it is drawn at the canvas size", calls[1], `draw:${m.canvas.width}x${m.canvas.height}`);
+    t.ok("view: ...the 2D world pass is skipped and the tells are drawn flat", world === 1 && tells === 1);
+    t.ok("view: drawing in either mode changes nothing the simulation samples",
+      firstSampleDiff(before, sampleScene(m.scene)) === null);
+    m.stop();
+    t.eq("view: stop() ends it", calls.at(-1), "end");
+    m.render();
+    t.ok("view: an ended view falls back to 2D rather than drawing nothing", world === 2 && calls.at(-1) === "end");
+    resetConfig();
   }
 
   // The half that CANNOT be asserted in here: test/run.mjs installs the DOM
