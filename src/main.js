@@ -122,7 +122,7 @@ const mission = new Mission(canvas, onMissionComplete);
 mission.onRendererToggle = () => syncRenderer();
 
 // ---- the 3D view (tech/mission-3d.md) ---------------------------------------
-// Loaded on the first switch to 3D and never before, so a 2D player never
+// Loaded when a mission first wants 3D (the default) and never before, so a 2D player never
 // fetches Three.js. The mission only ever sees `setView` — this module, not
 // mission.js, is what imports the view, which keeps mission.js bare-node safe.
 let inMission = false;

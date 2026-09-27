@@ -311,8 +311,8 @@ export const SCHEMA = [
         label: "Mission view",
         type: "enum",
         options: ["2d", "3d"],
-        default: "2d",
-        help: "Draw the mission flat (2d) or in Three.js (3d). Same simulation either way; the toggle key (Controls tool) flips it mid-mission. 3d loads Three.js from jsDelivr on first use and stays 2d if that fails. Live.",
+        default: "3d",
+        help: "Draw the mission in Three.js (3d, the default) or flat (2d). Same simulation either way; the toggle key (V by default; Controls tool) flips it mid-mission. 3d loads Three.js from jsDelivr on first use and falls back to 2d if that fails. Live.",
       },
       {
         key: "showFps",
