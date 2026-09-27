@@ -276,7 +276,7 @@ export class Hub {
             <span class="ro-value">${g.day}</span>
           </div>
           <div class="readout readout-gauge health-chip${low}" title="Campaign health — reach 0 and the invasion wins.">
-            <span class="ro-label">Sector integrity</span>
+            <span class="ro-label">Campaign health</span>
             <span class="ro-row">
               <span class="health-track"><span class="health-fill" style="width:${h}%;background:${color}"></span></span>
               <span class="ro-value">${h}</span>
@@ -698,7 +698,7 @@ export class Hub {
       <section class="squad-block">
         <h2>Campaign Health</h2>
         <div class="big-meter"><span class="big-fill" style="width:${h}%;background:${color}"></span></div>
-        <p class="muted">Sector integrity at <strong>${h}</strong>. ${this._doomLine()} Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
+        <p class="muted">Campaign health at <strong>${h}</strong>. ${this._doomLine()} Clear enough operations and the trail to the hive's command node surfaces in Ops — end it there.</p>
         <div class="card-foot">
           <span class="readout-inline"><span class="ri-label">Day</span><span class="ri-value">${g.day}</span></span>
         </div>

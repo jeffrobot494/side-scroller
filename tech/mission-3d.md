@@ -54,7 +54,7 @@ R1 is a pure refactor with a green suite. R2 is where it becomes playable, and w
 | `src/mission/enemyspec/render.js` | An option to draw an enemy's body without its health bars, and the bars alone. The default call stays byte-for-byte what the Firing Room and the Enemy Designer get today |
 | `src/game/config.js` | The `missionRenderer` enum |
 | `src/game/controlmap.js` | The `toggleRenderer` action and its default key |
-| `src/main.js` | Lazy `import()` of the view on the first switch to 3D; mounting and toggling its canvas. If the import fails (offline), it stays in 2D and says so on screen |
+| `src/main.js` | Lazy `import()` of the view — at page load when `missionRenderer` is `3d`, otherwise on the first switch; mounting and toggling its canvas. If the import fails (offline), it stays in 2D and says so on screen |
 | `index.html` | Import map, and the WebGL canvas placed *before* `#game` |
 | `src/hub/hub.css` | The WebGL canvas: same fixed, max-size letterbox rule as `#game`, same z-index (101, above the page vignette at 100), stacked by page order. `#game`'s opaque background is dropped while 3D is on |
 | `test/camera.test.mjs` | The new solve's guard |

@@ -445,7 +445,8 @@ section + the tests are the source of truth for what currently exists):
   EXTRACT label), nav overlays, vignette and HUD. `config.missionRenderer`
   (`2d`/`3d`, default 2d, local) picks it; `toggleRenderer` (default V, local-only
   on the wire) flips it mid-mission. `src/main.js` lazy-imports
-  `src/mission/view3d/` on the first switch and installs it with
+  `src/mission/view3d/` at page load when the setting is 3D (else on the first
+  switch) and installs it with
   `mission.setView()` — **mission.js never imports `three`** and stays bare-node
   importable; a failed CDN load stays 2D with a notice. The view begins per
   deploy, draws per frame, ends at stop. **The one invariant:**
