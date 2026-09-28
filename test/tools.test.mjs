@@ -14,7 +14,7 @@ import { RECRUIT_POOL } from "../src/game/soldiers.js";
 import { createSoundPage } from "../src/editor/sound-page.js";
 import { controlsTabsHTML, showControlsTab } from "../src/editor/controls.js";
 import { serverTarget, createRemoteConfig } from "../src/editor/remote-config.js";
-import { SCHEMA, config, resetConfig, setConfig, isDefault } from "../src/game/config.js";
+import { SCHEMA, config, resetConfig, setConfig, isDefault, pauseSchema } from "../src/game/config.js";
 import { Soldier } from "../src/mission/entities.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
@@ -530,6 +530,45 @@ export default async function run(t) {
     t.ok(`tabs: the group holding a change is flagged (${settings[target].title})`, flagged.includes(target));
     t.eq("tabs: and only that group", flagged.length, 1);
     resetConfig();
+  }
+
+  // ---- live is data, and the pause menu is that data filtered --------------
+  // "Live." used to be typed into help strings by hand and two had drifted
+  // (enemyJump said next deploy but is read per jump; Hub ambience said Live
+  // but nothing in a mission reads it). Now the field is the fact and the word
+  // is rendered from it.
+  {
+    const flat = SCHEMA.flatMap((g) => g.items);
+    const bad = flat.filter((it) => typeof it.live !== "boolean").map((it) => it.key);
+    t.eq("live: every schema item declares a boolean live", bad, []);
+    const typed = flat.filter((it) => /Live\./.test(it.help || "")).map((it) => it.key);
+    t.eq("live: no help string types 'Live.' itself", typed, []);
+    const html = controlsTabsHTML(SCHEMA, config, isDefault, 0);
+    const rowOf = (key) => html.slice(html.indexOf(`data-row="${key}"`)).split('class="cfg-control"')[0];
+    t.ok("live: a live item's row says Live.", /Live\./.test(rowOf("friendlyFire")));
+    t.ok("live: a next-deploy item's row does not", !/Live\./.test(rowOf("gravity")));
+
+    const keys = (s) => s.flatMap((g) => g.items.map((it) => it.key));
+    const VIEWPORT = ["missionZoom", "missionRenderer", "scanlines", "scanlineSpacing", "showFps", "debugOverlays"];
+    const SOUND = ["masterVolume", "sfxVolume", "uiVolume", "musicVolume", "muteOnBlur", "audioPan", "audioFalloff", "audioMaxVoices"];
+    // The design's table (design/pause-menu.md), pinned by name.
+    const SOLO = [
+      ...VIEWPORT, ...SOUND,
+      "aimMode", "padDeadzone", "aimSpread", "reloadSpeedMult",
+      "friendlyFire", "playerDamageMult",
+      "runSpeed", "jumpSpeed", "enemyJump", "coyoteTime", "knockbackDecay", "duckHoldTime", "duckLookahead",
+      "duckChanceSlow", "duckChanceFast", "duckLatencySlow", "duckLatencyFast",
+      "navArriveRadius", "navTakeoffWindow", "navRepathInterval", "navJumpAttempts", "navReposition",
+      "navRepositionHold", "navStallTime",
+    ];
+    const solo = pauseSchema({ room: false });
+    t.eq("pauseSchema: single-player shows the design's 38 settings", keys(solo).sort(), [...SOLO].sort());
+    t.eq("pauseSchema: 38 of them", keys(solo).length, 38);
+    const room = pauseSchema({ room: true });
+    t.eq("pauseSchema: a room shows Viewport, Sound, aimMode and padDeadzone",
+      keys(room).sort(), [...VIEWPORT, ...SOUND, "aimMode", "padDeadzone"].sort());
+    t.ok("pauseSchema: and drops the groups that empty", room.every((g) => g.items.length > 0)
+      && !room.some((g) => g.title === "Combat" || g.title === "Agent navigation"));
   }
 
   // ---- showControlsTab swaps panels in place -------------------------------

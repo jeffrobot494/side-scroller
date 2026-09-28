@@ -60,11 +60,14 @@ function groupHTML(group, config, isDefault) {
 
 function rowHTML(item, value, isDef) {
   const changed = isDef === false;
+  // "Live." comes from the item's `live` field, never the help text, so the
+  // word and the pause menu's filter cannot disagree.
+  const help = [item.help, item.live ? "Live." : ""].filter(Boolean).join(" ");
   return `
     <div class="cfg-row${changed ? " changed" : ""}" data-row="${item.key}">
       <div class="cfg-meta">
         <span class="cfg-label">${item.label}<span class="cfg-dot" title="Changed from default">●</span></span>
-        ${item.help ? `<span class="cfg-help">${item.help}</span>` : ""}
+        ${help ? `<span class="cfg-help">${help}</span>` : ""}
       </div>
       <div class="cfg-control">${inputHTML(item, value)}</div>
     </div>`;

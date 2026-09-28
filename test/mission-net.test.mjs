@@ -913,7 +913,7 @@ async function configPermanent(t) {
 
     const after = await readFile(copy, "utf8");
     t.ok("permanent: the number landed in the source", after.includes("default: 2600,"));
-    t.ok("permanent: and so did the bool", /key: "friendlyFire",\n\s*scope: "server",\n\s*label:[^\n]*\n\s*type: "bool",\n\s*default: true,/.test(after));
+    t.ok("permanent: and so did the bool", /key: "friendlyFire",\n\s*scope: "server",\n\s*label:[^\n]*\n\s*type: "bool",\n\s*live: true,\n\s*default: true,/.test(after));
     t.ok("permanent: a knob still at its default was not rewritten",
       after.includes("default: 4,") && after.includes(`key: "soldierMagazines",`));
 
