@@ -86,6 +86,13 @@
     background: var(--accent); color: #0e1320; font-weight: 600;
   }
   .note { font-size: 11.5px; color: var(--ink-3); margin-top: 8px; }
+  .turn {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px; margin-bottom: 8px;
+    padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+  }
+  .turn select { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; font-size: 12px; justify-self: start; }
+  .turn .x { background: none; border: 0; color: var(--ink-3); cursor: pointer; font-size: 14px; }
+  .turn textarea { grid-column: 1 / -1; min-height: 44px; border: 0; padding: 2px; background: none; }
 
   /* ── runs ──────────────────────────────────────────── */
   .runs { padding: 14px; }
@@ -210,8 +217,11 @@ const VIDEO = `<svg class="media" viewBox="0 0 160 90" style="aspect-ratio:16/9;
 const MODS = [
   { id: "chat", label: "Chat", group: "Text",
     fields: [
-      { k: "system", t: "textarea", label: "System", v: "You are the Ops officer on an alien-invasion strategy game." },
-      { k: "user", t: "textarea", label: "User", v: "Brief me on tonight's lead in three sentences." },
+      { k: "turns", t: "turns", label: "Conversation", turns: [
+        ["system", "You are the Ops officer on an alien-invasion strategy game."],
+        ["user", "Brief me on tonight's lead in three sentences."],
+        ["assistant", "Contact at the Harlow silos. Two hostiles, lightly armored. Low risk."],
+        ["user", "What should I bring?"] ] },
       { row: [{ k: "temperature", t: "range", label: "Temperature", min: 0, max: 2, step: .1, v: .8 },
               { k: "max_tokens", t: "number", label: "Max tokens", v: 400 }] },
       { row: [{ k: "json", t: "check", label: "JSON mode" }, { k: "stream", t: "check", label: "Stream", v: true }] },
@@ -238,7 +248,7 @@ const MODS = [
       { row: [{ k: "speed", t: "range", label: "Speed", min: .5, max: 2, step: .1, v: 1 },
               { k: "format", t: "select", label: "Format", opts: ["mp3", "wav", "opus", "flac", "ogg", "pcm"] }] },
       { k: "instructions", t: "text", label: "Delivery instructions", v: "Tense, clipped, under fire" },
-      { k: "stream", t: "check", label: "Stream (mp3 / wav only)" },
+      { k: "stream", t: "check", label: "Stream — plays as it arrives (mp3 / wav only; no provider reported)" },
     ],
     runs: [
       { id: 14, voice: "Marcus", ms: 850, j: 1, tts: true, inputs: { voice: "Marcus", speed: 1, instructions: "none sent" },
@@ -270,7 +280,7 @@ const MODS = [
   { id: "edit", label: "Image edit", group: "Image",
     fields: [
       { k: "prompt", t: "textarea", label: "Prompt", v: "Add a glowing weak point on its back" },
-      { k: "images", t: "drop", label: "Source image(s)", v: "Drop images, or pick a run's output" },
+      { k: "images", t: "drop", label: "Source image(s)", v: "Drop images, or use → Image edit on an image run" },
       { k: "aspect", t: "select", label: "Aspect ratio", opts: ["none (use size)", "1:1", "16:9", "4:3", "3:2", "21:9"] },
     ],
     runs: [] },
@@ -347,6 +357,10 @@ function field(f) {
     case "range": return `<label class="field">${L}<div class="range"><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${f.v}"
       oninput="this.nextElementSibling.textContent=this.value"><span class="v">${f.v}</span></div></label>`;
     case "check": return `<label class="field chk"><input type="checkbox" ${f.v ? "checked" : ""}> ${f.label}</label>`;
+    case "turns": return `<div class="field">${L}${f.turns.map(([role, text]) => `<div class="turn">
+      <select><option ${role === "system" ? "selected" : ""}>system</option><option ${role === "user" ? "selected" : ""}>user</option><option ${role === "assistant" ? "selected" : ""}>assistant</option></select>
+      <button class="x" title="Remove turn">×</button><textarea>${text}</textarea></div>`).join("")}
+      <button class="ghost">+ Add turn</button></div>`;
     case "drop": return `<div class="field">${L}<div class="drop">${f.v}</div></div>`;
     case "chips": return `<div class="field">${L}<div class="chips">${f.opts.map((o) =>
       `<span class="chip ${f.on.includes(o) ? "on" : ""}">${o}</span>`).join("")}</div></div>`;
@@ -378,6 +392,8 @@ function card(r, compare, diffKeys) {
       <button class="ghost" data-open="${r.id}">${open.has(r.id) ? "Hide raw" : "Raw"}</button>
       <button class="ghost">Rerun</button>
       ${r.tts ? `<button class="ghost">→ Speech to text</button>` : ""}
+      ${cur === "chat" ? `<button class="ghost">Continue</button>` : ""}
+      ${cur === "img" || cur === "edit" ? `<button class="ghost">→ Image edit</button>` : ""}
     </div>`;
   const raw = `<div class="raw"><b>request</b>  POST … ${JSON.stringify(r.inputs)}
 <b>response</b> 200 · ${r.ms || "—"} ms · ${r.rep

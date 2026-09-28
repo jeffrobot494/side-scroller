@@ -25,13 +25,13 @@ Every generation modality Player2 offers. Platform plumbing (asset projects, NPC
 
 | Modality | You give it | You get back |
 |---|---|---|
-| Chat | messages, temperature, max tokens, JSON mode, tools | text (streamed or whole), plus the name of the model that answered |
+| Chat | a conversation (a system message, then any number of user and assistant turns), temperature, max tokens, JSON mode, tools | text (streamed or whole), plus the name of the model that answered |
 | Embeddings | text, a model, dimensions | vectors |
-| Text to speech | text, voice(s), speed, format, delivery instructions | audio, plus whether the instructions were carried out |
+| Text to speech | text, voice(s), speed, format, delivery instructions, stream switch | audio (streamed audio plays as it arrives), plus whether the instructions were carried out |
 | Speech to text | an audio file or a mic recording, language | transcript, confidence, word timings |
 | Image generate | prompt, size | image |
-| Image edit | prompt, one or more images, aspect ratio or size | image |
-| Video | prompt, aspect ratio, optional start image | video |
+| Image edit | prompt, one or more images (uploaded, or the image output of an earlier run), aspect ratio or size | image |
+| Video | one of three modes: prompt; prompt plus a start image; or transform an image (edit it, then animate the result). Plus aspect ratio | video |
 | Music | prompt, duration, instrumental switch | audio |
 | 3D | prompt, or an image | a model shown in a 3D viewer |
 
@@ -48,6 +48,8 @@ Every generation modality Player2 offers. Platform plumbing (asset projects, NPC
 | Inspect a run | Shows the exact request and response, how long it took, joules spent, and the model/voice the platform reports |
 | Run a slow job (video, music, 3D) | It shows its progress and doesn't block anything else. Several can run at once |
 | Send a TTS output to STT | The audio goes straight into speech-to-text as the input |
+| Continue a chat run | The run's conversation, with its reply as the last assistant turn, becomes the form's conversation, ready for the next user turn |
+| Edit an image run's output | The image becomes a source image in the image-edit form |
 
 ## Every run records
 
