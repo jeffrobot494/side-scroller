@@ -231,6 +231,27 @@ export class MissionInput {
     }
   }
 
+  // ---- outside the sample ----------------------------------------------------
+  // For the one action read per RENDERED FRAME instead of per step: `pause`
+  // (tech/pause-menu.md), which must be readable while no steps run. Keyboard
+  // only — the pause menu is not driven from a gamepad.
+
+  // Take a pending device press of `action`, so no sample sees it afterwards.
+  takePress(action) {
+    if (!this.pressed[action]) return false;
+    delete this.pressed[action];
+    return true;
+  }
+
+  // Forget every press made while no step ran (a pause), keyboard and pad, so a
+  // jump tapped behind the menu does not fire on resume. The pad is re-polled
+  // so a button still held counts as held, not as a fresh press.
+  dropPresses() {
+    this.pressed = {};
+    this.pollGamepad();
+    this.padPressed = {};
+  }
+
   // ---- the sample ---------------------------------------------------------
 
   // Latch the device into one input frame and hand it the next step index.

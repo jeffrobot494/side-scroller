@@ -54,7 +54,7 @@ import { ACTIONS } from "../src/game/controlmap.js";
 
 // The exception, restated here on purpose: a test that imported the production
 // list would agree with it by construction and assert nothing.
-const LOCAL = ["debugGraph", "debugPath", "toggleRenderer"];
+const LOCAL = ["debugGraph", "debugPath", "toggleRenderer", "pause"];
 
 const SERVER = fileURLToPath(new URL("../server.mjs", import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

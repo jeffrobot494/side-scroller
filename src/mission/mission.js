@@ -71,6 +71,31 @@ export class Mission {
     this.view = null;
     this._viewLive = false;
     this.onRendererToggle = null;
+    // THE PAUSE (tech/pause-menu.md). Not gameplay state: update() never reads
+    // it, it never crosses the wire, and only `_frame` — the host's loop —
+    // honours it, so a headless driver of update() cannot enter it.
+    // `onPauseChange(paused)` tells the host, which owns the menu.
+    this.paused = false;
+    this.onPauseChange = null;
+  }
+
+  // Pause or resume. Resuming throws away the time that passed and every press
+  // made meanwhile, so no catch-up burst of steps runs and no jump tapped
+  // behind the menu fires.
+  setPaused(on) {
+    on = !!on;
+    if (on === this.paused) return;
+    this.paused = on;
+    if (!on) {
+      this.accumulator = 0;
+      this.input.dropPresses?.();
+    }
+    if (this.onPauseChange) this.onPauseChange(on);
+  }
+
+  // Is this page holding its mission still? Only one it steps itself.
+  _frozen() {
+    return this.paused && this.hosted && !this.remote;
   }
 
   // Install (or, with null, remove) the external view. Mid-mission it begins at
@@ -249,6 +274,7 @@ export class Mission {
 
     this.running = true;
     this.accumulator = 0;
+    this.paused = false; // a deploy starts unpaused; the menu belonged to the last one
     this.fps.reset(); // don't carry a rate in from the previous deploy
     // The device and the loop, and NOTHING else, are what a host has (J6).
     // `running` is set either way: since J2 it means "the scene has not ended",
@@ -270,6 +296,7 @@ export class Mission {
 
   stop() {
     this.running = false;
+    this.setPaused(false);
     this._endView();
     this.input.disable();
     audio.stopAll(); // don't let a tail ring out over the results screen
@@ -285,6 +312,19 @@ export class Mission {
     let ft = (now - this.lastTime) / 1000;
     this.lastTime = now;
     if (ft > 0.25) ft = 0.25;
+
+    // The pause is read once per FRAME, not per step, because while paused no
+    // steps run to read it. A room's mission is not this page's to pause.
+    // Optional calls: suites swap in scripted inputs that answer only the reads.
+    if (this.hosted && !this.remote && this.input.takePress?.("pause")) this.setPaused(!this.paused);
+    if (this._frozen()) {
+      // No samples, no steps: the scene holds still. The camera is re-solved
+      // so a zoom change from the menu stays centred on the soldier.
+      this._updateCamera();
+      this.render();
+      requestAnimationFrame(this._frame);
+      return;
+    }
 
     this.accumulator += ft;
     while (this.accumulator >= STEP) {
@@ -1107,8 +1147,9 @@ export class Mission {
 
     // The shake offset is rolled ONCE per frame and shared by the 2D world
     // transform, the flat tells and the 3D view, so the layers shake together.
+    // A frozen frame gets none, or a hit's shake would jitter on forever.
     let sx = 0, sy = 0;
-    if (this.shake > 0) {
+    if (this.shake > 0 && !this._frozen()) {
       const m = this.shake * 7;
       sx = (Math.random() * 2 - 1) * m;
       sy = (Math.random() * 2 - 1) * m;

@@ -241,8 +241,52 @@ export default async function run(t) {
   t.ok("controlmap: default KeyV → toggleRenderer", keyBindings.KeyV === "toggleRenderer");
   t.ok("controlmap: toggleRenderer is an action with a label",
     ACTIONS.includes("toggleRenderer") && !!ACTION_LABELS.toggleRenderer);
-  t.ok("controlmap: toggleRenderer is appended, so no earlier action's index moved",
-    ACTIONS.indexOf("toggleRenderer") === ACTIONS.length - 1);
+  t.ok("controlmap: toggleRenderer sits just before pause",
+    ACTIONS.indexOf("toggleRenderer") === ACTIONS.length - 2);
+
+  // pause (tech/pause-menu.md): Escape by default, rebindable, appended so no
+  // earlier action's index — the wire's bit — moved.
+  t.ok("controlmap: default Escape → pause", keyBindings.Escape === "pause");
+  t.ok("controlmap: pause is an action with a label", ACTIONS.includes("pause") && !!ACTION_LABELS.pause);
+  t.ok("controlmap: pause is appended, so no earlier action's index moved",
+    ACTIONS.indexOf("pause") === ACTIONS.length - 1);
+
+  // A map saved before `pause` existed binds nothing to it, and load() gives
+  // it its default key — unless the player already put that key on something.
+  // A fresh module instance (the query string) re-runs load() over the store.
+  {
+    const legacy = { ...DEFAULT_KEYS, KeyF: "fire" };
+    delete legacy.Escape; delete legacy.KeyJ;
+    localStorage.setItem("sidescroller.controls.v1", JSON.stringify(legacy));
+    const a = await import("../src/game/controlmap.js?saved-before-pause");
+    t.ok("load: a saved map with no pause key gains Escape", a.keyBindings.Escape === "pause");
+    t.ok("load: ...and keeps the player's own rebinding", a.keyBindings.KeyF === "fire" && a.keyBindings.KeyJ === undefined);
+    localStorage.setItem("sidescroller.controls.v1", JSON.stringify({ ...legacy, Escape: "swap" }));
+    const b = await import("../src/game/controlmap.js?escape-taken");
+    t.ok("load: a default key the player bound elsewhere is not stolen", b.keyBindings.Escape === "swap");
+    t.eq("load: ...so pause stays unbound", b.bindingsForAction("pause"), []);
+    localStorage.removeItem("sidescroller.controls.v1");
+  }
+
+  // Pause is read once per rendered FRAME, outside the per-step sample: a
+  // press taken there is gone before any sample sees it, and presses made
+  // while paused are dropped so none fires on resume.
+  {
+    const inp = new MissionInput();
+    inp.enable();
+    inp._set({ code: "Escape", preventDefault() {} }, true);
+    t.ok("input: takePress sees a pending pause press", inp.takePress("pause"));
+    t.ok("input: ...once", !inp.takePress("pause"));
+    inp.sample();
+    t.ok("input: ...and no sample sees it afterwards", !inp.justPressed("pause"));
+    inp._set({ code: "Escape", preventDefault() {} }, false);
+    inp._set({ code: "Space", preventDefault() {} }, true);
+    inp.dropPresses();
+    inp.sample();
+    t.ok("input: a press dropped while paused does not fire", !inp.justPressed("jump"));
+    t.ok("input: ...though the key still reads as held", inp.isDown("jump"));
+    inp.disable();
+  }
 
   // ---- Controls tool mounts headlessly -----------------------------------
   {

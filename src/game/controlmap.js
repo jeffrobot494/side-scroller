@@ -16,8 +16,10 @@
 // nothing in this game hardcodes a key, and being rebindable is what lets them
 // move off a key a player might hit. toggleRenderer flips config.missionRenderer
 // (2D / 3D view) mid-mission; like the overlays it is a fact about the person
-// looking, so it never crosses the wire.
-export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload", "debugGraph", "debugPath", "toggleRenderer"];
+// looking, so it never crosses the wire. pause opens the mission's pause menu
+// (tech/pause-menu.md) and is read once per rendered frame, not per step; it is
+// local too — a room mission is never paused by one commander.
+export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload", "debugGraph", "debugPath", "toggleRenderer", "pause"];
 
 // Human labels for the remap UI.
 export const ACTION_LABELS = {
@@ -32,6 +34,7 @@ export const ACTION_LABELS = {
   debugGraph: "Debug: nav graph",
   debugPath: "Debug: companion paths",
   toggleRenderer: "Toggle 2D / 3D view",
+  pause: "Pause menu",
 };
 
 // Default physical-key → action map (KeyboardEvent.code). Two keys may share an
@@ -54,6 +57,7 @@ export const DEFAULT_KEYS = {
   KeyG: "debugGraph",
   KeyH: "debugPath",
   KeyV: "toggleRenderer",
+  Escape: "pause",
 };
 
 // Fixed gamepad map (W3C "standard" mapping). Buttons fold into the same held +
@@ -116,7 +120,16 @@ function load() {
   if (saved && typeof saved === "object") {
     const clean = {};
     for (const code in saved) if (ACTIONS.includes(saved[code])) clean[code] = saved[code];
-    if (Object.keys(clean).length) return clean;
+    if (Object.keys(clean).length) {
+      // A map saved before an action existed binds nothing to it. Give such an
+      // action its default keys wherever they are still free, so a player who
+      // ever rebound anything still gets Escape for `pause` — and never steal
+      // a key the player put on something else.
+      const bound = new Set(Object.values(clean));
+      for (const [code, action] of Object.entries(DEFAULT_KEYS))
+        if (!bound.has(action) && !(code in clean)) clean[code] = action;
+      return clean;
+    }
   }
   return { ...DEFAULT_KEYS };
 }
