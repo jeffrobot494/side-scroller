@@ -207,6 +207,89 @@ export class Player2Client {
     );
   }
 
+  // ---- Whole-response calls (the Player2 Lab) ------------------------------
+  // The game's helpers above unwrap what they need and drop the rest (chat()
+  // keeps only the content). A test bench needs the whole response: the model
+  // that answered, TTS's style_outcome, usage. These add; nothing above changes.
+
+  /**
+   * Any JSON endpoint, returning the whole parsed response.
+   * @param {string} path
+   * @param {object} [opts] { method, body, query, signal, queue } — `queue:
+   *   false` skips the TaskQueue (job enqueues and polls, which the server queues).
+   */
+  call(path, { method, body, query, signal, queue = true } = {}) {
+    const m = method || (body === undefined ? "GET" : "POST");
+    const go = () => this._request(withQuery(path, query), { method: m, body, signal });
+    return queue ? this.queue.run(go) : go();
+  }
+
+  /**
+   * Streaming chat that also reports the model named in the chunks.
+   * @returns {Promise<{content:string, model:string|null}>}
+   */
+  chatStreamFull(messages, onDelta, opts = {}) {
+    return this.queue.run(async () => {
+      const res = await this._open("/chat/completions", { messages, stream: true, ...opts });
+      let content = "";
+      let model = null;
+      for await (const evt of parseSSE(res.body)) {
+        if (evt.data === "[DONE]") break;
+        try {
+          const chunk = JSON.parse(evt.data);
+          if (chunk.model && !model) model = chunk.model;
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (delta) {
+            content += delta;
+            onDelta?.(delta);
+          }
+        } catch {
+          /* ignore keep-alive / non-JSON lines */
+        }
+      }
+      return { content, model };
+    });
+  }
+
+  /**
+   * POST raw bytes (e.g. /stt/audio takes the audio as the body and its format
+   * as query parameters). Returns the parsed response.
+   */
+  sendBytes(path, bytes, { query, contentType = "application/octet-stream", signal } = {}) {
+    return this.queue.run(async () => {
+      if (!this.p2Key) throw new Error("Not authenticated. Call authenticate() first.");
+      const res = await fetch(`${this.baseUrl}${withQuery(path, query)}`, {
+        method: "POST",
+        signal,
+        headers: { Authorization: `Bearer ${this.p2Key}`, "Content-Type": contentType },
+        body: bytes,
+      });
+      return this._handle(res);
+    });
+  }
+
+  /**
+   * POST JSON and hand back the Response with its body unread (e.g.
+   * /tts/stream answers application/octet-stream). The queue slot is held
+   * only until the headers arrive.
+   * @returns {Promise<Response>}
+   */
+  openStream(path, body, { signal } = {}) {
+    return this.queue.run(() => this._open(path, body, signal));
+  }
+
+  async _open(path, body, signal) {
+    if (!this.p2Key) throw new Error("Not authenticated. Call authenticate() first.");
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: "POST",
+      signal,
+      headers: { Authorization: `Bearer ${this.p2Key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) await this._handle(res); // throws with the right error type
+    return res;
+  }
+
   // ===========================================================================
   // 2. ASYNC JOBS  — enqueue freely, poll for results. NOT on the sync queue.
   // ===========================================================================
@@ -336,7 +419,9 @@ class JobManager {
   /**
    * Poll a job status URL until status is terminal.
    * @param {string} path e.g. `/video/job/${jobId}`
-   * @param {object} [opts] { intervalMs, timeoutMs, isDone, isFailed }
+   * @param {object} [opts] { intervalMs, timeoutMs, isDone, isFailed,
+   *   onTick(status), signal } — onTick sees every status read; an aborted
+   *   signal rejects with an AbortError at the next check.
    */
   async poll(path, opts = {}) {
     const {
@@ -344,15 +429,19 @@ class JobManager {
       timeoutMs = 5 * 60_000,
       isDone = (s) => s.status === "completed",
       isFailed = (s) => s.status === "failed",
+      onTick,
+      signal,
     } = opts;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const status = await this.client._request(path);
+      throwIfAborted(signal);
+      const status = await this.client._request(path, { signal });
+      onTick?.(status);
       if (isFailed(status)) {
         throw new Error(status.error_message || "Job failed");
       }
       if (isDone(status)) return status;
-      await new Promise((r) => setTimeout(r, intervalMs));
+      await sleep(intervalMs, signal);
     }
     throw new Error(`Job timed out: ${path}`);
   }
@@ -364,6 +453,39 @@ class JobManager {
 }
 
 // ---- Stream parsing helpers -----------------------------------------------
+
+function withQuery(path, query) {
+  if (!query) return path;
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
+  const qs = q.toString();
+  return qs ? `${path}${path.includes("?") ? "&" : "?"}${qs}` : path;
+}
+
+function abortError() {
+  const e = new Error("Aborted");
+  e.name = "AbortError";
+  return e;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError();
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortError());
+    const t = setTimeout(() => {
+      signal?.removeEventListener?.("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(abortError());
+    };
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+  });
+}
 
 // Yields { event, data } objects from a Server-Sent Events body stream.
 async function* parseSSE(body) {

@@ -854,9 +854,10 @@ async function configRoutes(t) {
       else broke++;
     }
     // 52 since progression P2 added the four server-scoped xpReward* knobs;
-    // 25 local since mission-3d R1 added missionRenderer, which only a page reads.
+    // 27 local: missionRenderer (mission-3d R1), then scanlines + scanlineSpacing,
+    // which only the 3D view in a page reads.
     t.eq("config: a whole exported config applies its 52 server keys", applied, 52);
-    t.eq("config: ...drops the other 25", refused, 25);
+    t.eq("config: ...drops the other 27", refused, 27);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");
     t.eq("config: the server-scoped key it carried landed", after.values.healPerDay, 3);

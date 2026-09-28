@@ -460,6 +460,22 @@ section + the tests are the source of truth for what currently exists):
   `PROJECTILE_SHAPES`; skyline at real depth with fog anchored behind the play
   plane. Verified in headless Chromium (SwiftShader), never on a GPU — no
   performance number exists yet.
+- **Player2 Lab (`tech/player2-lab.md` L0–L4 — built):** `player2-lab.html` at
+  the repo root, linked from nothing in the game or the editor, runs every
+  Player2 generation modality — chat (multi-turn, streamed or whole), embeddings,
+  TTS (whole or streamed), STT (file, mic, or a TTS run), image generate/edit
+  (edit takes uploads or an earlier run's output), music, video (prompt, start
+  image, transform) and 3D (a GLB viewer) — and compares runs side by side. Model
+  choice lives in Player2's own interface, so a run shows the model the platform
+  reports, else the per-modality **model label** you typed, else "(not
+  reported)". Runs are session-only. `src/player2lab/modalities.js` is the
+  modality table as data (a modality = a row); `runs.js` (store, model-name rule,
+  diffs, joules attribution) and `audio.js` (WAV encoder) are DOM-free and tested;
+  `app.js` is the only module touching the DOM, the network or three, and no test
+  imports it. L0 added `call`/`chatStreamFull`/`sendBytes`/`openStream` and
+  `poll`'s `onTick`/`signal` to the client without changing any existing method.
+  The Lab reads `GAME_CLIENT_ID` from `src/player2/config.js`, never the game's
+  config, and has no schema knobs.
 - **Player2 is partially wired:** the Enemy Designer's Generate button uses
   `src/player2/client.js` chat completions (needs the app + a client id in the
   config `player2GameClientId`). Image gen and the rest remain unused — still
@@ -631,6 +647,9 @@ no process — but reach for it deliberately, not by habit.
   rules; calls state actions.
 - `src/player2/` — Player2 API client (`client.js`, `queue.js`). LLM + image
   generation gateway. **Exists but not yet wired** (see the two docs above).
+- `src/player2lab/` — the Player2 Lab page's modules (`player2-lab.html`). A
+  developer tool outside the game: imports nothing from `src/game/`,
+  `src/mission/`, `src/hub/`, `src/editor/` or `src/net/`.
 
 ## Conventions
 

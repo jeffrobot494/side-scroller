@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Player2 Lab — mockup</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c2027; --panel-2: #232831; --line: #2b313b;
+    --ink: #dfe4ea; --ink-2: #8b95a3; --ink-3: #5d6673;
+    --accent: #6f9ceb; --ok: #4fb783; --warn: #efc86b; --bad: #e07a5a;
+    --diff: rgba(239,200,107,.14);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-rows: 46px 1fr; height: 100vh; }
+
+  /* ── top bar ───────────────────────────────────────── */
+  .bar {
+    display: flex; align-items: center; gap: 18px; padding: 0 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .bar h1 { font-size: 13.5px; font-weight: 600; margin: 0; }
+  .stat { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12px; }
+  .stat b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .spacer { flex: 1; }
+  .pill {
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px;
+    font-size: 11.5px; color: var(--ink-2);
+  }
+  .pill.busy { border-color: #4a4230; color: var(--warn); }
+  .sample { font-size: 11px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-3); }
+
+  /* ── three columns ─────────────────────────────────── */
+  .body { display: grid; grid-template-columns: 170px 330px 1fr; min-height: 0; }
+  .rail, .form, .runs { min-height: 0; overflow: auto; }
+  .rail { background: var(--panel); border-right: 1px solid var(--line); padding: 10px 0; }
+  .lbl {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--ink-2); padding: 0 14px; margin: 10px 0 4px;
+  }
+  .mod {
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; background: none; border: 0; text-align: left;
+    padding: 6px 14px; cursor: pointer; color: var(--ink-2);
+    border-left: 2px solid transparent;
+  }
+  .mod:hover { color: var(--ink); background: var(--panel-2); }
+  .mod.on { color: var(--ink); background: var(--panel-2); border-left-color: var(--accent); }
+  .mod .n { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .mod .n.busy { color: var(--warn); }
+
+  /* ── input form ────────────────────────────────────── */
+  .form { border-right: 1px solid var(--line); padding: 14px; }
+  .form h2 { font-size: 13px; margin: 0 0 12px; font-weight: 600; }
+  .field { margin-bottom: 12px; }
+  .field > span { display: block; font-size: 11.5px; color: var(--ink-2); margin-bottom: 4px; }
+  .field textarea, .field input[type=text], .field input[type=number], .field select {
+    width: 100%; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 8px;
+  }
+  .field textarea { min-height: 84px; resize: vertical; }
+  .field.row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .range { display: flex; align-items: center; gap: 8px; }
+  .range input { flex: 1; accent-color: var(--accent); }
+  .range .v { width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+  .chk { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+  .chk input { accent-color: var(--accent); margin: 0; }
+  .drop {
+    border: 1px dashed var(--line); border-radius: 6px; padding: 14px;
+    text-align: center; color: var(--ink-3); font-size: 12px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip {
+    border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px;
+    font-size: 11.5px; color: var(--ink-2); background: var(--bg);
+  }
+  .chip.on { border-color: var(--accent); color: var(--ink); }
+  .run {
+    width: 100%; padding: 8px; border-radius: 6px; border: 0; cursor: pointer;
+    background: var(--accent); color: #0e1320; font-weight: 600;
+  }
+  .note { font-size: 11.5px; color: var(--ink-3); margin-top: 8px; }
+  .turn {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px; margin-bottom: 8px;
+    padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+  }
+  .turn select { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; font-size: 12px; justify-self: start; }
+  .turn .x { background: none; border: 0; color: var(--ink-3); cursor: pointer; font-size: 14px; }
+  .turn textarea { grid-column: 1 / -1; min-height: 44px; border: 0; padding: 2px; background: none; }
+
+  /* ── runs ──────────────────────────────────────────── */
+  .runs { padding: 14px; }
+  .runs-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .runs-head h2 { font-size: 13px; margin: 0; font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    background: none; border: 0; padding: 3px 11px; cursor: pointer;
+    color: var(--ink-2); font-size: 12px;
+  }
+  .seg button.on { background: var(--panel-2); color: var(--ink); }
+  .seg button:disabled { color: var(--ink-3); cursor: default; }
+  .ghost {
+    background: none; border: 1px solid var(--line); border-radius: 6px;
+    padding: 3px 10px; color: var(--ink-2); cursor: pointer; font-size: 12px;
+  }
+
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  .grid { display: grid; gap: 10px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .card.picked { border-color: var(--accent); }
+  .card-head {
+    display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+    border-bottom: 1px solid var(--line); font-size: 12px; color: var(--ink-2);
+  }
+  .card-head .id { color: var(--ink); font-weight: 600; }
+  .card-head .model { color: var(--ink); font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+  .card-head .model.lab { font-family: inherit; font-style: italic; font-size: 12px; }
+  .card-head .model.sent { color: var(--ink-2); }
+  .card-head .model.none { color: var(--ink-3); font-family: inherit; }
+  .card-head .model.differs { color: var(--warn); }
+  .src {
+    font-size: 11px; border: 1px solid var(--line); border-radius: 3px;
+    padding: 0 5px; color: var(--ink-3); white-space: nowrap;
+  }
+  .src.lab { border-style: dashed; color: var(--accent); }
+  .also { font-size: 11.5px; color: var(--ink-3); }
+  .also i { color: var(--accent); }
+  .meta { font-variant-numeric: tabular-nums; }
+  .card-body { padding: 10px; }
+  .inputs { font-size: 11.5px; color: var(--ink-2); margin-bottom: 8px; }
+  .inputs span { display: inline-block; margin-right: 10px; padding: 0 3px; border-radius: 3px; }
+  .inputs span.d { background: var(--diff); color: var(--warn); }
+  .card-foot { display: flex; gap: 6px; padding: 0 10px 10px; }
+  .out-text { white-space: pre-wrap; line-height: 1.55; }
+  .raw {
+    margin: 0 10px 10px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; font: 11.5px/1.5 ui-monospace, Consolas, monospace;
+    color: var(--ink-2); white-space: pre-wrap; display: none;
+  }
+  .card.open .raw { display: block; }
+  .raw b { color: var(--ink); font-weight: 600; }
+
+  .player { display: flex; align-items: center; gap: 10px; }
+  .play {
+    width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--panel-2); cursor: pointer; flex: none;
+  }
+  .wave { flex: 1; height: 36px; }
+  .media {
+    aspect-ratio: 1; width: 100%; max-width: 280px; border-radius: 6px;
+    border: 1px solid var(--line); display: block;
+  }
+  .progress { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+  .progress i { display: block; height: 100%; background: var(--warn); }
+  .err { color: var(--bad); }
+  .empty { color: var(--ink-3); padding: 30px 0; text-align: center; }
+
+  @media (max-width: 860px) {
+    .body { grid-template-columns: 1fr; }
+    .rail { display: flex; overflow-x: auto; padding: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+    .rail .lbl { display: none; }
+    .mod { width: auto; white-space: nowrap; border-left: 0; border-bottom: 2px solid transparent; }
+    .mod.on { border-bottom-color: var(--accent); }
+    .form { border-right: 0; border-bottom: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="bar">
+    <h1>Player2 Lab</h1>
+    <span class="stat"><i class="dot"></i> Connected via Player2 app</span>
+    <span class="stat">Balance <b>1,240 J</b> · Patron</span>
+    <span class="spacer"></span>
+    <span class="pill busy" id="jobs">2 jobs running</span>
+    <span class="sample">mockup · sample data</span>
+  </header>
+
+  <div class="body">
+    <nav class="rail" id="rail"></nav>
+    <section class="form" id="form"></section>
+    <section class="runs" id="runs"></section>
+  </div>
+</div>
+
+<script>
+// ── sample data: every value below is illustrative ──────────────────────
+const WAVE = (seed) => {
+  let s = seed, bars = "";
+  for (let i = 0; i < 64; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    const h = 6 + (s / 233280) * 26 * Math.sin(i / 64 * Math.PI);
+    bars += `<rect x="${i * 5}" y="${18 - h / 2}" width="3" height="${h}" rx="1" fill="#6f9ceb" opacity=".75"/>`;
+  }
+  return `<svg class="wave" viewBox="0 0 320 36" preserveAspectRatio="none">${bars}</svg>`;
+};
+const AUDIO = (seed, len) =>
+  `<div class="player"><button class="play" title="Play">▶</button>${WAVE(seed)}<span class="meta">${len}</span></div>`;
+const IMG = (a, b, label) => `<svg class="media" viewBox="0 0 100 100">
+  <defs><linearGradient id="g${a}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs>
+  <rect width="100" height="100" fill="url(#g${a})"/>
+  <text x="50" y="54" text-anchor="middle" font-size="6" fill="#fff" opacity=".7">${label}</text></svg>`;
+const CUBE = `<svg class="media" viewBox="0 0 100 100" style="background:#101216">
+  <g fill="none" stroke="#6f9ceb" stroke-width=".8">
+  <path d="M30 38 L55 28 L75 38 L50 48 Z"/><path d="M30 38 L30 68 L50 78 L50 48"/><path d="M75 38 L75 68 L50 78"/></g>
+  <text x="50" y="92" text-anchor="middle" font-size="5" fill="#8b95a3">drag to orbit · GLB</text></svg>`;
+const VIDEO = `<svg class="media" viewBox="0 0 160 90" style="aspect-ratio:16/9;max-width:320px;background:#101216">
+  <circle cx="80" cy="45" r="12" fill="none" stroke="#8b95a3"/><path d="M76 39 L86 45 L76 51 Z" fill="#8b95a3"/></svg>`;
+
+const MODS = [
+  { id: "chat", label: "Chat", group: "Text",
+    fields: [
+      { k: "turns", t: "turns", label: "Conversation", turns: [
+        ["system", "You are the Ops officer on an alien-invasion strategy game."],
+        ["user", "Brief me on tonight's lead in three sentences."],
+        ["assistant", "Contact at the Harlow silos. Two hostiles, lightly armored. Low risk."],
+        ["user", "What should I bring?"] ] },
+      { row: [{ k: "temperature", t: "range", label: "Temperature", min: 0, max: 2, step: .1, v: .8 },
+              { k: "max_tokens", t: "number", label: "Max tokens", v: 400 }] },
+      { row: [{ k: "json", t: "check", label: "JSON mode" }, { k: "stream", t: "check", label: "Stream", v: true }] },
+    ],
+    runs: [
+      { id: 4, rep: "llama-3.3-70b", label: "Llama 70B", ms: 2140, j: 1, inputs: { temperature: .8, max_tokens: 400, prompt: "same" },
+        out: `<div class="out-text">Contact reported at the grain silos east of Harlow. Two Husk signatures, possibly a Brood Mother below ground. Recommend a four-soldier squad with at least one shotgun.</div>` },
+      { id: 3, rep: "gpt-4.1-mini", ms: 1310, j: 1, inputs: { temperature: .8, max_tokens: 400, prompt: "same" },
+        out: `<div class="out-text">Commander, tonight's lead: movement at the Harlow silos. Scans show two hostiles, lightly armored. Low risk, moderate intel value — a good mission for green recruits.</div>` },
+      { id: 2, rep: "gpt-4.1-mini", ms: 1190, j: 1, inputs: { temperature: 1.4, max_tokens: 400, prompt: "same" },
+        out: `<div class="out-text">Harlow silos. Something's nesting in the grain. Bring fire.</div>` },
+    ] },
+  { id: "embed", label: "Embeddings", group: "Text",
+    fields: [
+      { k: "input", t: "textarea", label: "Input (one per line)", v: "Husk charger\nBrood mother\nRifle" },
+      { row: [{ k: "model", t: "text", label: "Model", v: "text-embedding-3-small" },
+              { k: "dimensions", t: "number", label: "Dimensions", v: 256 }] },
+    ],
+    runs: [] },
+  { id: "tts", label: "Text to speech", group: "Audio",
+    fields: [
+      { k: "text", t: "textarea", label: "Text", v: "Squad, move up. Contact on the left." },
+      { k: "voices", t: "chips", label: "Voice(s) — from the platform's voice list", opts: ["Aria", "Marcus", "Kai", "Nova", "Sable"], on: ["Marcus"] },
+      { row: [{ k: "speed", t: "range", label: "Speed", min: .5, max: 2, step: .1, v: 1 },
+              { k: "format", t: "select", label: "Format", opts: ["mp3", "wav", "opus", "flac", "ogg", "pcm"] }] },
+      { k: "instructions", t: "text", label: "Delivery instructions", v: "Tense, clipped, under fire" },
+      { k: "stream", t: "check", label: "Stream — plays as it arrives (mp3 / wav only; no provider reported)" },
+    ],
+    runs: [
+      { id: 14, voice: "Marcus", ms: 850, j: 1, tts: true, inputs: { voice: "Marcus", speed: 1, instructions: "none sent" },
+        out: AUDIO(7, "0:02.3") },
+      { id: 7, rep: "elevenlabs-flash", fidelity: "full", voice: "Marcus", ms: 880, j: 1, tts: true, inputs: { voice: "Marcus", speed: 1, instructions: "sent" },
+        out: AUDIO(3, "0:02.4") + `<div class="note">Delivery instructions: reached the provider</div>` },
+      { id: 6, rep: "kokoro", fidelity: "dropped", voice: "Marcus", ms: 910, j: 1, tts: true, inputs: { voice: "Marcus", speed: 1, instructions: "sent" },
+        out: AUDIO(11, "0:02.6") + `<div class="note">Delivery instructions: dropped — this provider has no style channel</div>` },
+    ] },
+  { id: "stt", label: "Speech to text", group: "Audio",
+    fields: [
+      { k: "audio", t: "drop", label: "Audio", v: "Drop a file, or ● Record from mic" },
+      { row: [{ k: "language", t: "select", label: "Language", opts: ["en-US", "multi", "en-GB", "es", "fr", "de", "ja"] },
+              { k: "encoding", t: "select", label: "Encoding", opts: ["auto from file", "wav", "mp3", "linear16", "opus", "flac"] }] },
+    ],
+    runs: [
+      { id: 8, ms: 640, j: 1, inputs: { language: "en-US", source: "run #7" },
+        out: `<div class="out-text">"Squad, move up. Contact on the left."</div><div class="note">confidence 0.97 · 2.4s · 7 words</div>` },
+    ] },
+  { id: "img", label: "Image generate", group: "Image",
+    fields: [
+      { k: "prompt", t: "textarea", label: "Prompt", v: "Side-view pixel art alien husk, 16-bit, transparent background" },
+      { row: [{ k: "width", t: "number", label: "Width", v: 1024 }, { k: "height", t: "number", label: "Height", v: 1024 }] },
+    ],
+    runs: [
+      { id: 10, label: "Seedream", ms: 7400, j: 5, inputs: { prompt: "same", size: "1024²" }, out: IMG("#3a2f5c", "#2f7d6b", "image · run 10") },
+      { id: 9, label: "Nano Banana", ms: 6900, j: 5, inputs: { prompt: "same", size: "1024²" }, out: IMG("#5c3a2f", "#6b2f7d", "image · run 9") },
+    ] },
+  { id: "edit", label: "Image edit", group: "Image",
+    fields: [
+      { k: "prompt", t: "textarea", label: "Prompt", v: "Add a glowing weak point on its back" },
+      { k: "images", t: "drop", label: "Source image(s)", v: "Drop images, or use → Image edit on an image run" },
+      { k: "aspect", t: "select", label: "Aspect ratio", opts: ["none (use size)", "1:1", "16:9", "4:3", "3:2", "21:9"] },
+    ],
+    runs: [] },
+  { id: "video", label: "Video", group: "Video",
+    fields: [
+      { k: "mode", t: "select", label: "Mode", opts: ["From prompt", "From image", "Transform image (edit + video)"] },
+      { k: "prompt", t: "textarea", label: "Prompt", v: "The husk lurches forward, dust rising" },
+      { k: "aspect", t: "select", label: "Aspect ratio", opts: ["1:1", "16:9", "9:16", "4:3", "3:4"] },
+    ],
+    runs: [
+      { id: 11, job: { status: "processing", pct: 40, t: "2m 05s" }, inputs: { mode: "from prompt", aspect: "16:9" }, out: VIDEO },
+    ] },
+  { id: "music", label: "Music", group: "Audio",
+    fields: [
+      { k: "prompt", t: "textarea", label: "Prompt", v: "Tense synth pulse for a night mission, 110 bpm" },
+      { row: [{ k: "duration", t: "number", label: "Duration (s)", v: 30 }, { k: "inst", t: "check", label: "Instrumental", v: true }] },
+    ],
+    runs: [
+      { id: 5, ms: 48000, j: 20, inputs: { duration: 30, instrumental: "yes" }, out: AUDIO(21, "0:30.0") },
+    ] },
+  { id: "3d", label: "3D", group: "3D",
+    fields: [
+      { k: "mode", t: "select", label: "Source", opts: ["From prompt", "From image"] },
+      { k: "prompt", t: "textarea", label: "Prompt", v: "Low-poly alien husk, game-ready" },
+    ],
+    runs: [
+      { id: 13, label: "account default", job: { status: "processing", pct: 70, t: "1m 12s" }, inputs: { source: "prompt" }, out: CUBE },
+      { id: 12, label: "account default", ms: 94000, j: 30, inputs: { source: "prompt" }, out: CUBE },
+      { id: 1, err: "failed: out of credits", inputs: { source: "image" } },
+    ] },
+];
+
+// ── state ───────────────────────────────────────────────────────────────
+let cur = "chat", view = "list";
+// Per-modality model label: models are selected per modality in Player2's own interface.
+const labels = { chat: "Llama 70B", img: "Nano Banana", "3d": "account default" };
+const REPORTS = {
+  chat: "The platform reports the model for chat. Your label is shown beside it.",
+  embed: "The platform reports the model for embeddings. Your label is shown beside it.",
+  tts: "The platform reports the provider only when delivery instructions are sent.",
+};
+
+// What the card names as the model, and where that name came from.
+function ident(r) {
+  if (r.rep) return { text: r.rep, cls: "", tag: r.tts ? "reported provider" : "reported" };
+  if (r.label) return { text: r.label, cls: "lab", tag: "your label", lab: true };
+  if (r.voice) return { text: "voice: " + r.voice, cls: "sent", tag: "voice sent · no provider reported" };
+  return { text: "(not reported)", cls: "none", tag: "" };
+}
+const picked = new Set([3, 4]);
+const open = new Set();
+
+const $ = (id) => document.getElementById(id);
+
+function rail() {
+  let html = "", last = "";
+  for (const m of MODS) {
+    if (m.group !== last) { html += `<div class="lbl">${m.group}</div>`; last = m.group; }
+    const busy = m.runs.some((r) => r.job);
+    html += `<button class="mod ${m.id === cur ? "on" : ""}" data-m="${m.id}">${m.label}
+      <span class="n ${busy ? "busy" : ""}">${busy ? "●" : ""} ${m.runs.length || ""}</span></button>`;
+  }
+  $("rail").innerHTML = html;
+}
+
+function field(f) {
+  if (f.row) return `<div class="field row">${f.row.map(field).join("")}</div>`;
+  const L = `<span>${f.label}</span>`;
+  switch (f.t) {
+    case "textarea": return `<label class="field">${L}<textarea>${f.v || ""}</textarea></label>`;
+    case "text": return `<label class="field">${L}<input type="text" value="${f.v || ""}"></label>`;
+    case "number": return `<label class="field">${L}<input type="number" value="${f.v}"></label>`;
+    case "select": return `<label class="field">${L}<select>${f.opts.map((o) => `<option>${o}</option>`).join("")}</select></label>`;
+    case "range": return `<label class="field">${L}<div class="range"><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${f.v}"
+      oninput="this.nextElementSibling.textContent=this.value"><span class="v">${f.v}</span></div></label>`;
+    case "check": return `<label class="field chk"><input type="checkbox" ${f.v ? "checked" : ""}> ${f.label}</label>`;
+    case "turns": return `<div class="field">${L}${f.turns.map(([role, text]) => `<div class="turn">
+      <select><option ${role === "system" ? "selected" : ""}>system</option><option ${role === "user" ? "selected" : ""}>user</option><option ${role === "assistant" ? "selected" : ""}>assistant</option></select>
+      <button class="x" title="Remove turn">×</button><textarea>${text}</textarea></div>`).join("")}
+      <button class="ghost">+ Add turn</button></div>`;
+    case "drop": return `<div class="field">${L}<div class="drop">${f.v}</div></div>`;
+    case "chips": return `<div class="field">${L}<div class="chips">${f.opts.map((o) =>
+      `<span class="chip ${f.on.includes(o) ? "on" : ""}">${o}</span>`).join("")}</div></div>`;
+  }
+}
+
+function form() {
+  const m = MODS.find((x) => x.id === cur);
+  $("form").innerHTML = `<h2>${m.label}</h2>${m.fields.map(field).join("")}
+    <label class="field"><span>Model label (optional) — what you have selected in Player2 for ${m.label}. Stamped on every run until you change it.</span>
+      <input type="text" placeholder="e.g. Seedream" value="${labels[cur] || ""}"></label>
+    <div class="note" style="margin:-6px 0 12px">${REPORTS[cur] || "The platform doesn't report a model for " + m.label + ". Without a label, runs show “(not reported)”."}</div>
+    <button class="run">Run</button>
+    <div class="note">Runs use whatever model your Player2 account has selected. Change it there, update the label, run again.</div>`;
+}
+
+function card(r, compare, diffKeys) {
+  const id = ident(r);
+  const meta = r.job ? `<span class="meta" style="color:var(--warn)">${r.job.status} · ${r.job.t}</span>`
+    : r.err ? `<span class="meta err">${r.err}</span>`
+    : `<span class="meta">${(r.ms / 1000).toFixed(1)}s · ${r.j} J</span>`;
+  const inputs = Object.entries(r.inputs || {}).map(([k, v]) =>
+    `<span class="${diffKeys.has(k) ? "d" : ""}">${k}: ${v}</span>`).join("");
+  const body = r.err ? "" : r.job
+    ? `<div class="progress"><i style="width:${r.job.pct}%"></i></div><div class="note">Polling… other runs are not blocked.</div>`
+    : r.out;
+  const foot = compare ? "" : `<div class="card-foot">
+      <label class="chk" style="margin-right:auto"><input type="checkbox" data-pick="${r.id}" ${picked.has(r.id) ? "checked" : ""}> Compare</label>
+      <button class="ghost" data-open="${r.id}">${open.has(r.id) ? "Hide raw" : "Raw"}</button>
+      <button class="ghost">Rerun</button>
+      ${r.tts ? `<button class="ghost">→ Speech to text</button>` : ""}
+      ${cur === "chat" ? `<button class="ghost">Continue</button>` : ""}
+      ${cur === "img" || cur === "edit" ? `<button class="ghost">→ Image edit</button>` : ""}
+    </div>`;
+  const raw = `<div class="raw"><b>request</b>  POST … ${JSON.stringify(r.inputs)}
+<b>response</b> 200 · ${r.ms || "—"} ms · ${r.rep
+    ? (r.tts ? `{ "style_outcome": { "provider": "${r.rep}", "fidelity": "${r.fidelity}" }, "data": "…" }` : `{ "model": "${r.rep}", … }`)
+    : "{ … no model field … }"}${r.label ? `\n<b>your label</b> ${r.label}` : ""}</div>`;
+  return `<div class="card ${picked.has(r.id) && !compare ? "picked" : ""} ${open.has(r.id) ? "open" : ""}">
+    <div class="card-head"><span class="id">#${r.id}</span><span class="model ${id.cls} ${diffKeys.has("model") ? "differs" : ""}">${id.text}</span>${id.tag ? `<span class="src ${id.lab ? "lab" : ""}">${id.tag}</span>` : ""}${r.rep && r.label ? `<span class="also">· <i>${r.label}</i></span>` : ""}<span class="spacer"></span>${meta}</div>
+    <div class="card-body"><div class="inputs">${inputs}</div>${body}</div>${foot}${raw}</div>`;
+}
+
+function runs() {
+  const m = MODS.find((x) => x.id === cur);
+  const sel = m.runs.filter((r) => picked.has(r.id));
+  const canCompare = sel.length >= 2;
+  if (!canCompare && view === "compare") view = "list";
+
+  // In compare view, inputs that differ between the picked runs are highlighted.
+  const diffKeys = new Set();
+  if (view === "compare") {
+    const keys = new Set(sel.flatMap((r) => Object.keys(r.inputs)));
+    for (const k of keys) if (new Set(sel.map((r) => String(r.inputs[k]))).size > 1) diffKeys.add(k);
+    if (new Set(sel.map((r) => ident(r).text)).size > 1) diffKeys.add("model");
+  }
+
+  const head = `<div class="runs-head"><h2>Runs</h2>
+    <div class="seg"><button data-v="list" class="${view === "list" ? "on" : ""}">List</button>
+    <button data-v="compare" class="${view === "compare" ? "on" : ""}" ${canCompare ? "" : "disabled"}>Compare (${sel.length})</button></div>
+    <span class="spacer" style="flex:1"></span>
+    <span class="note" style="margin:0">Session only — cleared on reload</span>
+    <button class="ghost">Clear</button></div>`;
+
+  let html;
+  if (!m.runs.length) html = `<div class="empty">No runs yet for ${m.label}.</div>`;
+  else if (view === "compare") {
+    html = `${diffKeys.has("model") ? `<div class="note" style="margin:0 0 10px;color:var(--warn)">Model differs between these runs.</div>` : ""}
+      <div class="grid" style="grid-template-columns:repeat(${sel.length},minmax(0,1fr))">${sel.map((r) => card(r, true, diffKeys)).join("")}</div>`;
+  } else html = `<div class="list">${m.runs.map((r) => card(r, false, diffKeys)).join("")}</div>`;
+  $("runs").innerHTML = head + html;
+}
+
+function render() { rail(); form(); runs(); }
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-m],[data-v],[data-open]");
+  if (!t) return;
+  if (t.dataset.m) { cur = t.dataset.m; view = "list"; render(); }
+  if (t.dataset.v && !t.disabled) { view = t.dataset.v; runs(); }
+  if (t.dataset.open) { const id = +t.dataset.open; open.has(id) ? open.delete(id) : open.add(id); runs(); }
+});
+document.addEventListener("change", (e) => {
+  const id = e.target.dataset.pick;
+  if (!id) return;
+  picked.has(+id) ? picked.delete(+id) : picked.add(+id);
+  runs();
+});
+
+render();
+</script>
+</body>
+</html>
