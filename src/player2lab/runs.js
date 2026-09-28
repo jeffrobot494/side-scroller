@@ -61,10 +61,23 @@ export function diffKeys(runs) {
   if (runs.length < 2) return out;
   const keys = new Set(runs.flatMap((r) => Object.keys(r.values || {})));
   for (const k of keys) {
-    if (new Set(runs.map((r) => JSON.stringify(r.values?.[k] ?? null))).size > 1) out.add(k);
+    if (new Set(runs.map((r) => valueKey(r.values?.[k] ?? null))).size > 1) out.add(k);
   }
   if (new Set(runs.map((r) => ident(r).text)).size > 1) out.add("model");
   return out;
+}
+
+// A comparable key for a value. Byte arrays (audio, images) are keyed by
+// length and a sampled hash rather than serialised whole.
+export function valueKey(value) {
+  return JSON.stringify(value, (_, v) => (v instanceof Uint8Array ? `bytes:${v.length}:${sampleHash(v)}` : v));
+}
+
+function sampleHash(bytes) {
+  let h = 2166136261;
+  const step = Math.max(1, Math.floor(bytes.length / 4096));
+  for (let i = 0; i < bytes.length; i += step) h = Math.imul(h ^ bytes[i], 16777619);
+  return (h >>> 0).toString(36);
 }
 
 // Joules per run is a balance difference, and only attributable when nothing

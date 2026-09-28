@@ -3,7 +3,8 @@
 // poll that the game relies on and nothing else pinned.
 import { Player2Client, RateLimitError, InsufficientCreditsError } from "../src/player2/client.js";
 import { MODALITIES, MODALITY_BY_ID, defaultValues, flatFields } from "../src/player2lab/modalities.js";
-import { createRunStore, createJoulesLedger, ident, diffKeys, shortenForRaw, formatMs } from "../src/player2lab/runs.js";
+import { createRunStore, createJoulesLedger, ident, diffKeys, valueKey, shortenForRaw, formatMs } from "../src/player2lab/runs.js";
+import { encodeWav, pcmToWav, toMono, decodeToWav, guessEncoding, base64ToBytes, concatBytes } from "../src/player2lab/audio.js";
 
 // A fetch stub: routes are matched in order by a predicate on (url, init).
 function stubFetch(routes) {
@@ -296,5 +297,96 @@ export default async function run(t) {
     t.ok("raw: long vectors shortened", r.vec.includes("100 numbers"));
     t.ok("raw: nested", r.nested[0].image.includes("base64"));
     t.eq("formatMs", [formatMs(1234), formatMs(125000), formatMs(undefined)], ["1.2s", "2m 05s", "—"]);
+  }
+
+  // ---- L2: audio bytes -------------------------------------------------------
+  {
+    const wav = encodeWav(new Float32Array([0, 1, -1, 0.5, 2]), 16000);
+    const dv = new DataView(wav.buffer);
+    const tag = (o) => String.fromCharCode(...wav.slice(o, o + 4));
+    t.eq("wav: RIFF/WAVE/fmt/data tags", [tag(0), tag(8), tag(12), tag(36)], ["RIFF", "WAVE", "fmt ", "data"]);
+    t.eq("wav: PCM mono 16-bit at the given rate", [dv.getUint16(20, true), dv.getUint16(22, true), dv.getUint32(24, true), dv.getUint16(34, true)], [1, 1, 16000, 16]);
+    t.eq("wav: sizes", [wav.length, dv.getUint32(4, true), dv.getUint32(40, true)], [54, 46, 10]);
+    t.eq("wav: samples clamped and scaled", [1, 2, 3, 4, 5].map((i) => dv.getInt16(42 + i * 2, true)), [0, 32767, -32768, 16383, 32767]);
+    const pcm = new Uint8Array(new Int16Array([0, 16384, -16384]).buffer);
+    const pw = pcmToWav(pcm, 24000);
+    const pdv = new DataView(pw.buffer);
+    t.eq("pcm: wrapped at its rate, samples kept", [pdv.getUint32(24, true), pdv.getInt16(46, true), pdv.getInt16(48, true)], [24000, 16383, -16384]);
+    t.eq("mono: channels averaged", Array.from(toMono([new Float32Array([1, 0]), new Float32Array([0, 1])])), [0.5, 0.5]);
+    const ctx = {
+      decodeAudioData: async (buf) => ({
+        numberOfChannels: 2, sampleRate: 16000, duration: 0.25,
+        getChannelData: (c) => new Float32Array(4000).fill(c ? 0.5 : 0),
+        _len: buf.byteLength,
+      }),
+    };
+    const src = new Uint8Array([1, 2, 3]);
+    const dec = await decodeToWav(src, ctx);
+    t.eq("decodeToWav: mono WAV at the context rate", [dec.sampleRate, dec.seconds, dec.wav.length], [16000, 0.25, 44 + 8000]);
+    t.eq("decodeToWav: input not detached", src.length, 3);
+    t.eq("guessEncoding", [guessEncoding("a.MP3"), guessEncoding("x.webm"), guessEncoding("y", "audio/wav"), guessEncoding("z.m4a"), guessEncoding("q", "video/x")], ["mp3", "opus", "wav", "mp4", null]);
+    t.eq("base64ToBytes, data URI too", [Array.from(base64ToBytes("AQID")), Array.from(base64ToBytes("data:audio/mpeg;base64,AQID"))], [[1, 2, 3], [1, 2, 3]]);
+    t.eq("concatBytes", Array.from(concatBytes([new Uint8Array([1]), new Uint8Array([2, 3])])), [1, 2, 3]);
+  }
+
+  // ---- L2: TTS and STT rows --------------------------------------------------
+  {
+    const tts = MODALITY_BY_ID.tts;
+    const v = defaultValues(tts);
+    let err = null;
+    try { tts.request(v); } catch (e) { err = e; }
+    t.ok("tts: empty text refused", err && /empty/.test(err.message));
+    v.text = " Move up. ";
+    const bare = tts.request(v);
+    t.eq("tts: whole, no voices or instructions", [bare.kind, bare.path, bare.body], ["json", "/tts/speak", { text: "Move up.", speed: 1, audio_format: "mp3" }]);
+    v.voices = [{ id: "a", name: "Aria" }, { id: "m", name: "Marcus" }];
+    v.instructions = "Tense";
+    v.stream = true;
+    const st = tts.request(v);
+    t.eq("tts: stream path, voice ids, instructions", [st.kind, st.path, st.body.voice_ids, st.body.advanced_voice.instructions], ["tts-stream", "/tts/stream", ["a", "m"], "Tense"]);
+    v.format = "ogg";
+    err = null;
+    try { tts.request(v); } catch (e) { err = e; }
+    t.ok("tts: stream refuses formats other than mp3/wav", err && /mp3 and wav/.test(err.message));
+    v.stream = false;
+    t.eq("tts: voice sent names the mix", tts.voiceSent(v), "Aria + Marcus");
+    t.eq("tts: reports a provider", tts.reportedKind, "provider");
+    const out = tts.output({ data: "AQID", style_outcome: { provider: "kokoro", fidelity: "dropped" } }, v);
+    t.eq("tts: output bytes, mime, fidelity", [Array.from(out.bytes), out.mime, out.instructions], [[1, 2, 3], "audio/ogg", "dropped"]);
+    t.eq("tts: reported provider", tts.reported({ style_outcome: { provider: "kokoro" } }), "kokoro");
+    t.eq("tts: nothing reported without style_outcome", tts.reported({ data: "" }), null);
+    v.format = "mp3";
+    const so = tts.output({ _streamBytes: new Uint8Array([9]), _playback: "progressive", _ttfb: 120 }, v);
+    t.eq("tts: streamed output", [so.streamed, so.playback, so.ttfb, so.instructions], [true, "progressive", 120, "not reported"]);
+    v.format = "pcm";
+    v.instructions = "";
+    const po = tts.output({ data: "AAAAAA==" }, v);
+    t.ok("tts: pcm becomes playable WAV, no instructions note", po.mime === "audio/wav" && po.bytes.length === 44 + 4 && !("instructions" in po));
+    t.ok("tts: summary keys are value keys", Object.keys(tts.summary(v)).every((k) => k in v));
+  }
+  {
+    const stt = MODALITY_BY_ID.stt;
+    const v = defaultValues(stt);
+    let err = null;
+    try { stt.request(v); } catch (e) { err = e; }
+    t.ok("stt: no audio refused", err && /No audio/.test(err.message));
+    v.audio = { source: "run #3", name: "run-3.mp3", bytes: new Uint8Array(100), encoding: "wav", sampleRate: 16000, seconds: 1.5, reencoded: true };
+    const req = stt.request(v);
+    t.eq("stt: raw bytes with encoding/rate/language query", [req.kind, req.path, req.bytes.length, req.query], ["bytes", "/stt/audio", 100, { encoding: "wav", sample_rate: 16000, language: "en-US" }]);
+    t.ok("stt: Raw describes the WAV sent and its source", req.body.body.includes("re-encoded from run #3"));
+    v.audio = { source: "clip.xyz", name: "clip.xyz", bytes: new Uint8Array(5), encoding: null, reencoded: false };
+    err = null;
+    try { stt.request(v); } catch (e) { err = e; }
+    t.ok("stt: undecodable with no guess refused", err && /could not decode/.test(err.message));
+    const out = stt.output({ transcript: "hi", confidence: 0.9, duration: 1, words: [{ word: "hi" }] });
+    t.eq("stt: output", [out.type, out.transcript, out.words.length], ["transcript", "hi", 1]);
+    t.eq("stt: reports nothing", stt.reported, undefined);
+  }
+  {
+    const a = { values: { audio: { bytes: new Uint8Array(5000).fill(1) } } };
+    const b = { values: { audio: { bytes: new Uint8Array(5000).fill(2) } } };
+    t.ok("valueKey: bytes keyed without serialising them", valueKey(a.values).length < 80);
+    t.ok("diff: different audio differs", diffKeys([a, b]).has("audio"));
+    t.eq("diff: same audio does not", diffKeys([a, { values: { audio: { bytes: new Uint8Array(5000).fill(1) } } }]).size, 0);
   }
 }

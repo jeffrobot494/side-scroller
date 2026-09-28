@@ -9,6 +9,7 @@ import { Player2Client } from "../player2/client.js";
 import { GAME_CLIENT_ID } from "../player2/config.js";
 import { MODALITIES, MODALITY_BY_ID, ROLES, LAB, defaultValues, flatFields } from "./modalities.js";
 import { createRunStore, createJoulesLedger, ident, diffKeys, shortenForRaw, formatMs } from "./runs.js";
+import { decodeToWav, guessEncoding, concatBytes } from "./audio.js";
 
 const client = new Player2Client({ gameClientId: GAME_CLIENT_ID });
 const store = createRunStore();
@@ -26,7 +27,16 @@ const state = {
   formError: "",
   picked: new Set(),
   open: new Set(),
+  voices: null, // /tts/voices, loaded on connect
+  voicesError: "",
+  voiceFilter: "",
+  audioBusy: false, // an STT clip is being decoded
+  recorder: null, // { rec, chunks, stream } while the mic records
 };
+
+// Media elements live outside the cards, one per run, and are moved into a
+// card's slot on render — so re-rendering a card never restarts playback.
+const media = new Map(); // run id -> HTMLMediaElement
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -41,6 +51,7 @@ async function connect() {
   try {
     await client.authenticate();
     state.conn = "on";
+    loadVoices();
     await refreshBalance();
   } catch (e) {
     state.conn = "off";
@@ -57,6 +68,17 @@ async function refreshBalance() {
   return state.balance;
 }
 
+async function loadVoices() {
+  try {
+    const res = await client.call("/tts/voices");
+    state.voices = (res?.voices || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    state.voicesError = "";
+  } catch (e) {
+    state.voicesError = e.message;
+  }
+  if (state.cur === "tts") form();
+}
+
 // ── running ────────────────────────────────────────────────────────────────
 
 async function execute(m, values) {
@@ -68,12 +90,17 @@ async function execute(m, values) {
     form();
     return;
   }
-  state.formError = "";
+  if (state.formError) {
+    state.formError = "";
+    form();
+  }
   const run = store.add({
     mod: m.id,
     values: structuredClone(values),
     summary: m.summary(values),
     label: (state.labels[m.id] || "").trim(),
+    voice: m.voiceSent?.(values) || "",
+    reportedKind: m.reportedKind || "",
     request,
     startedAt: performance.now(),
   });
@@ -89,6 +116,8 @@ async function execute(m, values) {
       reported: m.reported?.(response) || null,
       ms: performance.now() - run.startedAt,
     });
+    // A streamed run that could not play progressively plays once complete.
+    if (response?._playback === "at end") mediaFor(store.get(run.id))?.play().catch(() => {});
   } catch (e) {
     store.update(run.id, { status: "failed", error: e.message || String(e), ms: performance.now() - run.startedAt });
   }
@@ -112,7 +141,133 @@ async function send(req, run) {
     // Assembled so the chat row's output/reported read it like a whole reply.
     return { model, choices: [{ message: { role: "assistant", content } }], _assembledFromStream: true };
   }
+  if (req.kind === "tts-stream") return streamTts(req, run);
+  if (req.kind === "bytes") return client.sendBytes(req.path, req.bytes, { query: req.query });
   return client.call(req.path, { method: req.method, body: req.body });
+}
+
+// Streamed TTS: mp3 plays as it arrives through MediaSource; anything else
+// (wav, or no mp3 MediaSource) plays once the last byte lands.
+async function streamTts(req, run) {
+  const res = await client.openStream(req.path, req.body);
+  const progressive = req.body.audio_format === "mp3" && Boolean(globalThis.MediaSource?.isTypeSupported?.("audio/mpeg"));
+  let sb = null;
+  let ms = null;
+  if (progressive) {
+    ms = new MediaSource();
+    const el = makeAudio(URL.createObjectURL(ms));
+    media.set(run.id, el);
+    await new Promise((r) => ms.addEventListener("sourceopen", r, { once: true }));
+    sb = ms.addSourceBuffer("audio/mpeg");
+  }
+  const append = (chunk) =>
+    new Promise((resolve, reject) => {
+      sb.addEventListener("updateend", resolve, { once: true });
+      sb.addEventListener("error", reject, { once: true });
+      sb.appendBuffer(chunk);
+    });
+  const chunks = [];
+  let ttfb = null;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value?.length) continue;
+    chunks.push(value);
+    if (ttfb === null) {
+      ttfb = performance.now() - run.startedAt;
+      store.update(run.id, { ttfb, live: progressive });
+    }
+    if (progressive) {
+      await append(value);
+      if (chunks.length === 1) media.get(run.id).play().catch(() => {});
+    }
+  }
+  if (progressive && ms.readyState === "open") ms.endOfStream();
+  return { _streamBytes: concatBytes(chunks), _playback: progressive ? "progressive" : "at end", _ttfb: ttfb };
+}
+
+function makeAudio(src) {
+  const el = document.createElement("audio");
+  el.controls = true;
+  el.preload = "metadata";
+  el.src = src;
+  return el;
+}
+
+// The run's media element, made from its output bytes on first need.
+function mediaFor(r) {
+  if (media.has(r.id)) return media.get(r.id);
+  const o = r.output;
+  if (!o?.bytes) return null;
+  const el = makeAudio(URL.createObjectURL(new Blob([o.bytes], { type: o.mime })));
+  media.set(r.id, el);
+  return el;
+}
+
+function mountMedia(root) {
+  for (const slot of root.querySelectorAll("[data-media]")) {
+    const r = store.get(+slot.dataset.media);
+    const el = r && mediaFor(r);
+    if (el && el.parentNode !== slot) slot.appendChild(el);
+  }
+}
+
+// ── STT input: every clip is decoded and re-encoded as mono WAV ─────────────
+
+async function prepareClip(bytes, name, mime, source) {
+  state.audioBusy = true;
+  if (state.cur === "stt") form();
+  let clip;
+  try {
+    const ctx = new OfflineAudioContext(1, 1, LAB.sttRate);
+    const { wav, sampleRate, seconds } = await decodeToWav(bytes, ctx);
+    clip = { source, name, bytes: wav, encoding: "wav", sampleRate, seconds, reencoded: true, mime: "audio/wav" };
+  } catch {
+    // Not decodable here: send it as supplied, encoding guessed from the name.
+    clip = { source, name, bytes, encoding: guessEncoding(name, mime), reencoded: false, mime };
+  }
+  state.values.stt.audio = clip;
+  state.audioBusy = false;
+  state.formError = "";
+  if (state.cur === "stt") form();
+}
+
+async function toggleRecording() {
+  if (state.recorder) {
+    state.recorder.rec.stop();
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const rec = new MediaRecorder(stream);
+    const chunks = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      state.recorder = null;
+      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+      await prepareClip(new Uint8Array(await blob.arrayBuffer()), "mic.webm", blob.type, "mic recording");
+    };
+    rec.start();
+    state.recorder = { rec, chunks, stream };
+  } catch (e) {
+    state.formError = `Mic unavailable: ${e.message}`;
+  }
+  form();
+}
+
+async function takeFile(file) {
+  if (!file) return;
+  await prepareClip(new Uint8Array(await file.arrayBuffer()), file.name, file.type, file.name);
+}
+
+// → Speech to text: a TTS run's audio becomes the STT input.
+function sendToStt(r) {
+  state.cur = "stt";
+  state.view = "list";
+  render();
+  prepareClip(r.output.bytes, `run-${r.id}.${r.output.format}`, r.output.mime, `run #${r.id}`);
 }
 
 // ── top bar + rail ─────────────────────────────────────────────────────────
@@ -179,8 +334,38 @@ function field(f, v) {
         )
         .join("")}
         <button class="ghost" data-turn-add>+ Add turn</button></div>`;
+    case "voices":
+      return `<div class="field">${L}<div class="chips" style="margin-bottom:6px">${
+        (val || []).map((x) => `<span class="chip on">${esc(x.name)} <button class="x-in" data-voice-x="${esc(x.id)}" title="Remove">×</button></span>`).join("") ||
+        `<span class="note" style="margin:0">None picked — the platform's default voice</span>`
+      }</div>${
+        state.voices
+          ? `<input type="text" data-voice-filter placeholder="Filter ${state.voices.length} voices by name, language or gender" value="${esc(state.voiceFilter)}">
+             <div class="voice-list" id="voice-list">${voiceList(val)}</div>`
+          : `<div class="note" style="margin:0">${state.voicesError ? `Voice list unavailable: ${esc(state.voicesError)}` : "Loading the voice list…"}</div>`
+      }</div>`;
+    case "audio": {
+      const rec = state.recorder;
+      return `<div class="field">${L}<div class="drop" data-drop>
+          ${state.audioBusy ? "Decoding…" : val ? `<b>${esc(val.source)}</b>${val.seconds ? ` · ${val.seconds.toFixed(1)}s` : ""} · ${
+            val.reencoded ? `re-encoded to WAV ${val.sampleRate} Hz` : val.encoding ? `sent as supplied (${esc(val.encoding)})` : "format unknown"
+          }` : "Drop an audio file here"}
+          <div class="drop-actions"><label class="ghost">Choose file<input type="file" accept="audio/*" data-audio-file hidden></label>
+          <button class="ghost ${rec ? "rec" : ""}" data-record>${rec ? "■ Stop recording" : "● Record from mic"}</button></div>
+        </div>${val ? `<div class="clip" id="clip-slot"></div>` : ""}</div>`;
+    }
   }
   return "";
+}
+
+function voiceList(picked) {
+  const q = state.voiceFilter.trim().toLowerCase();
+  const on = new Set((picked || []).map((x) => x.id));
+  const list = state.voices.filter((x) => !on.has(x.id) && (!q || `${x.name} ${x.language} ${x.gender}`.toLowerCase().includes(q)));
+  if (!list.length) return `<span class="note" style="margin:0">No match.</span>`;
+  return list
+    .map((x) => `<button class="chip" data-voice-add="${esc(x.id)}" title="${esc(x.language)} · ${esc(x.gender)}">${esc(x.name)} <i>${esc(x.language)}</i></button>`)
+    .join("");
 }
 
 function form() {
@@ -193,6 +378,9 @@ function form() {
     <button class="run" data-run ${state.conn === "on" ? "" : "disabled"}>Run</button>
     ${state.formError ? `<div class="form-err">${esc(state.formError)}</div>` : ""}
     <div class="note">Runs use whatever model your Player2 account has selected. Change it there, update the label, run again.</div>`;
+  const clipSlot = $("clip-slot");
+  const clip = v.audio;
+  if (clipSlot && clip?.bytes) clipSlot.appendChild(makeAudio(URL.createObjectURL(new Blob([clip.bytes], { type: clip.mime }))));
 }
 
 // ── run cards ──────────────────────────────────────────────────────────────
@@ -201,6 +389,8 @@ function outputHtml(r) {
   if (r.status === "failed") return `<div class="err">${esc(r.error)}</div>`;
   if (r.status === "running") {
     if (r.partial) return `<div class="out-text caret">${esc(r.partial)}</div>`;
+    if (r.live) return `<div class="media-slot" data-media="${r.id}"></div><div class="note">Streaming · first audio after ${formatMs(r.ttfb)}</div>`;
+    if (r.ttfb != null) return `<div class="note" style="margin:0">Receiving audio · first byte after ${formatMs(r.ttfb)}</div>`;
     return `<div class="note" style="margin:0">Running…</div>`;
   }
   const o = r.output || {};
@@ -213,6 +403,30 @@ function outputHtml(r) {
       return o.vectors
         .map((x) => `<div class="vec"><b>${x.length}</b> dims · “${esc(x.text)}” · [${x.head.map((n) => Number(n).toFixed(4)).join(", ")}${x.length > x.head.length ? ", …" : ""}]</div>`)
         .join("");
+    case "audio": {
+      const notes = [];
+      if (o.streamed) notes.push(`streamed · first audio after ${formatMs(o.ttfb)} · ${o.playback === "progressive" ? "played as it arrived" : "played once complete"}`);
+      if (o.instructions) {
+        notes.push(
+          {
+            full: "Delivery instructions: reached the provider",
+            dropped: "Delivery instructions: dropped — this provider has no style channel",
+          }[o.instructions] || "Delivery instructions: sent; the outcome was not reported",
+        );
+      }
+      return `<div class="media-slot" data-media="${r.id}"></div>${notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}`;
+    }
+    case "transcript": {
+      const bits = [];
+      if (typeof o.confidence === "number") bits.push(`confidence ${o.confidence.toFixed(2)}`);
+      if (typeof o.duration === "number") bits.push(`${o.duration.toFixed(1)}s`);
+      bits.push(`${o.words.length} word${o.words.length === 1 ? "" : "s"}`);
+      const words = o.words
+        .map((w) => `<span title="confidence ${w.confidence ?? "?"}">${esc(w.word)} <i>${Number(w.start ?? 0).toFixed(2)}–${Number(w.end ?? 0).toFixed(2)}</i></span>`)
+        .join("");
+      return `<div class="out-text">${o.transcript ? `“${esc(o.transcript)}”` : `<span class="note">(no speech recognised)</span>`}</div>
+        <div class="note">${bits.join(" · ")}</div>${words ? `<div class="words">${words}</div>` : ""}`;
+    }
   }
   return "";
 }
@@ -252,6 +466,7 @@ function cardHtml(r, compare, diff) {
       <button class="ghost" data-open="${r.id}">${state.open.has(r.id) ? "Hide raw" : "Raw"}</button>
       <button class="ghost" data-rerun="${r.id}" ${state.conn === "on" ? "" : "disabled"}>Rerun</button>
       ${m.continueFrom && done ? `<button class="ghost" data-continue="${r.id}">Continue</button>` : ""}
+      ${done && r.output?.type === "audio" && r.mod === "tts" ? `<button class="ghost" data-to-stt="${r.id}">→ Speech to text</button>` : ""}
     </div>`;
   return `<div class="card ${state.picked.has(r.id) && !compare ? "picked" : ""} ${state.open.has(r.id) ? "open" : ""}" data-card="${r.id}">
     <div class="card-head"><span class="id">#${r.id}</span><span class="model ${id.cls} ${diff.has("model") ? "differs" : ""}">${esc(id.text)}</span>${
@@ -281,6 +496,7 @@ function runsView() {
     const diff = diffKeys(sel);
     root.innerHTML = `${head}${diff.has("model") ? `<div class="note" style="margin:0 0 10px;color:var(--warn)">Model differs between these runs.</div>` : ""}
       <div class="grid" style="grid-template-columns:repeat(${sel.length},minmax(0,1fr))">${sel.map((r) => cardHtml(r, true, diff)).join("")}</div>`;
+    mountMedia(root);
     return;
   }
   if (!all.length) {
@@ -314,6 +530,7 @@ function runsView() {
     if (want !== el) list.insertBefore(el, want);
     prev = el;
   }
+  mountMedia(list);
 }
 
 function render() {
@@ -326,7 +543,7 @@ function render() {
 // ── events ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("click", (e) => {
-  const t = e.target.closest("[data-m],[data-v],[data-open],[data-rerun],[data-continue],[data-clear],[data-run],[data-turn-add],[data-turn-x],[data-connect]");
+  const t = e.target.closest("[data-m],[data-v],[data-open],[data-rerun],[data-continue],[data-clear],[data-run],[data-turn-add],[data-turn-x],[data-connect],[data-to-stt],[data-voice-add],[data-voice-x],[data-record]");
   if (!t || t.disabled) return;
   const d = t.dataset;
   const v = state.values[state.cur];
@@ -351,8 +568,27 @@ document.addEventListener("click", (e) => {
     form();
     const areas = $("form").querySelectorAll('textarea[data-part="content"]');
     areas[areas.length - 1]?.focus();
+  } else if (d.toStt) {
+    sendToStt(store.get(+d.toStt));
+  } else if (d.voiceAdd) {
+    const x = state.voices.find((y) => y.id === d.voiceAdd);
+    v.voices.push({ id: x.id, name: x.name });
+    form();
+  } else if (d.voiceX) {
+    v.voices = v.voices.filter((y) => y.id !== d.voiceX);
+    form();
+  } else if ("record" in d) {
+    toggleRecording();
   } else if ("clear" in d) {
-    for (const r of store.list(state.cur)) state.picked.delete(r.id);
+    for (const r of store.list(state.cur)) {
+      state.picked.delete(r.id);
+      if (r.status !== "running" && media.has(r.id)) {
+        const el = media.get(r.id);
+        el.pause();
+        if (el.src.startsWith("blob:")) URL.revokeObjectURL(el.src);
+        media.delete(r.id);
+      }
+    }
     store.clear(state.cur);
   } else if ("run" in d) {
     execute(mod(), state.values[state.cur]);
@@ -373,6 +609,9 @@ function onField(e) {
   const v = state.values[state.cur];
   if (t.dataset.label !== undefined) {
     state.labels[state.cur] = t.value;
+  } else if (t.dataset.voiceFilter !== undefined) {
+    state.voiceFilter = t.value;
+    $("voice-list").innerHTML = voiceList(v.voices);
   } else if (t.dataset.turn !== undefined) {
     v.turns[+t.dataset.turn][t.dataset.part] = t.value;
     if (t.dataset.part === "role") form();
@@ -390,7 +629,21 @@ document.addEventListener("change", (e) => {
     runsView();
     return;
   }
+  if (e.target.dataset.audioFile !== undefined) {
+    takeFile(e.target.files[0]);
+    return;
+  }
   if (e.target.type === "checkbox" || e.target.tagName === "SELECT") onField(e);
+});
+
+// Drop an audio file on the STT drop zone.
+document.addEventListener("dragover", (e) => {
+  if (e.target.closest?.("[data-drop]")) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  if (!e.target.closest?.("[data-drop]")) return;
+  e.preventDefault();
+  takeFile(e.dataTransfer.files[0]);
 });
 
 // Ctrl/Cmd+Enter runs from anywhere in the form.

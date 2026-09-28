@@ -6,16 +6,25 @@
 // response becomes an output (`output`), and where the reported model lives
 // (`reported`). DOM-free and fetch-free: app.js executes the request.
 //
-// Field kinds: text, textarea, number, range, check, select, turns. A `row`
-// groups fields side by side.
+// Field kinds: text, textarea, number, range, check, select, turns, voices
+// (value: [{ id, name }], options from /tts/voices), audio (value: a prepared
+// clip, see app.js). A `row` groups fields side by side.
 //
-// A request is { kind, method, path, body } where kind is:
+// A request is { kind, method, path, body, bytes?, query? } where kind is:
 //   "json"        — client.call(path, { body })
 //   "chat-stream" — client.chatStreamFull(body.messages, …, rest of body)
+//   "tts-stream"  — client.openStream(path, body); the bytes come back as
+//                   { _streamBytes, _playback, _ttfb }
+//   "bytes"       — client.sendBytes(path, bytes, { query }); `body` then only
+//                   describes what was sent, for Raw
+
+import { base64ToBytes, pcmToWav, FORMAT_MIME } from "./audio.js";
 
 export const LAB = {
   rawKeep: 48, // characters of a base64 string that Raw keeps
   vectorHead: 8, // embedding values shown on the card
+  pcmRate: 24000, // TTS `pcm` has no header; played as 16-bit mono at this rate
+  sttRate: 16000, // STT input is decoded and re-encoded as WAV at this rate
 };
 
 const clip = (s, n = 48) => {
@@ -134,7 +143,100 @@ const embed = {
   reported: (resp) => resp?.model || null,
 };
 
-export const MODALITIES = [chat, embed];
+const TTS_FORMATS = ["mp3", "wav", "opus", "flac", "ogg", "pcm"];
+const STREAM_FORMATS = ["mp3", "wav"];
+
+const tts = {
+  id: "tts",
+  label: "Text to speech",
+  group: "Audio",
+  reports: "The platform reports the provider only when delivery instructions are sent, and never for a streamed run.",
+  reportedKind: "provider",
+  fields: [
+    { k: "text", t: "textarea", label: "Text", v: "" },
+    { k: "voices", t: "voices", label: "Voice(s) — pick one, or several to mix them", v: [] },
+    { row: [
+      { k: "speed", t: "range", label: "Speed", min: 0.25, max: 4, step: 0.05, v: 1 },
+      { k: "format", t: "select", label: "Format", opts: TTS_FORMATS, v: "mp3" },
+    ] },
+    { k: "instructions", t: "text", label: "Delivery instructions (optional)", v: "" },
+    { k: "stream", t: "check", label: "Stream — plays as it arrives (mp3 / wav only; no provider reported)", v: false },
+  ],
+  request(v) {
+    const text = String(v.text || "").trim();
+    if (!text) throw new Error("Text is empty.");
+    if (v.stream && !STREAM_FORMATS.includes(v.format)) throw new Error(`Streaming supports ${STREAM_FORMATS.join(" and ")} only.`);
+    const body = { text, speed: Number(v.speed), audio_format: v.format };
+    if (v.voices?.length) body.voice_ids = v.voices.map((x) => x.id);
+    if (String(v.instructions || "").trim()) body.advanced_voice = { instructions: v.instructions.trim() };
+    return v.stream
+      ? { kind: "tts-stream", method: "POST", path: "/tts/stream", body }
+      : { kind: "json", method: "POST", path: "/tts/speak", body };
+  },
+  summary(v) {
+    const s = { text: `“${clip(v.text, 40)}”`, voices: v.voices?.length ? v.voices.map((x) => x.name).join(" + ") : "default voice", speed: `speed ${v.speed}`, format: v.format };
+    s.instructions = String(v.instructions || "").trim() ? `instructions: “${clip(v.instructions, 28)}”` : "no instructions";
+    s.stream = v.stream ? "streamed" : "whole";
+    return s;
+  },
+  output(resp, v) {
+    const streamed = Boolean(resp?._streamBytes);
+    let bytes = streamed ? resp._streamBytes : base64ToBytes(resp?.data || "");
+    if (v.format === "pcm") bytes = pcmToWav(bytes, LAB.pcmRate);
+    const out = { type: "audio", bytes, mime: FORMAT_MIME[v.format] || "audio/mpeg", format: v.format };
+    if (streamed) Object.assign(out, { streamed: true, playback: resp._playback, ttfb: resp._ttfb });
+    const sent = Boolean(String(v.instructions || "").trim());
+    if (sent) out.instructions = resp?.style_outcome?.fidelity || "not reported";
+    return out;
+  },
+  reported: (resp) => resp?.style_outcome?.provider || null,
+  voiceSent: (v) => (v.voices?.length ? v.voices.map((x) => x.name).join(" + ") : ""),
+};
+
+export const STT_LANGUAGES = ["en-US", "multi", "en", "en-AU", "en-GB", "en-NZ", "en-IN", "es", "es-419", "fr", "fr-CA", "de", "de-CH", "it", "pt", "pt-BR", "pt-PT", "ru", "hi", "ja", "ko", "ko-KR", "zh", "zh-CN", "zh-TW", "zh-HK", "nl", "nl-BE", "tr", "pl", "sv", "sv-SE", "no", "da", "da-DK", "fi", "uk", "el", "cs", "hu", "ar", "be", "bn", "bs", "bg", "ca", "hr", "et", "he", "id", "kn", "lv", "lt", "mk", "ms", "mr", "fa", "ro", "sr", "sk", "sl", "tl", "ta", "te", "th", "ur", "vi"];
+
+const stt = {
+  id: "stt",
+  label: "Speech to text",
+  group: "Audio",
+  fields: [
+    { k: "audio", t: "audio", label: "Audio", v: null },
+    { k: "language", t: "select", label: "Language", opts: STT_LANGUAGES, v: "en-US" },
+  ],
+  // v.audio: { source, name, bytes, encoding, sampleRate?, seconds?, reencoded }
+  request(v) {
+    const a = v.audio;
+    if (!a?.bytes?.length) throw new Error("No audio yet: drop a file, record from the mic, or send a TTS run here.");
+    if (!a.encoding) throw new Error(`The browser could not decode “${a.name}” and its format could not be guessed.`);
+    const query = { encoding: a.encoding, sample_rate: a.sampleRate, language: v.language };
+    return {
+      kind: "bytes",
+      method: "POST",
+      path: "/stt/audio",
+      bytes: a.bytes,
+      query,
+      body: { query, body: `${a.bytes.length} bytes ${a.encoding}${a.reencoded ? `, re-encoded from ${a.source}` : `, sent as supplied (${a.source})`}` },
+    };
+  },
+  summary(v) {
+    const a = v.audio;
+    return {
+      audio: a ? `${a.source}${a.seconds ? ` · ${a.seconds.toFixed(1)}s` : ""}` : "no audio",
+      language: v.language,
+    };
+  },
+  output(resp) {
+    return {
+      type: "transcript",
+      transcript: resp?.transcript ?? "",
+      confidence: resp?.confidence,
+      duration: resp?.duration,
+      words: resp?.words || [],
+    };
+  },
+};
+
+export const MODALITIES = [chat, embed, tts, stt];
 export const MODALITY_BY_ID = Object.fromEntries(MODALITIES.map((m) => [m.id, m]));
 
 // Every field, rows flattened.
@@ -145,6 +247,6 @@ export function flatFields(mod) {
 // A fresh copy of a modality's default values.
 export function defaultValues(mod) {
   const v = {};
-  for (const f of flatFields(mod)) v[f.k] = structuredClone(f.v ?? "");
+  for (const f of flatFields(mod)) v[f.k] = f.v === null ? null : structuredClone(f.v ?? "");
   return v;
 }

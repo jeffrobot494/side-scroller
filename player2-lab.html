@@ -12,6 +12,7 @@
     --ink: #dfe4ea; --ink-2: #8b95a3; --ink-3: #5d6673;
     --accent: #6f9ceb; --ok: #4fb783; --warn: #efc86b; --bad: #e07a5a;
     --diff: rgba(239,200,107,.14);
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   body {
@@ -180,6 +181,20 @@
   .vec b { color: var(--ink); font-weight: 600; font-family: inherit; }
   .tool-calls { font: 11.5px/1.5 ui-monospace, Consolas, monospace; color: var(--ink-2); white-space: pre-wrap; margin-top: 8px; }
   .connect { margin-left: 4px; }
+  button.chip { cursor: pointer; }
+  button.chip:hover { border-color: var(--accent); color: var(--ink); }
+  .chip i { font-style: normal; color: var(--ink-3); font-size: 11px; }
+  .x-in { background: none; border: 0; padding: 0 0 0 2px; color: var(--ink-3); cursor: pointer; }
+  .voice-list { display: flex; flex-wrap: wrap; gap: 5px; max-height: 150px; overflow: auto; margin-top: 6px; padding: 2px 0; }
+  .drop b { color: var(--ink); font-weight: 600; }
+  .drop-actions { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+  .drop-actions label.ghost { display: inline-block; }
+  .ghost.rec { border-color: var(--bad); color: var(--bad); }
+  .clip { margin-top: 8px; }
+  .clip audio, .media-slot audio { width: 100%; max-width: 420px; height: 36px; display: block; }
+  .words { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; font-size: 11.5px; }
+  .words span { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+  .words i { font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
