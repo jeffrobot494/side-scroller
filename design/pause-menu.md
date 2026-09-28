@@ -1,7 +1,7 @@
 ---
 type: design
 category: scenes
-status: unbuilt
+status: built
 resolution: sharp
 related: [missions]
 ---

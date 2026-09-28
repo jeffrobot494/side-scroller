@@ -1,10 +1,12 @@
 // The pause menu (tech/pause-menu.md): P2's frozen frame loop, driven through
-// the real `_frame` off a synthetic clock (rAF is a no-op under the harness).
+// the real `_frame` off a synthetic clock (rAF is a no-op under the harness),
+// and P3's room behaviour and overlay.
 import { makeEl } from "./harness.mjs";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { sampleScene, firstSampleDiff } from "../src/mission/checksum.js";
-import { config, setConfig, resetConfig } from "../src/game/config.js";
+import { config, setConfig, resetConfig, isDefault, pauseSchema } from "../src/game/config.js";
+import { createPauseMenu } from "../src/hub/pause.js";
 import { SEED, SQUAD } from "./mission-trace.mjs";
 
 const FRAME = 1000 / 60;
@@ -91,15 +93,112 @@ export default async function run(t) {
     m.stop();
   }
 
-  // ---- P2: a room's mission is not this page's to pause ------------------
+  // ---- P3: in a room the menu opens and the mission runs on ---------------
+  // The room steps it; this page only stops driving its soldier.
   {
     const m = build();
+    const seen = [];
+    m.onPauseChange = (p) => seen.push(p);
     m.remote = true;
     m.update = () => {}; // no room is on the other end; the loop is what's asked about
+    let prevented = 0;
+    m.input._set({ code: "KeyD", preventDefault() { prevented++; } }, true); // running right
     tap(m, "Escape");
     m.tick();
-    t.ok("pause: a remote mission ignores the pause key", m.paused === false);
+    t.ok("room: the pause key opens the menu", m.paused === true);
+    t.eq("room: ...and the host is told", seen, [true]);
+    const samples = m.input.frame;
+    m.tick(30);
+    t.ok(`room: the mission keeps stepping under it (${m.input.frame - samples} steps)`, m.input.frame - samples >= 29);
+    t.ok("room: the held key was released when it opened", !m.input.isDown("right"));
+    prevented = 0;
+    m.input._set({ code: "Space", preventDefault() { prevented++; } }, true);
+    m.tick();
+    t.ok("room: a key pressed under the menu drives nothing", !m.input.isDown("jump"));
+    t.eq("room: ...and is left to the menu (no preventDefault)", prevented, 0);
+    m.input._set({ code: "Space", preventDefault() {} }, false);
+    tap(m, "Escape");
+    m.tick();
+    t.ok("room: the pause key closes it again", m.paused === false);
+    m.input._set({ code: "KeyD", preventDefault() {} }, true);
+    m.tick();
+    t.ok("room: ...and the soldier takes input again", m.input.isDown("right"));
     m.stop();
+  }
+
+  // ---- P3: the overlay, mounted headlessly --------------------------------
+  // The harness DOM dispatches no events, so the overlay's root records its
+  // listeners here and the test fires them with targets that answer closest().
+  {
+    const made = [];
+    const createElement = document.createElement;
+    document.createElement = (tag) => {
+      const el = createElement(tag);
+      el.on = {};
+      el.addEventListener = (type, fn) => (el.on[type] = el.on[type] || []).push(fn);
+      el.querySelector = () => null;
+      made.push(el);
+      return el;
+    };
+    const container = { kids: [], appendChild(c) { this.kids.push(c); c.remove = () => { this.kids = this.kids.filter((k) => k !== c); }; } };
+    const fire = (el, type, target) => (el.on[type] || []).forEach((fn) => fn({ target }));
+    const MATCH = {
+      "[data-pm]": (n) => n.dataset.pm !== undefined,
+      "[data-cfg-tab]": (n) => n.dataset.cfgTab !== undefined,
+      ".toggle": (n) => n.toggle,
+      "[data-type='range']": (n) => n.dataset.type === "range",
+      "[data-type='enum']": (n) => n.dataset.type === "enum",
+      "[data-type='text']": (n) => n.dataset.type === "text",
+    };
+    const node = (dataset, extra = {}) => {
+      const n = { dataset, classList: { on: false, toggle() { return (this.on = !this.on); } }, setAttribute() {}, ...extra };
+      n.closest = (sel) => (sel.split(",").some((s) => MATCH[s] && MATCH[s](n)) ? n : null);
+      return n;
+    };
+    const rows = (html) => [...html.matchAll(/data-row="(\w+)"/g)].map((r) => r[1]);
+    const shown = (s) => s.flatMap((g) => g.items.map((it) => it.key));
+
+    resetConfig();
+    let resumed = 0;
+    const changes = [];
+    const pm = createPauseMenu(container, { room: false, resume: () => resumed++, onChange: (k, v) => changes.push([k, v]) });
+    const el = made.at(-1);
+    t.ok("overlay: mounts into its container", container.kids.includes(el));
+    t.eq("overlay: the menu is Options and Resume, nothing else",
+      [...el.innerHTML.matchAll(/data-pm="(\w+)"/g)].map((r) => r[1]), ["options", "resume"]);
+
+    fire(el, "click", node({ pm: "options" }));
+    t.eq("overlay: Options opens the options screen", pm.screen(), "options");
+    t.eq("overlay: ...one row per live setting, the design's 38", rows(el.innerHTML), shown(pauseSchema({ room: false })));
+    t.ok("overlay: ...with a Back button", /data-pm="back"/.test(el.innerHTML));
+
+    const ff = config.friendlyFire;
+    fire(el, "click", node({ key: "friendlyFire", type: "bool" }, { toggle: true }));
+    t.eq("overlay: a toggle changes the setting", config.friendlyFire, !ff);
+    t.ok("overlay: ...kept the way the editor keeps it", isDefault("friendlyFire") === false
+      && JSON.parse(localStorage.getItem("sidescroller.config.v1")).friendlyFire === !ff);
+    const other = config.missionRenderer === "3d" ? "2d" : "3d";
+    fire(el, "change", node({ key: "missionRenderer", type: "enum" }, { value: other }));
+    t.eq("overlay: the host hears each change, coerced", changes, [["friendlyFire", !ff], ["missionRenderer", other]]);
+
+    fire(el, "click", node({ pm: "back" }));
+    t.eq("overlay: Back returns to the menu", pm.screen(), "menu");
+    fire(el, "click", node({ pm: "resume" }));
+    t.eq("overlay: Resume asks the host to resume", resumed, 1);
+    t.ok("overlay: ...and does not close itself — the host's hook does", container.kids.includes(el));
+    pm.dispose();
+    t.ok("overlay: dispose removes it", !container.kids.includes(el));
+
+    const roomMenu = createPauseMenu(container, { room: true });
+    const rel = made.at(-1);
+    fire(rel, "click", node({ pm: "options" }));
+    t.eq("overlay: in a room it shows only what is this page's to change",
+      rows(rel.innerHTML), shown(pauseSchema({ room: true })));
+    t.ok("overlay: ...so no Run speed", !rows(rel.innerHTML).includes("runSpeed"));
+    roomMenu.dispose();
+
+    document.createElement = createElement;
+    resetConfig();
   }
 
   // ---- the one rule: paused is not gameplay state -------------------------

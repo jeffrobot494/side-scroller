@@ -1,7 +1,7 @@
 ---
 type: tech
 category: scenes
-status: unbuilt
+status: built
 resolution: sharp
 needs: []
 related: [mission-3d, server-settings]
@@ -21,6 +21,17 @@ How Escape stops a mission and opens a menu whose Options screen is the editor's
 | P3 | **The menu.** A DOM overlay built by `src/hub/` and mounted by `src/main.js` over both mission canvases. Menu: Options, Resume. Options: `controlsTabsHTML(pauseSchema({ room: mission.remote }), config, isDefault)` bound with `bindControls`, persisted with `setConfig`, and a Back button. Escape closes the whole menu from either screen. A change to `missionRenderer` goes through `syncRenderer()`, the path the toggle key already uses. While the menu is open, in either mode, the device half of `MissionInput` releases every held action and ignores every key but `pause`, without `preventDefault`, so arrow keys, Space and Tab reach the menu. In a room mission the menu opens and the mission keeps running. The overlay is disposed whenever the mission scene is left, including a room mission that ends under it | **Changed: first playable.** The design, whole |
 
 P0 and P1 are refactors with a green suite. P2 is playable on its own (a freeze key). P3 is the feature.
+
+**As built.** Where the code differs from the table above:
+
+| Slice | As built | Why |
+|---|---|---|
+| P0 | `test/mission-net.test.mjs`'s "Make permanent" case pinned an item's line layout by regex (`type`, then `default`), so it now expects the `live` line between them | The `default:` writer in `server.mjs` is order-agnostic; only the test pinned the layout. The 52 / 27 count did not move |
+| P2 | `Mission` calls `takePress`/`dropPresses` (and P3's `suspend`) with optional chaining | Three suites swap in scripted inputs that answer only `isDown`/`justPressed`/`aimSource` |
+| P2 | `dropPresses()` also re-polls the pad and drops its edges; suspended mode also blanks the pad and the mouse buttons, not only keys | "Your soldier takes no input from you" covers every device. The pad's edge tracking keeps running, so a button held through the menu is not a fresh press when it closes |
+| P3 | `paused` means *the menu is open*, in both modes. What freezes the loop is `_frozen()` = paused, hosted and not remote. The pause key is read for any hosted mission; P2's "a remote mission ignores the action" became "a remote mission opens the menu and keeps running" | One flag and one hook for the menu, whichever mode is running |
+| P3 | The overlay has no key handler and never closes itself. Escape reaches the mission as `pause` (suspended input still takes it), Resume calls `mission.setPaused(false)`, and both end in `onPauseChange(false)`, which disposes it | One way out, and no key is hardcoded in the overlay |
+| P3 | `main.js` closes the menu on every exit from the mission scene through one call in `showScene`: leaving the mission calls `mission.setPaused(false)`, and its hook disposes the overlay. `stop()` does the same | Covers `onMissionComplete` and a room's pushed results with one line instead of one per exit |
 
 ## Reuses
 

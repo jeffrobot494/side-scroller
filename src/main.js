@@ -42,6 +42,7 @@ import { Hub } from "./hub/hub.js";
 import { Mission } from "./mission/mission.js";
 import { createHubAmbient } from "./hub/ambient.js";
 import { createFpsMeter } from "./hub/fpsmeter.js";
+import { createPauseMenu } from "./hub/pause.js";
 import { audio } from "./audio/engine.js";
 import { config, setConfig } from "./game/config.js";
 
@@ -120,6 +121,24 @@ let netSocket = null;
 // it is still built up front.
 const mission = new Mission(canvas, onMissionComplete);
 mission.onRendererToggle = () => syncRenderer();
+
+// ---- the pause menu (tech/pause-menu.md) ------------------------------------
+// The mission says when it opens and closes — its `pause` key, Resume, and
+// stop() all end in onPauseChange — and this module owns the DOM over it. In a
+// room the menu opens while the mission runs on, and shows only what is this
+// page's to change (`mission.remote`).
+let pauseMenu = null;
+mission.onPauseChange = (open) => {
+  if (pauseMenu) pauseMenu.dispose();
+  pauseMenu = null;
+  if (!open) return;
+  pauseMenu = createPauseMenu(document.body, {
+    room: mission.remote,
+    resume: () => mission.setPaused(false),
+    // The 2D/3D switch is the same act from the menu as from the toggle key.
+    onChange: (key) => { if (key === "missionRenderer") syncRenderer(); },
+  });
+};
 
 // ---- the 3D view (tech/mission-3d.md) ---------------------------------------
 // Fetched at page load when the setting is 3D (the default), so the first
@@ -437,6 +456,9 @@ function onMissionComplete(result, owner) {
 // the same time, so input never crosses over.
 function showScene(name) {
   inMission = name === "mission";
+  // Every exit from the mission closes its menu, including a room's mission
+  // that ended under it. The mission's own hook is what disposes it.
+  if (!inMission) mission.setPaused(false);
   canvas.style.display = inMission ? "block" : "none";
   syncRenderer();
   hubRoot.style.display = inMission ? "none" : "block";

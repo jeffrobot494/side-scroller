@@ -476,6 +476,19 @@ section + the tests are the source of truth for what currently exists):
   `poll`'s `onTick`/`signal` to the client without changing any existing method.
   The Lab reads `GAME_CLIENT_ID` from `src/player2/config.js`, never the game's
   config, and has no schema knobs.
+- **Pause menu (`tech/pause-menu.md` P0–P3 — built).** Escape (the `pause`
+  action, rebindable, local-only on the wire) opens `src/hub/pause.js` over a
+  mission: Options and Resume. Options is `src/hub/controls.js` (moved from
+  `src/editor/`, CSS with it into `hub.css`) fed `pauseSchema({ room })` — every
+  `SCHEMA` item now declares `live`, the renderer prints "Live." from it, and the
+  menu shows live items only, minus `scope: "server"` ones in a room. A change is
+  `setConfig`, kept like an editor change. `mission.paused` means the menu is
+  open; `_frame` reads the key once per rendered FRAME and freezes only a hosted,
+  non-remote mission (no samples, no steps, still renders, camera re-solved, no
+  shake). A room mission keeps running. Either way `MissionInput.suspend()`
+  releases held actions and leaves every key but `pause` to the menu without
+  `preventDefault`. `main.js` owns the overlay through `onPauseChange`, and
+  leaving the mission scene unpauses, which closes it.
 - **Player2 is partially wired:** the Enemy Designer's Generate button uses
   `src/player2/client.js` chat completions (needs the app + a client id in the
   config `player2GameClientId`). Image gen and the rest remain unused — still

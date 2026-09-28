@@ -71,9 +71,11 @@ export class Mission {
     this.view = null;
     this._viewLive = false;
     this.onRendererToggle = null;
-    // THE PAUSE (tech/pause-menu.md). Not gameplay state: update() never reads
-    // it, it never crosses the wire, and only `_frame` — the host's loop —
-    // honours it, so a headless driver of update() cannot enter it.
+    // THE PAUSE (tech/pause-menu.md). `paused` means the pause menu is up.
+    // Not gameplay state: update() never reads it, it never crosses the wire,
+    // and only `_frame` — the host's loop — honours it, so a headless driver of
+    // update() cannot enter it. A room's mission opens the menu and keeps
+    // running (see _frozen); either way the device stops driving the soldier.
     // `onPauseChange(paused)` tells the host, which owns the menu.
     this.paused = false;
     this.onPauseChange = null;
@@ -86,6 +88,7 @@ export class Mission {
     on = !!on;
     if (on === this.paused) return;
     this.paused = on;
+    this.input.suspend?.(on);
     if (!on) {
       this.accumulator = 0;
       this.input.dropPresses?.();
@@ -93,7 +96,8 @@ export class Mission {
     if (this.onPauseChange) this.onPauseChange(on);
   }
 
-  // Is this page holding its mission still? Only one it steps itself.
+  // Is this page holding its mission still? Only one it steps itself: a room's
+  // mission is the room's, and one commander's menu does not stop it.
   _frozen() {
     return this.paused && this.hosted && !this.remote;
   }
@@ -274,7 +278,7 @@ export class Mission {
 
     this.running = true;
     this.accumulator = 0;
-    this.paused = false; // a deploy starts unpaused; the menu belonged to the last one
+    this.setPaused(false); // a deploy starts unpaused; a menu left up belonged to the last one
     this.fps.reset(); // don't carry a rate in from the previous deploy
     // The device and the loop, and NOTHING else, are what a host has (J6).
     // `running` is set either way: since J2 it means "the scene has not ended",
@@ -314,9 +318,9 @@ export class Mission {
     if (ft > 0.25) ft = 0.25;
 
     // The pause is read once per FRAME, not per step, because while paused no
-    // steps run to read it. A room's mission is not this page's to pause.
-    // Optional calls: suites swap in scripted inputs that answer only the reads.
-    if (this.hosted && !this.remote && this.input.takePress?.("pause")) this.setPaused(!this.paused);
+    // steps run to read it. Optional calls: suites swap in scripted inputs
+    // that answer only the reads.
+    if (this.hosted && this.input.takePress?.("pause")) this.setPaused(!this.paused);
     if (this._frozen()) {
       // No samples, no steps: the scene holds still. The camera is re-solved
       // so a zoom change from the menu stays centred on the soldier.

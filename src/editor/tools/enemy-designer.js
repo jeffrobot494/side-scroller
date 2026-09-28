@@ -1530,7 +1530,8 @@ export function createEnemyDesigner(container, onBack) {
   // Focus is the keyboard handover. Clicking the canvas focuses it (tabindex),
   // which enables MissionInput; clicking any field on the page blurs it, which
   // disables it again. Esc is the explicit way out without reaching for the
-  // mouse. (Esc is unbound in controlmap, so MissionInput ignores it.)
+  // mouse. (Esc is bound to `pause`, which only a Mission reads; the canvas's
+  // own listener runs before MissionInput's window one, so it still blurs.)
   if (canvas.addEventListener) {
     canvas.addEventListener("focus", () => takeKeys(true));
     canvas.addEventListener("blur", () => takeKeys(false));

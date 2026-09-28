@@ -1337,6 +1337,31 @@ select:disabled { color: var(--dim); opacity: 0.6; cursor: not-allowed; }
   font-family: var(--font-num); font-size: 12px;
 }
 
+/* ---- Pause menu (tech/pause-menu.md) ----
+   Over both mission canvases and every chip above them. The mission keeps
+   drawing behind it, so a zoom or view change shows as it is made. */
+.pm {
+  position: fixed; inset: 0; z-index: 104;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+  background: rgba(6, 7, 8, 0.7);
+}
+.pm-panel {
+  background: linear-gradient(180deg, var(--metal-hi), var(--metal));
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  box-shadow: var(--e2);
+}
+.pm-menu { display: flex; flex-direction: column; gap: 10px; padding: 24px; width: min(260px, 100%); }
+.pm-menu .btn { width: 100%; padding: 11px 17px; font-size: 15px; }
+.pm-options {
+  display: flex; flex-direction: column;
+  width: min(880px, 100%); height: min(680px, calc(100vh - 32px));
+  padding: 18px 22px;
+}
+.pm-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.pm-head h2 { margin: 0; font-size: 13px; letter-spacing: 2.5px; text-transform: uppercase; color: #a0a9ae; }
+.pm-cfg { overflow-y: auto; min-height: 0; }
+
 /* ===========================================================================
    MOTION — one moment: the room you just opened arrives.
    Exponential ease-out from a state that is already legible, so a slow machine

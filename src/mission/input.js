@@ -47,6 +47,7 @@ export class MissionInput {
     this.frame = 0; // samples taken: the step index of the input, not of a rAF
     this._sample = blankSample(); // reads before the first sample see nothing
     this._enabled = false;
+    this._suspended = false; // a menu is open over the mission; see suspend()
     this._canvas = null;
     this._diag = {}; // one-shot gamepad diagnostics, keyed by message (see _padLog)
     this._onDown = (e) => this._set(e, true);
@@ -63,6 +64,7 @@ export class MissionInput {
   // numbers its input frames from its own start, because `frame` is the step
   // index J4 defined and a server stepping a scene has steps like anyone else.
   reset() {
+    this._suspended = false;
     this._diag = {}; // report the pad situation once per mission, not once per page
     this.frame = 0; // a mission's input frames are numbered from its own start
     this._sample = blankSample();
@@ -115,12 +117,32 @@ export class MissionInput {
     this.mouse.active = false;
     this.aimStick.active = false;
     this._sample = blankSample(); // or a held key survives the mission it was in
+    this._suspended = false;
     this._enabled = false;
+  }
+
+  // A menu is open over the mission (tech/pause-menu.md). On entry every held
+  // action is released, so a soldier does not run on under the menu. While
+  // suspended, every key but `pause` is left alone — no action, and no
+  // preventDefault, so arrows, Space and Tab reach the menu's own controls —
+  // and the mouse buttons and the pad drive nothing. Cleared by reset() and
+  // disable(), so it cannot outlive the mission it was entered in.
+  suspend(on) {
+    on = !!on;
+    if (on === this._suspended) return;
+    this._suspended = on;
+    if (!on) return;
+    this.actions = {};
+    this.pressed = {};
+    this.padActions = {};
+    this.padPressed = {};
+    this.aimStick.active = false;
   }
 
   _set(e, down) {
     const action = keyBindings[e.code];
     if (!action) return;
+    if (this._suspended && action !== "pause") return;
     e.preventDefault();
     if (down && !this.actions[action]) this.pressed[action] = true;
     this.actions[action] = down;
@@ -138,7 +160,7 @@ export class MissionInput {
   }
 
   _mouseButton(e, down) {
-    if (e.button !== 0) return; // left button = fire
+    if (e.button !== 0 || this._suspended) return; // left button = fire
     if (down && !this.actions.fire) this.pressed.fire = true;
     this.actions.fire = down;
   }
@@ -218,6 +240,14 @@ export class MissionInput {
     for (const action in held) if (!this._padPrev[action]) this.padPressed[action] = true;
     this._padPrev = held;
     this.padActions = held;
+    if (this._suspended) {
+      // Edges are still tracked above, so a button held through the menu is
+      // not a fresh press when it closes; it just drives nothing meanwhile.
+      this.padActions = {};
+      this.padPressed = {};
+      this.aimStick.active = false;
+      return;
+    }
 
     // Right stick → aim vector (past the deadzone).
     const ax = pad.axes[padBindings.aimAxisX] || 0;

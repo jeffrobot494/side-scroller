@@ -288,6 +288,43 @@ export default async function run(t) {
     inp.disable();
   }
 
+  // Suspended (P3): a menu is open over the mission. Held actions release,
+  // every key but pause passes through untouched so the menu gets arrows,
+  // Space and Tab, and the mouse fires nothing.
+  {
+    const inp = new MissionInput();
+    inp.enable();
+    let prevented = 0;
+    const ev = (code) => ({ code, preventDefault() { prevented++; } });
+    inp._set(ev("KeyD"), true);
+    inp.suspend(true);
+    inp.sample();
+    t.ok("suspend: a held action is released on entry", !inp.isDown("right"));
+    prevented = 0;
+    inp._set(ev("Space"), true);
+    inp._set(ev("Tab"), true);
+    inp._set(ev("ArrowDown"), true);
+    inp._mouseButton({ button: 0 }, true);
+    inp.sample();
+    t.ok("suspend: bound keys drive nothing", !inp.isDown("jump") && !inp.isDown("swap") && !inp.isDown("crouch"));
+    t.ok("suspend: ...nor does the mouse button", !inp.isDown("fire"));
+    t.eq("suspend: ...and none is preventDefault-ed, so the menu gets them", prevented, 0);
+    inp._set(ev("Escape"), true);
+    t.eq("suspend: the pause key is still handled", prevented, 1);
+    t.ok("suspend: ...and still read", inp.takePress("pause"));
+    inp.reset();
+    inp._set(ev("Space"), true);
+    inp.sample();
+    t.ok("suspend: reset() clears it", inp.isDown("jump"));
+    inp.suspend(true);
+    inp.disable();
+    inp.enable();
+    inp._set(ev("KeyD"), true);
+    inp.sample();
+    t.ok("suspend: disable() clears it", inp.isDown("right"));
+    inp.disable();
+  }
+
   // ---- Controls tool mounts headlessly -----------------------------------
   {
     installDom();
