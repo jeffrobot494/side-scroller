@@ -94,7 +94,7 @@ P0 and P1 are refactors with a green suite. P2 is playable on its own (a freeze 
 | Where | What the build does | What catches it |
 |---|---|---|
 | `live` is declared, not proven | A setting marked live whose code reads it once at load would show in the menu and do nothing until the next deploy | P0's test catches a missing declaration, not a wrong one. Read the code when adding a knob |
-| Hot-seat pauses | `?players=2` runs its mission on this page (`remote` is false), so it is treated as single-player. The design names single-player and room missions only | Bo, when he plays hot-seat |
+| Hot-seat | Not a mode the game supports (Bo, 2026-09-28). `?players=2` runs its mission on this page with `remote` false, so it pauses like single-player; nothing is built for it | Nothing, on purpose |
 | Held keys across a pause | Opening releases every held action. A key still held on resume must be pressed again | By hand |
 | Sound during a pause | Sounds already playing ring out; nothing new plays because nothing steps. A volume change is heard from the next sound played, because `applyVolumes()` in `src/audio/engine.js` runs per play | By ear |
 | The mission stays drawn behind the menu | Rendering continues while paused, so a zoom, view or scanline change shows behind the menu as it is made. Cosmetics that advance only in `update()` (particles, motes, the damage flash) hold still | Bo's eye |

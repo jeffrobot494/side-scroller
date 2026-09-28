@@ -48,6 +48,8 @@ tool settings, are not shown.
 Settings the room owns are not shown. What remains is Viewport, Sound, Aim mode
 and Gamepad deadzone.
 
+While the menu is open, your soldier takes no input from you.
+
 ## Accepted consequences
 
 | | |
