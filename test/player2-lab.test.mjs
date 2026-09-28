@@ -2,7 +2,7 @@
 // L0: the client's additive calls, and the return shapes of chat/chatStream/
 // poll that the game relies on and nothing else pinned.
 import { Player2Client, RateLimitError, InsufficientCreditsError } from "../src/player2/client.js";
-import { MODALITIES, MODALITY_BY_ID, defaultValues, flatFields } from "../src/player2lab/modalities.js";
+import { MODALITIES, MODALITY_BY_ID, defaultValues, flatFields, jobState, jobLabel, jobId, findJobResult, assetUrl, LAB } from "../src/player2lab/modalities.js";
 import { createRunStore, createJoulesLedger, ident, diffKeys, valueKey, shortenForRaw, formatMs } from "../src/player2lab/runs.js";
 import { encodeWav, pcmToWav, toMono, decodeToWav, guessEncoding, base64ToBytes, concatBytes } from "../src/player2lab/audio.js";
 
@@ -433,4 +433,73 @@ export default async function run(t) {
     t.ok("valueKey: long strings hashed", valueKey({ x: long }).length < 60);
     t.ok("diff: different images differ", diffKeys([{ values: { images: [{ dataUrl: long }] } }, { values: { images: [{ dataUrl: long + "B" }] } }]).has("images"));
   }
+
+  // ---- L4: jobs --------------------------------------------------------------
+  {
+    t.eq("jobState: done words", ["completed", "succeeded", "SUCCESS", "done"].map((x) => jobState({ status: x })), ["done", "done", "done", "done"]);
+    t.eq("jobState: failed words, `state` too", [jobState({ status: "failed" }), jobState({ state: "cancelled" })], ["failed", "failed"]);
+    t.eq("jobState: anything else pends", [jobState({ status: "processing" }), jobState({}), jobState(null)], ["pending", "pending", "pending"]);
+    t.eq("jobLabel", [jobLabel({ state: "Running" }), jobLabel({})], ["running", "pending"]);
+    const uuid = "11111111-2222-3333-4444-555555555555";
+    t.eq("result: video_url", findJobResult({ status: "completed", video_url: "https://x/v.mp4" }), { url: "https://x/v.mp4" });
+    t.eq("result: deprecated video_data", findJobResult({ status: "completed", video_data: "AAA", mimetype: "video/mp4" }), { dataUrl: "data:video/mp4;base64,AAA" });
+    t.eq("result: asset id in result", findJobResult({ status: "succeeded", result: { asset_id: uuid } }), { assetId: uuid });
+    t.eq("result: asset id one level down", findJobResult({ result: { asset: { asset_id: uuid } } }), { assetId: uuid });
+    t.eq("result: bare uuid result", findJobResult({ result: uuid }), { assetId: uuid });
+    t.eq("result: bare url result", findJobResult({ result: "https://x/m.glb" }), { url: "https://x/m.glb" });
+    t.eq("result: url beats asset id on the same object", findJobResult({ result: { glb_url: "https://x/a.glb", asset_id: uuid } }), { url: "https://x/a.glb" });
+    t.eq("result: nothing found", findJobResult({ status: "completed", result: { note: "?" } }), null);
+    t.eq("assetUrl: original, else any", [assetUrl({ urls: { thumb: "t", original: "o" } }), assetUrl({ urls: { thumb: "t" } }), assetUrl({})], ["o", "t", null]);
+    t.eq("jobId", jobId({ job_id: "j1" }), "j1");
+    let err = null;
+    try { jobId({ out_of_credits: {} }); } catch (e) { err = e; }
+    t.ok("jobId: out of credits refused", err && /credits/.test(err.message));
+    err = null;
+    try { jobId({}); } catch (e) { err = e; }
+    t.ok("jobId: missing id refused", err && /job_id/.test(err.message));
+    t.ok("LAB: poll constants", LAB.pollMs > 0 && LAB.jobTimeoutMs >= 60_000);
+  }
+  {
+    const video = MODALITY_BY_ID.video;
+    const v = defaultValues(video);
+    v.prompt = "lurch";
+    const r1 = video.request(v);
+    t.eq("video: prompt mode", [r1.kind, r1.path, r1.poll, r1.body], ["job", "/video/generate", "/video/job/{id}", { prompt: "lurch", aspect_ratio: "16:9" }]);
+    const imgField = flatFields(video).find((f) => f.k === "image");
+    t.ok("video: start image hidden in prompt mode", imgField.show(v) === false && imgField.max === 1);
+    v.mode = video.fields[0].opts[1];
+    let err = null;
+    try { video.request(v); } catch (e) { err = e; }
+    t.ok("video: image modes need an image", err && /start image/.test(err.message));
+    v.image = [{ source: "run #2", dataUrl: "data:image/png;base64,AA" }];
+    t.eq("video: from image", [video.request(v).path, video.request(v).body.image], ["/video/generate_from_image", "data:image/png;base64,AA"]);
+    v.mode = video.fields[0].opts[2];
+    t.eq("video: transform polls the video route too", [video.request(v).path, video.request(v).poll], ["/video/transform_image", "/video/job/{id}"]);
+    t.ok("video: transform notes its cost", /60 J/.test(video.note(v)));
+    t.eq("video: summary", video.summary(v).mode, "transform image");
+    t.eq("video: output", video.output({ url: "https://x/v.mp4" }), { type: "video", url: "https://x/v.mp4" });
+  }
+  {
+    const music = MODALITY_BY_ID.music;
+    const v = defaultValues(music);
+    v.prompt = "synth";
+    const r = music.request(v);
+    t.eq("music: job body and generic poll", [r.path, r.poll, r.body], ["/music/generate_job", "/jobs/{id}", { prompt: "synth", force_instrumental: true, duration_seconds: 30 }]);
+    t.eq("music: output is audio by URL", music.output({ url: "https://x/m.mp3", asset: { mime: "audio/wav" } }), { type: "audio", url: "https://x/m.mp3", mime: "audio/wav" });
+  }
+  {
+    const m3 = MODALITY_BY_ID["3d"];
+    const v = defaultValues(m3);
+    v.prompt = "husk";
+    t.eq("3d: prompt", [m3.request(v).path, m3.request(v).body, m3.request(v).poll], ["/text3d/generate", { prompt: "husk" }, "/jobs/{id}"]);
+    v.mode = "From image";
+    let err = null;
+    try { m3.request(v); } catch (e) { err = e; }
+    t.ok("3d: image mode needs an image", err && /image/.test(err.message));
+    v.image = [{ source: "a.png", dataUrl: "data:image/png;base64,BB" }];
+    t.eq("3d: from image", [m3.request(v).path, m3.request(v).body], ["/model3d/generate_from_image", { image: "data:image/png;base64,BB" }]);
+    t.ok("3d: prompt hidden in image mode", flatFields(m3).find((f) => f.k === "prompt").show(v) === false);
+    t.eq("3d: output is a model URL", m3.output({ url: "https://x/a.glb" }), { type: "model", url: "https://x/a.glb" });
+  }
+  t.eq("table: every design modality present", MODALITIES.map((m) => m.id).sort(), ["3d", "chat", "edit", "embed", "img", "music", "stt", "tts", "video"]);
 }

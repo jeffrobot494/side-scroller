@@ -7,7 +7,7 @@
 
 import { Player2Client } from "../player2/client.js";
 import { GAME_CLIENT_ID } from "../player2/config.js";
-import { MODALITIES, MODALITY_BY_ID, ROLES, LAB, defaultValues, flatFields } from "./modalities.js";
+import { MODALITIES, MODALITY_BY_ID, ROLES, LAB, defaultValues, flatFields, jobState, jobLabel, jobId, findJobResult, assetUrl } from "./modalities.js";
 import { createRunStore, createJoulesLedger, ident, diffKeys, shortenForRaw, formatMs } from "./runs.js";
 import { decodeToWav, guessEncoding, concatBytes } from "./audio.js";
 
@@ -36,7 +36,8 @@ const state = {
 
 // Media elements live outside the cards, one per run, and are moved into a
 // card's slot on render — so re-rendering a card never restarts playback.
-const media = new Map(); // run id -> HTMLMediaElement
+const media = new Map(); // run id -> HTMLMediaElement, or a GLB viewer
+const polls = new Map(); // run id -> AbortController, while a job is polled
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -119,7 +120,7 @@ async function execute(m, values) {
     // A streamed run that could not play progressively plays once complete.
     if (response?._playback === "at end") mediaFor(store.get(run.id))?.play().catch(() => {});
   } catch (e) {
-    store.update(run.id, { status: "failed", error: e.message || String(e), ms: performance.now() - run.startedAt });
+    store.update(run.id, { status: "failed", error: e.message || String(e), payload: e.payload || null, ms: performance.now() - run.startedAt });
   }
   let after = null;
   try {
@@ -142,6 +143,7 @@ async function send(req, run) {
     return { model, choices: [{ message: { role: "assistant", content } }], _assembledFromStream: true };
   }
   if (req.kind === "tts-stream") return streamTts(req, run);
+  if (req.kind === "job") return runJob(req, run);
   if (req.kind === "bytes") return client.sendBytes(req.path, req.bytes, { query: req.query });
   return client.call(req.path, { method: req.method, body: req.body });
 }
@@ -187,6 +189,43 @@ async function streamTts(req, run) {
   return { _streamBytes: concatBytes(chunks), _playback: progressive ? "progressive" : "at end", _ttfb: ttfb };
 }
 
+// Slow jobs: enqueue (off the sync queue; the server queues jobs), poll with
+// a status label, then turn the result into a URL.
+async function runJob(req, run) {
+  const enqueue = await client.call(req.path, { method: req.method, body: req.body, queue: false });
+  const id = jobId(enqueue);
+  const ac = new AbortController();
+  polls.set(run.id, ac);
+  store.update(run.id, { job: { id, status: "queued" }, enqueue });
+  let status;
+  try {
+    status = await client.jobs.poll(req.poll.replace("{id}", id), {
+      intervalMs: LAB.pollMs,
+      timeoutMs: LAB.jobTimeoutMs,
+      isDone: (s) => jobState(s) === "done",
+      isFailed: (s) => jobState(s) === "failed",
+      onTick: (s) => store.update(run.id, { job: { id, status: jobLabel(s), last: s } }),
+      signal: ac.signal,
+    });
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Stopped polling. The job may still finish on Player2.");
+    const last = store.get(run.id).job?.last;
+    if (last && typeof last.error === "string" && e.message === "Job failed") throw new Error(`Job failed: ${last.error}`);
+    throw e;
+  } finally {
+    polls.delete(run.id);
+  }
+  const found = findJobResult(status);
+  if (!found) throw Object.assign(new Error("The job finished, but its result named no asset id or URL. See Raw for the payload."), { payload: status });
+  if (found.assetId) {
+    const asset = await client.call(`/assets/${found.assetId}`, { queue: false });
+    const url = assetUrl(asset);
+    if (!url) throw Object.assign(new Error(`Asset ${found.assetId} has no download URL. See Raw.`), { payload: asset });
+    return { enqueue, status, asset, url };
+  }
+  return { enqueue, status, url: found.url || found.dataUrl };
+}
+
 function makeAudio(src) {
   const el = document.createElement("audio");
   el.controls = true;
@@ -195,14 +234,98 @@ function makeAudio(src) {
   return el;
 }
 
-// The run's media element, made from its output bytes on first need.
+// The run's media element, made from its output on first need.
 function mediaFor(r) {
   if (media.has(r.id)) return media.get(r.id);
   const o = r.output;
-  if (!o?.bytes) return null;
-  const el = makeAudio(URL.createObjectURL(new Blob([o.bytes], { type: o.mime })));
-  media.set(r.id, el);
+  let el = null;
+  if (o?.type === "audio" && o.bytes) el = makeAudio(URL.createObjectURL(new Blob([o.bytes], { type: o.mime })));
+  else if (o?.type === "audio" && o.url) el = makeAudio(o.url);
+  else if (o?.type === "video" && o.url) {
+    el = document.createElement("video");
+    el.controls = true;
+    el.playsInline = true;
+    el.preload = "metadata";
+    el.src = o.url;
+  } else if (o?.type === "model" && o.url) el = makeModelViewer(o.url);
+  if (el) media.set(r.id, el);
   return el;
+}
+
+// ── GLB viewer ─────────────────────────────────────────────────────────────
+// Three.js loads on the first model shown, so the rest of the page never
+// waits on the CDN. Renders on demand (orbit input), not in a loop.
+
+let threeKit = null;
+function loadThree() {
+  threeKit ??= Promise.all([
+    import("three"),
+    import("three/addons/loaders/GLTFLoader.js"),
+    import("three/addons/controls/OrbitControls.js"),
+  ]).then(([THREE, { GLTFLoader }, { OrbitControls }]) => ({ THREE, GLTFLoader, OrbitControls }));
+  return threeKit;
+}
+
+function makeModelViewer(url) {
+  const wrap = document.createElement("div");
+  wrap.className = "glb";
+  wrap.textContent = "Loading the 3D viewer…";
+  (async () => {
+    const { THREE, GLTFLoader, OrbitControls } = await loadThree();
+    const gltf = await new GLTFLoader().loadAsync(url);
+    const w = 360;
+    const h = 300;
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(2, globalThis.devicePixelRatio || 1));
+    renderer.setSize(w, h);
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.2));
+    const sun = new THREE.DirectionalLight(0xffffff, 2);
+    sun.position.set(3, 5, 4);
+    scene.add(sun);
+    scene.add(gltf.scene);
+    // Frame the model: back the camera off until its bounding sphere fits the
+    // narrower of the two fields of view, with a margin.
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = box.getSize(new THREE.Vector3()).length() || 1;
+    const centre = box.getCenter(new THREE.Vector3());
+    const fov = 40;
+    const camera = new THREE.PerspectiveCamera(fov, w / h, size / 100, size * 100);
+    const halfFov = Math.min(fov / 2, THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * (w / h))));
+    const dist = (size / 2 / Math.sin(THREE.MathUtils.degToRad(halfFov))) * 1.1;
+    camera.position.copy(centre).add(new THREE.Vector3(0.55, 0.4, 0.75).normalize().multiplyScalar(dist));
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.copy(centre);
+    const draw = () => renderer.render(scene, camera);
+    controls.addEventListener("change", draw);
+    controls.update();
+    wrap.replaceChildren(renderer.domElement);
+    const hint = document.createElement("div");
+    hint.className = "note";
+    hint.textContent = "Drag to orbit · scroll to zoom";
+    wrap.appendChild(hint);
+    draw();
+    wrap.dispose = () => {
+      controls.dispose();
+      renderer.dispose();
+      renderer.forceContextLoss?.();
+    };
+  })().catch((e) => {
+    wrap.textContent = `Could not show the model: ${e.message}`;
+    wrap.classList.add("err");
+  });
+  return wrap;
+}
+
+function disposeMedia(id) {
+  const el = media.get(id);
+  if (!el) return;
+  if (el.dispose) el.dispose();
+  else {
+    el.pause?.();
+    if (el.src?.startsWith("blob:")) URL.revokeObjectURL(el.src);
+  }
+  media.delete(id);
 }
 
 function mountMedia(root) {
@@ -279,12 +402,15 @@ function bar() {
     off: `<i class="dot off"></i> Not connected — is the Player2 app running? <button class="ghost connect" data-connect>Retry</button>`,
   }[state.conn];
   const bal = state.balance == null ? "—" : `${Number(state.balance).toLocaleString()} J`;
-  const running = store.running().length;
-  $("bar").innerHTML = `<h1>Player2 Lab</h1>
+  const running = store.running();
+  const jobs = running.filter((r) => r.request.kind === "job").length;
+  const sync = running.length - jobs;
+  setHtml($("bar"), `<h1>Player2 Lab</h1>
     <span class="stat" title="${esc(state.connError)}">${conn}</span>
     <span class="stat">Balance <b>${bal}</b>${state.tier ? ` · ${esc(state.tier)}` : ""}</span>
     <span class="spacer"></span>
-    ${running ? `<span class="pill busy">${running} running</span>` : ""}`;
+    ${jobs ? `<span class="pill busy">${jobs} job${jobs === 1 ? "" : "s"} running</span>` : ""}
+    ${sync ? `<span class="pill busy">${sync} running</span>` : ""}`);
 }
 
 function rail() {
@@ -300,13 +426,22 @@ function rail() {
     html += `<button class="mod ${m.id === state.cur ? "on" : ""}" data-m="${m.id}">${esc(m.label)}
       <span class="n ${busy ? "busy" : ""}">${busy ? "● " : ""}${runs.length || ""}</span></button>`;
   }
-  $("rail").innerHTML = html;
+  setHtml($("rail"), html);
+}
+
+// Rewrite only on change: the store emits on every streamed delta and poll,
+// and a node replaced between mousedown and mouseup loses the click.
+function setHtml(el, html) {
+  if (el._html === html) return;
+  el._html = html;
+  el.innerHTML = html;
 }
 
 // ── form ───────────────────────────────────────────────────────────────────
 
 function field(f, v) {
   if (f.row) return `<div class="field row">${f.row.map((x) => field(x, v)).join("")}</div>`;
+  if (f.show && !f.show(v)) return "";
   const L = `<span>${esc(f.label)}</span>`;
   const val = v[f.k];
   switch (f.t) {
@@ -420,6 +555,7 @@ function form() {
   const m = mod();
   const v = state.values[m.id];
   $("form").innerHTML = `<h2>${esc(m.label)}</h2>${m.fields.map((f) => field(f, v)).join("")}
+    ${m.note?.(v) ? `<div class="note" style="margin:-4px 0 12px">${esc(m.note(v))}</div>` : ""}
     <label class="field"><span>Model label (optional) — what you have selected in Player2 for ${esc(m.label)}. Stamped on every run until you change it.</span>
       <input type="text" data-label placeholder="e.g. Seedream" value="${esc(state.labels[m.id] || "")}"></label>
     <div class="note" style="margin:-6px 0 12px">${esc(m.reports || `The platform doesn't report a model for ${m.label}. Without a label, runs show “(not reported)”.`)}</div>
@@ -439,6 +575,8 @@ function outputHtml(r) {
     if (r.partial) return `<div class="out-text caret">${esc(r.partial)}</div>`;
     if (r.live) return `<div class="media-slot" data-media="${r.id}"></div><div class="note">Streaming · first audio after ${formatMs(r.ttfb)}</div>`;
     if (r.ttfb != null) return `<div class="note" style="margin:0">Receiving audio · first byte after ${formatMs(r.ttfb)}</div>`;
+    if (r.job) return `<div class="note" style="margin:0">Job ${esc(r.job.id)} · polling every ${LAB.pollMs / 1000}s. Other runs are not blocked.</div>`;
+    if (r.request.kind === "job") return `<div class="note" style="margin:0">Enqueueing…</div>`;
     return `<div class="note" style="margin:0">Running…</div>`;
   }
   const o = r.output || {};
@@ -462,13 +600,19 @@ function outputHtml(r) {
           }[o.instructions] || "Delivery instructions: sent; the outcome was not reported",
         );
       }
-      return `<div class="media-slot" data-media="${r.id}"></div>${notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}`;
+      return `<div class="media-slot" data-media="${r.id}"></div>${notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}${
+        o.url ? `<div class="img-actions"><a class="ghost" href="${esc(o.url)}" target="_blank" rel="noopener">Open file</a></div>` : ""
+      }`;
     }
     case "image": {
       const ext = (o.mime.split("/")[1] || "png").replace("jpeg", "jpg");
       return `<img class="media" src="${o.dataUrl}" alt="run ${r.id} output">
         <div class="img-actions"><a class="ghost" href="${o.dataUrl}" download="player2-lab-run-${r.id}.${ext}">Download</a></div>`;
     }
+    case "video":
+      return `<div class="media-slot video" data-media="${r.id}"></div>${o.url && !o.url.startsWith("data:") ? `<div class="img-actions"><a class="ghost" href="${esc(o.url)}" target="_blank" rel="noopener">Open video</a></div>` : ""}`;
+    case "model":
+      return `<div class="media-slot" data-media="${r.id}"></div><div class="img-actions"><a class="ghost" href="${esc(o.url)}" target="_blank" rel="noopener">Open GLB</a></div>`;
     case "transcript": {
       const bits = [];
       if (typeof o.confidence === "number") bits.push(`confidence ${o.confidence.toFixed(2)}`);
@@ -485,16 +629,18 @@ function outputHtml(r) {
 }
 
 function metaHtml(r) {
-  if (r.status === "running") return `<span class="meta" style="color:var(--warn)" data-elapsed="${r.id}">running · ${formatMs(performance.now() - r.startedAt)}</span>`;
+  if (r.status === "running") return `<span class="meta" style="color:var(--warn)" data-elapsed="${r.id}">${esc(runningLabel(r))} · ${formatMs(performance.now() - r.startedAt)}</span>`;
   const j = r.joules == null ? "—" : `${r.joules} J`;
   return `<span class="meta ${r.status === "failed" ? "err" : ""}">${r.status === "failed" ? "failed · " : ""}${formatMs(r.ms)} · ${j}</span>`;
 }
 
+const runningLabel = (r) => r.job?.status || (r.request.kind === "job" ? "enqueueing" : "running");
+
 function rawHtml(r) {
   const req = `${r.request.method} ${r.request.path}\n${JSON.stringify(shortenForRaw(r.request.body, LAB.rawKeep), null, 2)}`;
   let res;
-  if (r.status === "running") res = "(waiting)";
-  else if (r.status === "failed") res = r.error;
+  if (r.status === "running") res = r.job?.last ? `(latest status)\n${JSON.stringify(shortenForRaw(r.job.last, LAB.rawKeep), null, 2)}` : "(waiting)";
+  else if (r.status === "failed") res = `${r.error}${r.payload ? `\n${JSON.stringify(shortenForRaw(r.payload, LAB.rawKeep), null, 2)}` : r.job?.last ? `\n(latest status)\n${JSON.stringify(shortenForRaw(r.job.last, LAB.rawKeep), null, 2)}` : ""}`;
   else {
     const body = { ...r.response };
     delete body._assembledFromStream;
@@ -517,6 +663,7 @@ function cardHtml(r, compare, diff) {
     : `<div class="card-foot">
       <label class="chk" style="margin-right:auto"><input type="checkbox" data-pick="${r.id}" ${state.picked.has(r.id) ? "checked" : ""}> Compare</label>
       <button class="ghost" data-open="${r.id}">${state.open.has(r.id) ? "Hide raw" : "Raw"}</button>
+      ${polls.has(r.id) ? `<button class="ghost" data-stop="${r.id}">Stop polling</button>` : ""}
       <button class="ghost" data-rerun="${r.id}" ${state.conn === "on" ? "" : "disabled"}>Rerun</button>
       ${m.continueFrom && done ? `<button class="ghost" data-continue="${r.id}">Continue</button>` : ""}
       ${done && r.output?.type === "audio" && r.mod === "tts" ? `<button class="ghost" data-to-stt="${r.id}">→ Speech to text</button>` : ""}
@@ -597,7 +744,7 @@ function render() {
 // ── events ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("click", (e) => {
-  const t = e.target.closest("[data-m],[data-v],[data-open],[data-rerun],[data-continue],[data-clear],[data-run],[data-turn-add],[data-turn-x],[data-connect],[data-to-stt],[data-voice-add],[data-voice-x],[data-record],[data-to-edit],[data-img-x]");
+  const t = e.target.closest("[data-m],[data-v],[data-open],[data-rerun],[data-continue],[data-clear],[data-run],[data-turn-add],[data-turn-x],[data-connect],[data-to-stt],[data-voice-add],[data-voice-x],[data-record],[data-to-edit],[data-img-x],[data-stop]");
   if (!t || t.disabled) return;
   const d = t.dataset;
   const v = state.values[state.cur];
@@ -622,6 +769,8 @@ document.addEventListener("click", (e) => {
     form();
     const areas = $("form").querySelectorAll('textarea[data-part="content"]');
     areas[areas.length - 1]?.focus();
+  } else if (d.stop) {
+    polls.get(+d.stop)?.abort();
   } else if (d.toEdit) {
     sendToEdit(store.get(+d.toEdit));
   } else if (d.imgX) {
@@ -642,12 +791,7 @@ document.addEventListener("click", (e) => {
   } else if ("clear" in d) {
     for (const r of store.list(state.cur)) {
       state.picked.delete(r.id);
-      if (r.status !== "running" && media.has(r.id)) {
-        const el = media.get(r.id);
-        el.pause();
-        if (el.src.startsWith("blob:")) URL.revokeObjectURL(el.src);
-        media.delete(r.id);
-      }
+      if (r.status !== "running") disposeMedia(r.id);
     }
     store.clear(state.cur);
   } else if ("run" in d) {
@@ -679,6 +823,7 @@ function onField(e) {
     const f = flatFields(mod()).find((x) => x.k === t.dataset.k);
     v[t.dataset.k] = f.t === "check" ? t.checked : f.t === "range" ? Number(t.value) : t.value;
     if (f.t === "range") t.nextElementSibling.textContent = t.value;
+    if (f.rerender && e.type === "change") form();
   }
 }
 document.addEventListener("input", onField);
@@ -731,7 +876,7 @@ store.onChange(() => {
 setInterval(() => {
   for (const el of document.querySelectorAll("[data-elapsed]")) {
     const r = store.get(+el.dataset.elapsed);
-    if (r?.status === "running") el.textContent = `running · ${formatMs(performance.now() - r.startedAt)}`;
+    if (r?.status === "running") el.textContent = `${runningLabel(r)} · ${formatMs(performance.now() - r.startedAt)}`;
   }
 }, 500);
 

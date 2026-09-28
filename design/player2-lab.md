@@ -1,7 +1,7 @@
 ---
 type: design
 category: development-tools
-status: unbuilt
+status: built
 resolution: sharp
 related: [asset-generation, level-generation]
 ---

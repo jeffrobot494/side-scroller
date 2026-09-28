@@ -20,6 +20,8 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { config } from "../../game/config.js";
 import { solveCamera3D } from "../camera.js";
 import { buildBackground } from "./background.js";
 import { buildTerrain } from "./terrain.js";
@@ -63,6 +65,38 @@ export function createView3D(canvas) {
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
+  // Scanlines: after OutputPass, so they darken DISPLAY colour (post tone map
+  // and sRGB) and bloom never blurs them. Keyed off gl_FragCoord, i.e. canvas
+  // pixels, so they sit still while the camera scrolls. A cosine profile, not
+  // a hard step: the canvas is CSS-scaled to the window, and a 1px hard edge
+  // resampled at a non-integer scale moirés. Strength 0 disables the pass —
+  // no draw, no cost.
+  const scanlines = new ShaderPass({
+    uniforms: {
+      tDiffuse: { value: null },
+      strength: { value: 0 },
+      spacing: { value: 3 },
+    },
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D tDiffuse;
+      uniform float strength;
+      uniform float spacing;
+      varying vec2 vUv;
+      void main() {
+        vec4 c = texture2D(tDiffuse, vUv);
+        float line = 0.5 + 0.5 * cos(6.2831853 * gl_FragCoord.y / spacing);
+        c.rgb *= 1.0 - strength * line;
+        gl_FragColor = c;
+      }`,
+  });
+  composer.addPass(scanlines);
+
   let level = null; // everything built for one deploy
   const halos = haloPool(scene);
 
@@ -89,6 +123,11 @@ export function createView3D(canvas) {
     level.enemies.sync(m, halos);
     level.effects.sync(m, halos);
     halos.end();
+
+    const k = +config.scanlines || 0;
+    scanlines.enabled = k > 0;
+    scanlines.uniforms.strength.value = k;
+    scanlines.uniforms.spacing.value = Math.max(2, +config.scanlineSpacing || 3);
 
     composer.render();
   }

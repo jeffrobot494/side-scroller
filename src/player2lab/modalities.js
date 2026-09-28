@@ -18,6 +18,12 @@
 //                   { _streamBytes, _playback, _ttfb }
 //   "bytes"       — client.sendBytes(path, bytes, { query }); `body` then only
 //                   describes what was sent, for Raw
+//   "job"         — enqueue with client.call(path, { body }) unqueued, then
+//                   poll `poll` (with {id} replaced) until jobState() says
+//                   done, then findJobResult(); an asset id is resolved
+//                   through GET /assets/{id}
+//
+// A field with `show(values)` is drawn only when it returns true.
 
 import { base64ToBytes, pcmToWav, FORMAT_MIME } from "./audio.js";
 
@@ -26,6 +32,8 @@ export const LAB = {
   vectorHead: 8, // embedding values shown on the card
   pcmRate: 24000, // TTS `pcm` has no header; played as 16-bit mono at this rate
   sttRate: 16000, // STT input is decoded and re-encoded as WAV at this rate
+  pollMs: 3000, // job status poll interval
+  jobTimeoutMs: 15 * 60_000, // a job still pending after this ends as a failed card
 };
 
 const clip = (s, n = 48) => {
@@ -318,7 +326,156 @@ const edit = {
   imageOut: true,
 };
 
-export const MODALITIES = [chat, embed, tts, stt, img, edit];
+// ── jobs ────────────────────────────────────────────────────────────────────
+// Only the video status route is documented; music and 3D poll the generic
+// /jobs/{id}, whose shape is not, so both readers below are defensive.
+
+const DONE = ["completed", "succeeded", "success", "done", "complete"];
+const FAILED = ["failed", "error", "cancelled", "canceled"];
+
+export function jobState(status) {
+  const s = String(status?.status ?? status?.state ?? "").toLowerCase();
+  if (DONE.includes(s)) return "done";
+  if (FAILED.includes(s)) return "failed";
+  return "pending";
+}
+
+export function jobLabel(status) {
+  return String(status?.status ?? status?.state ?? "pending").toLowerCase();
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const URL_KEYS = ["video_url", "audio_url", "music_url", "model_url", "glb_url", "download_url", "url"];
+const ASSET_KEYS = ["asset_id", "assetId", "result_asset_id", "asset"];
+
+// A URL or an asset id in a finished job's payload: the payload, its
+// `result`, and one level of nested objects. Null when there is neither.
+export function findJobResult(status) {
+  if (!status || typeof status !== "object") return null;
+  if (typeof status.video_data === "string" && status.video_data && !status.video_url) {
+    return { dataUrl: `data:${status.mimetype || "video/mp4"};base64,${status.video_data}` };
+  }
+  const roots = [status.result, status].filter((x) => x !== undefined && x !== null);
+  const candidates = [];
+  for (const r of roots) {
+    candidates.push(r);
+    if (typeof r === "object") candidates.push(...Object.values(r).filter((x) => x && typeof x === "object"));
+  }
+  for (const c of candidates) {
+    if (typeof c === "string") {
+      if (/^https?:\/\//.test(c)) return { url: c };
+      if (UUID.test(c)) return { assetId: c };
+      continue;
+    }
+    if (typeof c !== "object") continue;
+    for (const k of URL_KEYS) if (typeof c[k] === "string" && /^https?:\/\//.test(c[k])) return { url: c[k] };
+    for (const k of ASSET_KEYS) if (typeof c[k] === "string" && c[k]) return { assetId: c[k] };
+  }
+  return null;
+}
+
+// The download URL of an asset from GET /assets/{id}.
+export function assetUrl(asset) {
+  const urls = asset?.urls || {};
+  return urls.original || urls.glb || Object.values(urls).find((u) => typeof u === "string") || null;
+}
+
+export function jobId(enqueued) {
+  if (enqueued?.out_of_credits) throw new Error("Out of credits: the job was not started.");
+  if (!enqueued?.job_id) throw new Error("The enqueue response carried no job_id.");
+  return enqueued.job_id;
+}
+
+// A job's final response, as app.js assembles it: { enqueue, status, asset, url }.
+const jobUrl = (resp) => resp?.url || null;
+
+const VIDEO_MODES = ["From prompt", "From image", "Transform image (edit + video)"];
+const VIDEO_PATH = { [VIDEO_MODES[0]]: "/video/generate", [VIDEO_MODES[1]]: "/video/generate_from_image", [VIDEO_MODES[2]]: "/video/transform_image" };
+const needsImage = (v) => v.mode !== VIDEO_MODES[0];
+
+const video = {
+  id: "video",
+  label: "Video",
+  group: "Video",
+  fields: [
+    { k: "mode", t: "select", label: "Mode", opts: VIDEO_MODES, v: VIDEO_MODES[0], rerender: true },
+    { k: "prompt", t: "textarea", label: "Prompt", v: "" },
+    { k: "image", t: "images", label: "Start image", max: 1, v: [], show: needsImage },
+    { k: "aspect", t: "select", label: "Aspect ratio", opts: ["16:9", "9:16", "1:1", "4:3", "3:4"], v: "16:9" },
+  ],
+  note: (v) => (v.mode === VIDEO_MODES[2] ? "Transform edits the image from the prompt, then animates the result: 480p, 5s, 60 J." : ""),
+  request(v) {
+    const prompt = String(v.prompt || "").trim();
+    if (!prompt) throw new Error("Prompt is empty.");
+    const body = { prompt, aspect_ratio: v.aspect };
+    if (needsImage(v)) {
+      if (!v.image?.length) throw new Error("This mode needs a start image.");
+      body.image = v.image[0].dataUrl;
+    }
+    return { kind: "job", method: "POST", path: VIDEO_PATH[v.mode], body, poll: "/video/job/{id}" };
+  },
+  summary(v) {
+    const s = { mode: v.mode.replace(/ \(.*\)$/, "").toLowerCase(), prompt: `“${clip(v.prompt, 40)}”` };
+    if (needsImage(v)) s.image = imagesSummary(v.image);
+    s.aspect = v.aspect;
+    return s;
+  },
+  output: (resp) => ({ type: "video", url: jobUrl(resp) }),
+};
+
+const music = {
+  id: "music",
+  label: "Music",
+  group: "Audio",
+  fields: [
+    { k: "prompt", t: "textarea", label: "Prompt", v: "" },
+    { row: [
+      { k: "duration", t: "number", label: "Duration (3–300 s)", v: 30 },
+      { k: "instrumental", t: "check", label: "Instrumental", v: true },
+    ] },
+  ],
+  request(v) {
+    const prompt = String(v.prompt || "").trim();
+    if (!prompt) throw new Error("Prompt is empty.");
+    const body = { prompt, force_instrumental: Boolean(v.instrumental) };
+    const d = num(v.duration);
+    if (d !== undefined) body.duration_seconds = d;
+    return { kind: "job", method: "POST", path: "/music/generate_job", body, poll: "/jobs/{id}" };
+  },
+  summary(v) {
+    return { prompt: `“${clip(v.prompt, 40)}”`, duration: `${v.duration || "?"}s`, instrumental: v.instrumental ? "instrumental" : "vocals allowed" };
+  },
+  output: (resp) => ({ type: "audio", url: jobUrl(resp), mime: resp?.asset?.mime || "audio/mpeg" }),
+};
+
+const MODEL_MODES = ["From prompt", "From image"];
+const fromImage = (v) => v.mode === MODEL_MODES[1];
+
+const model3d = {
+  id: "3d",
+  label: "3D",
+  group: "3D",
+  fields: [
+    { k: "mode", t: "select", label: "Source", opts: MODEL_MODES, v: MODEL_MODES[0], rerender: true },
+    { k: "prompt", t: "textarea", label: "Prompt", v: "", show: (v) => !fromImage(v) },
+    { k: "image", t: "images", label: "Image", max: 1, v: [], show: fromImage },
+  ],
+  request(v) {
+    if (fromImage(v)) {
+      if (!v.image?.length) throw new Error("Add an image.");
+      return { kind: "job", method: "POST", path: "/model3d/generate_from_image", body: { image: v.image[0].dataUrl }, poll: "/jobs/{id}" };
+    }
+    const prompt = String(v.prompt || "").trim();
+    if (!prompt) throw new Error("Prompt is empty.");
+    return { kind: "job", method: "POST", path: "/text3d/generate", body: { prompt }, poll: "/jobs/{id}" };
+  },
+  summary(v) {
+    return fromImage(v) ? { mode: "from image", image: imagesSummary(v.image) } : { mode: "from prompt", prompt: `“${clip(v.prompt, 40)}”` };
+  },
+  output: (resp) => ({ type: "model", url: jobUrl(resp) }),
+};
+
+export const MODALITIES = [chat, embed, tts, stt, music, img, edit, video, model3d];
 export const MODALITY_BY_ID = Object.fromEntries(MODALITIES.map((m) => [m.id, m]));
 
 // Every field, rows flattened.

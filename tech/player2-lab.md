@@ -1,7 +1,7 @@
 ---
 type: tech
 category: development-tools
-status: designed
+status: built
 resolution: sharp
 needs: []
 related: [asset-generation, level-generation]
@@ -21,6 +21,7 @@ How the standalone test bench for every Player2 generation modality is built. Im
 | L3 | **Images.** Generate (prompt, width, height) and edit (prompt, 1..n source images, aspect ratio or size), with a download button on the output. A source image is an upload or, through **→ Image edit** on any image-generate or image-edit card, that run's output. Builds the image-upload field L4 reuses | New modalities on the page |
 | L4 | **Slow jobs: music, video, 3D.** One job runner: enqueue, poll, a progress card (status label plus elapsed time), several jobs at once, and the job count in the top bar. Music is audio. Video has three modes: a prompt, a prompt plus a start image, or transform an image (`/video/transform_image`: edit, then animate; 60J). All three poll `/video/job/{id}`. 3D comes from a prompt or an image and shows in a GLB viewer with orbit controls | New modalities on the page. **After this slice every modality in the design is present** |
 
+- **As built (L4):** a running job's card has **Stop polling**, which aborts the poll through the signal L0 added; the run fails with "the job may still finish on Player2", because the job itself cannot be cancelled. Three.js loads on the first model shown, not with the page, so no other modality waits on the CDN, and the viewer renders on orbit input rather than in a loop. Video, music and 3D cards carry an **Open** link to the file's URL: a cross-origin URL ignores `download`, so there is no Download button like the images have.
 - L0 is additive, and the existing client test is its guard.
 - L1–L4 each land alone: each adds rows to the modality table and the players those rows need.
 - L2 and L3 are independent of each other after L1. **L4 comes after both**: music reuses L2's audio player, and video-from-image and 3D-from-image reuse L3's image-upload field.
@@ -73,6 +74,8 @@ The **wire** is not involved: the Lab has no state that a room would simulate.
 | Serve check | `player2-lab.html` and every `src/player2lab/*` module return 200 under `python3 -m http.server` |
 
 **Where the bar cannot see:** `src/player2lab/app.js` and the live endpoints. No test drives a real Player2 account, the mic, audio playback or WebGL. `authenticate` stays unguarded; Enemy Designer → Connect + Generate is the manual check that L0 did not break the game's live callers.
+
+**As built:** each slice was also driven in headless Chrome against a mocked Player2 API before it was committed: streamed and whole chat, Continue, compare, TTS whole/stream (progressive mp3, wav once complete, pcm), TTS → STT, file and fake-mic STT, image generate/edit/edit-from-a-run, three jobs at once, the GLB viewer on SwiftShader, and every failure path. That harness is not in the repo: it needs puppeteer, and the repo takes no dependencies. The mocks were written from the OpenAPI document, so they prove the page against the documented shapes, not against Player2.
 
 ## Approximations
 
