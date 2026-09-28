@@ -2,6 +2,8 @@
 // L0: the client's additive calls, and the return shapes of chat/chatStream/
 // poll that the game relies on and nothing else pinned.
 import { Player2Client, RateLimitError, InsufficientCreditsError } from "../src/player2/client.js";
+import { MODALITIES, MODALITY_BY_ID, defaultValues, flatFields } from "../src/player2lab/modalities.js";
+import { createRunStore, createJoulesLedger, ident, diffKeys, shortenForRaw, formatMs } from "../src/player2lab/runs.js";
 
 // A fetch stub: routes are matched in order by a predicate on (url, init).
 function stubFetch(routes) {
@@ -170,5 +172,129 @@ export default async function run(t) {
     setTimeout(() => ac.abort(), 5);
     await p;
     t.eq("poll: abort rejects with AbortError", err && err.name, "AbortError");
+  }
+
+  // ---- L1: the modality table ------------------------------------------------
+  for (const m of MODALITIES) {
+    const v = defaultValues(m);
+    t.ok(`table ${m.id}: every field has a default`, flatFields(m).every((f) => f.k in v));
+    t.ok(`table ${m.id}: has request/summary/output`, [m.request, m.summary, m.output].every((f) => typeof f === "function"));
+  }
+  {
+    const chat = MODALITY_BY_ID.chat;
+    const v = defaultValues(chat);
+    let err = null;
+    try { chat.request(v); } catch (e) { err = e; }
+    t.ok("chat: empty conversation refused before sending", err && /empty/.test(err.message));
+    v.turns = [{ role: "system", content: "Be terse." }, { role: "user", content: "hi" }, { role: "assistant", content: "  " }];
+    v.stream = false;
+    v.max_tokens = "200";
+    v.json = true;
+    const req = chat.request(v);
+    t.eq("chat: blank turns dropped", req.body.messages.length, 2);
+    t.eq("chat: whole reply is a json call", [req.kind, req.path, req.body.stream], ["json", "/chat/completions", undefined]);
+    t.eq("chat: numbers and JSON mode", [req.body.max_tokens, req.body.temperature, req.body.response_format.type], [200, 1, "json_object"]);
+    v.stream = true;
+    v.max_tokens = "";
+    v.tools = '[{"type":"function","function":{"name":"f"}}]';
+    const s = chat.request(v);
+    t.eq("chat: streamed", [s.kind, s.body.stream, "max_tokens" in s.body], ["chat-stream", true, false]);
+    t.eq("chat: tools parsed", s.body.tools[0].function.name, "f");
+    v.tools = "{";
+    err = null;
+    try { chat.request(v); } catch (e) { err = e; }
+    t.ok("chat: bad tools JSON refused", err && /Tools/.test(err.message));
+    v.tools = "{}";
+    err = null;
+    try { chat.request(v); } catch (e) { err = e; }
+    t.ok("chat: tools must be an array", err && /array/.test(err.message));
+    v.tools = "";
+    const sum = chat.summary(v);
+    t.ok("chat: summary keys are value keys (so compare can diff them)", Object.keys(sum).every((k) => k in v));
+    t.ok("chat: summary names the last turn", sum.turns.startsWith("2 turns") && sum.turns.includes("hi"));
+    const out = chat.output({ model: "m", choices: [{ message: { content: "yo", tool_calls: [{ id: 1 }] } }] });
+    t.eq("chat: output text + tool calls", [out.type, out.text, out.toolCalls.length], ["text", "yo", 1]);
+    t.eq("chat: reported model", chat.reported({ model: "gpt-x" }), "gpt-x");
+    t.eq("chat: no model reported", chat.reported({}), null);
+    const next = chat.continueFrom({ values: v, output: { text: "yo" } });
+    t.eq("chat: Continue = conversation + reply + empty user turn",
+      next.turns.map((m) => [m.role, m.content]),
+      [["system", "Be terse."], ["user", "hi"], ["assistant", "yo"], ["user", ""]]);
+    t.ok("chat: Continue does not mutate the run's values", v.turns.length === 3);
+  }
+  {
+    const embed = MODALITY_BY_ID.embed;
+    const v = defaultValues(embed);
+    v.input = "a\n\n b ";
+    v.model = " text-embedding-3-small ";
+    v.dimensions = "256";
+    const req = embed.request(v);
+    t.eq("embed: lines become an array, model trimmed, dims numeric", req.body, { input: ["a", "b"], model: "text-embedding-3-small", dimensions: 256 });
+    v.input = "one";
+    v.model = "";
+    v.dimensions = "";
+    t.eq("embed: one line is a string, blanks omitted", embed.request(v).body, { input: "one" });
+    v.input = "a\nb";
+    const out = embed.output({ data: [{ index: 1, embedding: [3, 4] }, { index: 0, embedding: Array(20).fill(0.5) }] }, v);
+    t.eq("embed: vectors carry text by index, length and head",
+      out.vectors.map((x) => [x.text, x.length, x.head.length]), [["b", 2, 2], ["a", 20, 8]]);
+  }
+
+  // ---- L1: the run store and its rules ---------------------------------------
+  {
+    const store = createRunStore();
+    const seen = [];
+    store.onChange((r) => seen.push(r && r.id));
+    const a = store.add({ mod: "chat", values: {} });
+    const b = store.add({ mod: "embed", values: {} });
+    store.add({ mod: "chat", values: {} });
+    t.eq("store: ids increase, newest first, filtered", store.list("chat").map((r) => r.id), [3, 1]);
+    store.update(a.id, { status: "done" });
+    t.eq("store: update bumps ver", store.get(a.id).ver, 1);
+    t.eq("store: running", store.running().map((r) => r.id), [2, 3]);
+    store.clear("chat");
+    t.eq("store: clear keeps running runs", store.list("chat").map((r) => r.id), [3]);
+    t.ok("store: emits on every change", seen.length === 5 && b.id === 2);
+  }
+  {
+    t.eq("ident: reported beats label", ident({ reported: "gpt-x", label: "mine" }), { text: "gpt-x", source: "reported", cls: "" });
+    t.eq("ident: TTS provider", ident({ reported: "kokoro", reportedKind: "provider", voice: "V" }).source, "reported provider");
+    t.eq("ident: label", ident({ label: "Seedream" }), { text: "Seedream", source: "your label", cls: "lab" });
+    t.eq("ident: voice sent", ident({ voice: "Marcus" }).text, "voice: Marcus");
+    t.eq("ident: nothing", ident({}).text, "(not reported)");
+  }
+  {
+    const r1 = { values: { prompt: "a", t: 1, turns: [{ c: 1 }] }, reported: "m1" };
+    const r2 = { values: { prompt: "a", t: 2, turns: [{ c: 2 }] }, reported: "m1" };
+    t.eq("diff: differing values, deep", [...diffKeys([r1, r2])].sort(), ["t", "turns"]);
+    t.ok("diff: model when names differ", diffKeys([r1, { ...r1, reported: null, label: "L" }]).has("model"));
+    t.eq("diff: one run diffs nothing", diffKeys([r1]).size, 0);
+  }
+  {
+    const L = createJoulesLedger();
+    L.begin(1);
+    L.setStart(1, 100);
+    t.eq("joules: lone run is the balance delta", L.end(1, 97), 3);
+    L.begin(2);
+    L.begin(3); // overlaps 2
+    L.setStart(2, 90);
+    L.setStart(3, 90);
+    t.eq("joules: overlapped run -> null", L.end(2, 80), null);
+    t.eq("joules: the other one too", L.end(3, 80), null);
+    L.begin(4);
+    t.eq("joules: missing start balance -> null", L.end(4, 70), null);
+    L.begin(5);
+    L.setStart(5, null);
+    t.eq("joules: failed balance read -> null", L.end(5, 70), null);
+    t.eq("joules: window closed", L.openCount, 0);
+  }
+  {
+    const b64 = "A".repeat(1000);
+    const r = shortenForRaw({ data: b64, text: "hello", vec: Array(100).fill(1), nested: [{ image: b64 }] });
+    t.ok("raw: base64 shortened with its length", r.data.includes("1000 chars base64") && r.data.length < 100);
+    t.eq("raw: text kept", r.text, "hello");
+    t.ok("raw: long vectors shortened", r.vec.includes("100 numbers"));
+    t.ok("raw: nested", r.nested[0].image.includes("base64"));
+    t.eq("formatMs", [formatMs(1234), formatMs(125000), formatMs(undefined)], ["1.2s", "2m 05s", "—"]);
   }
 }
