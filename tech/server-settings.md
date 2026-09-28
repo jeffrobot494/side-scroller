@@ -63,7 +63,7 @@ the next reader both depend on them.
 |---|---|---|
 | **`setConfig` already works in node, unchanged** | `src/game/config.js` | Verified by running it in a bare process: unknown keys dropped (`if (!item) return`), values coerced to type and clamped to range (`gravity` 99999 → 4000, `"false"` → `true`, an unknown enum → the default), the live object mutated **in place** so every importer sees it, and `persist()` reaching `writeStore`, which is guarded on `typeof localStorage` and is a silent no-op. In-memory mutation with no persistence is not built here; it is what that function does when nothing is listening |
 | `SCHEMA` | `src/game/config.js` | Already the single place a knob is declared, with label, type, range and default. `scope` is one more field on an entry, which is the convention `CLAUDE.md` states for adding anything tunable |
-| `controlsHTML` / `controlsTabsHTML` / `bindControls` | `src/editor/controls.js` | The whole screen. Data in, a callback out, no knowledge of storage — which is why C3 is a branch rather than a second renderer |
+| `controlsHTML` / `controlsTabsHTML` / `bindControls` | `src/hub/controls.js` | The whole screen. Data in, a callback out, no knowledge of storage — which is why C3 is a branch rather than a second renderer |
 | `item.default` | `src/game/config.js` | What the "you changed this" dot compares against. **Not `isDefault`**, which takes one argument and reads the module-local `config` — over a server the page holds values from a different machine, and `isDefault` of an unknown key returns `true`, so a server key the browser lacks would read as unchanged rather than as an error |
 | The `/api` shape and its 404 | `server.mjs` | `apiRoute` handles every `/api/` path and ends in a catch-all 404. Routes go inside it, above that line — a route added below the outer method guard instead would be unreachable |
 | **A real server, spawned** | `test/mission-net.test.mjs` | It already starts `server.mjs` on its own port and drives it over HTTP — the instrument exists, and `test/service.test.mjs` is not it, speaking no HTTP at all. **As of C2 the spawn is already hoisted** into `spawnServer()` and section 5 (`configRoutes`) calls it directly, so C4 inherits an instrument rather than building one — the original constraint, that a case nested inside `twoSeatDrive()` vanishes on a node with no global `WebSocket`, is discharged and is recorded here only so nobody re-solves it. The remaining constraint stands: the suite is the parent process with no handle on the child's `config`; it says so itself about `leadVisibility`. The assertable claim is POST-then-GET **through the routes**, which is weaker than "a change lands on the live object" and is what the cases must say |
@@ -112,7 +112,7 @@ it, not by which folder it lives in. `scope` is that decision written down.
 
 | Boundary | Why |
 |---|---|
-| `src/editor/controls.js` | It renders a schema and calls back. A renderer that learns about servers has to learn about every future source |
+| `src/hub/controls.js` | It renders a schema and calls back. A renderer that learns about servers has to learn about every future source |
 | `setConfig`'s behaviour | Coercion, unknown-key handling and in-place mutation are what make this small. A route that validates separately is a second opinion about the schema |
 | The campaign and mission channels | `/api/command`, `/api/stream` and the mission socket are unchanged. A settings change is not a command and never reaches the session |
 | **A knob read on BOTH machines** | There is exactly one and it was fixed rather than scoped: `aimMode` was read by the browser to pack aim and by the room to interpret it, so a room's copy silently killed a keyboard commander's aim. The room no longer reads it. **A knob in this position must be removed from one side, never marked `server`** — scoping it would force two commanders to agree about their own hands |
@@ -165,7 +165,7 @@ matters, which is that the plain URL still writes localStorage.
 
 ### Why this is two routes rather than a feature
 
-The screen exists: `src/editor/controls.js` renders every group in the schema,
+The screen exists: `src/hub/controls.js` renders every group in the schema,
 marks what differs from default, and hands changes to a callback — written that
 way for the local case, before any of this. The setter exists, and because this
 repo guards every storage access it already behaves correctly in a process that

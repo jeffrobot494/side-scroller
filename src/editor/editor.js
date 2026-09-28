@@ -14,7 +14,7 @@ import {
   exportConfig,
   importConfig,
 } from "../game/config.js";
-import { controlsTabsHTML, bindControls, showControlsTab } from "./controls.js";
+import { controlsTabsHTML, bindControls, showControlsTab } from "../hub/controls.js";
 import { serverTarget, createRemoteConfig } from "./remote-config.js";
 import { createWeaponDesigner } from "./tools/weapon-designer.js";
 import { createEnemyDesigner } from "./tools/enemy-designer.js";

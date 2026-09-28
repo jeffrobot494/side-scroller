@@ -39,7 +39,7 @@ import { profileFor, graphFor, invalidateNavGraphs } from "../../mission/navigat
 import { drawNavGraph, drawNavPath, NAV_EDGE_COLOR } from "../../mission/render.js";
 import { WEAPONS } from "../../game/content.js";
 import { SCHEMA, config, setConfig, isDefault } from "../../game/config.js";
-import { controlsHTML, bindControls } from "../controls.js";
+import { controlsHTML, bindControls } from "../../hub/controls.js";
 
 // 1:1, and 540 tall because the world is. The design's argument for panning
 // instead of fitting is that a level scaled to a tenth makes the agent

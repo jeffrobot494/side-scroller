@@ -12,7 +12,7 @@ import { defaultProgression } from "../src/game/progression.js";
 import { createState } from "../src/game/state.js";
 import { RECRUIT_POOL } from "../src/game/soldiers.js";
 import { createSoundPage } from "../src/editor/sound-page.js";
-import { controlsTabsHTML, showControlsTab } from "../src/editor/controls.js";
+import { controlsTabsHTML, showControlsTab } from "../src/hub/controls.js";
 import { serverTarget, createRemoteConfig } from "../src/editor/remote-config.js";
 import { SCHEMA, config, resetConfig, setConfig, isDefault, pauseSchema } from "../src/game/config.js";
 import { Soldier } from "../src/mission/entities.js";

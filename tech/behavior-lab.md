@@ -82,7 +82,7 @@ looks at would be the failure mode.
 | A soldier-bodied agent | `src/game/companionspecs.js` | A working EnemySpec on `body.locomotor: "soldier"` — the shape to copy. Note it authors `body.gravity` explicitly, which a grounded agent must, because `moveTo` is in `FLYING_MOTIONS` and would otherwise default the body to a flyer |
 | Level + scene construction | `src/game/gen/levelgen.js`, `src/mission/entities.js` | `generateLevel` then `loadMission` gives a real world, real platforms and a real spawn — plus `stepActor`, which the Lab calls itself for its one Soldier |
 | Tool shell and discipline | `src/editor/tools/level-generator.js` | The `createX(container, onBack) → { dispose() }` convention from `CLAUDE.md`: one synchronous `draw()` at mount, a cancelled rAF on dispose, `TOOLS`/`MOUNTABLE`/`factory` registration. A canvas tool that is not v1 |
-| Schema-driven controls | `src/editor/controls.js`, `src/game/config.js` | The Tuning panel renders a `SCHEMA` group rather than bespoke sliders. The renderer works a whole group at a time — see Approximations |
+| Schema-driven controls | `src/hub/controls.js`, `src/game/config.js` | The Tuning panel renders a `SCHEMA` group rather than bespoke sliders. The renderer works a whole group at a time — see Approximations |
 | Headless mount test | `test/tools.test.mjs` | The shape a new tool's test copies — mount, assert a `dispose()`, dispose without throwing |
 
 ## Where the code goes

@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import { SCHEMA, config, setConfig, isDefault } from "../game/config.js";
-import { controlsHTML, bindControls } from "./controls.js";
+import { controlsHTML, bindControls } from "../hub/controls.js";
 import { CUES } from "../audio/cues.js";
 import { WAVES, SYNTH_RANGES } from "../audio/synth.js";
 import {
