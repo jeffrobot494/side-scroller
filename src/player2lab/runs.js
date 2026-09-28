@@ -67,16 +67,21 @@ export function diffKeys(runs) {
   return out;
 }
 
-// A comparable key for a value. Byte arrays (audio, images) are keyed by
-// length and a sampled hash rather than serialised whole.
+// A comparable key for a value. Byte arrays (audio) and long strings (image
+// data URLs) are keyed by length and a sampled hash rather than serialised
+// whole.
 export function valueKey(value) {
-  return JSON.stringify(value, (_, v) => (v instanceof Uint8Array ? `bytes:${v.length}:${sampleHash(v)}` : v));
+  return JSON.stringify(value, (_, v) => {
+    if (v instanceof Uint8Array) return `bytes:${v.length}:${sampleHash(v, (i) => v[i])}`;
+    if (typeof v === "string" && v.length > 1024) return `str:${v.length}:${sampleHash(v, (i) => v.charCodeAt(i))}`;
+    return v;
+  });
 }
 
-function sampleHash(bytes) {
+function sampleHash(seq, at) {
   let h = 2166136261;
-  const step = Math.max(1, Math.floor(bytes.length / 4096));
-  for (let i = 0; i < bytes.length; i += step) h = Math.imul(h ^ bytes[i], 16777619);
+  const step = Math.max(1, Math.floor(seq.length / 4096));
+  for (let i = 0; i < seq.length; i += step) h = Math.imul(h ^ at(i), 16777619);
   return (h >>> 0).toString(36);
 }
 

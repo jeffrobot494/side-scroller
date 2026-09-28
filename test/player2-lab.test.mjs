@@ -389,4 +389,48 @@ export default async function run(t) {
     t.ok("diff: different audio differs", diffKeys([a, b]).has("audio"));
     t.eq("diff: same audio does not", diffKeys([a, { values: { audio: { bytes: new Uint8Array(5000).fill(1) } } }]).size, 0);
   }
+
+  // ---- L3: images ------------------------------------------------------------
+  {
+    const img = MODALITY_BY_ID.img;
+    const v = defaultValues(img);
+    let err = null;
+    try { img.request(v); } catch (e) { err = e; }
+    t.ok("img: empty prompt refused", err && /empty/.test(err.message));
+    v.prompt = "husk";
+    v.width = "512";
+    t.eq("img: generate body", img.request(v).body, { prompt: "husk", width: 512, height: 1024 });
+    const out = img.output({ image: "iVBOR" });
+    t.eq("img: output is a PNG data URL", [out.type, out.dataUrl, out.mime], ["image", "data:image/png;base64,iVBOR", "image/png"]);
+    t.ok("img: offers → Image edit", img.imageOut === true);
+    t.eq("img: reports nothing", img.reported, undefined);
+  }
+  {
+    const edit = MODALITY_BY_ID.edit;
+    const v = defaultValues(edit);
+    v.prompt = "glow";
+    let err = null;
+    try { edit.request(v); } catch (e) { err = e; }
+    t.ok("edit: no source image refused", err && /source image/.test(err.message));
+    const a = { name: "a", source: "run #1", dataUrl: "data:image/png;base64,AAA" };
+    const b = { name: "b.png", source: "b.png", dataUrl: "data:image/png;base64,BBB" };
+    v.images = [a];
+    v.width = "800";
+    const one = edit.request(v);
+    t.eq("edit: one image goes in `image`, size used without a ratio", [one.body.image, one.body.images, one.body.width, "height" in one.body], [a.dataUrl, undefined, 800, false]);
+    v.images = [a, b];
+    v.aspect = "16:9";
+    const two = edit.request(v);
+    t.eq("edit: several go in `images`; a ratio wins over size", [two.body.images.length, two.body.aspect_ratio, "width" in two.body], [2, "16:9", false]);
+    const sum = edit.summary(v);
+    t.eq("edit: summary names the sources", sum.images, "2 images: run #1, b.png");
+    t.ok("edit: summary keys are value keys", Object.keys(sum).every((k) => k in v));
+    t.eq("edit: output uses the reported mimetype", edit.output({ image: "QQ", mimetype: "image/jpeg" }).dataUrl, "data:image/jpeg;base64,QQ");
+    err = null;
+    try { edit.output({ error: "refused", image: "" }); } catch (e) { err = e; }
+    t.ok("edit: an error body fails the run", err && err.message === "refused");
+    const long = "data:image/png;base64," + "A".repeat(5000);
+    t.ok("valueKey: long strings hashed", valueKey({ x: long }).length < 60);
+    t.ok("diff: different images differ", diffKeys([{ values: { images: [{ dataUrl: long }] } }, { values: { images: [{ dataUrl: long + "B" }] } }]).has("images"));
+  }
 }

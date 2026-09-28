@@ -192,6 +192,14 @@
   .ghost.rec { border-color: var(--bad); color: var(--bad); }
   .clip { margin-top: 8px; }
   .clip audio, .media-slot audio { width: 100%; max-width: 420px; height: 36px; display: block; }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .thumb { position: relative; width: 84px; font-size: 11px; color: var(--ink-3); text-align: center; }
+  .thumb img { width: 84px; height: 84px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; margin-bottom: 2px; }
+  .thumb .x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: rgba(0,0,0,.65); color: #fff; cursor: pointer; line-height: 1; }
+  .thumb span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  img.media { aspect-ratio: auto; height: auto; max-width: 360px; object-fit: contain; background: repeating-conic-gradient(#20242b 0 25%, #1a1d23 0 50%) 0 0 / 16px 16px; }
+  .img-actions { display: flex; gap: 6px; margin-top: 8px; }
+  a.ghost { text-decoration: none; display: inline-block; }
   .words { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; font-size: 11.5px; }
   .words span { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
   .words i { font-style: normal; color: var(--ink-3); font-variant-numeric: tabular-nums; }

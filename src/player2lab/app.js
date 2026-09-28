@@ -344,6 +344,8 @@ function field(f, v) {
              <div class="voice-list" id="voice-list">${voiceList(val)}</div>`
           : `<div class="note" style="margin:0">${state.voicesError ? `Voice list unavailable: ${esc(state.voicesError)}` : "Loading the voice list…"}</div>`
       }</div>`;
+    case "images":
+      return imagesField(f, val);
     case "audio": {
       const rec = state.recorder;
       return `<div class="field">${L}<div class="drop" data-drop>
@@ -356,6 +358,52 @@ function field(f, v) {
     }
   }
   return "";
+}
+
+// Image fields: uploads or an earlier run's output, as data URLs.
+function imagesField(f, val) {
+  const list = val || [];
+  const full = f.max && list.length >= f.max;
+  return `<div class="field"><span>${esc(f.label)}</span>${
+    list.length
+      ? `<div class="thumbs">${list
+          .map((x, i) => `<div class="thumb"><img src="${x.dataUrl}" alt=""><button class="x" data-img-x="${f.k}:${i}" title="Remove">×</button><span>${esc(x.source)}</span></div>`)
+          .join("")}</div>`
+      : ""
+  }${
+    full
+      ? ""
+      : `<div class="drop" data-drop="images:${f.k}">Drop image${f.max === 1 ? "" : "s"} here, or use → Image edit on an image run
+        <div class="drop-actions"><label class="ghost">Choose file${f.max === 1 ? "" : "s"}<input type="file" accept="image/*" ${f.max === 1 ? "" : "multiple"} data-image-file="${f.k}" hidden></label></div></div>`
+  }</div>`;
+}
+
+function readDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+}
+
+async function takeImages(key, files) {
+  const f = flatFields(mod()).find((x) => x.k === key);
+  const v = state.values[state.cur];
+  for (const file of [...files].filter((x) => x.type.startsWith("image/"))) {
+    if (f.max && v[key].length >= f.max) break;
+    v[key].push({ name: file.name, source: file.name, dataUrl: await readDataUrl(file) });
+  }
+  form();
+}
+
+// → Image edit: an image run's output becomes a source image.
+function sendToEdit(r) {
+  const v = state.values.edit;
+  v.images.push({ name: `run-${r.id}`, source: `run #${r.id}`, dataUrl: r.output.dataUrl });
+  state.cur = "edit";
+  state.view = "list";
+  render();
 }
 
 function voiceList(picked) {
@@ -416,6 +464,11 @@ function outputHtml(r) {
       }
       return `<div class="media-slot" data-media="${r.id}"></div>${notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}`;
     }
+    case "image": {
+      const ext = (o.mime.split("/")[1] || "png").replace("jpeg", "jpg");
+      return `<img class="media" src="${o.dataUrl}" alt="run ${r.id} output">
+        <div class="img-actions"><a class="ghost" href="${o.dataUrl}" download="player2-lab-run-${r.id}.${ext}">Download</a></div>`;
+    }
     case "transcript": {
       const bits = [];
       if (typeof o.confidence === "number") bits.push(`confidence ${o.confidence.toFixed(2)}`);
@@ -467,6 +520,7 @@ function cardHtml(r, compare, diff) {
       <button class="ghost" data-rerun="${r.id}" ${state.conn === "on" ? "" : "disabled"}>Rerun</button>
       ${m.continueFrom && done ? `<button class="ghost" data-continue="${r.id}">Continue</button>` : ""}
       ${done && r.output?.type === "audio" && r.mod === "tts" ? `<button class="ghost" data-to-stt="${r.id}">→ Speech to text</button>` : ""}
+      ${done && m.imageOut ? `<button class="ghost" data-to-edit="${r.id}">→ Image edit</button>` : ""}
     </div>`;
   return `<div class="card ${state.picked.has(r.id) && !compare ? "picked" : ""} ${state.open.has(r.id) ? "open" : ""}" data-card="${r.id}">
     <div class="card-head"><span class="id">#${r.id}</span><span class="model ${id.cls} ${diff.has("model") ? "differs" : ""}">${esc(id.text)}</span>${
@@ -543,7 +597,7 @@ function render() {
 // ── events ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("click", (e) => {
-  const t = e.target.closest("[data-m],[data-v],[data-open],[data-rerun],[data-continue],[data-clear],[data-run],[data-turn-add],[data-turn-x],[data-connect],[data-to-stt],[data-voice-add],[data-voice-x],[data-record]");
+  const t = e.target.closest("[data-m],[data-v],[data-open],[data-rerun],[data-continue],[data-clear],[data-run],[data-turn-add],[data-turn-x],[data-connect],[data-to-stt],[data-voice-add],[data-voice-x],[data-record],[data-to-edit],[data-img-x]");
   if (!t || t.disabled) return;
   const d = t.dataset;
   const v = state.values[state.cur];
@@ -568,6 +622,12 @@ document.addEventListener("click", (e) => {
     form();
     const areas = $("form").querySelectorAll('textarea[data-part="content"]');
     areas[areas.length - 1]?.focus();
+  } else if (d.toEdit) {
+    sendToEdit(store.get(+d.toEdit));
+  } else if (d.imgX) {
+    const [k, i] = d.imgX.split(":");
+    v[k].splice(+i, 1);
+    form();
   } else if (d.toStt) {
     sendToStt(store.get(+d.toStt));
   } else if (d.voiceAdd) {
@@ -629,6 +689,10 @@ document.addEventListener("change", (e) => {
     runsView();
     return;
   }
+  if (e.target.dataset.imageFile) {
+    takeImages(e.target.dataset.imageFile, e.target.files);
+    return;
+  }
   if (e.target.dataset.audioFile !== undefined) {
     takeFile(e.target.files[0]);
     return;
@@ -641,9 +705,12 @@ document.addEventListener("dragover", (e) => {
   if (e.target.closest?.("[data-drop]")) e.preventDefault();
 });
 document.addEventListener("drop", (e) => {
-  if (!e.target.closest?.("[data-drop]")) return;
+  const zone = e.target.closest?.("[data-drop]");
+  if (!zone) return;
   e.preventDefault();
-  takeFile(e.dataTransfer.files[0]);
+  const kind = zone.dataset.drop;
+  if (kind.startsWith("images:")) takeImages(kind.slice(7), e.dataTransfer.files);
+  else takeFile(e.dataTransfer.files[0]);
 });
 
 // Ctrl/Cmd+Enter runs from anywhere in the form.

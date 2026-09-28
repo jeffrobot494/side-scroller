@@ -8,7 +8,8 @@
 //
 // Field kinds: text, textarea, number, range, check, select, turns, voices
 // (value: [{ id, name }], options from /tts/voices), audio (value: a prepared
-// clip, see app.js). A `row` groups fields side by side.
+// clip, see app.js), images (value: [{ name, source, dataUrl }], at most
+// `max`). A `row` groups fields side by side.
 //
 // A request is { kind, method, path, body, bytes?, query? } where kind is:
 //   "json"        — client.call(path, { body })
@@ -236,7 +237,88 @@ const stt = {
   },
 };
 
-export const MODALITIES = [chat, embed, tts, stt];
+const ASPECTS = ["none (use size)", "21:9", "16:9", "3:2", "4:3", "5:4", "1:1", "4:5", "3:4", "2:3", "9:16", "9:21"];
+
+const imagesSummary = (list) => (list?.length ? `${list.length} image${list.length === 1 ? "" : "s"}: ${list.map((x) => x.source).join(", ")}` : "no image");
+
+const img = {
+  id: "img",
+  label: "Image generate",
+  group: "Image",
+  fields: [
+    { k: "prompt", t: "textarea", label: "Prompt", v: "" },
+    { row: [
+      { k: "width", t: "number", label: "Width (128–1024)", v: 1024 },
+      { k: "height", t: "number", label: "Height (128–1024)", v: 1024 },
+    ] },
+  ],
+  request(v) {
+    const prompt = String(v.prompt || "").trim();
+    if (!prompt) throw new Error("Prompt is empty.");
+    const body = { prompt };
+    const w = num(v.width);
+    const h = num(v.height);
+    if (w !== undefined) body.width = w;
+    if (h !== undefined) body.height = h;
+    return { kind: "json", method: "POST", path: "/image/generate", body };
+  },
+  summary(v) {
+    const s = { prompt: `“${clip(v.prompt, 48)}”` };
+    s.width = `${v.width || "?"}w`;
+    s.height = `${v.height || "?"}h`;
+    return s;
+  },
+  output: (resp) => ({ type: "image", dataUrl: `data:image/png;base64,${resp?.image || ""}`, mime: "image/png" }),
+  imageOut: true,
+};
+
+const edit = {
+  id: "edit",
+  label: "Image edit",
+  group: "Image",
+  fields: [
+    { k: "prompt", t: "textarea", label: "Prompt", v: "" },
+    { k: "images", t: "images", label: "Source image(s) — several combine on models that support it", v: [] },
+    { k: "aspect", t: "select", label: "Aspect ratio", opts: ASPECTS, v: ASPECTS[0] },
+    { row: [
+      { k: "width", t: "number", label: "Width (if no ratio)", v: "" },
+      { k: "height", t: "number", label: "Height (if no ratio)", v: "" },
+    ] },
+  ],
+  request(v) {
+    const prompt = String(v.prompt || "").trim();
+    if (!prompt) throw new Error("Prompt is empty.");
+    if (!v.images?.length) throw new Error("Add at least one source image: upload one, or use → Image edit on an image run.");
+    const body = { prompt };
+    if (v.images.length === 1) body.image = v.images[0].dataUrl;
+    else body.images = v.images.map((x) => x.dataUrl);
+    if (v.aspect && v.aspect !== ASPECTS[0]) body.aspect_ratio = v.aspect;
+    else {
+      const w = num(v.width);
+      const h = num(v.height);
+      if (w !== undefined) body.width = w;
+      if (h !== undefined) body.height = h;
+    }
+    return { kind: "json", method: "POST", path: "/image/edit", body };
+  },
+  summary(v) {
+    const s = { prompt: `“${clip(v.prompt, 40)}”`, images: imagesSummary(v.images) };
+    if (v.aspect && v.aspect !== ASPECTS[0]) s.aspect = v.aspect;
+    else {
+      if (num(v.width) !== undefined) s.width = `${v.width}w`;
+      if (num(v.height) !== undefined) s.height = `${v.height}h`;
+    }
+    return s;
+  },
+  output(resp) {
+    if (resp?.error && !resp?.image) throw new Error(resp.error);
+    const mime = resp?.mimetype || "image/png";
+    return { type: "image", dataUrl: `data:${mime};base64,${resp?.image || ""}`, mime };
+  },
+  imageOut: true,
+};
+
+export const MODALITIES = [chat, embed, tts, stt, img, edit];
 export const MODALITY_BY_ID = Object.fromEntries(MODALITIES.map((m) => [m.id, m]));
 
 // Every field, rows flattened.
