@@ -403,4 +403,83 @@ export default async function run(t) {
     t.ok(`speed: being late costs hit points even when the reaction lands (${Math.round(slow.dealt)} vs ${Math.round(fast.dealt)})`,
       slow.dealt > fast.dealt);
   }
+
+  // ---- survival senses (tech/squad-survival.md, V1) -------------------------
+  // Seam only: nothing reads them yet. What is pinned is that they are TRUE to
+  // the body, and that the fight ending does not freeze them.
+  {
+    const magRifle = { ...rifle, magazine: 10, reloadTime: 1.5 };
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), magRifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(650, 500 - 40)] });
+    play(comp, sc, leader, 2, false);
+    const a = comp.agent;
+    t.ok("survival: the companion is opted in", !!a.survival);
+    t.eq("survival: its HP is the soldier's, not the agent's constant 1", a.maxHealth, comp.maxHealth);
+    t.ok("survival: healthy and unhurt is neither wounded nor under fire", a.sense.wounded === false && a.sense.underFire === false);
+    t.eq("survival: one hostile in sight is exposure 1", a.sense.exposure, 1);
+    t.eq("survival: and until V4 a shot is exactly line of sight", a.sense.shot, a.sense.los);
+
+    comp.health = comp.maxHealth * 0.3;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: a health drop is being under fire", a.sense.underFire === true);
+    t.ok("survival: and below the knob is wounded", a.sense.wounded === true);
+    t.ok("survival: which is not calm", a.sense.calm === false);
+
+    comp.ammo = 0;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: an empty magazine with a spare reloads, which is needReload",
+      comp.reloading > 0 && a.sense.needReload === true && a.sense.outOfAmmo === false);
+    comp.reloading = 0;
+    comp.magsLeft = 0;
+    comp.ammo = 0;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: empty with no spare is outOfAmmo", a.sense.outOfAmmo === true && a.sense.needReload === false);
+
+    // The last hostile dies: calm has to arrive anyway, or cover never ends.
+    sc.specRoots[0].alive = false;
+    play(comp, sc, leader, Math.ceil((config.survivalCalmTime + 0.3) / STEP), false);
+    t.ok("survival: with nothing left alive, calm still arrives", a.sense.calm === true && a.sense.underFire === false);
+    t.ok("survival: and there is nothing to be exposed to or to shoot", a.sense.exposure === 0 && a.sense.shot === false);
+  }
+  {
+    // A wall between them: seen by nobody, a shot at nobody.
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(650, 500 - 40)] });
+    sc.platforms.push({ x: 480, y: 300, w: 30, h: 200 });
+    play(comp, sc, leader, 2, false);
+    t.ok("survival: behind a wall, exposure 0 and no shot", comp.agent.sense.exposure === 0 && comp.agent.sense.shot === false);
+  }
+  {
+    // An inbound rocket is fire. The explode rule belongs to the duck alone.
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(900, 500 - 40)] });
+    const spec = { w: 8, h: 8, color: "#f80", life: 3, gravity: 0 };
+    sc.projectiles.push(new Projectile(520, 500 - 30, -300, 0, spec, "enemy", [{ kind: "explode", radius: 60, amount: 10 }], null));
+    play(comp, sc, leader, 1, false);
+    t.ok("survival: an inbound explosive round sets underFire", comp.agent.sense.underFire === true);
+    t.ok("survival: and it is still not ducked", comp.crouched === false);
+  }
+  {
+    // The leash, with its hysteresis: out past it sets, back inside the margin
+    // clears, and in between keeps what it was.
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp] });
+    const at = (d) => { leader.x = comp.x - d; play(comp, sc, leader, 13, false); return comp.agent.sense.leaderFar; };
+    t.ok("leash: near is not far", at(100) === false);
+    t.ok("leash: past the leash is far", at(config.survivalLeash + 20) === true);
+    t.ok("leash: just inside it is STILL far", at(config.survivalLeash - config.survivalLeashMargin / 2) === true);
+    t.ok("leash: inside the margin clears it", at(config.survivalLeash - config.survivalLeashMargin - 20) === false);
+  }
+  {
+    // Not opted in: an ordinary player-team agent (the Behavior Lab's) never
+    // publishes any of it.
+    const plain = instantiate(normalizeSpec({ id: "plain", root: { visual: { size: [30, 46] }, motion: { type: "static" } } }), 300, 454, "player");
+    const sc = scene({ specRoots: [foeAt(650, 500 - 40)] });
+    updateSpecEnemy(plain, STEP, sc, noopCtx);
+    t.ok("survival: an agent nobody opted in publishes none of it", !("underFire" in plain.sense) && !("exposure" in plain.sense));
+  }
 }

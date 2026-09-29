@@ -46,7 +46,7 @@ import { fileURLToPath } from "node:url";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { createRooms } from "../src/net/rooms.js";
-import { config, exportConfig } from "../src/game/config.js";
+import { config, exportConfig, SCHEMA } from "../src/game/config.js";
 import {
   packInput, createWireInput, projectScene, applySnapshot, WIRE_ACTIONS,
 } from "../src/net/mission-wire.js";
@@ -55,6 +55,10 @@ import { ACTIONS } from "../src/game/controlmap.js";
 // The exception, restated here on purpose: a test that imported the production
 // list would agree with it by construction and assert nothing.
 const LOCAL = ["debugGraph", "debugPath", "toggleRenderer", "pause"];
+
+// The Squad survival group (tech/squad-survival.md) is all server-scoped and
+// grows a slice at a time, so it is counted rather than restated.
+const SURVIVAL_KNOBS = SCHEMA.find((g) => g.title === "Squad survival").items.length;
 
 const SERVER = fileURLToPath(new URL("../server.mjs", import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -803,7 +807,7 @@ async function configRoutes(t) {
     const keys = new Set(items.map((it) => it.key));
 
     t.ok("config: GET answers groups and values", Array.isArray(payload.groups) && !!payload.values);
-    t.eq("config: six groups hold a server knob", payload.groups.length, 6);
+    t.eq("config: seven groups hold a server knob", payload.groups.length, 7);
     t.ok("config: and none of them is empty", payload.groups.every((g) => g.items.length > 0));
     t.eq("config: every entry it serves is scoped", items.filter((it) => it.scope !== "server").length, 0);
     t.ok("config: a value comes with every entry", items.every((it) => payload.values[it.key] !== undefined));
@@ -853,10 +857,11 @@ async function configRoutes(t) {
       else if (r.status === 403) refused++;
       else broke++;
     }
-    // 52 since progression P2 added the four server-scoped xpReward* knobs;
+    // 52 since progression P2 added the four server-scoped xpReward* knobs, plus
+    // squad survival's group (tech/squad-survival.md), all server-scoped;
     // 27 local: missionRenderer (mission-3d R1), then scanlines + scanlineSpacing,
     // which only the 3D view in a page reads.
-    t.eq("config: a whole exported config applies its 52 server keys", applied, 52);
+    t.eq("config: a whole exported config applies its server keys", applied, 52 + SURVIVAL_KNOBS);
     t.eq("config: ...drops the other 27", refused, 27);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");

@@ -10,7 +10,7 @@
 import { Soldier, Projectile, overlaps, STAND_H, CROUCH_H } from "../src/mission/entities.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
-import { updateProjectiles, updateStatuses, duckableShot } from "../src/mission/combat.js";
+import { updateProjectiles, updateStatuses, duckableShot, predictHit } from "../src/mission/combat.js";
 import { losBetween } from "../src/mission/enemyspec/perception.js";
 import { makeRng } from "../src/game/gen/rng.js";
 
@@ -160,6 +160,11 @@ export default async function run(t) {
     const boom = shot(60, 262, 900, 0, { effects: [{ kind: "explode", radius: 90, amount: 20 }] });
     t.ok("duck: an explosive round is never duckable, whatever the geometry says",
       duckableShot(sc, boom, duckTarget(), STEP, {}) === false);
+    // ...which is the duck's rule, not the predictor's: the same round IS a hit,
+    // so a squadmate with a rocket inbound is under fire (tech/squad-survival.md).
+    const s = duckTarget();
+    t.ok("predict: the explosive round is still predicted to hit",
+      predictHit(sc, boom, s, () => s, STEP, 90, {}) >= 0);
   }
 
   // ---- who may hit whom is combat's rule, not geometry ---------------------

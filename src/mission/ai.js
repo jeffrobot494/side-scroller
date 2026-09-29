@@ -185,6 +185,10 @@ function companionAgent(soldier, scene) {
   // stream has to come from the scene rather than from loadMission.
   const a = instantiate(DEFAULT_COMPANION_SPEC, soldier.x, soldier.y, "player", scene && scene.rng);
   a.soldier = soldier;
+  // Opted into the survival senses (tech/squad-survival.md) — the only agents
+  // that are. The two clocks are advanced by tickSurvival below; perception
+  // reads them on its own cadence.
+  a.survival = { sinceHurt: 99, sinceThreat: 99, hp: soldier.health, leaderFar: false };
   // brain `fire` → the Soldier's EQUIPPED weapon, down the SAME barrel the
   // renderer draws: fireDir() reads the aimVec set in updateCompanionSpec below,
   // exactly as it does for the player. Through the shared fire() path, not the
@@ -277,10 +281,25 @@ export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
   // are (the locomotor drives the Soldier; the agent's own x/y is just a mirror).
   a.x = soldier.x; a.y = soldier.y; a.w = soldier.w; a.h = soldier.h;
   a.vx = soldier.vx; a.vy = soldier.vy; a.onGround = soldier.onGround; a.facing = soldier.facing;
+  tickSurvival(soldier, a, dt);
   a.anchor = leader ? { x: leader.x + leader.w / 2, y: leader.y + leader.h / 2 } : null;
   aimAt(soldier, nearestHostile(a, scene));
   // perception + brain + soldier locomotor (→ soldier.applyMovement / fire())
   updateSpecEnemy(a, dt, scene, ctx);
+}
+
+// The real health, mirrored so `self.hpPct` stops being the agent's constant 1,
+// and the two clocks perception's underFire/calm read. "Hurt" is a health drop
+// seen between ticks rather than a hook on ctx.damage, because burn skips
+// ctx.damage (combat.js updateStatuses) and burning is being hurt.
+function tickSurvival(soldier, a, dt) {
+  const sv = a.survival;
+  a.health = soldier.health;
+  a.maxHealth = soldier.maxHealth;
+  sv.sinceHurt += dt;
+  sv.sinceThreat += dt;
+  if (soldier.health < sv.hp) sv.sinceHurt = 0;
+  sv.hp = soldier.health;
 }
 
 // Point a companion's gun at its target, in 2D. Set EVERY frame, not on

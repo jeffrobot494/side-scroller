@@ -17,9 +17,24 @@
 //   sense.routeSteps        graph edges left on the current route (0 = none)
 //   sense.routeReachable    the destination is on the graph and gettable
 //   sense.navBlocked        gave up: the same jump failed too many times
+//
+// Survival senses, for agents the companion bridge opts in (root.survival) and
+// no one else (tech/squad-survival.md, V1) — published by publishSurvival:
+//
+//   sense.underFire   hurt within the hurt window, or a round inbound now
+//   sense.wounded     health below the wounded fraction
+//   sense.calm        no hurt and no inbound round for the calm time
+//   sense.exposure    how many living hostiles can hit where I stand
+//   sense.shot        I can hit my target from here
+//   sense.needReload  magazine empty, reloading, a spare left
+//   sense.outOfAmmo   magazine empty, not reloading, no spare left
+//   sense.leaderFar   past the leash from the leader (with hysteresis)
 // ---------------------------------------------------------------------------
 
 import { navSense } from "../navigation.js";
+import { predictHit } from "../combat.js";
+import { STAND_H } from "../entities.js";
+import { config } from "../../game/config.js";
 
 const SENSE_INTERVAL = 0.2;
 const EDGE = 90;
@@ -51,6 +66,11 @@ export function updateSense(root, scene, dt) {
   s.anchorX = ax;
   s.anchorY = ay;
   s.anchorDist = Math.hypot(ax - ex, ay - ey);
+
+  // Ahead of the no-hostile return, like publishNav: the fight ending is exactly
+  // when `calm` has to keep ticking, or a squadmate in cover when the last
+  // hostile dies never sees it and stays there.
+  publishSurvival(root, scene, dt);
 
   const t = nearestHostile(root, scene);
   if (!t) {
@@ -98,6 +118,82 @@ function publishNav(root, scene) {
   root.sense.routeSteps = n.routeSteps;
   root.sense.routeReachable = n.routeReachable;
   root.sense.navBlocked = n.navBlocked;
+}
+
+// The survival senses (tech/squad-survival.md, V1). Opted-in agents only; the
+// flag is `root.survival`, which the companion bridge (ai.js) creates and whose
+// two clocks it advances every frame — `sinceHurt` from the health drops it sees
+// between ticks, `sinceThreat` since this last found a round inbound. Every
+// threshold is a config knob and every published value a plain boolean or
+// count, because an expression cannot read config.
+function publishSurvival(root, scene, dt) {
+  const sv = root.survival;
+  if (!sv) return;
+  const s = root.sense;
+  const body = root.soldier || root;
+
+  s.wounded = (root.maxHealth ? Math.max(0, root.health) / root.maxHealth : 1) < config.survivalWounded;
+
+  // A round inbound on the STANDING box, whatever the stance: kneeling under a
+  // round is being shot at. Blasts count here (predictHit leaves the explode rule
+  // to the callers that must ignore them).
+  const step = dt > 0 ? dt : 1 / 60;
+  const box = standingBox(root, root.x);
+  const steps = Math.ceil(config.survivalLookahead / step);
+  let inbound = false;
+  for (const p of scene.projectiles) {
+    if (predictHit(scene, p, body, () => box, step, steps, root._ctx || {}) >= 0) { inbound = true; break; }
+  }
+  if (inbound) sv.sinceThreat = 0;
+  s.underFire = inbound || sv.sinceHurt < config.survivalHurtWindow;
+  s.calm = sv.sinceHurt >= config.survivalCalmTime && sv.sinceThreat >= config.survivalCalmTime;
+
+  // `magsLeft` drops at the END of a reload, so a reload in progress still
+  // counts its own magazine as a spare, and the empty-and-reloading case is
+  // needReload rather than outOfAmmo. A body with no magazine never runs dry.
+  const w = body.weapon;
+  const empty = !!(w && w.magazine) && body.ammo <= 0;
+  const reloading = body.reloading > 0;
+  const spare = body.magsLeft === undefined || body.magsLeft > 0;
+  s.needReload = empty && reloading;
+  s.outOfAmmo = empty && !reloading && !spare;
+
+  // Hysteresis: past the leash sets it, back inside the leash minus the margin
+  // clears it. Only a live leader can be far; the spawn-point anchor cannot.
+  if (!root.anchor) sv.leaderFar = false;
+  else if (s.anchorDist > config.survivalLeash) sv.leaderFar = true;
+  else if (s.anchorDist < config.survivalLeash - config.survivalLeashMargin) sv.leaderFar = false;
+  s.leaderFar = !!sv.leaderFar;
+
+  s.exposure = exposureAt(root, scene, root.x + root.w / 2, box.y + box.h / 2);
+  const t = nearestHostile(root, scene);
+  s.shot = !!t && canHit(scene, root, root.x + root.w / 2, root.y + root.h / 2, t.x + t.w / 2, t.y + t.h / 2);
+}
+
+// A soldier's standing box with its left edge at `x`, hung off the current feet
+// line — the box exposure is measured against, whatever the stance right now.
+function standingBox(root, x) {
+  const h = root.soldier ? STAND_H : root.h;
+  return { x, y: root.y + root.h - h, w: root.w, h };
+}
+
+// How many living hostiles of `root` can hit a body whose standing centre is at
+// (x, y). The one exposure count: V1's own-spot sense and V2's spot scores.
+export function exposureAt(root, scene, x, y) {
+  let n = 0;
+  for (const h of hostilesFor(root, scene)) {
+    if (!h || !h.alive) continue;
+    if (canHit(scene, h, h.x + h.w / 2, h.y + h.h / 2, x, y)) n++;
+  }
+  return n;
+}
+
+// CAN-HIT: can a round from `shooter`, leaving (x0, y0), reach (x1, y1)? The
+// one predicate this system asks about shots, in both directions — theirs at
+// me, mine at them. In V1 it is line of sight; V4 makes it the round's own
+// flight. New code calls this, never losBetween.
+export function canHit(scene, shooter, x0, y0, x1, y1) {
+  return losBetween(x0, y0, x1, y1, scene.platforms);
 }
 
 // Who this agent fights. An enemy (the default team) hunts the squad; a

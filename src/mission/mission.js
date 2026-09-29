@@ -660,11 +660,22 @@ export class Mission {
   // Routes the squad is HOLDING — read off each companion's own nav state, never
   // recomputed. A view that repathed to draw would show a fresher route than the
   // one being walked, which is the thing you turn this on to catch.
-  _drawSquadPaths(ctx, graph) {
+  _drawSquadPaths(ctx, graph, z = 1) {
     const leaders = this._owners.map((o) => this.currentSoldier(o));
     for (const s of this.scene.soldiers) {
       if (!s.alive || leaders.includes(s)) continue; // a leader holds no route
-      const nav = s.agent && s.agent.nav;
+      const a = s.agent;
+      // What the squadmate thinks of its situation (tech/squad-survival.md, V1):
+      // brain state, real HP%, and how many hostiles can hit where it stands.
+      if (a && a.survival) {
+        const pct = Math.round((100 * Math.max(0, s.health)) / (s.maxHealth || 1));
+        ctx.font = `${10 / z}px monospace`;
+        ctx.textAlign = "center";
+        ctx.fillStyle = s.color;
+        ctx.fillText(`${a.brainState.current} ${pct}% x${a.sense.exposure ?? 0}`, s.x + s.w / 2, s.y - 22 / z);
+        ctx.textAlign = "left";
+      }
+      const nav = a && a.nav;
       if (!nav || !nav.path || !nav.path.length) continue;
       drawNavPath(ctx, graph, nav.path, { halfW: s.w / 2, color: s.color });
     }
@@ -1194,7 +1205,7 @@ export class Mission {
             viewR: this.camera.x + W / z,
           });
         }
-        if (this.debug.path) this._drawSquadPaths(ctx, graph);
+        if (this.debug.path) this._drawSquadPaths(ctx, graph, z);
       }
       ctx.globalAlpha = 1;
     }

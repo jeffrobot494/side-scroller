@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: unbuilt
+status: building
 resolution: sharp
 needs: [agent-navigation, ranged-repositioning, soldier-ducking, soldier-behavior, enemyspec]
 related: [squad-survival, locomotion, mission-determinism, nav-audit]
@@ -27,6 +27,16 @@ fire only with a usable shot, and dodge by ducking or jumping. Implements
 V1 lands alone and changes nothing. That proves the lifted walk is the same walk
 before anything reads it. **V2 is the first slice a player can see.** V3–V6 each
 land alone on V2. V4 and V5 do not depend on each other.
+
+### As built
+
+| Slice | The spec said | What shipped, and why |
+|---|---|---|
+| V1 | `predictHit(scene, p, boxAt, dt, steps)` | `predictHit(scene, p, s, boxAt, dt, steps, ctx)`. The owner and friendly-fire rules need the body's identity and `ctx.friendlyFire`, which a box function cannot carry |
+| V1 | `duckableShot` is "`predictHit` on the standing box, and not on the crouched box" | Not on the crouched box **by the frame the round reaches the standing one**. Over the whole flight, a descending lobbed pod that clears a knee on arrival and would drop onto it a frame later stopped being duckable, which failed `test/crouch.test.mjs` ("the lobbed pod clears it and is duckable anyway"). The by-that-frame form is the old answer exactly |
+| V1 | The knobs are one group | "Squad survival" in `src/game/config.js`, grown a slice at a time. V1 has the wounded fraction (0.5), hurt window (1.5s), under-fire lookahead (1s), calm time (2.5s), leash (420px) and leash margin (80px). All are live and server-scoped, so they are on the pause menu (`design/pause-menu.md`'s rule) and in the room's config route; `test/tools.test.mjs` and `test/mission-net.test.mjs` count them off the group rather than restating a number |
+| V1 | Exposure is measured where the agent stands | Against the **standing** box's centre, hung off the feet line, whatever the stance, so a duck does not flip it. `sense.shot` uses the current centre, as `sense.los` does, so the two are equal in V1 |
+| V1 | The Path overlay prints state, HP% and exposure | Drawn in `_drawSquadPaths`. Like the paths it rides with, it is absent from a room mission's client, because `src/net/mission-wire.js` carries no agent state. Nothing drawn for play reads the new senses, so the wire gains nothing |
 
 ### Cover transitions (V3)
 
