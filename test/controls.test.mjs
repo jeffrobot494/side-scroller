@@ -219,21 +219,22 @@ export default async function run(t) {
   t.ok("shape: tiny → pellet", defaultShape({ w: 5, h: 4 }) === "pellet");
   t.ok("shape: default → bullet", defaultShape({ w: 10, h: 4 }) === "bullet");
 
-  // ---- debug overlay actions ---------------------------------------------
-  // The mission's nav overlays are bound like everything else rather than
-  // hardcoded, which is what lets them move off a key a player might hit. The
-  // config gate (config.debugOverlays) is what keeps them out of someone else's
-  // build; the bindings themselves are always present.
+  // ---- the debug key ------------------------------------------------------
+  // One key opens the pause menu's Debug screen (tech/squad-debug.md), which
+  // holds every debug control, so the debug view takes no game keys. Bound
+  // like everything else rather than hardcoded. The config gate
+  // (config.debugOverlays) is what keeps it out of someone else's build; the
+  // binding itself is always present.
   resetKeys();
-  t.ok("controlmap: default KeyG → debugGraph", keyBindings.KeyG === "debugGraph");
-  t.ok("controlmap: default KeyH → debugPath", keyBindings.KeyH === "debugPath");
-  t.ok("controlmap: both debug actions are rebindable like any other",
-    ACTIONS.includes("debugGraph") && ACTIONS.includes("debugPath"));
-  t.ok("controlmap: they carry labels, so the Controls tool can list them",
-    !!ACTION_LABELS.debugGraph && !!ACTION_LABELS.debugPath);
-  setKeyBinding("KeyP", "debugPath");
-  t.ok("rebind: KeyP now toggles paths", keyBindings.KeyP === "debugPath");
-  t.ok("rebind: the old debug key was cleared", keyBindings.KeyH === undefined);
+  t.ok("controlmap: default Backquote → debugMenu", keyBindings.Backquote === "debugMenu");
+  t.ok("controlmap: G and H are no longer debug keys", keyBindings.KeyG === undefined && keyBindings.KeyH === undefined);
+  t.ok("controlmap: the old per-layer actions are gone",
+    !ACTIONS.includes("debugGraph") && !ACTIONS.includes("debugPath"));
+  t.ok("controlmap: debugMenu is rebindable and labelled, so the Controls tool lists it",
+    ACTIONS.includes("debugMenu") && !!ACTION_LABELS.debugMenu);
+  setKeyBinding("KeyP", "debugMenu");
+  t.ok("rebind: KeyP now opens the Debug screen", keyBindings.KeyP === "debugMenu");
+  t.ok("rebind: the old debug key was cleared", keyBindings.Backquote === undefined);
   resetKeys();
 
   // The 2D/3D view toggle is a mission-time action like the overlays: bound,
@@ -265,6 +266,14 @@ export default async function run(t) {
     const b = await import("../src/game/controlmap.js?escape-taken");
     t.ok("load: a default key the player bound elsewhere is not stolen", b.keyBindings.Escape === "swap");
     t.eq("load: ...so pause stays unbound", b.bindingsForAction("pause"), []);
+    // A map saved while G/H were the debug keys (before tech/squad-debug.md D1)
+    // loses them, because their actions no longer exist, and gains the debug key.
+    const old = { ...DEFAULT_KEYS, KeyG: "debugGraph", KeyH: "debugPath" };
+    delete old.Backquote;
+    localStorage.setItem("sidescroller.controls.v1", JSON.stringify({ ...old, KeyF: "fire" }));
+    const c = await import("../src/game/controlmap.js?saved-with-gh");
+    t.ok("load: a map saved with G/H drops them", c.keyBindings.KeyG === undefined && c.keyBindings.KeyH === undefined);
+    t.ok("load: ...and gains ` for the debug menu", c.keyBindings.Backquote === "debugMenu");
     localStorage.removeItem("sidescroller.controls.v1");
   }
 

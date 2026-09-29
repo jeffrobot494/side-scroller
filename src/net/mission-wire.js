@@ -43,7 +43,7 @@ import { ACTIONS } from "../game/controlmap.js";
 //
 // This list is the whole of the exception, and it exists so that leaving an
 // action off the wire is a DECISION rather than an oversight.
-const LOCAL_ONLY = ["debugGraph", "debugPath", "toggleRenderer", "pause"];
+const LOCAL_ONLY = ["debugMenu", "toggleRenderer", "pause"];
 
 // The gameplay actions, DERIVED from the control map rather than copied from
 // it. A second hand-written list is a list that drifts: add "grenade" to

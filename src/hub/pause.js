@@ -1,8 +1,13 @@
 // ---------------------------------------------------------------------------
 // PAUSE MENU — the overlay over a mission (design/pause-menu.md,
-// tech/pause-menu.md). Two screens: the menu (Options, Resume) and Options,
-// which is the editor's settings renderer fed `pauseSchema` — the live
-// settings, minus the room's own in a room mission.
+// tech/pause-menu.md). Three screens: the menu (Options, Debug, Resume);
+// Options, which is the editor's settings renderer fed `pauseSchema` — the live
+// settings, minus the room's own in a room mission; and Debug
+// (tech/squad-debug.md), the same renderer fed the mission's debug layers.
+//
+// Debug exists only with a `debug` handle (the mission's per-deploy flags;
+// null in a room) and while config.debugOverlays is on — decided at every
+// draw, because that knob is live on the Options screen of this same menu.
 //
 // Owns no rules. A change goes through `setConfig`, exactly as the editor's
 // Settings tab does, and then to `onChange(key, value)` for anything the page
@@ -11,24 +16,49 @@
 // `onPauseChange(false)`, which disposes it — one path for every way out.
 // ---------------------------------------------------------------------------
 
-import { controlsTabsHTML, bindControls, showControlsTab } from "./controls.js";
+import { controlsHTML, controlsTabsHTML, bindControls, showControlsTab } from "./controls.js";
 import { config, setConfig, isDefault, pauseSchema } from "../game/config.js";
 
-export function createPauseMenu(container, { room = false, resume, onChange } = {}) {
+// The Debug screen's controls, as schema items the controls renderer draws.
+// A `debug.` key writes the mission's debug handle, never the config.
+const DEBUG_PREFIX = "debug.";
+const DEBUG_LAYERS = [
+  { key: "debug.graph", label: "Nav graph", type: "bool", help: "Every place the squad's body can stand and every connection between them." },
+  { key: "debug.path", label: "Squad routes", type: "bool", help: "The route each squadmate is walking, with its concern, health and exposure." },
+];
+
+function debugHTML(debug) {
+  const values = {};
+  for (const it of DEBUG_LAYERS) values[it.key] = debug[it.key.slice(DEBUG_PREFIX.length)];
+  return controlsHTML([{ title: "Layers", items: DEBUG_LAYERS }], values, null);
+}
+
+export function createPauseMenu(container, { room = false, resume, onChange, screen: first = "menu", debug = null } = {}) {
   const el = document.createElement("div");
   el.className = "pm";
   el.setAttribute("role", "dialog");
   el.setAttribute("aria-modal", "true");
   el.setAttribute("aria-label", "Pause menu");
 
-  let screen = "menu";
+  let screen = first;
   let tab = 0;
+  const hasDebug = () => !!debug && !!config.debugOverlays;
 
   function draw() {
+    if (screen === "debug" && !hasDebug()) screen = "menu";
     el.innerHTML = screen === "menu"
       ? `<div class="pm-panel pm-menu">
            <button type="button" class="btn" data-pm="options">Options</button>
+           ${hasDebug() ? `<button type="button" class="btn" data-pm="debug">Debug</button>` : ""}
            <button type="button" class="btn btn-go" data-pm="resume">Resume</button>
+         </div>`
+      : screen === "debug"
+      ? `<div class="pm-panel pm-options pm-debug">
+           <div class="pm-head">
+             <button type="button" class="btn btn-ghost btn-sm" data-pm="back">← Back</button>
+             <h2>Debug</h2>
+           </div>
+           <div class="pm-cfg">${debugHTML(debug)}</div>
          </div>`
       : `<div class="pm-panel pm-options">
            <div class="pm-head">
@@ -50,6 +80,10 @@ export function createPauseMenu(container, { room = false, resume, onChange } = 
 
   // Delegated, so a redraw keeps every listener.
   bindControls(el, (key, value) => {
+    if (key.startsWith(DEBUG_PREFIX)) {
+      if (debug) debug[key.slice(DEBUG_PREFIX.length)] = value;
+      return;
+    }
     const v = setConfig(key, value);
     if (onChange) onChange(key, v);
   });
@@ -58,6 +92,7 @@ export function createPauseMenu(container, { room = false, resume, onChange } = 
     if (!t) return;
     if (t.dataset.cfgTab !== undefined) tab = showControlsTab(el, t.dataset.cfgTab);
     else if (t.dataset.pm === "options") show("options");
+    else if (t.dataset.pm === "debug") show("debug");
     else if (t.dataset.pm === "back") show("menu");
     else if (t.dataset.pm === "resume" && resume) resume();
   });

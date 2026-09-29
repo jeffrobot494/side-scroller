@@ -54,7 +54,7 @@ import { ACTIONS } from "../src/game/controlmap.js";
 
 // The exception, restated here on purpose: a test that imported the production
 // list would agree with it by construction and assert nothing.
-const LOCAL = ["debugGraph", "debugPath", "toggleRenderer", "pause"];
+const LOCAL = ["debugMenu", "toggleRenderer", "pause"];
 
 // The Squad survival group (tech/squad-survival.md) is all server-scoped and
 // grows a slice at a time, so it is counted rather than restated.
@@ -91,8 +91,8 @@ export default async function run(t) {
     const dev = stubInput({ down: { right: true, fire: true }, pressed: { swap: true } });
     const pkt = packInput(dev, 1, "gamepad", null);
 
-    t.eq("input: the eight gameplay actions cross and the two debug ones do not",
-      WIRE_ACTIONS.includes("debugGraph"), false);
+    t.eq("input: the eight gameplay actions cross and the debug key does not",
+      WIRE_ACTIONS.includes("debugMenu"), false);
     // EVERY action is classified — this is what a new one trips. WIRE_ACTIONS is
     // derived from ACTIONS minus a named local-only list, so adding "grenade" to
     // the control map puts it on the wire by default; the failure this guards is

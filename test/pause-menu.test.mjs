@@ -126,6 +126,54 @@ export default async function run(t) {
     m.stop();
   }
 
+  // ---- D1 (tech/squad-debug.md): the debug key opens the Debug screen -------
+  {
+    const m = build();
+    const seen = [];
+    m.onPauseChange = (p, screen) => seen.push([p, screen]);
+    m.tick(5);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: ` pauses", m.paused === true);
+    t.eq("debug key: ...asking the host for the Debug screen", seen, [[true, "debug"]]);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: ` closes it again (it passes through the suspended input)", m.paused === false);
+    tap(m, "Backquote");
+    m.tick();
+    tap(m, "Escape");
+    m.tick();
+    t.ok("debug key: the pause key closes the Debug screen too", m.paused === false);
+    tap(m, "Escape");
+    m.tick();
+    t.eq("debug key: Escape still opens on the menu", seen.at(-1), [true, "menu"]);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: ` closes the menu from any screen", m.paused === false);
+
+    setConfig("debugOverlays", false);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: with debug overlays off it does nothing", m.paused === false);
+    resetConfig();
+
+    // A room's mission has no Debug screen: the key neither opens nor closes.
+    m.remote = true;
+    m.update = () => {};
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: in a room it does nothing", m.paused === false);
+    m.stop();
+
+    // The layers are per deploy.
+    m.remote = false;
+    m.debug.graph = true;
+    const g = generateLevel({ seed: SEED + 1, difficulty: "low" });
+    m.start(g.mission, g.level, SQUAD);
+    t.ok("debug: a new deploy starts with every layer off", !Object.values(m.debug).some((v) => v === true));
+    m.stop();
+  }
+
   // ---- P3: the overlay, mounted headlessly --------------------------------
   // The harness DOM dispatches no events, so the overlay's root records its
   // listeners here and the test fires them with targets that answer closest().
@@ -155,7 +203,7 @@ export default async function run(t) {
       n.closest = (sel) => (sel.split(",").some((s) => MATCH[s] && MATCH[s](n)) ? n : null);
       return n;
     };
-    const rows = (html) => [...html.matchAll(/data-row="(\w+)"/g)].map((r) => r[1]);
+    const rows = (html) => [...html.matchAll(/data-row="([\w.]+)"/g)].map((r) => r[1]);
     const shown = (s) => s.flatMap((g) => g.items.map((it) => it.key));
 
     resetConfig();
@@ -188,6 +236,43 @@ export default async function run(t) {
     t.ok("overlay: ...and does not close itself — the host's hook does", container.kids.includes(el));
     pm.dispose();
     t.ok("overlay: dispose removes it", !container.kids.includes(el));
+
+    // D1: the Debug screen (tech/squad-debug.md), with the mission's handle.
+    const items = (e) => [...e.innerHTML.matchAll(/data-pm="(\w+)"/g)].map((r) => r[1]);
+    const debug = { graph: false, path: false };
+    const dm = createPauseMenu(container, { room: false, screen: "debug", debug });
+    const del = made.at(-1);
+    t.eq("debug screen: the debug key's request opens it", dm.screen(), "debug");
+    t.eq("debug screen: Nav graph and Squad routes", rows(del.innerHTML), ["debug.graph", "debug.path"]);
+    t.ok("debug screen: ...with a Back button", /data-pm="back"/.test(del.innerHTML));
+    fire(del, "click", node({ key: "debug.graph", type: "bool" }, { toggle: true }));
+    t.ok("debug screen: a toggle writes the mission's flag", debug.graph === true && debug.path === false);
+    t.ok("debug screen: ...and never the config", !("debug.graph" in config) && isDefault("debugOverlays"));
+    fire(del, "click", node({ pm: "back" }));
+    t.eq("debug screen: Back returns to the menu", dm.screen(), "menu");
+    t.eq("debug screen: the menu is Options, Debug, Resume", items(del), ["options", "debug", "resume"]);
+    // The knob is live on Options: turning it off there hides Debug on Back.
+    // (A stub switch starts off, so the one that turns it off starts on.)
+    fire(del, "click", node({ pm: "options" }));
+    const lit = node({ key: "debugOverlays", type: "bool" }, { toggle: true });
+    lit.classList.on = true;
+    fire(del, "click", lit);
+    fire(del, "click", node({ pm: "back" }));
+    t.eq("debug screen: overlays turned off in Options hide it on Back", items(del), ["options", "resume"]);
+    fire(del, "click", node({ pm: "options" }));
+    fire(del, "click", node({ key: "debugOverlays", type: "bool" }, { toggle: true }));
+    fire(del, "click", node({ pm: "back" }));
+    t.eq("debug screen: ...and turned back on show it", items(del), ["options", "debug", "resume"]);
+    dm.dispose();
+    setConfig("debugOverlays", false);
+    const off = createPauseMenu(container, { screen: "debug", debug });
+    t.eq("debug screen: with overlays off a Debug request opens the menu", off.screen(), "menu");
+    t.eq("debug screen: ...which has no Debug item", items(made.at(-1)), ["options", "resume"]);
+    off.dispose();
+    resetConfig();
+    const nohandle = createPauseMenu(container, { screen: "debug", debug: null });
+    t.eq("debug screen: with no handle (a room) there is none", items(made.at(-1)), ["options", "resume"]);
+    nohandle.dispose();
 
     const roomMenu = createPauseMenu(container, { room: true });
     const rel = made.at(-1);

@@ -379,7 +379,7 @@ export const SCHEMA = [
         type: "bool",
         live: true,
         default: true,
-        help: "Unlocks the in-mission nav overlay keys (Graph / Path — rebindable in the Controls tool), which draw the squad's node graph and the routes companions are holding, the same views the Behavior Lab shows. Off means the keys do nothing, so a build handed to someone else cannot land in a debug view.",
+        help: "Unlocks the pause menu's Debug screen and its key (` by default — rebindable in the Controls tool), which toggles the squad debug layers: the node graph, the routes squadmates are holding, and what they perceive and decide. Off means the Debug screen is not in the menu and the key does nothing, so a build handed to someone else cannot land in a debug view. Never in a room mission.",
       },
     ],
   },

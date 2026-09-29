@@ -76,15 +76,16 @@ export class Mission {
     // and only `_frame` — the host's loop — honours it, so a headless driver of
     // update() cannot enter it. A room's mission opens the menu and keeps
     // running (see _frozen); either way the device stops driving the soldier.
-    // `onPauseChange(paused)` tells the host, which owns the menu.
+    // `onPauseChange(paused, screen)` tells the host, which owns the menu;
+    // `screen` is the one it should open on ("debug" from the debug key).
     this.paused = false;
     this.onPauseChange = null;
   }
 
   // Pause or resume. Resuming throws away the time that passed and every press
   // made meanwhile, so no catch-up burst of steps runs and no jump tapped
-  // behind the menu fires.
-  setPaused(on) {
+  // behind the menu fires. `screen` is the menu screen to open on.
+  setPaused(on, screen = "menu") {
     on = !!on;
     if (on === this.paused) return;
     this.paused = on;
@@ -93,7 +94,13 @@ export class Mission {
       this.accumulator = 0;
       this.input.dropPresses?.();
     }
-    if (this.onPauseChange) this.onPauseChange(on);
+    if (this.onPauseChange) this.onPauseChange(on, screen);
+  }
+
+  // Can the debug key open the Debug screen here (tech/squad-debug.md, D1)?
+  // Only with the overlays on, and never on a room's mission.
+  debugAvailable() {
+    return !!config.debugOverlays && !this.remote;
   }
 
   // Is this page holding its mission still? Only one it steps itself: a room's
@@ -229,8 +236,9 @@ export class Mission {
     // world's own. See _feedback: this is how a cue reaching one funnel from
     // eighteen call sites still knows who caused it.
     this._cause = null;
-    // Nav debug overlays, off every deploy. Toggled by the debugGraph/debugPath
-    // actions and only while config.debugOverlays is on.
+    // Debug overlays (tech/squad-debug.md), off every deploy (start() resets
+    // them). Toggled from the pause menu's Debug screen, which exists only
+    // while config.debugOverlays is on and never on a room's mission.
     this.debug = { graph: false, path: false };
 
     // Bridge to the shared combat module: rules run in combat.js, cosmetics +
@@ -282,6 +290,7 @@ export class Mission {
     this.running = true;
     this.accumulator = 0;
     this.setPaused(false); // a deploy starts unpaused; a menu left up belonged to the last one
+    this.debug = { graph: false, path: false };
     this.fps.reset(); // don't carry a rate in from the previous deploy
     // The device and the loop, and NOTHING else, are what a host has (J6).
     // `running` is set either way: since J2 it means "the scene has not ended",
@@ -324,6 +333,7 @@ export class Mission {
     // steps run to read it. Optional calls: suites swap in scripted inputs
     // that answer only the reads.
     if (this.hosted && this.input.takePress?.("pause")) this.setPaused(!this.paused);
+    else if (this.hosted && this.debugAvailable() && this.input.takePress?.("debugMenu")) this.setPaused(!this.paused, "debug");
     if (this._frozen()) {
       // No samples, no steps: the scene holds still. The camera is re-solved
       // so a zoom change from the menu stays centred on the soldier.
@@ -542,7 +552,6 @@ export class Mission {
       if (end.timer <= 0) this._finish(end.owner);
     }
 
-    this._handleOverlays();
     this._handleViewToggle();
 
     // A VIEWER STOPS HERE (J8). Everything above this line is cosmetic state
@@ -621,26 +630,10 @@ export class Mission {
     }
   }
 
-  // Debug overlays. The keys are always bound; the config gate is what keeps
-  // them out of a build handed to somebody else. Edge-triggered, so holding the
-  // key does not strobe.
-  //
-  // Deliberately on `this.input` and not per commander: an overlay is what the
-  // person LOOKING at this canvas wants to see, not something a commander owns.
-  // Which is also why it sits ABOVE the viewer's early return (J8) rather than
-  // inside _handleControl where it used to live — a page watching a room's
-  // mission is still a person looking at a canvas, and a toggle that went
-  // silently dead there would be a dev tool lost to a slice that had no reason
-  // to touch it.
-  _handleOverlays() {
-    if (!config.debugOverlays) return;
-    if (this.input.justPressed("debugGraph")) this.debug.graph = !this.debug.graph;
-    if (this.input.justPressed("debugPath")) this.debug.path = !this.debug.path;
-  }
-
-  // The 2D/3D toggle. Same reasoning as the overlays — what the person looking
-  // at this canvas wants — so it sits beside them above the viewer's early
-  // return, but it is not a debug tool and has no config gate. A host-free
+  // The 2D/3D toggle. What the person looking at this canvas wants, not
+  // something a commander owns, so it sits above the viewer's early return —
+  // a page watching a room's mission is still a person looking at a canvas.
+  // It is not a debug tool and has no config gate. A host-free
   // mission has nobody looking and never writes the knob.
   _handleViewToggle() {
     if (!this.hosted || !this.input.justPressed("toggleRenderer")) return;
