@@ -37,7 +37,7 @@ categories the editor's Settings tab uses.
 | Sound | Master volume · Effects volume · Interface volume · Music volume · Mute when unfocused · Stereo width · Audible range · Max simultaneous sounds |
 | Controls / aim | Aim mode · Gamepad deadzone · Aim spread · Reload move speed × |
 | Combat | Friendly fire · Squad damage × |
-| Movement / feel | Run speed · Jump strength · Enemy jump strength · Coyote time · Knockback decay · Duck hold · Duck lookahead · Duck chance @ Speed 1 · Duck chance @ Speed 10 · Duck latency @ Speed 1 · Duck latency @ Speed 10 |
+| Movement / feel | Gravity · Run speed · Jump strength · Enemy jump strength · Coyote time · Knockback decay · Duck hold · Duck lookahead · Duck chance @ Speed 1 · Duck chance @ Speed 10 · Duck latency @ Speed 1 · Duck latency @ Speed 10 |
 | Agent navigation | Arrival radius · Takeoff window · Repath interval · Jump attempts before avoiding a connection · Ranged repositioning · Reposition commitment · Stall before repositioning |
 
 Settings that only apply on the next mission, and campaign, generation, base and
@@ -54,7 +54,7 @@ While the menu is open, your soldier takes no input from you.
 
 | | |
 |---|---|
-| Run speed, Jump strength | Lowering either mid-mission can leave parts of the level out of reach |
+| Gravity, Run speed, Jump strength | Changing any of them mid-mission can leave parts of the level out of reach |
 
 ## While the menu is open
 

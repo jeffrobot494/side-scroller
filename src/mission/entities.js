@@ -454,8 +454,11 @@ export function loadMission(level, squad, seed) {
   });
 
   return {
-    // gravity comes from config (editable) rather than the level's own value
-    world: { ...level.world, gravity: config.gravity },
+    // gravity comes from config (editable) rather than the level's own value,
+    // and is read through on every access so a mid-mission change applies at
+    // once (tech/pause-menu.md). Every reader already looks it up per use, and
+    // the nav graph cache is keyed by it (profileKey), so a change rebuilds.
+    world: { ...level.world, get gravity() { return config.gravity; } },
     // The gameplay stream, read by every `scene.rng` site (ai.js) and by the
     // companion agents built lazily during the mission. null when unseeded.
     rng,

@@ -546,7 +546,7 @@ export default async function run(t) {
     const html = controlsTabsHTML(SCHEMA, config, isDefault, 0);
     const rowOf = (key) => html.slice(html.indexOf(`data-row="${key}"`)).split('class="cfg-control"')[0];
     t.ok("live: a live item's row says Live.", /Live\./.test(rowOf("friendlyFire")));
-    t.ok("live: a next-deploy item's row does not", !/Live\./.test(rowOf("gravity")));
+    t.ok("live: a next-deploy item's row does not", !/Live\./.test(rowOf("soldierMagazines")));
 
     const keys = (s) => s.flatMap((g) => g.items.map((it) => it.key));
     const VIEWPORT = ["missionZoom", "missionRenderer", "scanlines", "scanlineSpacing", "showFps", "debugOverlays"];
@@ -556,14 +556,14 @@ export default async function run(t) {
       ...VIEWPORT, ...SOUND,
       "aimMode", "padDeadzone", "aimSpread", "reloadSpeedMult",
       "friendlyFire", "playerDamageMult",
-      "runSpeed", "jumpSpeed", "enemyJump", "coyoteTime", "knockbackDecay", "duckHoldTime", "duckLookahead",
+      "gravity", "runSpeed", "jumpSpeed", "enemyJump", "coyoteTime", "knockbackDecay", "duckHoldTime", "duckLookahead",
       "duckChanceSlow", "duckChanceFast", "duckLatencySlow", "duckLatencyFast",
       "navArriveRadius", "navTakeoffWindow", "navRepathInterval", "navJumpAttempts", "navReposition",
       "navRepositionHold", "navStallTime",
     ];
     const solo = pauseSchema({ room: false });
-    t.eq("pauseSchema: single-player shows the design's 38 settings", keys(solo).sort(), [...SOLO].sort());
-    t.eq("pauseSchema: 38 of them", keys(solo).length, 38);
+    t.eq("pauseSchema: single-player shows the design's 39 settings", keys(solo).sort(), [...SOLO].sort());
+    t.eq("pauseSchema: 39 of them", keys(solo).length, 39);
     const room = pauseSchema({ room: true });
     t.eq("pauseSchema: a room shows Viewport, Sound, aimMode and padDeadzone",
       keys(room).sort(), [...VIEWPORT, ...SOUND, "aimMode", "padDeadzone"].sort());

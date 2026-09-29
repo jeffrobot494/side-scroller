@@ -127,6 +127,16 @@ export default async function run(t) {
   t.ok("loadMission: flying enemy is lifted airborne", m.specRoots[1].y < 454);
   t.ok("loadMission: unknown type falls back to a built-in", m.specRoots[2].alive === true);
   t.ok("loadMission: kill loot derives from threat", !!m.specRoots[0].loot && m.specRoots[0].loot.value > 0);
+  // Gravity is live: the scene reads the setting through, so a change made
+  // mid-mission (the pause menu) reaches every reader without a redeploy.
+  {
+    const { config, setConfig, resetConfig } = await import("../src/game/config.js");
+    t.eq("loadMission: gravity starts at the setting", m.world.gravity, config.gravity);
+    setConfig("gravity", 3000);
+    t.eq("loadMission: and follows it after load", m.world.gravity, 3000);
+    t.eq("loadMission: through a spread copy too (locomotion.js scales one)", { ...m.world }.gravity, 3000);
+    resetConfig();
+  }
 
   // ---- loadMission resolves an ADDED enemy too (E6) -----------------------
   // The whole point of the list reaching the game: a placement carrying an id
