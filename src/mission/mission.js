@@ -17,7 +17,7 @@ import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload,
 import { fire, updateCompanion, updateCompanionSpec, aimAccuracy, markVerdictHit } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
 import { drawProjectile, drawNavGraph, drawNavPath } from "./render.js";
-import { createDebugView, drawSquadDebug } from "./debugview.js";
+import { createDebugView, drawSquadDebug, drawSpeedLabel } from "./debugview.js";
 import { graphFor, soldierProfile } from "./navigation.js";
 import {
   updateSpecEnemy, collidables,
@@ -38,7 +38,7 @@ const MAX_FEEDBACK = 64;
 
 // The debug layers (tech/squad-debug.md), all off: a fresh set per deploy.
 function debugLayers() {
-  return { graph: false, path: false, threats: false, spots: false, dodges: false };
+  return { graph: false, path: false, threats: false, spots: false, dodges: false, speed: 1 };
 }
 
 export class Mission {
@@ -336,6 +336,10 @@ export class Mission {
     let ft = (now - this.lastTime) / 1000;
     this.lastTime = now;
     if (ft > 0.25) ft = 0.25;
+    // Slow motion (tech/squad-debug.md, D3): the same steps in the same order,
+    // further apart. Only this page's own mission, and only with the overlays
+    // on, so a hidden speed cannot outlive the setting that shows it.
+    if (this.debugAvailable() && this.debug.speed < 1) ft *= this.debug.speed;
 
     // The pause is read once per FRAME, not per step, because while paused no
     // steps run to read it. Optional calls: suites swap in scripted inputs
@@ -1246,6 +1250,7 @@ export class Mission {
 
     this._drawVignette(ctx, W, H);
     this._drawHUD();
+    if (this.debugAvailable() && this.debug.speed < 1) drawSpeedLabel(ctx, this.debug.speed, W);
     if (this.introTimer > 0) this._drawIntro();
     // THIS commander's banner. Another commander extracting is not this page's
     // news and puts nothing on this screen (J2).

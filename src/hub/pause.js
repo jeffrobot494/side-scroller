@@ -28,11 +28,15 @@ const DEBUG_LAYERS = [
   { key: "debug.threats", label: "Threats", type: "bool", help: "A line from every hostile that can hit a squadmate where it stands." },
   { key: "debug.spots", label: "Spot choice", type: "bool", help: "Every spot a squadmate weighed at its last pick, best green to worst red, the chosen one ringed and staying put a square. Labels: total, then travel, danger, shot, crowding; – is a term it never computed." },
   { key: "debug.dodges", label: "Dodges", type: "bool", help: "A tag over a squadmate for each round it judged a threat: DUCK, JUMP, CAN'T, MISSED, LATE." },
+  { key: "debug.speed", label: "Speed", type: "enum", options: ["full", "half", "quarter"], help: "Slow motion. The mission plays out exactly as it would at full speed." },
 ];
+const SPEEDS = { full: 1, half: 0.5, quarter: 0.25 };
+const speedName = (v) => Object.keys(SPEEDS).find((k) => SPEEDS[k] === v) || "full";
 
 function debugHTML(debug) {
   const values = {};
   for (const it of DEBUG_LAYERS) values[it.key] = debug[it.key.slice(DEBUG_PREFIX.length)];
+  values["debug.speed"] = speedName(debug.speed);
   return controlsHTML([{ title: "Layers", items: DEBUG_LAYERS }], values, null);
 }
 
@@ -84,7 +88,8 @@ export function createPauseMenu(container, { room = false, resume, onChange, scr
   // Delegated, so a redraw keeps every listener.
   bindControls(el, (key, value) => {
     if (key.startsWith(DEBUG_PREFIX)) {
-      if (debug) debug[key.slice(DEBUG_PREFIX.length)] = value;
+      const k = key.slice(DEBUG_PREFIX.length);
+      if (debug) debug[k] = k === "speed" ? SPEEDS[value] ?? 1 : value;
       return;
     }
     const v = setConfig(key, value);

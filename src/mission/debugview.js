@@ -156,6 +156,17 @@ function drawTags(ctx, s, clock, z) {
   ctx.restore();
 }
 
+// Slow motion's label (D3), in the flat layer, top centre.
+export function drawSpeedLabel(ctx, speed, W) {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.font = "bold 13px monospace";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f2c14e";
+  ctx.fillText(`SLOW MOTION ${speed === 0.5 ? "½" : speed === 0.25 ? "¼" : `×${speed}`}`, W / 2, 22);
+  ctx.restore();
+}
+
 // The tag a verdict entry prints as — the death card (D4) names it too.
 export function tagText(entry) {
   return entry ? (TAGS[entry.verdict] || [entry.verdict])[0] : null;

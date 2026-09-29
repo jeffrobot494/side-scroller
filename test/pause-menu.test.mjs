@@ -214,6 +214,31 @@ export default async function run(t) {
     m.stop();
   }
 
+  // ---- D3: slow motion -------------------------------------------------------
+  // Same steps, same order, further apart: half speed takes twice the frames to
+  // reach a step, and the scene at that step is the full-speed scene.
+  {
+    const full = build();
+    full.tick(90);
+    const half = build();
+    half.debug.speed = 0.5;
+    half.tick(90);
+    t.ok(`slow: half speed runs half the steps (${half.input.frame} vs ${full.input.frame})`,
+      Math.abs(half.input.frame * 2 - full.input.frame) <= 2);
+    const want = full.input.frame;
+    while (half.input.frame < want) half.tick();
+    t.eq("slow: ...and reaches the same state at the same step", half.input.frame, want);
+    t.ok("slow: the scene at that step is the full-speed scene",
+      firstSampleDiff(sampleScene(full.scene), sampleScene(half.scene)) === null);
+    setConfig("debugOverlays", false);
+    const off = build();
+    off.debug.speed = 0.25;
+    off.tick(60);
+    t.ok(`slow: with debug overlays off the speed is ignored (${off.input.frame} steps)`, off.input.frame >= 59);
+    resetConfig();
+    for (const m of [full, half, off]) m.stop();
+  }
+
   // ---- P3: the overlay, mounted headlessly --------------------------------
   // The harness DOM dispatches no events, so the overlay's root records its
   // listeners here and the test fires them with targets that answer closest().
@@ -283,12 +308,14 @@ export default async function run(t) {
     const dm = createPauseMenu(container, { room: false, screen: "debug", debug });
     const del = made.at(-1);
     t.eq("debug screen: the debug key's request opens it", dm.screen(), "debug");
-    t.eq("debug screen: the five layers", rows(del.innerHTML),
-      ["debug.graph", "debug.path", "debug.threats", "debug.spots", "debug.dodges"]);
+    t.eq("debug screen: the five layers and the speed", rows(del.innerHTML),
+      ["debug.graph", "debug.path", "debug.threats", "debug.spots", "debug.dodges", "debug.speed"]);
     t.ok("debug screen: ...with a Back button", /data-pm="back"/.test(del.innerHTML));
     fire(del, "click", node({ key: "debug.graph", type: "bool" }, { toggle: true }));
     t.ok("debug screen: a toggle writes the mission's flag", debug.graph === true && debug.path === false);
     t.ok("debug screen: ...and never the config", !("debug.graph" in config) && isDefault("debugOverlays"));
+    fire(del, "change", node({ key: "debug.speed", type: "enum" }, { value: "quarter" }));
+    t.eq("debug screen: Speed writes the mission's time scale", debug.speed, 0.25);
     fire(del, "click", node({ pm: "back" }));
     t.eq("debug screen: Back returns to the menu", dm.screen(), "menu");
     t.eq("debug screen: the menu is Options, Debug, Resume", items(del), ["options", "debug", "resume"]);
