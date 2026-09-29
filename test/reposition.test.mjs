@@ -530,9 +530,9 @@ export default async function run(t) {
 
     // One escort run, from a fixed seed so the gunner's shot jitter is the same
     // in both. Returns how far left the companion got, and whether it kneeled.
-    const escortRun = (seconds, fire) => {
+    const escortRun = (seconds, fire, seed = 20260816) => {
       const real = Math.random;
-      Math.random = makeRng(20260816);
+      Math.random = makeRng(seed);
       try {
         const leader = new Soldier(rosterSoldier("L"), rifle, 150, 500 - STAND_H);
         const comp = new Soldier(rosterSoldier("C"), rifle, 800, 500 - STAND_H);
@@ -559,15 +559,28 @@ export default async function run(t) {
       }
     };
 
-    const under = escortRun(4, true);
+    // Summed over three seeds, and read at 1.5s while the squadmate is still
+    // walking. Since the dodge's KEEP-GOING candidate (tech/squad-survival.md,
+    // V6) a walking squadmate only kneels for a round that would actually meet
+    // it, so it kneels less, gets there in about 2s rather than 4, and one
+    // seed's chance rolls can all fail.
+    const runs = (fire) => {
+      const all = [2, 3, 20260816].map((seed) => escortRun(1.5, fire, seed));
+      return {
+        kneeled: all.reduce((a, r) => a + r.kneeled, 0),
+        gap: all.reduce((a, r) => a + r.gap, 0) / all.length,
+        states: new Set(all.flatMap((r) => [...r.states])),
+      };
+    };
+    const under = runs(true);
     t.ok(`escort: it kneels while escorting (${under.kneeled} frames down)`, under.kneeled > 0);
     t.ok("escort: and never breaks off to fight the distant gunner", !under.states.has("combat"));
 
-    // The price, stated as a comparison rather than assumed: the same four
-    // seconds of the same fire, with the reflex switched off, covers more ground.
+    // The price, stated as a comparison rather than assumed: the same seconds
+    // of the same fire, with the reflex switched off, covers more ground.
     const hold = config.duckHoldTime;
     config.duckHoldTime = 0;
-    const standing = escortRun(4, true);
+    const standing = runs(true);
     config.duckHoldTime = hold;
     t.eq("escort: with the hold at 0 it never kneels", standing.kneeled, 0);
     t.ok(`escort: ducking costs real progress (${Math.round(under.gap)}px short vs ${Math.round(standing.gap)}px)`,
@@ -583,7 +596,7 @@ export default async function run(t) {
     const station = escortRun(6, false).gap;
     const late = escortRun(20, true).gap;
     t.ok(`escort: unshot at it settles on a station (${Math.round(station)}px off the offset)`, station < under.gap);
-    t.ok(`escort: under fire it still gets there, later (${Math.round(under.gap)}px short at 4s → ${Math.round(late)}px)`,
+    t.ok(`escort: under fire it still gets there, later (${Math.round(under.gap)}px short at 1.5s → ${Math.round(late)}px)`,
       late <= station + 20);
   }
 

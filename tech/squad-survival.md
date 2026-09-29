@@ -1,7 +1,7 @@
 ---
 type: tech
 category: artificial-intelligence
-status: building
+status: built
 resolution: sharp
 needs: [agent-navigation, ranged-repositioning, soldier-ducking, soldier-behavior, enemyspec]
 related: [squad-survival, locomotion, mission-determinism, nav-audit]
@@ -57,6 +57,11 @@ land alone on V2. V4 and V5 do not depend on each other.
 | V5 | The held path is replaced only when a new route is cheaper by a margin | `survivalRouteMargin`, 0.5s, and only when the fresh route ends on the same node. A held path's cost is re-priced under the current weights each time |
 | V5 | The E1/E2 frozen numbers may move | They did not. The mission golden did, and is re-frozen |
 | V5 | The cost ceiling covers V5 | Pricing every edge of a graph cold, over the same sweep, is frozen at 90,000 tests; the worst measured is 87,997, about as expensive as the node scan. Dijkstra relaxes every reachable edge, so the first route in each sense interval pays it and the shared cache serves the rest |
+| V6 | Speed's chance and latency gate the reflex as they gate the duck | They do, and `duckHoldTime` 0, the duck's off switch, turns off the whole reflex, jumps included |
+| V6 | Duck: the crouched box | For a body standing still, the crouched box must clear by the frame the round reaches the standing one, which is `duckableShot`'s answer exactly. For a moving body, it must clear the whole lookahead: the body stops to kneel, so no arrival frame carries over. The reflex no longer calls `duckableShot`, which stays exported and pinned in `test/crouch.test.mjs` |
+| V6 | Jump: a standable landing and no other predicted round on its path | The copy is flown until it lands, for up to the lookahead or 2s, whichever is longer. Its landing must be a node on the squadmate's graph, and every round in the air, blasts included, must miss the arc |
+| V6 | The zero-input intent is cleared on landing | And if the body is still on the ground two frames after the intent was set, because the jump never fired, so it cannot hold a body still forever |
+| V6 | Must not regress | The escort ducking cases in `test/reposition.test.mjs` moved: keep-going means a walking squadmate kneels only for a round that would meet it, so it reaches its station in about 2s rather than 4, and the fixed seed failed every chance roll it made. They are now summed over three seeds and read at 1.5s, while it is still walking. The golden is re-frozen |
 
 ### Cover transitions (V3)
 

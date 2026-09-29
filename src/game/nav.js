@@ -423,7 +423,10 @@ export function driveV(dx, speed, dt) {
 // of the arc. A soldier that takes off at 270px/s needs six frames to stop
 // moving that way, and where a legged body would have held its column beside a
 // ledge it drifts 13px into the ledge's underside instead.
-function actuate(profile, vx, want, dt) {
+//
+// Exported for the squad's dodge jump (tech/squad-survival.md, V6), which flies
+// a soldier copy under zero input and must brake the way the body will.
+export function actuate(profile, vx, want, dt) {
   if (!profile.accel) return want; // legged: the request is the velocity
   const move = Math.sign(want);
   if (move !== 0) return clamp(vx + move * profile.accel * dt, -profile.runSpeed, profile.runSpeed);

@@ -638,4 +638,67 @@ export default async function run(t) {
     t.ok(`arc: the barrel is raised above the straight bearing (${comp.aimVec.y.toFixed(2)} vs ${flat.y.toFixed(2)})`, comp.aimVec.y < flat.y - 0.05);
     t.ok(`arc: and the lobbed rounds land on the target (${hits} hits)`, hits > 0);
   }
+
+  // ---- dodging: a jump for what a knee cannot avoid (V6) ---------------------
+  // A round at shin height meets the crouched box as surely as the standing
+  // one, so the knee is no answer; a jump flown under zero input clears it.
+  {
+    const shin = (off) => {
+      const saved = [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast, config.duckHoldTime];
+      config.duckChanceSlow = config.duckChanceFast = 1;
+      config.duckLatencySlow = config.duckLatencyFast = 0;
+      if (off) config.duckHoldTime = 0;
+      try {
+        const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+        const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+        comp.health = comp.maxHealth = 1e6;
+        const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(1500, 460)] });
+        const ctx = tally(comp);
+        sc.projectiles.push(new Projectile(640, 488, -900, 0, { w: 12, h: 4, color: "#fff", life: 2, gravity: 0 }, "enemy", [{ kind: "damage", amount: 5 }], null));
+        let rose = 0;
+        let knelt = false;
+        let drift = 0;
+        const x0 = comp.x;
+        for (let i = 0; i < 90; i++) {
+          if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+          updateCompanionSpec(comp, STEP, sc, leader, ctx);
+          stepActor(comp, STEP, sc.world, sc.platforms);
+          updateProjectiles(sc, STEP, ctx);
+          if (!comp.onGround) { rose++; drift = Math.max(drift, Math.abs(comp.x - x0)); }
+          if (comp.crouched) knelt = true;
+        }
+        return { rose, knelt, dealt: ctx.dealt, landed: comp.onGround, drift };
+      } finally {
+        [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast, config.duckHoldTime] = saved;
+      }
+    };
+    const on = shin(false);
+    t.ok(`jump: a round at shin height is jumped (${on.rose} frames in the air)`, on.rose > 0);
+    t.ok("jump: not knelt at — the knee does not clear it", on.knelt === false);
+    t.eq("jump: and it misses", on.dealt, 0);
+    t.ok("jump: the squadmate lands again", on.landed === true);
+    t.ok(`jump: flown under zero input, it comes down where it went up (${on.drift.toFixed(1)}px)`, on.drift < 4);
+    const off = shin(true);
+    t.ok(`jump: with the reflex off it takes the round (${off.dealt})`, off.rose === 0 && off.dealt > 0);
+  }
+  {
+    // Keep going: a round chasing a squadmate that walks away from it closes at
+    // 280px/s and does not reach it inside the lookahead, so it is neither knelt
+    // at nor jumped. Standing still, the same round is ducked.
+    const judged = (vx) => {
+      const saved = [config.duckChanceSlow, config.duckChanceFast];
+      config.duckChanceSlow = config.duckChanceFast = 1;
+      const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+      const comp = new Soldier(roster("C"), rifle, 700, 500 - STAND_H);
+      const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(1500, 460)] });
+      comp.vx = vx;
+      comp.onGround = true;
+      sc.projectiles.push(new Projectile(1300, 470, -600, 0, { w: 12, h: 4, color: "#fff", life: 3, gravity: 0 }, "enemy", [], null));
+      updateCompanionSpec(comp, STEP, sc, leader, noopCtx);
+      [config.duckChanceSlow, config.duckChanceFast] = saved;
+      return !!(comp.duck.pending || comp.duck.wait > 0 || comp.duck.hold > 0 || comp.agent.dodgeHold);
+    };
+    t.ok("keep going: standing still, the round is dodged", judged(0) === true);
+    t.ok("keep going: walking away from it, it is not", judged(-320) === false);
+  }
 }

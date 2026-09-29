@@ -8,8 +8,10 @@
 // archetypes were retired when EnemySpec was wired into missions.
 // ---------------------------------------------------------------------------
 
-import { Projectile, startReload } from "./entities.js";
-import { duckableShot } from "./combat.js";
+import { Projectile, startReload, stepActor, STAND_H, CROUCH_H, SOLDIER_TUNING } from "./entities.js";
+import { predictHit } from "./combat.js";
+import { navGraph, abortRoute } from "./navigation.js";
+import { actuate, nodeUnder } from "../game/nav.js";
 import { config } from "../game/config.js";
 import { weaponSound } from "../audio/cues.js";
 import { instantiate, updateSpecEnemy } from "./enemyspec/runtime.js";
@@ -214,35 +216,43 @@ function companionAgent(soldier, scene) {
   return a;
 }
 
-// ---- the duck reflex (tech/soldier-ducking.md, D1) ------------------------
+// ---- the dodge reflex (tech/soldier-ducking.md D1, tech/squad-survival.md V6)
 // A reflex BELOW the brain, not a brain state: a state would be entered and left
 // on perception's 0.2s cadence — far too slow for a round in flight — and would
 // fight escort/combat the way the old vertical band did.
 //
-// It owns exactly two things: whether this squadmate is kneeling and for how
-// long, and the verdict attached to one round for one soldier. It writes the
-// stance nowhere itself — `agent.crouchIntent` is a deferred channel the soldier
-// locomotor actuates, the same shape as the pending jump beside it
-// (locomotion.js).
+// Three candidates per threatening round, taken in order, the first that
+// predictHit says clears it: KEEP GOING (the standing box carried on at its
+// current velocity — if that clears, the round is no threat), DUCK (the
+// crouched box), JUMP (a copy of the body flown on stepActor under zero input).
+// Exploding rounds are skipped: getting smaller does not help against a blast,
+// and neither does getting higher.
 //
-// Relaxing mission.js's unconditional stand-up means this function now OWNS
+// It owns whether this squadmate is kneeling and for how long, a jump it has
+// decided on and not launched yet, and the verdict attached to one round for
+// one soldier. It writes the stance and the jump nowhere itself — `crouchIntent`,
+// `pendingJump` and `dodgeHold` are deferred channels the soldier locomotor
+// actuates (locomotion.js).
+//
+// Relaxing mission.js's unconditional stand-up means this function also OWNS
 // standing a swapped-away soldier back up: with no hold running it asks for a
 // stand every frame, and the locomotor delivers it on the same tick.
 function tickDuck(soldier, agent, dt, scene, ctx) {
-  const d = soldier.duck || (soldier.duck = { hold: 0, wait: 0, judged: new WeakSet() });
+  const d = soldier.duck || (soldier.duck = { hold: 0, wait: 0, pending: null, judged: new WeakSet() });
   if (d.hold > 0) d.hold = Math.max(0, d.hold - dt);
   else if (d.wait > 0) {
-    // A duck that has been decided but has not landed yet. The soldier stands
-    // through it — the stance is a two-state height swap with no in-between
+    // A dodge that has been decided but has not landed yet. The soldier carries
+    // on through it — the stance is a two-state height swap with no in-between
     // pose, so latency shows as a delayed snap, and a slow soldier gets clipped
     // in the gap. That is the half of Speed the player can actually watch.
     d.wait = Math.max(0, d.wait - dt);
-    if (d.wait === 0) d.hold = config.duckHoldTime;
+    if (d.wait === 0) act(d, soldier, agent, dt, scene, ctx);
   }
 
   // Grounded only: kneeling mid-jump changes the box without changing the
-  // trajectory, which reads as a glitch rather than a dodge.
-  if (d.hold <= 0 && d.wait <= 0 && soldier.onGround && config.duckHoldTime > 0) {
+  // trajectory, which reads as a glitch rather than a dodge, and a jump needs
+  // ground to leave from.
+  if (d.hold <= 0 && d.wait <= 0 && soldier.onGround && !agent.dodgeHold && config.duckHoldTime > 0) {
     for (const p of scene.projectiles) {
       // ONE verdict per round per soldier — a soldier who misses a round coming
       // does not get a second look at it. Re-judging across a round's flight
@@ -250,19 +260,100 @@ function tickDuck(soldier, agent, dt, scene, ctx) {
       // the round: one round can threaten more than one squadmate.
       if (d.judged.has(p)) continue;
       d.judged.add(p);
-      if (!duckableShot(scene, p, soldier, dt, ctx)) continue;
+      const kind = dodgeFor(soldier, agent, p, dt, scene, ctx);
+      if (!kind) continue;
       // Whether they react at all is the roll; a failed one is spent, not
       // retried, which is what makes a soldier who was not paying attention
       // indistinguishable from one who was too slow.
       const t = speedT(soldier);
       if (sceneRng(scene)() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) continue;
+      d.pending = { kind, round: p };
       const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
       if (latency > 0) d.wait = latency;
-      else d.hold = config.duckHoldTime;
+      else act(d, soldier, agent, dt, scene, ctx);
       break;
     }
   }
   agent.crouchIntent = d.hold > 0;
+}
+
+// Carry out the dodge decided on. A duck is a duck. A jump is re-flown from the
+// body as it is NOW, because the latency has moved it; if it no longer clears,
+// the reflex falls back to the knee, then to nothing.
+function act(d, soldier, agent, dt, scene, ctx) {
+  const pend = d.pending;
+  d.pending = null;
+  if (!pend) return;
+  if (pend.kind === "duck") { d.hold = config.duckHoldTime; return; }
+  if (!soldier.onGround) return;
+  const steps = Math.ceil(config.duckLookahead / dt);
+  if (jumpClears(soldier, agent, pend.round, dt, steps, scene, ctx)) {
+    // Drop the route leg first, so a dodge is never booked as a failed nav jump,
+    // then hold zero input from launch to landing so it flies the predicted arc.
+    abortRoute(agent);
+    agent.pendingJump = true;
+    agent.dodgeHold = { airborne: false };
+  } else if (crouchClears(soldier, pend.round, dt, steps, scene, ctx)) {
+    d.hold = config.duckHoldTime;
+  }
+}
+
+// Which dodge answers round `p`, if any: "duck", "jump", or null — null both
+// for a round that is no threat and for one nothing here can avoid.
+function dodgeFor(s, agent, p, dt, scene, ctx) {
+  if ((p.effects || []).some((e) => e.kind === "explode")) return null;
+  const steps = Math.ceil(config.duckLookahead / dt);
+  const feet = s.y + s.h;
+  const stand = { x: s.x, y: feet - STAND_H, w: s.w, h: STAND_H };
+  const moving = Math.abs(s.vx) > 1e-6;
+  const go = moving ? (i) => ({ x: s.x + s.vx * dt * (i + 1), y: stand.y, w: s.w, h: STAND_H }) : () => stand;
+  const k = predictHit(scene, p, s, go, dt, steps, ctx);
+  if (k < 0) return null;
+  // A body standing still is judged on the frame the round reaches it, exactly
+  // as duckableShot judges it; one that was moving stops to kneel, so the
+  // crouched box must clear the whole flight.
+  if (crouchClears(s, p, dt, moving ? steps : k + 1, scene, ctx)) return "duck";
+  if (jumpClears(s, agent, p, dt, steps, scene, ctx)) return "jump";
+  return null;
+}
+
+function crouchClears(s, p, dt, steps, scene, ctx) {
+  const crouch = { x: s.x, y: s.y + s.h - CROUCH_H, w: s.w, h: CROUCH_H };
+  return predictHit(scene, p, s, () => crouch, dt, steps, ctx) < 0;
+}
+
+// Does a jump from here clear `p`? The body is flown on the mission's own
+// integrator under zero input — friction braking, as applyMovement applies it,
+// mirrored by `actuate` — until it lands. The landing must be somewhere the
+// squadmate's graph says is standable, and NO predicted round, `p` or any other,
+// may meet the arc.
+function jumpClears(s, agent, p, dt, steps, scene, ctx) {
+  const f = jumpFlight(s, dt, scene, Math.max(steps, Math.ceil(2 / dt)));
+  if (!f) return false;
+  const graph = navGraph(agent, scene, config.runSpeed);
+  if (!graph || !nodeUnder(graph, f.x, f.feet)) return false;
+  const at = (i) => f.boxes[Math.min(i, f.boxes.length - 1)];
+  for (const q of scene.projectiles) {
+    if (predictHit(scene, q, s, at, dt, steps, ctx) >= 0) return false;
+  }
+  return true;
+}
+
+function jumpFlight(s, dt, scene, frames) {
+  const prof = { accel: SOLDIER_TUNING.accel, friction: SOLDIER_TUNING.friction, runSpeed: config.runSpeed };
+  const b = {
+    x: s.x, y: s.y + s.h - STAND_H, w: s.w, h: STAND_H, vx: s.vx, vy: 0,
+    onGround: true, coyote: 0, slow: s.slow, shoveX: 0, shoveY: 0,
+  };
+  const boxes = [];
+  for (let i = 0; i < frames; i++) {
+    b.vx = actuate(prof, b.vx, 0, dt);
+    if (i === 0) b.vy = -config.jumpSpeed;
+    stepActor(b, dt, scene.world, scene.platforms);
+    boxes.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+    if (i > 0 && b.onGround) return { boxes, x: b.x, feet: b.y + b.h };
+  }
+  return null; // never came down inside the window
 }
 
 // Where a soldier sits on the 1..10 Speed stat, as 0..1 — the same shape
