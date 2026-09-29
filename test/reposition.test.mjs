@@ -244,16 +244,19 @@ export default async function run(t) {
     // case that collides with the companion's own brain — `combat` exits the
     // moment its target stops being level, so it will not settle up there. The
     // assertion is therefore that it gets the shot at all, not that it stays.
+    // Sized to the companion's fighting range (420–600px): from the ground on
+    // either side the target is hidden or too close, and the top of the block
+    // is the only place in range with a sight line.
     const COVER = [
       { x: 0, y: 500, w: 1400, h: 40 },
-      { x: 600, y: 420, w: 200, h: 80 },
+      { x: 600, y: 420, w: 80, h: 80 },
     ];
     const runCover = () => {
       const leader = new Soldier(rosterSoldier("L"), rifle, 500, 500 - STAND_H);
-      const comp = new Soldier(rosterSoldier("C"), rifle, 520, 500 - STAND_H);
+      const comp = new Soldier(rosterSoldier("C"), rifle, 565, 500 - STAND_H); // inside engage range
       const foe = instantiate(normalizeSpec({
         id: "dummy", root: { health: { max: 1e6 }, visual: { size: [30, 46] }, motion: { type: "static" } },
-      }), 1000, 454);
+      }), 1080, 454);
       foe.rng = () => 0.5;
       const sc = scene(COVER, [leader, comp]);
       sc.specRoots = [foe];
@@ -351,9 +354,12 @@ export default async function run(t) {
     // and the agent is asked to re-decide from mid-air, where there is no node
     // under it to decide anything from — so it silently hands back to holdRange
     // with a jump still in the books.
+    // Sized to the companion's fighting range (420–600px): from the ground on
+    // either side the target is hidden or too close, and the top of the block
+    // is the only place in range with a sight line.
     const COVER = [
       { x: 0, y: 500, w: 1400, h: 40 },
-      { x: 600, y: 420, w: 200, h: 80 },
+      { x: 600, y: 420, w: 80, h: 80 },
     ];
     const sc = scene(COVER, [soldierAt(1000, 454)]);
     const g = gunner(200, 474, { min: 220, max: 420 });

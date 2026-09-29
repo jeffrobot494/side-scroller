@@ -221,14 +221,16 @@ export default async function run(t) {
   // ---- a target BELOW -------------------------------------------------------
   {
     const leader = new Soldier(roster("L"), rifle, 250, 300 - STAND_H);
-    const comp = new Soldier(roster("C"), rifle, 300, 300 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 425, 300 - STAND_H); // at the lip
     const sc = scene({
       soldiers: [leader, comp],
       // a ledge for the companion; the sight line down to the floor is clear
       platforms: [{ x: 0, y: 500, w: 1600, h: 40 }, { x: 240, y: 300, w: 220, h: 20 }],
       specRoots: [foeAt(700, 460)],
     });
-    const shots = play(comp, sc, leader, 240);
+    // Frozen on the ledge: the fighting range (420–600) would otherwise walk it
+    // off, and what is under test is the barrel, not where it stands.
+    const shots = play(comp, sc, leader, 240, false);
     t.ok(`below: engages and fires (${shots.length} shots)`, shots.length > 3);
     const down = shots.filter((s) => s.p.vy > 100).length;
     t.ok(`below: the rounds travel DOWNWARD (${down}/${shots.length} with vy > 100)`, down === shots.length);
@@ -272,14 +274,15 @@ export default async function run(t) {
 
   // ---- aim is a channel of its own, not a function of facing ----------------
   // The defect was that the shot WAS facing, which is horizontal by
-  // construction. Target dead overhead and inside the keepDistance band, so the
-  // body has no reason to move: facing stays ±1 (the locomotor is its only
+  // construction. Target dead overhead, body frozen: facing stays ±1 (the locomotor is its only
   // writer, locomotion.js) while the barrel points near-vertically.
   {
     const leader = new Soldier(roster("L"), rifle, 300, 500 - STAND_H);
     const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
     const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(comp.x - 8, 200)] });
-    play(comp, sc, leader, 60);
+    // Frozen: 280px overhead is inside the engage range but short of the
+    // fighting range, which would otherwise back the body away from under it.
+    play(comp, sc, leader, 60, false);
     t.ok(`aim: the barrel is near-vertical (aimVec.y ${comp.aimVec.y.toFixed(3)})`, comp.aimVec.y < -0.98);
     t.ok("aim: facing is still a horizontal ±1 the ground probe can use", Math.abs(comp.facing) === 1);
     t.ok("aim: and the shot does NOT follow facing", Math.abs(comp.fireDir().y) > 0.98);
