@@ -11,6 +11,8 @@
 //   ctx.damage(t,a,o)  apply `a` damage to `t` from owner `o` (does hit flash + kill)
 //   ctx.kill(t,o)      kill `t` crediting `o` (used by burn ticks)
 //   ctx.spark(x,y,color,n,spd) / ctx.burst(x,y,color,n,spd)   cosmetics (optional)
+//   ctx.hit(p,t)       round `p` struck `t`, before its effects (optional; a record
+//                      for the squad debug view, never a rule)
 //
 // Sound is the one presentation hook that hangs off the SCENE rather than ctx
 // (`scene.sound(cueId, { x, y })`), because ai.js `fire()` — the most important
@@ -219,6 +221,7 @@ export function duckableShot(scene, p, s, dt, ctx = {}) {
 // ---- effect resolution ----------------------------------------------------
 
 export function resolveHit(scene, p, target, ctx) {
+  if (ctx.hit) ctx.hit(p, target);
   applyEffects(scene, target, p.effects, p.owner, ctx, { x: p.x + p.w / 2, y: p.y + p.h / 2, vx: p.vx, team: p.team });
 }
 

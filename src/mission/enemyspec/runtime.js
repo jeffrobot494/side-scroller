@@ -570,7 +570,9 @@ function repositionRequest(root, ent, m, point, scene, dt) {
 
   const see = (x, y) => losBetween(x, y, point.x, point.y, scene.platforms);
   const here = { x: cx(ent), y: ent.y + ent.h / 2 };
-  const dest = holdPoint(ent, scene, m.speed, point, m.min, m.max, see, sv ? spotScorer(root, ent, scene, here) : undefined);
+  const scorer = sv ? spotScorer(root, ent, scene, here) : undefined;
+  const dest = holdPoint(ent, scene, m.speed, point, m.min, m.max, see, scorer);
+  if (scorer) keepSpotPass(root, scene, scorer, "fight", dest);
   if (!dest) return committed ? release(st, ent) : null; // nowhere better exists
 
   commitSpot(st, ent, dest);
@@ -601,7 +603,9 @@ function recheckHeld(root, ent, m, point, scene, dt, st) {
   st.recheck = config.navRepathInterval;
   if (spotExposure(root, scene, st.dest.x, st.destFeet - STAND_H / 2) < config.survivalExposureTrigger) return true;
   const see = (x, y) => losBetween(x, y, point.x, point.y, scene.platforms);
-  const fresh = holdPoint(ent, scene, m.speed, point, m.min, m.max, see, spotScorer(root, ent, scene, st.dest));
+  const scorer = spotScorer(root, ent, scene, st.dest);
+  const fresh = holdPoint(ent, scene, m.speed, point, m.min, m.max, see, scorer);
+  keepSpotPass(root, scene, scorer, "fight", fresh);
   if (!fresh) return true;
   release(st, ent);
   commitSpot(st, ent, fresh);
@@ -629,16 +633,35 @@ function spotScorer(root, ent, scene, stay, weights = null) {
     // The cheap terms first and the flights last, each skipped once the
     // candidate cannot beat `bound` any more: a shot can only subtract, and
     // exposure can only add.
+    // Every probe scored, with the terms actually computed (null = skipped),
+    // for the squad debug view (tech/squad-debug.md, D0). The first is the stay
+    // entry — the only call with an unbounded `bound`.
+    probes: [],
     of(p, travel, bound) {
       const feet = p.y + ent.h / 2;
+      const rec = { x: p.x, y: p.y, travel, crowd: 0, shot: null, exposure: null, total: 0, cut: false };
+      this.probes.push(rec);
       let v = travel;
       for (const c of claims) if (Math.hypot(c.x - p.x, c.y - feet) < reach) v += config.survivalCrowdWeight;
-      if (v - wShot >= bound) return v;
-      if (target && myShot(scene, root, { x: p.x - ent.w / 2, y: feet - STAND_H, w: ent.w, h: STAND_H }, target)) v -= wShot;
-      if (v >= bound) return v;
-      return v + wExp * spotExposure(root, scene, p.x, feet - STAND_H / 2);
+      rec.crowd = v - travel;
+      if (v - wShot >= bound) { rec.cut = true; return (rec.total = v); }
+      rec.shot = 0;
+      if (target && myShot(scene, root, { x: p.x - ent.w / 2, y: feet - STAND_H, w: ent.w, h: STAND_H }, target)) { v -= wShot; rec.shot = -wShot; }
+      if (v >= bound) { rec.cut = true; return (rec.total = v); }
+      rec.exposure = wExp * spotExposure(root, scene, p.x, feet - STAND_H / 2);
+      return (rec.total = v + rec.exposure);
     },
   };
+}
+
+// Keep a scored pick on the root for the squad debug view (tech/squad-debug.md,
+// D0): kind (fight | cover), every probe (the first is staying), what was
+// chosen (null = stayed) and when. A search that returned before scoring
+// anything (no graph, no node underfoot) is not a pick and keeps the last one.
+// Nothing in update() reads it.
+function keepSpotPass(root, scene, scorer, kind, chosen) {
+  if (!scorer.probes.length) return;
+  root.spotPass = { kind, probes: scorer.probes, chosen: chosen ? { x: chosen.x, y: chosen.y } : null, t: scene.survivalClock || 0 };
 }
 
 // Where the rest of the squad is, or means to be, as { x centre, y feet }. Each
@@ -702,7 +725,9 @@ function coverRequest(root, ent, m, dt, scene) {
       // measured against where the body stands now.
       const holding = c.picked && !!c.dest && !hurt;
       const stay = holding ? c.dest : { x: cx(ent), y: ent.y + ent.h / 2 };
-      const fresh = coverPoint(ent, scene, m.speed, spotScorer(root, ent, scene, stay, coverWeights()), coverHorizon(root), leash(root));
+      const scorer = spotScorer(root, ent, scene, stay, coverWeights());
+      const fresh = coverPoint(ent, scene, m.speed, scorer, coverHorizon(root), leash(root));
+      keepSpotPass(root, scene, scorer, "cover", fresh);
       if (fresh || !holding) {
         if (c.dest) abortRoute(ent);
         c.dest = fresh; // null: nowhere beats here, so here is the cover

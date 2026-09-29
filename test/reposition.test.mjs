@@ -654,6 +654,40 @@ export default async function run(t) {
     const piled = stack(0);
     t.ok(`spots: with the claim price at 0 they stack on it (${Math.round(piled.gap)}px apart)`,
       piled.gap < config.survivalClaimRadius * 30);
+
+    // The pass the pick came from is kept for the squad debug view
+    // (tech/squad-debug.md, D0): a record only, so it must agree with the pick.
+    {
+      const sc = shelfScene();
+      const { leader, mates: [m] } = squad(sc, [685]);
+      let pass = null;
+      let dest = null;
+      for (let i = 0; i < 120 && !pass; i++) {
+        tick(sc, leader, [m]);
+        if (m.agent.repo && m.agent.repo.hold > 0) { pass = m.agent.spotPass; dest = m.agent.repo.dest; }
+      }
+      const stay = pass && pass.probes[0];
+      const rest = pass ? pass.probes.slice(1) : [];
+      const chosen = rest.find((p) => dest && p.x === dest.x && p.y === dest.y);
+      t.ok(`record: the fight pick left a pass (${pass ? pass.probes.length : 0} probes)`, !!pass && pass.kind === "fight" && rest.length > 0);
+      t.ok("record: its first entry is staying put, scored in full", !!stay && Math.abs(stay.x - (685 + 15)) < 2 && !stay.cut && stay.exposure !== null);
+      t.ok("record: the chosen point is the spot committed to", !!chosen && pass.chosen.x === dest.x && pass.chosen.y === dest.y);
+      t.ok("record: and it has the lowest total of every probe", !!chosen && rest.every((p) => p.total >= chosen.total));
+      t.ok("record: and beats staying by the margin", !!chosen && chosen.total < stay.total - config.survivalSpotMargin);
+      t.ok("record: a cut-off probe skipped the flight term", rest.filter((p) => p.cut).every((p) => p.exposure === null));
+      // A search that never scores is not a pick and must not replace the last
+      // one. Held mid-air but told it is grounded, the body has no node under
+      // it, so holdPoint returns before any probe; the trigger at 0 makes the
+      // frame want a new spot.
+      const hold = config.survivalExposureTrigger;
+      config.survivalExposureTrigger = 0;
+      Object.assign(m.agent.repo, { hold: 0, retry: 0 });
+      m.y = 200;
+      m.onGround = true;
+      updateCompanionSpec(m, STEP, sc, leader, ctx);
+      config.survivalExposureTrigger = hold;
+      t.ok("record: a search that scored nothing keeps the last pass", m.agent.spotPass === pass);
+    }
   }
   {
     // A held spot that goes bad on the way: a third hostile appears that can

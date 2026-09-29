@@ -14,7 +14,7 @@
 
 import { MissionInput } from "./input.js";
 import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload, STAND_H } from "./entities.js";
-import { fire, updateCompanion, updateCompanionSpec, aimAccuracy } from "./ai.js";
+import { fire, updateCompanion, updateCompanionSpec, aimAccuracy, markVerdictHit } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
 import { drawProjectile, drawNavGraph, drawNavPath } from "./render.js";
 import { graphFor, soldierProfile } from "./navigation.js";
@@ -244,6 +244,9 @@ export class Mission {
       get damageMult() { return config.playerDamageMult; },
       damage: (t, a, o) => this._damage(t, a, o),
       kill: (t, o) => this._kill(t, o),
+      // A record for the squad debug view (tech/squad-debug.md, D0): marks the
+      // struck squadmate's dodge verdict for this round. Nothing reads it back.
+      hit: (p, t) => { if (t.kind === "soldier") markVerdictHit(t, p); },
       spark: (x, y, c, n, s) => this._feedback("spk", [x, y, c, n, s]),
       burst: (x, y, c, n, s) => this._feedback("bst", [x, y, c, n, s]),
     };

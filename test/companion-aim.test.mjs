@@ -20,7 +20,7 @@
 // suite, which had a squadmate and no incoming fire.
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
-import { updateCompanionSpec } from "../src/mission/ai.js";
+import { updateCompanionSpec, markVerdictHit } from "../src/mission/ai.js";
 import { nearestHostile, exposureAt } from "../src/mission/enemyspec/perception.js";
 import { updateProjectiles } from "../src/mission/combat.js";
 import { Soldier, Projectile, STAND_H, stepActor, tickReload } from "../src/mission/entities.js";
@@ -715,5 +715,53 @@ export default async function run(t) {
     };
     t.ok("keep going: standing still, the round is dodged", judged(0) === true);
     t.ok("keep going: walking away from it, it is not", judged(-320) === false);
+  }
+
+  // ---- the verdict log (tech/squad-debug.md, D0) ----------------------------
+  // One round at a standing squadmate, the reflex's knobs pinned, and the ctx
+  // the Mission installs: its `hit` marks the struck soldier's verdict. The log
+  // is a record — these read it, nothing in the game does.
+  {
+    const verdicts = ({ y = 470, h = 4, from = 640, vx = -900, chance = 1, latency = 0, fx = [{ kind: "damage", amount: 5 }] } = {}) => {
+      const saved = [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast];
+      config.duckChanceSlow = config.duckChanceFast = chance;
+      config.duckLatencySlow = config.duckLatencyFast = latency;
+      try {
+        const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+        const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+        comp.health = comp.maxHealth = 1e6;
+        const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(1500, 460)] });
+        const ctx = tally(comp);
+        ctx.hit = (p, target) => { if (target.kind === "soldier") markVerdictHit(target, p); };
+        comp.onGround = true; // a fresh Soldier has not landed yet, and the reflex is grounded-only
+        const round = new Projectile(from, y, vx, 0, { w: 12, h, color: "#fff", life: 2, gravity: 0 }, "enemy", fx, null);
+        sc.projectiles.push(round);
+        for (let i = 0; i < 60; i++) {
+          if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+          updateCompanionSpec(comp, STEP, sc, leader, ctx);
+          stepActor(comp, STEP, sc.world, sc.platforms);
+          updateProjectiles(sc, STEP, ctx);
+        }
+        return { log: comp.duck.log, round, dealt: ctx.dealt };
+      } finally {
+        [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast] = saved;
+      }
+    };
+    const one = (r) => (r.log.length === 1 ? r.log[0] : null);
+    const duck = verdicts();
+    t.ok("verdict: a chest-high round knelt under is DUCK, unhit", one(duck) && one(duck).verdict === "duck" && !one(duck).hit && one(duck).round === duck.round);
+    const jump = verdicts({ y: 488 });
+    t.ok("verdict: a shin-high round jumped is JUMP, unhit", one(jump) && one(jump).verdict === "jump" && !one(jump).hit);
+    // A round as tall as the body, arriving in two frames: no knee, no launch.
+    const cant = verdicts({ y: 454, h: 40, from: 340 });
+    t.ok("verdict: a round nothing clears is CAN'T, and it lands", one(cant) && one(cant).verdict === "cant" && one(cant).hit);
+    const missed = verdicts({ chance: 0 });
+    t.ok("verdict: a failed roll is MISSED, and it lands", one(missed) && one(missed).verdict === "missed" && one(missed).hit);
+    // Chosen, but the reaction is slower than the round.
+    const late = verdicts({ from: 420, latency: 0.5 });
+    t.ok(`verdict: a duck still waiting when the round lands is LATE (${one(late) && one(late).verdict})`, one(late) && one(late).verdict === "late" && one(late).hit);
+    t.eq("verdict: a round flying away is no threat and writes nothing", verdicts({ vx: 900 }).log.length, 0);
+    t.eq("verdict: an exploding round is never judged and writes nothing",
+      verdicts({ fx: [{ kind: "explode", radius: 40, damage: 5 }] }).log.length, 0);
   }
 }

@@ -238,7 +238,7 @@ function companionAgent(soldier, scene) {
 // standing a swapped-away soldier back up: with no hold running it asks for a
 // stand every frame, and the locomotor delivers it on the same tick.
 function tickDuck(soldier, agent, dt, scene, ctx) {
-  const d = soldier.duck || (soldier.duck = { hold: 0, wait: 0, pending: null, judged: new WeakSet() });
+  const d = soldier.duck || (soldier.duck = { hold: 0, wait: 0, pending: null, judged: new WeakSet(), log: [] });
   if (d.hold > 0) d.hold = Math.max(0, d.hold - dt);
   else if (d.wait > 0) {
     // A dodge that has been decided but has not landed yet. The soldier carries
@@ -266,10 +266,12 @@ function tickDuck(soldier, agent, dt, scene, ctx) {
       const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
       const plan = dodgeFor(soldier, agent, p, dt, scene, ctx, Math.ceil(latency / dt - 1e-9));
       if (!plan) continue;
+      if (plan.kind === "cant") { logVerdict(d, p, scene, "cant"); continue; }
       // Whether they react at all is the roll; a failed one is spent, not
       // retried, which is what makes a soldier who was not paying attention
       // indistinguishable from one who was too slow.
-      if (sceneRng(scene)() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) continue;
+      if (sceneRng(scene)() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) { logVerdict(d, p, scene, "missed"); continue; }
+      logVerdict(d, p, scene, plan.kind);
       d.pending = { kind: plan.kind, round: p };
       const wait = plan.kind === "jump" ? plan.delay * dt : latency;
       if (wait > 0) d.wait = wait;
@@ -289,7 +291,7 @@ function act(d, soldier, agent, dt, scene, ctx) {
   d.pending = null;
   if (!pend) return;
   if (pend.kind === "duck") { d.hold = config.duckHoldTime; return; }
-  if (!soldier.onGround) return;
+  if (!soldier.onGround) { abandonVerdict(d, pend.round); return; }
   const steps = Math.ceil(config.duckLookahead / dt);
   const delay = jumpDelay(soldier, agent, pend.round, dt, steps, scene, ctx, 0);
   if (delay === 0) {
@@ -303,12 +305,40 @@ function act(d, soldier, agent, dt, scene, ctx) {
     d.wait = delay * dt;
   } else if (crouchClears(soldier, pend.round, dt, steps, scene, ctx)) {
     d.hold = config.duckHoldTime;
-  }
+  } else abandonVerdict(d, pend.round);
+}
+
+// THE VERDICT LOG (tech/squad-debug.md, D0). One entry per round judged a
+// threat — { round, t, verdict: duck | jump | cant | missed, abandoned, hit } —
+// for the squad debug view to read. A record only: nothing in the reflex or
+// the brain reads it back. `t` is on scene.survivalClock, the one clock here.
+const VERDICT_LOG = 8;
+
+function logVerdict(d, round, scene, verdict) {
+  d.log.push({ round, t: (scene && scene.survivalClock) || 0, verdict, abandoned: false, hit: false });
+  if (d.log.length > VERDICT_LOG) d.log.shift();
+}
+
+function abandonVerdict(d, round) {
+  const e = d.log.find((x) => x.round === round);
+  if (e) e.abandoned = true;
+}
+
+// Round `p` struck `soldier` (the Mission's ctx.hit). A dodge still waiting on
+// that round, or a jump given up with nothing in its place, was LATE.
+export function markVerdictHit(soldier, p) {
+  const d = soldier.duck;
+  const e = d && d.log.find((x) => x.round === p);
+  if (!e) return null;
+  e.hit = true;
+  if ((e.verdict === "duck" || e.verdict === "jump") && ((d.pending && d.pending.round === p) || e.abandoned)) e.verdict = "late";
+  return e;
 }
 
 // Which dodge answers round `p`, if any: { kind: "duck" }, { kind: "jump",
-// delay } with the launch `delay` in frames, or null — null both for a round
-// that is no threat and for one nothing here can avoid. `minDelay` is the
+// delay } with the launch `delay` in frames, { kind: "cant" } for a threat
+// nothing here can avoid, or null for a round that is no threat (an exploding
+// round is never judged, so it is null too). `minDelay` is the
 // soldier's reaction time in frames: no jump is planned to launch sooner.
 function dodgeFor(s, agent, p, dt, scene, ctx, minDelay = 0) {
   if ((p.effects || []).some((e) => e.kind === "explode")) return null;
@@ -324,7 +354,7 @@ function dodgeFor(s, agent, p, dt, scene, ctx, minDelay = 0) {
   // crouched box must clear the whole flight.
   if (crouchClears(s, p, dt, moving ? steps : k + 1, scene, ctx)) return { kind: "duck" };
   const delay = jumpDelay(s, agent, p, dt, steps, scene, ctx, minDelay);
-  return delay >= 0 ? { kind: "jump", delay } : null;
+  return delay >= 0 ? { kind: "jump", delay } : { kind: "cant" };
 }
 
 function crouchClears(s, p, dt, steps, scene, ctx) {
