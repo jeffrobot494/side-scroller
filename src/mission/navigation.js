@@ -519,7 +519,11 @@ export function abortRoute(ent) {
 // module for navSense, so the sight test arrives from the call site that owns
 // both. Returns a world point in CENTRE space — what routeRequest consumes —
 // or null, which means "nothing better exists; hold distance where you are".
-export function holdPoint(ent, scene, speed, tp, min, max, see) {
+//
+// `score`, when a caller passes one, replaces the tiebreak with a RANKING
+// (tech/squad-survival.md, V2) and drops sight as a filter — see scoredPoint.
+// Absent, this is the rule above exactly, which is what every enemy gets.
+export function holdPoint(ent, scene, speed, tp, min, max, see, score) {
   if (!config.navReposition) return null;
   if (!ent.onGround) return null; // "where I could stand" needs a node to stand on
   const graph = navGraph(ent, scene, speed);
@@ -534,6 +538,7 @@ export function holdPoint(ent, scene, speed, tp, min, max, see) {
   // would silently remove a perfectly good candidate.
   const nav = navState(ent, scene, graph);
   const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null);
+  if (score) return scoredPoint(graph, dist, here, ent, tp, min, max, see, score);
 
   let best = null;
   let bestCost = Infinity;
@@ -550,6 +555,43 @@ export function holdPoint(ent, scene, speed, tp, min, max, see) {
   return best;
 }
 
+// The ranked form of the search, for a caller that passes a scorer. Every
+// reachable node offers ALL of its in-band probes whether or not they see the
+// target — `sees` rides along for the scorer to reward — and the lowest score
+// wins. All of them, not the first that sees: on one long floor the nearest
+// probe is usually where the body already stands, and the covered end of the
+// band is another probe.
+//
+//   score.of(p, travel)  the cost of standing at p = { x, y, sees }, `travel`
+//                        seconds away. Lower is better.
+//   score.floor          the most the non-travel terms can SUBTRACT, so a node
+//                        whose travel alone cannot beat the best is skipped
+//                        before its probes are paid for, as the plain rule does
+//   score.stay           a centre point; staying there is a candidate too
+//   score.margin         how much a spot must beat staying by to be worth it
+//
+// Null when nothing beats staying by the margin. Staying's travel is the graph's
+// cost to the node under it — 0 where the body stands, the remaining walk for a
+// spot it is already committed to.
+function scoredPoint(graph, dist, here, ent, tp, min, max, see, score) {
+  const st = score.stay;
+  const under = nodeUnder(graph, st.x - ent.w / 2, st.y + ent.h / 2);
+  const stayTravel = under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0;
+  const stay = score.of({ x: st.x, y: st.y, sees: see(st.x, st.y) }, stayTravel);
+
+  let best = null;
+  let bestScore = stay - score.margin;
+  for (const n of graph.nodes) {
+    const c = dist[n.id];
+    if (!Number.isFinite(c) || c - score.floor >= bestScore) continue;
+    for (const p of standPoints(n, ent, tp, min, max, see)) {
+      const v = score.of(p, c);
+      if (v < bestScore) { best = p; bestScore = v; }
+    }
+  }
+  return best;
+}
+
 // Where on one node a body could stand to hold the band, or null.
 //
 // `holdRange` measures centre-to-centre in TWO dimensions, so a node's height
@@ -559,10 +601,25 @@ export function holdPoint(ent, scene, speed, tp, min, max, see) {
 // horizontal half of that gives two intervals — one either side of the target —
 // which are then clipped to the span the body actually fits on.
 function standPoint(n, ent, tp, min, max, see) {
+  for (const p of bandProbes(n, ent, tp, min, max)) if (see(p.x, p.y)) return p;
+  return null;
+}
+
+// Every probe of one node, for the scored search, each marked with whether it
+// sees the target.
+function standPoints(n, ent, tp, min, max, see) {
+  const out = bandProbes(n, ent, tp, min, max);
+  for (const p of out) p.sees = see(p.x, p.y);
+  return out;
+}
+
+// The probes themselves, in the order standPoint tries them.
+function bandProbes(n, ent, tp, min, max) {
+  const out = [];
   const cyN = n.y - ent.h / 2; // a body standing here has its CENTRE at this y
   const dy = cyN - tp.y;
   const far = max * max - dy * dy;
-  if (far <= 0) return null; // too far above/below to be in band at any x
+  if (far <= 0) return out; // too far above/below to be in band at any x
   const hi = Math.sqrt(far);
   const lo = Math.sqrt(Math.max(0, min * min - dy * dy));
   // node spans are body-LEFT-EDGE; the band and the sight test are both centre
@@ -584,11 +641,9 @@ function standPoint(n, ent, tp, min, max, see) {
     // agent would arrive with the least walking, then each end of the band —
     // hugging `min` and hugging `max` see past different corners. Three probes,
     // not a tunable sample count: they are the positions that mean something.
-    for (const x of [clamp(cxE, a, b), a, b]) {
-      if (see(x, cyN)) return { x, y: cyN };
-    }
+    for (const x of [clamp(cxE, a, b), a, b]) out.push({ x, y: cyN });
   }
-  return null;
+  return out;
 }
 
 // ---- observability ---------------------------------------------------------

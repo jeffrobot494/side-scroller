@@ -587,5 +587,90 @@ export default async function run(t) {
       late <= station + 20);
   }
 
+  // ---- scored spots (tech/squad-survival.md, V2) ----------------------------
+  // Squadmates only: the scorer is behind the opt-in the companion bridge sets.
+  // The scene is one floor, a target gunner F1 on it, and a second F2 on a high
+  // perch to the right. A low shelf hides the left end of the firing band from
+  // F2 but not from F1, so under it a squadmate keeps its shot and is exposed to
+  // one hostile instead of two — and the shelf is one body wide.
+  {
+    const dummy = (x, y) => {
+      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" } } }), x, y);
+      r.rng = () => 0.5;
+      return r;
+    };
+    const shelfScene = () => {
+      const sc = scene([{ x: 0, y: 500, w: 1600, h: 40 }, { x: 540, y: 440, w: 160, h: 10 }, { x: 1290, y: 150, w: 120, h: 20 }]);
+      sc.world.width = 1600;
+      sc.specRoots = [dummy(900, 460), dummy(1300, 110)];
+      return sc;
+    };
+    const squad = (sc, xs) => {
+      const leader = new Soldier(rosterSoldier("L"), rifle, 150, 500 - STAND_H);
+      const mates = xs.map((x, i) => new Soldier(rosterSoldier(`M${i}`), rifle, x, 500 - STAND_H));
+      sc.soldiers.push(leader, ...mates);
+      return { leader, mates };
+    };
+    const tick = (sc, leader, mates) => {
+      for (const c of mates) {
+        if (c.fireCooldown > 0) c.fireCooldown -= STEP;
+        updateCompanionSpec(c, STEP, sc, leader, ctx);
+        stepActor(c, STEP, sc.world, sc.platforms);
+      }
+    };
+    const stack = (crowd) => {
+      const hold = config.survivalCrowdWeight;
+      config.survivalCrowdWeight = crowd;
+      const sc = shelfScene();
+      const { leader, mates } = squad(sc, [665, 685]);
+      for (let i = 0; i < 300; i++) tick(sc, leader, mates);
+      config.survivalCrowdWeight = hold;
+      return { gap: Math.abs(mates[0].x - mates[1].x), exp: mates.map((m) => m.agent.sense.exposure) };
+    };
+
+    const claimed = stack(config.survivalCrowdWeight);
+    t.ok(`spots: two squadmates and one good spot end on two spots (${Math.round(claimed.gap)}px apart)`,
+      claimed.gap > config.survivalClaimRadius * 30);
+    t.ok(`spots: and both leave the open, where two hostiles could hit them (${claimed.exp})`, claimed.exp.every((e) => e < 2));
+    const piled = stack(0);
+    t.ok(`spots: with the claim price at 0 they stack on it (${Math.round(piled.gap)}px apart)`,
+      piled.gap < config.survivalClaimRadius * 30);
+  }
+  {
+    // A held spot that goes bad on the way: a third hostile appears that can
+    // hit it. The repath tick is shortened so the walk is still under way when
+    // it re-checks, which is the case the re-check exists for.
+    const dummy = (x, y) => {
+      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" } } }), x, y);
+      r.rng = () => 0.5;
+      return r;
+    };
+    config.navRepathInterval = 0.1;
+    const sc = scene([{ x: 0, y: 500, w: 1600, h: 40 }, { x: 540, y: 440, w: 160, h: 10 }, { x: 1290, y: 150, w: 120, h: 20 }]);
+    sc.world.width = 1600;
+    sc.specRoots = [dummy(900, 460), dummy(1300, 110)];
+    const leader = new Soldier(rosterSoldier("L"), rifle, 150, 500 - STAND_H);
+    const m = new Soldier(rosterSoldier("M"), rifle, 685, 500 - STAND_H);
+    sc.soldiers.push(leader, m);
+    let first = null;
+    let firstAt = -1;
+    let gaveUp = -1;
+    for (let i = 0; i < 120; i++) {
+      updateCompanionSpec(m, STEP, sc, leader, ctx);
+      stepActor(m, STEP, sc.world, sc.platforms);
+      const r = m.agent.repo;
+      if (!first && r && r.hold > 0) {
+        first = r.dest;
+        firstAt = m.x;
+        sc.platforms.push({ x: 60, y: 440, w: 100, h: 20 });
+        sc.specRoots.push(dummy(100, 400));
+      } else if (first && gaveUp < 0 && r.dest !== first) { gaveUp = i; firstAt = m.x + m.w / 2; }
+    }
+    config.navRepathInterval = 0.5;
+    t.ok("recheck: the squadmate commits to the covered end first", !!first && first.x < 600);
+    t.ok(`recheck: and gives it up once a third hostile can hit it (frame ${gaveUp})`, gaveUp > 0);
+    t.ok(`recheck: while still walking to it (${Math.round(firstAt - first.x)}px short)`, firstAt - first.x > config.navArriveRadius);
+  }
+
   resetConfig();
 }

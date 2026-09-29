@@ -553,7 +553,8 @@ export default async function run(t) {
     const SOUND = ["masterVolume", "sfxVolume", "uiVolume", "musicVolume", "muteOnBlur", "audioPan", "audioFalloff", "audioMaxVoices"];
     // The Squad survival group (tech/squad-survival.md): every one is live, so
     // the design's rule puts all of them on the menu.
-    const SURVIVAL = ["survivalWounded", "survivalHurtWindow", "survivalLookahead", "survivalCalmTime", "survivalLeash", "survivalLeashMargin"];
+    const SURVIVAL = ["survivalWounded", "survivalHurtWindow", "survivalLookahead", "survivalCalmTime", "survivalLeash", "survivalLeashMargin",
+      "survivalExposureTrigger", "survivalExposureWeight", "survivalShotBonus", "survivalCrowdWeight", "survivalClaimRadius", "survivalSpotMargin"];
     // The design's table (design/pause-menu.md), pinned by name.
     const SOLO = [
       ...VIEWPORT, ...SOUND,

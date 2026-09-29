@@ -188,7 +188,7 @@ function companionAgent(soldier, scene) {
   // Opted into the survival senses (tech/squad-survival.md) — the only agents
   // that are. The two clocks are advanced by tickSurvival below; perception
   // reads them on its own cadence.
-  a.survival = { sinceHurt: 99, sinceThreat: 99, hp: soldier.health, leaderFar: false };
+  a.survival = { sinceHurt: 99, sinceThreat: 99, hp: soldier.health, leaderFar: false, clock: (scene && scene.survivalClock) || 0 };
   // brain `fire` → the Soldier's EQUIPPED weapon, down the SAME barrel the
   // renderer draws: fireDir() reads the aimVec set in updateCompanionSpec below,
   // exactly as it does for the player. Through the shared fire() path, not the
@@ -281,7 +281,8 @@ export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
   // are (the locomotor drives the Soldier; the agent's own x/y is just a mirror).
   a.x = soldier.x; a.y = soldier.y; a.w = soldier.w; a.h = soldier.h;
   a.vx = soldier.vx; a.vy = soldier.vy; a.onGround = soldier.onGround; a.facing = soldier.facing;
-  tickSurvival(soldier, a, dt);
+  a.leader = leader && leader !== soldier ? leader : null;
+  tickSurvival(soldier, a, dt, scene);
   a.anchor = leader ? { x: leader.x + leader.w / 2, y: leader.y + leader.h / 2 } : null;
   aimAt(soldier, nearestHostile(a, scene));
   // perception + brain + soldier locomotor (→ soldier.applyMovement / fire())
@@ -292,8 +293,16 @@ export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
 // and the two clocks perception's underFire/calm read. "Hurt" is a health drop
 // seen between ticks rather than a hook on ctx.damage, because burn skips
 // ctx.damage (combat.js updateStatuses) and burning is being hurt.
-function tickSurvival(soldier, a, dt) {
+//
+// It also advances `scene.survivalClock`, the time the shared exposure cache is
+// aged on. Every squadmate moves it to the last value IT saw plus its step, and
+// never backwards — so squadmates ticking in the same frame advance it once, one
+// that sat out a while as the leader cannot drag it back, and any one of them
+// alone keeps it running.
+function tickSurvival(soldier, a, dt, scene) {
   const sv = a.survival;
+  scene.survivalClock = Math.max(scene.survivalClock || 0, sv.clock + dt);
+  sv.clock = scene.survivalClock;
   a.health = soldier.health;
   a.maxHealth = soldier.maxHealth;
   sv.sinceHurt += dt;

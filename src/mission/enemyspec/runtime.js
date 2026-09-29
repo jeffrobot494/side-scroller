@@ -19,11 +19,11 @@
 // (doc §10.4: the engine enforces limits regardless).
 // ---------------------------------------------------------------------------
 
-import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT } from "../entities.js";
+import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT, STAND_H } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
 import { routeRequest, holdPoint, abortRoute, navState, navGraph, stationPoint } from "../navigation.js";
 import { tickBrain } from "./brain.js";
-import { updateSense, nearestHostile, losBetween } from "./perception.js";
+import { updateSense, nearestHostile, losBetween, spotExposure } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
 import { config } from "../../game/config.js";
 
@@ -485,6 +485,7 @@ function repositionRequest(root, ent, m, point, scene, dt) {
   if (!config.navEnabled || !config.navReposition) return null;
 
   const st = root.repo || (root.repo = { hold: 0, dest: null, stall: 0, anchorX: ent.x, retry: 0, seen: -1 });
+  const sv = root.survival; // opted in: a scored choice, a third trigger, its own release
 
   // A commitment must not outlive the controller that made it. This branch only
   // runs while `keepDistance` is the standing controller, and a brain can leave
@@ -533,7 +534,14 @@ function repositionRequest(root, ent, m, point, scene, dt) {
     // moved has not been given up on yet, and releasing on a stale `blocked`
     // hands the agent back to holdRange for a dead end that no longer exists.
     const nav = navState(ent, scene);
-    if ((root.sense.los && !outside) || (nav && nav.blocked)) return release(st, ent);
+    if (sv) {
+      // A survival reposition (tech/squad-survival.md, V2) was chosen for more
+      // than sight, so sight returning does not end it — arriving or failing
+      // does. Arriving hands back to holdRange ON the spot, and from then on the
+      // ordinary exposure trigger below is what re-checks it.
+      if ((nav && nav.blocked) || arrivedAt(ent, st)) return release(st, ent);
+      if (recheckHeld(root, ent, m, point, scene, dt, st)) return routeRequest(ent, st.dest, m.speed, scene, dt);
+    } else if ((root.sense.los && !outside) || (nav && nav.blocked)) return release(st, ent);
     // Mid-window: keep walking. A null from the follower (mid-fall, off the
     // graph) is one frame of holdRange, not a reason to abandon the choice.
     if (st.hold > 0) return routeRequest(ent, st.dest, m.speed, scene, dt);
@@ -549,7 +557,8 @@ function repositionRequest(root, ent, m, point, scene, dt) {
   // the cooldown that rations the ones that could.
   if (!ent.onGround) return null;
   st.retry -= dt;
-  const wants = !root.sense.los || (outside && st.stall >= config.navStallTime);
+  const wants = !root.sense.los || (outside && st.stall >= config.navStallTime)
+    || (!!sv && root.sense.exposure >= config.survivalExposureTrigger);
   if (!wants) return committed ? release(st, ent) : null;
   // A scan that found nothing costs a sight test per node and will find nothing
   // again this frame. Committed agents skip the cooldown — their window expiring
@@ -558,12 +567,84 @@ function repositionRequest(root, ent, m, point, scene, dt) {
   st.retry = config.navRepathInterval;
 
   const see = (x, y) => losBetween(x, y, point.x, point.y, scene.platforms);
-  const dest = holdPoint(ent, scene, m.speed, point, m.min, m.max, see);
+  const here = { x: cx(ent), y: ent.y + ent.h / 2 };
+  const dest = holdPoint(ent, scene, m.speed, point, m.min, m.max, see, sv ? spotScorer(root, ent, scene, here) : undefined);
   if (!dest) return committed ? release(st, ent) : null; // nowhere better exists
 
-  st.dest = dest;
-  st.hold = config.navRepositionHold;
+  commitSpot(st, ent, dest);
   return routeRequest(ent, dest, m.speed, scene, dt);
+}
+
+function commitSpot(st, ent, dest) {
+  st.dest = dest;
+  st.destFeet = dest.y + ent.h / 2; // the claim others avoid, whatever the stance
+  st.hold = config.navRepositionHold;
+  st.recheck = config.navRepathInterval;
+}
+
+// A survival reposition is done when the body is standing on the spot.
+function arrivedAt(ent, st) {
+  return ent.onGround && Math.abs(cx(ent) - st.dest.x) <= config.navArriveRadius
+    && Math.abs(ent.y + ent.h - st.destFeet) <= config.navArriveRadius;
+}
+
+// THE HELD-SPOT RE-CHECK (tech/squad-survival.md, V2). On the repath tick, a
+// squadmate walking to a spot asks whether the spot has gone bad — hostiles
+// moved, or new ones arrived — and gives it up only for a fresh pick that beats
+// it by the margin, so it does not dither between two near-equal spots. Grounded
+// only, like every other decision here. Returns whether the walk goes on.
+function recheckHeld(root, ent, m, point, scene, dt, st) {
+  st.recheck = (st.recheck ?? 0) - dt;
+  if (st.hold <= 0 || st.recheck > 0 || !ent.onGround) return st.hold > 0;
+  st.recheck = config.navRepathInterval;
+  if (spotExposure(root, scene, st.dest.x, st.destFeet - STAND_H / 2) < config.survivalExposureTrigger) return true;
+  const see = (x, y) => losBetween(x, y, point.x, point.y, scene.platforms);
+  const fresh = holdPoint(ent, scene, m.speed, point, m.min, m.max, see, spotScorer(root, ent, scene, st.dest));
+  if (!fresh) return true;
+  release(st, ent);
+  commitSpot(st, ent, fresh);
+  return true;
+}
+
+// THE SPOT SCORER (tech/squad-survival.md, V2), handed to holdPoint. Seconds,
+// lower is better: the walk, plus a price per hostile that can hit the spot,
+// minus the worth of a shot from it, plus a price per ally claim nearby. `stay`
+// is the candidate the rest must beat — where the body stands, or the spot it
+// already holds.
+function spotScorer(root, ent, scene, stay) {
+  const claims = allyClaims(root, scene);
+  const reach = config.survivalClaimRadius * ent.w;
+  return {
+    stay,
+    floor: config.survivalShotBonus,
+    margin: config.survivalSpotMargin,
+    of(p, travel) {
+      const feet = p.y + ent.h / 2;
+      let v = travel + config.survivalExposureWeight * spotExposure(root, scene, p.x, feet - STAND_H / 2);
+      if (p.sees) v -= config.survivalShotBonus;
+      for (const c of claims) if (Math.hypot(c.x - p.x, c.y - feet) < reach) v += config.survivalCrowdWeight;
+      return v;
+    },
+  };
+}
+
+// Where the rest of the squad is, or means to be, as { x centre, y feet }. Each
+// other living squadmate claims the spot it is committed to, else where it
+// stands; the leader claims where it stands. Squadmates update in order, so a
+// later one sees what an earlier one claimed this same frame — deterministic,
+// and no draw. A commitment only counts while its controller is running (the
+// repositioner stamps `seen` every frame it runs); an escorting squadmate's old
+// fight spot is not a claim.
+function allyClaims(root, scene) {
+  const out = [];
+  for (const s of scene.soldiers || []) {
+    if (!s.alive || s === root.soldier) continue;
+    const a = s.agent;
+    const r = a && s !== root.leader ? a.repo : null;
+    if (r && r.hold > 0 && r.dest && a.age - r.seen < 0.1) out.push({ x: r.dest.x, y: r.destFeet });
+    else out.push({ x: s.x + s.w / 2, y: s.y + s.h });
+  }
+  return out;
 }
 
 // Hand the agent back to `holdRange`. The route state goes with it: the follower

@@ -188,6 +188,41 @@ export function exposureAt(root, scene, x, y) {
   return n;
 }
 
+// THE SHARED EXPOSURE CACHE (tech/squad-survival.md, V2). One per scene, not
+// per agent: exposure depends on the point and the hostiles, never on which
+// squadmate asks, and every soldier has the same standing box. Refilled by the
+// first opted-in agent to ask once it is a sense interval old — measured on
+// `scene.survivalClock`, which the companion bridge advances (ai.js), so a
+// seeded mission refills on the same frames every run. Keyed to the terrain's
+// generation and the clearance policy, the graph identity navState checks;
+// per-profile edge values (V5) key themselves by graph key inside it.
+//
+// Every opted-in agent is on the player team, so one cache answers for all of
+// them. An enemy never reads it.
+export function exposureCache(scene) {
+  const now = scene.survivalClock || 0;
+  const gen = scene.navGen || 0;
+  const clearance = !!config.navClearance;
+  let c = scene.exposureCache;
+  if (!c || now - c.t >= SENSE_INTERVAL || c.gen !== gen || c.clearance !== clearance) {
+    c = scene.exposureCache = { t: now, gen, clearance, points: new Map(), edges: new Map() };
+  }
+  return c;
+}
+
+// Exposure of a standing centre, through the cache. Rounded to the pixel: two
+// probes a fraction of a pixel apart are the same place to a hostile.
+export function spotExposure(root, scene, x, y) {
+  const c = exposureCache(scene);
+  const k = `${Math.round(x)},${Math.round(y)}`;
+  let n = c.points.get(k);
+  if (n === undefined) {
+    n = exposureAt(root, scene, x, y);
+    c.points.set(k, n);
+  }
+  return n;
+}
+
 // CAN-HIT: can a round from `shooter`, leaving (x0, y0), reach (x1, y1)? The
 // one predicate this system asks about shots, in both directions — theirs at
 // me, mine at them. In V1 it is line of sight; V4 makes it the round's own
