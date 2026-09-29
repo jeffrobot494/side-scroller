@@ -165,9 +165,8 @@ function publishSurvival(root, scene, dt) {
   else if (s.anchorDist < config.survivalLeash - config.survivalLeashMargin) sv.leaderFar = false;
   s.leaderFar = !!sv.leaderFar;
 
-  s.exposure = exposureAt(root, scene, root.x + root.w / 2, box.y + box.h / 2);
-  const t = nearestHostile(root, scene);
-  s.shot = !!t && canHit(scene, root, root.x + root.w / 2, root.y + root.h / 2, t.x + t.w / 2, t.y + t.h / 2);
+  s.exposure = spotExposure(root, scene, root.x + root.w / 2, box.y + box.h / 2);
+  s.shot = myShot(scene, root, root, nearestHostile(root, scene));
 }
 
 // A soldier's standing box with its left edge at `x`, hung off the current feet
@@ -178,12 +177,14 @@ function standingBox(root, x) {
 }
 
 // How many living hostiles of `root` can hit a body whose standing centre is at
-// (x, y). The one exposure count: V1's own-spot sense and V2's spot scores.
+// (x, y). The one exposure count: the own-spot sense, V2's spot scores and
+// cover. Against a SOLDIER's standing box, since only squadmates ask.
 export function exposureAt(root, scene, x, y) {
+  const box = { x: x - root.w / 2, y: y - STAND_H / 2, w: root.w, h: STAND_H };
   let n = 0;
   for (const h of hostilesFor(root, scene)) {
     if (!h || !h.alive) continue;
-    if (canHit(scene, h, h.x + h.w / 2, h.y + h.h / 2, x, y)) n++;
+    if (theyCanHit(scene, h, box)) n++;
   }
   return n;
 }
@@ -223,12 +224,192 @@ export function spotExposure(root, scene, x, y) {
   return n;
 }
 
-// CAN-HIT: can a round from `shooter`, leaving (x0, y0), reach (x1, y1)? The
-// one predicate this system asks about shots, in both directions — theirs at
-// me, mine at them. In V1 it is line of sight; V4 makes it the round's own
-// flight. New code calls this, never losBetween.
-export function canHit(scene, shooter, x0, y0, x1, y1) {
-  return losBetween(x0, y0, x1, y1, scene.platforms);
+// ---- can-hit (tech/squad-survival.md, V4) ---------------------------------
+// Seeing is not hitting. The one predicate this system asks about shots, in both
+// directions, and it is the round's own flight: its origin, speed, gravity and
+// lifetime, stopped by terrain. New code calls these, never losBetween.
+//
+// Cost rules, because exposure is candidates × hostiles × emitters: a straight
+// round is ONE segment test against the platforms. A gravity round is flown at a
+// coarse step (`survivalFlightStep`), each step's chord tested as a segment — an
+// exact sweep, so a thin platform is never skipped between samples — against
+// only the platforms overlapping the whole flight's bounding box, and it stops
+// once it has passed the body. `flightTests.n` counts every segment and box test
+// so the cost has a ceiling a test can freeze on any machine.
+export const flightTests = { n: 0 };
+
+// THEIRS: can any weapon of hostile `h` hit a body standing in `box`? Each
+// projectile emitter in its tree, from its origin, with its speed, gravity and
+// life. A straight one is tested aimed at the body; a gravity one across a fan
+// of launch angles rising from the aim, so a lobber reaches over cover. A
+// hostile with contact damage and no projectile emitter reaches a radius around
+// itself. Spawned-entity emitters (`ref`) are not rounds and are not seen.
+export function theyCanHit(scene, h, box) {
+  const tx = box.x + box.w / 2;
+  const ty = box.y + box.h / 2;
+  let armed = false;
+  let contact = false;
+  const stack = [h];
+  while (stack.length) {
+    const e = stack.pop();
+    if (!e.alive || e.disabled) continue;
+    for (const c of e.children || []) stack.push(c);
+    if (e.spec.contact && e.spec.contact.damage > 0) contact = true;
+    const ems = e.spec.emitters;
+    if (!ems) continue;
+    for (const k in ems) {
+      const p = ems[k].projectile;
+      if (!p) continue;
+      armed = true;
+      const ox = e.x + e.w / 2 + ems[k].at[0];
+      const oy = e.y + e.h / 2 + ems[k].at[1];
+      const g = (p.gravity || 0) * scene.world.gravity;
+      if (!g) {
+        if (straightReaches(scene, ox, oy, tx, ty, p.speed, p.life, null)) return true;
+        continue;
+      }
+      // No launch angle carries a round further across than speed × life, so a
+      // body beyond that is out of reach before a single step is flown.
+      if (Math.abs(tx - ox) - box.w / 2 > p.speed * p.life) continue;
+      const b = Math.atan2(ty - oy, tx - ox);
+      const up = Math.cos(b) >= 0 ? -1 : 1; // rotating toward straight up
+      const n = Math.max(1, config.survivalLobCount);
+      const fan = (config.survivalLobFan * Math.PI) / 180;
+      for (let i = 0; i < n; i++) {
+        const a = b + up * (n === 1 ? 0 : (fan * i) / (n - 1));
+        if (arcReaches(scene, ox, oy, Math.cos(a) * p.speed, Math.sin(a) * p.speed, g, p.life, box, null)) return true;
+      }
+    }
+  }
+  if (armed || !contact) return false;
+  return Math.hypot(h.x + h.w / 2 - tx, h.y + h.h / 2 - ty) <= config.survivalContactReach;
+}
+
+// MINE: can this squadmate's own round reach `t` from a body at `from` (a box)?
+// From fire()'s muzzle origin, down the barrel updateCompanionSpec would point
+// — the low arc for a gravity weapon, and no shot at all when no arc lands. It
+// stops at an ally's box when friendly fire is on, the rule that decides whether
+// it would hit that ally. Spread is ignored.
+export function myShot(scene, root, from, t) {
+  const body = root.soldier;
+  const w = body && body.weapon;
+  if (!w || !w.projectile || !t) return false;
+  const p = w.projectile;
+  const g = (p.gravity || 0) * scene.world.gravity;
+  const dir = aimFrom(from, t.x + t.w / 2, t.y + t.h / 2, p.speed, g);
+  if (!dir) return false;
+  const o = muzzle(from, dir);
+  const ctx = root._ctx || {};
+  const allies = ctx.friendlyFire
+    ? (scene.soldiers || []).filter((s) => s.alive && s !== body)
+    : null;
+  if (!g) return straightReaches(scene, o.x, o.y, t.x + t.w / 2, t.y + t.h / 2, p.speed, p.life, allies);
+  return arcReaches(scene, o.x, o.y, dir.x * p.speed, dir.y * p.speed, g, p.life, t, allies);
+}
+
+// Where fire() launches a round from a body box along unit `dir` (ai.js).
+export function muzzle(b, dir) {
+  return { x: b.x + b.w / 2 + dir.x * (b.w / 2 + 6), y: b.y + b.h * 0.42 + dir.y * (b.h / 2 + 6) };
+}
+
+// The unit launch direction from a body box at a point (tx, ty): straight at it
+// for a round with no gravity, else the LOW arc that lands on it, solved once
+// from the gun height and once more from the muzzle that aim implies. Null when
+// no arc reaches.
+export function aimFrom(b, tx, ty, speed, g) {
+  let o = { x: b.x + b.w / 2, y: b.y + b.h * 0.42 };
+  let dir = null;
+  for (let i = 0; i < 2; i++) {
+    const d = g ? lowArc(tx - o.x, ty - o.y, speed, g) : unit(tx - o.x, ty - o.y);
+    if (!d) return dir;
+    dir = d;
+    o = muzzle(b, dir);
+  }
+  return dir;
+}
+
+// The low-arc launch direction for a round at `v` under gravity `g` (px/s², y
+// down) to cover (dx, dy), or null when it is out of reach.
+export function lowArc(dx, dy, v, g) {
+  const X = Math.abs(dx);
+  if (X < 1e-6) return unit(0, dy);
+  const up = -dy;
+  const disc = v * v * v * v - g * (g * X * X + 2 * up * v * v);
+  if (disc < 0) return null;
+  const th = Math.atan((v * v - Math.sqrt(disc)) / (g * X)); // elevation, up positive
+  return { x: Math.sign(dx) * Math.cos(th), y: -Math.sin(th) };
+}
+
+function unit(x, y) {
+  const l = Math.hypot(x, y);
+  return l < 1e-9 ? null : { x: x / l, y: y / l };
+}
+
+// A straight round from (x0, y0) aimed at (x1, y1): in range, and one segment
+// clear of the platforms and of any `boxes` in the way.
+function straightReaches(scene, x0, y0, x1, y1, speed, life, boxes) {
+  if (Math.hypot(x1 - x0, y1 - y0) > speed * life) return false;
+  flightTests.n += scene.platforms.length + (boxes ? boxes.length : 0);
+  if (blocked(x0, y0, x1, y1, scene.platforms)) return false;
+  return !boxes || !blocked(x0, y0, x1, y1, boxes);
+}
+
+// A gravity round launched at (vx, vy): does it reach `target` (a box) before
+// terrain, one of `boxes`, the end of its life, or passing the target?
+function arcReaches(scene, x0, y0, vx, vy, g, life, target, boxes) {
+  let tEnd = life;
+  if (Math.abs(vx) > 1e-6) {
+    const far = vx > 0 ? target.x + target.w : target.x;
+    const tPass = (far - x0) / vx;
+    if (tPass < 0) return false;
+    tEnd = Math.min(tEnd, tPass);
+  }
+  const at = (t) => ({ x: x0 + vx * t, y: y0 + vy * t + 0.5 * g * t * t });
+  // The whole flight's bounding box, apex included, so every step below tests
+  // only the platforms it could possibly meet.
+  const e = at(tEnd);
+  const tApex = -vy / g;
+  const yTop = Math.min(y0, e.y, tApex > 0 && tApex < tEnd ? at(tApex).y : Infinity);
+  const bb = { x: Math.min(x0, e.x), y: yTop, w: Math.abs(e.x - x0), h: Math.max(y0, e.y) - yTop };
+  flightTests.n += scene.platforms.length;
+  const near = scene.platforms.filter((p) => p.x <= bb.x + bb.w && p.x + p.w >= bb.x && p.y <= bb.y + bb.h && p.y + p.h >= bb.y);
+
+  const step = config.survivalFlightStep;
+  let a = at(0);
+  for (let t = 0; t < tEnd; t += step) {
+    const b = at(Math.min(tEnd, t + step));
+    flightTests.n += 1 + near.length + (boxes ? boxes.length : 0);
+    const hit = entry(a.x, a.y, b.x, b.y, target);
+    let wall = Infinity;
+    for (const p of near) wall = Math.min(wall, entry(a.x, a.y, b.x, b.y, p));
+    if (boxes) for (const q of boxes) wall = Math.min(wall, entry(a.x, a.y, b.x, b.y, q));
+    if (hit <= wall && hit < Infinity) return true;
+    if (wall < Infinity) return false;
+    a = b;
+  }
+  return false;
+}
+
+// Where along (x0, y0)→(x1, y1) the segment first enters box `p`, as 0..1, or
+// Infinity for a miss. The slab method `blocked` uses, returning the entry.
+function entry(x0, y0, x1, y1, p) {
+  let tmin = 0;
+  let tmax = 1;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  for (const [d, o, lo, hi] of [[dx, x0, p.x, p.x + p.w], [dy, y0, p.y, p.y + p.h]]) {
+    if (Math.abs(d) < 1e-9) {
+      if (o < lo || o > hi) return Infinity;
+    } else {
+      let t0 = (lo - o) / d;
+      let t1 = (hi - o) / d;
+      if (t0 > t1) [t0, t1] = [t1, t0];
+      tmin = Math.max(tmin, t0);
+      tmax = Math.min(tmax, t1);
+      if (tmin > tmax) return Infinity;
+    }
+  }
+  return tmin;
 }
 
 // Who this agent fights. An enemy (the default team) hunts the squad; a

@@ -39,7 +39,7 @@ categories the editor's Settings tab uses.
 | Combat | Friendly fire · Squad damage × |
 | Movement / feel | Gravity · Run speed · Jump strength · Enemy jump strength · Coyote time · Knockback decay · Duck hold · Duck lookahead · Duck chance @ Speed 1 · Duck chance @ Speed 10 · Duck latency @ Speed 1 · Duck latency @ Speed 10 |
 | Agent navigation | Arrival radius · Takeoff window · Repath interval · Jump attempts before avoiding a connection · Ranged repositioning · Reposition commitment · Stall before repositioning |
-| Squad survival | Wounded below · Under fire: hurt window · Under fire: lookahead · Calm after · Leash · Leash margin · Move when exposed to · Spot: cost per hostile · Spot: worth of a shot · Spot: cost per ally · Spot: ally claim radius · Spot: margin to move · Cover: how far · Cover: cost per hostile |
+| Squad survival | Wounded below · Under fire: hurt window · Under fire: lookahead · Calm after · Leash · Leash margin · Move when exposed to · Spot: cost per hostile · Spot: worth of a shot · Spot: cost per ally · Spot: ally claim radius · Spot: margin to move · Cover: how far · Cover: cost per hostile · Lobber reach: fan width · Lobber reach: angles tried · Melee reach · Flight test step |
 
 Settings that only apply on the next mission, and campaign, generation, base and
 tool settings, are not shown.

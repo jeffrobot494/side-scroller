@@ -555,7 +555,8 @@ export default async function run(t) {
     // the design's rule puts all of them on the menu.
     const SURVIVAL = ["survivalWounded", "survivalHurtWindow", "survivalLookahead", "survivalCalmTime", "survivalLeash", "survivalLeashMargin",
       "survivalExposureTrigger", "survivalExposureWeight", "survivalShotBonus", "survivalCrowdWeight", "survivalClaimRadius", "survivalSpotMargin",
-      "survivalCoverHorizon", "survivalCoverExposureWeight"];
+      "survivalCoverHorizon", "survivalCoverExposureWeight",
+      "survivalLobFan", "survivalLobCount", "survivalContactReach", "survivalFlightStep"];
     // The design's table (design/pause-menu.md), pinned by name.
     const SOLO = [
       ...VIEWPORT, ...SOUND,

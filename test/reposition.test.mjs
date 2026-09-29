@@ -595,7 +595,7 @@ export default async function run(t) {
   // one hostile instead of two — and the shelf is one body wide.
   {
     const dummy = (x, y) => {
-      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" } } }), x, y);
+      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" }, emitters: { gun: { at: [0, 0], projectile: { speed: 700, life: 2, damage: 1 } } } } }), x, y);
       r.rng = () => 0.5;
       return r;
     };
@@ -641,7 +641,7 @@ export default async function run(t) {
     // hit it. The repath tick is shortened so the walk is still under way when
     // it re-checks, which is the case the re-check exists for.
     const dummy = (x, y) => {
-      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" } } }), x, y);
+      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" }, emitters: { gun: { at: [0, 0], projectile: { speed: 700, life: 2, damage: 1 } } } } }), x, y);
       r.rng = () => 0.5;
       return r;
     };

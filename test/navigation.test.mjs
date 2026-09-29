@@ -14,7 +14,8 @@
 
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
-import { Soldier, stepActor, STAND_H, SOLDIER_TUNING } from "../src/mission/entities.js";
+import { Soldier, stepActor, STAND_H, SOLDIER_TUNING, loadMission } from "../src/mission/entities.js";
+import { exposureAt, flightTests } from "../src/mission/enemyspec/perception.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
 import { WEAPONS } from "../src/game/content.js";
 import { profileFor, graphFor, routeRequest, invalidateNavGraphs, navState, abortRoute } from "../src/mission/navigation.js";
@@ -1027,6 +1028,29 @@ export default async function run(t) {
       }
     }
     t.ok(`S4: ${failed} of ${legs} route legs fail in the air (11.9% before S4)`, legs > 200 && failed <= 6);
+  }
+
+  // ---- squad survival: the exposure cost ceiling (V4) -----------------------
+  // Exposure is candidates × hostiles × emitters, and gravity emitters are
+  // flown. What bounds it is the cost rules (one segment per straight round, a
+  // coarse chord-tested arc over only the platforms in its bounding box, a range
+  // reject) and the shared cache. The measure is the WORST cold scan — every
+  // node's two ends and middle, against the level's full roster — counted in
+  // segment and box tests, so it holds on any machine. Frozen as a ceiling.
+  {
+    let worst = 0;
+    const data = { id: "s", name: "S", stats: { aim: 5, health: 5, speed: 5, nerve: 5 }, wounds: 0 };
+    const me = { team: "player", w: 30, h: 46 };
+    for (let seed = 1; seed <= 60; seed++) {
+      const { level } = generateLevel({ seed, difficulty: "high", length: "long" });
+      const m = loadMission(level, [{ data, weapon: WEAPONS[0] }], seed);
+      const sc = { ...scene(level.platforms), world: { ...level.world, gravity: config.gravity }, soldiers: m.soldiers, specRoots: m.specRoots };
+      const g = graphFor(sc, profileFor(soldierAgent(level.playerSpawn.x, level.platforms[0].y), sc, config.runSpeed));
+      flightTests.n = 0;
+      for (const n of g.nodes) for (const left of [n.a, (n.a + n.b) / 2, n.b]) exposureAt(me, sc, left + me.w / 2, n.y - STAND_H / 2);
+      worst = Math.max(worst, flightTests.n);
+    }
+    t.ok(`survival: the worst cold exposure scan over 60 levels is ${worst} tests (ceiling 60000)`, worst > 0 && worst <= 60000);
   }
 
   // ---- S5: off the graph, never hop blind -----------------------------------

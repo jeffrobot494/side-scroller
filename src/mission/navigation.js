@@ -557,13 +557,14 @@ export function holdPoint(ent, scene, speed, tp, min, max, see, score) {
 
 // The ranked form of the search, for a caller that passes a scorer. Every
 // reachable node offers ALL of its in-band probes whether or not they see the
-// target — `sees` rides along for the scorer to reward — and the lowest score
-// wins. All of them, not the first that sees: on one long floor the nearest
+// target — whether one has a shot is the scorer's question — and the lowest
+// score wins. All of them, not the first that sees: on one long floor the nearest
 // probe is usually where the body already stands, and the covered end of the
 // band is another probe.
 //
-//   score.of(p, travel)  the cost of standing at p = { x, y, sees }, `travel`
-//                        seconds away. Lower is better.
+//   score.of(p, travel, bound)  the cost of standing at p = { x, y }, `travel`
+//                        seconds away. Lower is better. It may stop scoring and
+//                        answer anything >= `bound` once it cannot beat it.
 //   score.floor          the most the non-travel terms can SUBTRACT, so a node
 //                        whose travel alone cannot beat the best is skipped
 //                        before its probes are paid for, as the plain rule does
@@ -577,15 +578,15 @@ function scoredPoint(graph, dist, here, ent, tp, min, max, see, score) {
   const st = score.stay;
   const under = nodeUnder(graph, st.x - ent.w / 2, st.y + ent.h / 2);
   const stayTravel = under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0;
-  const stay = score.of({ x: st.x, y: st.y, sees: see(st.x, st.y) }, stayTravel);
+  const stay = score.of({ x: st.x, y: st.y }, stayTravel, Infinity);
 
   let best = null;
   let bestScore = stay - score.margin;
   for (const n of graph.nodes) {
     const c = dist[n.id];
     if (!Number.isFinite(c) || c - score.floor >= bestScore) continue;
-    for (const p of standPoints(n, ent, tp, min, max, see)) {
-      const v = score.of(p, c);
+    for (const p of bandProbes(n, ent, tp, min, max)) {
+      const v = score.of(p, c, bestScore);
       if (v < bestScore) { best = p; bestScore = v; }
     }
   }
@@ -610,7 +611,7 @@ export function coverPoint(ent, scene, speed, score, horizon, near) {
   const st = score.stay;
   const under = nodeUnder(graph, st.x - ent.w / 2, st.y + ent.h / 2);
   let best = null;
-  let bestScore = score.of(st, under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0) - score.margin;
+  let bestScore = score.of(st, under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0, Infinity) - score.margin;
   for (const n of graph.nodes) {
     const c = dist[n.id];
     if (!Number.isFinite(c) || c > horizon || c - score.floor >= bestScore) continue;
@@ -618,7 +619,7 @@ export function coverPoint(ent, scene, speed, score, horizon, near) {
     for (const left of [clamp(ent.x, n.a, n.b), n.a, n.b]) {
       const p = { x: left + ent.w / 2, y };
       if (near && dist2(p.x, p.y, near.x, near.y) > near.r * near.r) continue;
-      const v = score.of(p, c);
+      const v = score.of(p, c, bestScore);
       if (v < bestScore) { best = p; bestScore = v; }
     }
   }
@@ -636,14 +637,6 @@ export function coverPoint(ent, scene, speed, score, horizon, near) {
 function standPoint(n, ent, tp, min, max, see) {
   for (const p of bandProbes(n, ent, tp, min, max)) if (see(p.x, p.y)) return p;
   return null;
-}
-
-// Every probe of one node, for the scored search, each marked with whether it
-// sees the target.
-function standPoints(n, ent, tp, min, max, see) {
-  const out = bandProbes(n, ent, tp, min, max);
-  for (const p of out) p.sees = see(p.x, p.y);
-  return out;
 }
 
 // The probes themselves, in the order standPoint tries them.

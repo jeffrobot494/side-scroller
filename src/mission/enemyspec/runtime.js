@@ -23,7 +23,7 @@ import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT, STAN
 import { locomotorFor } from "../locomotion.js";
 import { routeRequest, holdPoint, coverPoint, abortRoute, navState, navGraph, stationPoint } from "../navigation.js";
 import { tickBrain } from "./brain.js";
-import { updateSense, nearestHostile, losBetween, spotExposure } from "./perception.js";
+import { updateSense, nearestHostile, losBetween, spotExposure, myShot } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
 import { config } from "../../game/config.js";
 
@@ -621,16 +621,22 @@ function spotScorer(root, ent, scene, stay, weights = null) {
   const reach = config.survivalClaimRadius * ent.w;
   const wExp = weights ? weights.exposure : config.survivalExposureWeight;
   const wShot = weights ? weights.shot : config.survivalShotBonus;
+  const target = wShot ? nearestHostile(root, scene) : null;
   return {
     stay,
     floor: wShot,
     margin: config.survivalSpotMargin,
-    of(p, travel) {
+    // The cheap terms first and the flights last, each skipped once the
+    // candidate cannot beat `bound` any more: a shot can only subtract, and
+    // exposure can only add.
+    of(p, travel, bound) {
       const feet = p.y + ent.h / 2;
-      let v = travel + wExp * spotExposure(root, scene, p.x, feet - STAND_H / 2);
-      if (p.sees) v -= wShot;
+      let v = travel;
       for (const c of claims) if (Math.hypot(c.x - p.x, c.y - feet) < reach) v += config.survivalCrowdWeight;
-      return v;
+      if (v - wShot >= bound) return v;
+      if (target && myShot(scene, root, { x: p.x - ent.w / 2, y: feet - STAND_H, w: ent.w, h: STAND_H }, target)) v -= wShot;
+      if (v >= bound) return v;
+      return v + wExp * spotExposure(root, scene, p.x, feet - STAND_H / 2);
     },
   };
 }

@@ -21,7 +21,7 @@
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
-import { nearestHostile } from "../src/mission/enemyspec/perception.js";
+import { nearestHostile, exposureAt } from "../src/mission/enemyspec/perception.js";
 import { updateProjectiles } from "../src/mission/combat.js";
 import { Soldier, Projectile, STAND_H, stepActor, tickReload } from "../src/mission/entities.js";
 import { config } from "../src/game/config.js";
@@ -44,9 +44,12 @@ function scene(extra = {}) {
 }
 
 // A target that stays exactly where it is put: nothing in these tests ticks it,
-// so its own motion controller never runs.
+// so its own motion controller never runs. It carries a straight gun it never
+// fires, because exposure is "which hostile weapons can reach me"
+// (tech/squad-survival.md, V4) and an unarmed dummy reaches nobody.
+const GUN = { gun: { at: [0, 0], projectile: { speed: 700, life: 2, damage: 1 } } };
 function foeAt(x, y) {
-  const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" } } }), x, y);
+  const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" }, emitters: GUN } }), x, y);
   r.rng = () => 0.5;
   return r;
 }
@@ -577,5 +580,62 @@ export default async function run(t) {
     const limit = config.survivalCalmTime + 0.2;
     t.ok(`cover: the last hostile dead, it escorts within calm time plus a sense tick (${(frames * STEP).toFixed(2)}s ≤ ${limit}s)`,
       comp.agent.brainState.current === "escort" && frames * STEP <= limit + STEP);
+  }
+
+  // ---- seeing is not hitting (V4) -------------------------------------------
+  {
+    // In sight, out of range: a round that dies at 270px is no shot at 400.
+    const short = { ...rifle, projectile: { ...rifle.projectile, life: 0.3 } };
+    const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), short, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(700, 500 - 40)] });
+    const shots = play(comp, sc, leader, 120, false);
+    t.ok("reach: the target is in plain sight", comp.agent.sense.los === true);
+    t.ok("reach: but the round cannot get there, so there is no shot", comp.agent.sense.shot === false);
+    t.eq("reach: and the squadmate holds its fire", shots.length, 0);
+  }
+  {
+    // Over a low wall: a straight gun cannot reach, a lobber can.
+    const wall = { x: 520, y: 440, w: 24, h: 60 };
+    const lobber = (x) => {
+      const r = instantiate(normalizeSpec({ id: "lob", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" },
+        emitters: { pod: { at: [0, -10], projectile: { speed: 520, life: 3, gravity: 0.4, damage: 1 } } } } }), x, 500 - 40);
+      r.rng = () => 0.5;
+      return r;
+    };
+    const sc = scene({ specRoots: [foeAt(700, 460)] });
+    sc.platforms.push(wall);
+    const me = { team: "player", w: 30, h: 46 };
+    const at = [400, 500 - STAND_H / 2];
+    t.eq("lob: behind the wall, a straight gun cannot reach", exposureAt(me, sc, ...at), 0);
+    sc.specRoots = [lobber(700)];
+    t.eq("lob: a lobber in the same place can", exposureAt(me, sc, ...at), 1);
+    t.eq("lob: but not past its range", exposureAt(me, sc, 1900, at[1]), 0);
+  }
+  {
+    // A charger has no gun: it reaches a radius around itself.
+    const sc = scene({ specRoots: [instantiate(normalizeSpec({ id: "charger", root: { health: { max: 50 }, visual: { size: [30, 40] },
+      motion: { type: "static" }, contact: { damage: 5 } } }), 700, 460)] });
+    const me = { team: "player", w: 30, h: 46 };
+    t.eq("melee: inside its reach is exposed", exposureAt(me, sc, 715 - config.survivalContactReach + 10, 477), 1);
+    t.eq("melee: outside it is not", exposureAt(me, sc, 715 - config.survivalContactReach - 40, 477), 0);
+  }
+  {
+    // A gravity weapon's barrel takes the arc that lands, and the rounds do land.
+    const lobGun = { id: "lob", name: "Lob", fireRate: 3, projectile: { speed: 750, w: 8, h: 8, color: "#fff", life: 3, gravity: 0.5 }, effects: [{ kind: "damage", amount: 1 }] };
+    const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), lobGun, 300, 500 - STAND_H);
+    const foe = foeAt(700, 500 - 40);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foe], enemies: [foe] });
+    let hits = 0;
+    const hitCtx = { ...noopCtx, damage(tg) { if (tg === foe) hits++; } };
+    for (let i = 0; i < 180; i++) {
+      if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+      updateCompanionSpec(comp, STEP, sc, leader, hitCtx);
+      updateProjectiles(sc, STEP, hitCtx);
+    }
+    const flat = bearing(comp, foe);
+    t.ok(`arc: the barrel is raised above the straight bearing (${comp.aimVec.y.toFixed(2)} vs ${flat.y.toFixed(2)})`, comp.aimVec.y < flat.y - 0.05);
+    t.ok(`arc: and the lobbed rounds land on the target (${hits} hits)`, hits > 0);
   }
 }

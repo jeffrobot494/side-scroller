@@ -13,7 +13,7 @@ import { duckableShot } from "./combat.js";
 import { config } from "../game/config.js";
 import { weaponSound } from "../audio/cues.js";
 import { instantiate, updateSpecEnemy } from "./enemyspec/runtime.js";
-import { nearestHostile } from "./enemyspec/perception.js";
+import { nearestHostile, aimFrom } from "./enemyspec/perception.js";
 import { DEFAULT_COMPANION_SPEC } from "../game/companionspecs.js";
 
 // Map a 1..10 Aim stat to a 0..1 accuracy (10 = perfectly tight, 1 = loosest).
@@ -289,7 +289,7 @@ export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
   a.leader = leader && leader !== soldier ? leader : null;
   tickSurvival(soldier, a, dt, scene);
   a.anchor = leader ? { x: leader.x + leader.w / 2, y: leader.y + leader.h / 2 } : null;
-  aimAt(soldier, nearestHostile(a, scene));
+  aimAt(soldier, nearestHostile(a, scene), scene);
   // perception + brain + soldier locomotor (→ soldier.applyMovement / fire())
   updateSpecEnemy(a, dt, scene, ctx);
 }
@@ -326,8 +326,18 @@ function tickSurvival(soldier, a, dt, scene) {
 // (locomotion.js — move direction, else toward the target), and sense.groundAhead
 // probes off it. Aim is a separate channel: the barrel reads aimVec, so a
 // companion can shoot straight up without the body claiming to face upward.
-function aimAt(soldier, foe) {
+//
+// A gravity weapon's barrel follows the LOW arc that lands on the target
+// (tech/squad-survival.md, V4) — the same solve can-hit flies — and falls back to
+// pointing straight at it when no arc reaches, since that round lands nowhere.
+function aimAt(soldier, foe, scene) {
   if (!foe || !foe.alive) { soldier.aimVec = null; return; }
+  const p = soldier.weapon && soldier.weapon.projectile;
+  const g = p && p.gravity > 0 && scene ? p.gravity * scene.world.gravity : 0;
+  if (g) {
+    const arc = aimFrom(soldier, foe.x + foe.w / 2, foe.y + foe.h / 2, p.speed, g);
+    if (arc) { soldier.aimVec = arc; return; }
+  }
   const dx = foe.x + foe.w / 2 - (soldier.x + soldier.w / 2);
   const dy = foe.y + foe.h / 2 - (soldier.y + soldier.h * 0.42);
   const len = Math.hypot(dx, dy);
