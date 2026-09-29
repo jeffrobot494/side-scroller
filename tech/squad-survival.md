@@ -42,6 +42,10 @@ land alone on V2. V4 and V5 do not depend on each other.
 | V2 | Claims come from `repo.dest` | Only while the claimant's repositioner is running (`repo.seen` within 0.1s of its age). An escorting squadmate's old fight spot is not a claim. The leader is known because the bridge sets `agent.leader` |
 | V2 | A held spot is re-checked whether travelling or arrived | Travelling: on its own `navRepathInterval` timer, grounded only. Arrival releases the commitment, and from then on the ordinary exposure trigger re-checks the spot on the retry cooldown, which is the same interval. Staying at a held spot is scored with the graph's remaining travel to it |
 | V2 | The cache is refilled off scene time | There is no scene clock, so the bridge keeps one: `scene.survivalClock`, which each squadmate advances to the last value it saw plus its step and never moves backwards. Squadmates in one frame advance it once, and any one of them alone keeps it running. Values fill lazily per pixel-rounded point |
+| V3 | Cover weights: "exposure dominates" | `survivalCoverExposureWeight` 8s per hostile against travel, and no worth in a shot. `survivalCoverHorizon` is 2s. A re-check or a hit ranks against the held spot or where the body stands respectively, with staying's travel taken from the graph as in V2 |
+| V3 | The fight track fires when `sense.shot && !sense.outOfAmmo` | The `cover` state runs the same track, so a squadmate returns fire from cover when it has the shot. And `fireWeapon` in the bridge also refuses a trigger pull on an empty magazine: the gate reads a sense up to one tick stale, and the frame the last round left was a dry click in the first test run |
+| V3 | `cover` is left out of the LLM vocabulary line | `MOTIONS.cover` carries `squadOnly: true` and `vocabularyDoc` filters on it. The Enemy Designer's motion picker still lists it, as a valid controller |
+| V3 | The golden is re-frozen | It did not move: the recorded trace has no reload, wound or empty magazine, so no squadmate enters cover in it |
 
 ### Cover transitions (V3)
 

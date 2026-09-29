@@ -21,7 +21,7 @@
 
 import { overlaps, Projectile, shoveActor, KNOCKBACK_MAX_V, KNOCKBACK_LIFT, STAND_H } from "../entities.js";
 import { locomotorFor } from "../locomotion.js";
-import { routeRequest, holdPoint, abortRoute, navState, navGraph, stationPoint } from "../navigation.js";
+import { routeRequest, holdPoint, coverPoint, abortRoute, navState, navGraph, stationPoint } from "../navigation.js";
 import { tickBrain } from "./brain.js";
 import { updateSense, nearestHostile, losBetween, spotExposure } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
@@ -445,6 +445,8 @@ function controllerRequest(root, ent, m, dt, scene, target) {
       return repositionRequest(root, ent, m, point, scene, dt)
         || { kind: "holdRange", point, min: m.min, max: m.max, speed: m.speed };
     }
+    case "cover":
+      return coverRequest(root, ent, m, dt, scene);
     case "home": {
       if (!target) return { kind: "coast" };
       return { kind: "kinematic", style: "home", point: { x: cx(target), y: cy(target) }, speed: m.speed, turnRate: m.turnRate || 3 };
@@ -611,17 +613,22 @@ function recheckHeld(root, ent, m, point, scene, dt, st) {
 // minus the worth of a shot from it, plus a price per ally claim nearby. `stay`
 // is the candidate the rest must beat — where the body stands, or the spot it
 // already holds.
-function spotScorer(root, ent, scene, stay) {
+//
+// Cover (V3) ranks with the same scorer under its own weights: exposure priced
+// so high it dominates, and no worth in a shot.
+function spotScorer(root, ent, scene, stay, weights = null) {
   const claims = allyClaims(root, scene);
   const reach = config.survivalClaimRadius * ent.w;
+  const wExp = weights ? weights.exposure : config.survivalExposureWeight;
+  const wShot = weights ? weights.shot : config.survivalShotBonus;
   return {
     stay,
-    floor: config.survivalShotBonus,
+    floor: wShot,
     margin: config.survivalSpotMargin,
     of(p, travel) {
       const feet = p.y + ent.h / 2;
-      let v = travel + config.survivalExposureWeight * spotExposure(root, scene, p.x, feet - STAND_H / 2);
-      if (p.sees) v -= config.survivalShotBonus;
+      let v = travel + wExp * spotExposure(root, scene, p.x, feet - STAND_H / 2);
+      if (p.sees) v -= wShot;
       for (const c of claims) if (Math.hypot(c.x - p.x, c.y - feet) < reach) v += config.survivalCrowdWeight;
       return v;
     },
@@ -629,8 +636,8 @@ function spotScorer(root, ent, scene, stay) {
 }
 
 // Where the rest of the squad is, or means to be, as { x centre, y feet }. Each
-// other living squadmate claims the spot it is committed to, else where it
-// stands; the leader claims where it stands. Squadmates update in order, so a
+// other living squadmate claims the spot it is committed to — a reposition, else
+// its cover spot — else where it stands; the leader claims where it stands. Squadmates update in order, so a
 // later one sees what an earlier one claimed this same frame — deterministic,
 // and no draw. A commitment only counts while its controller is running (the
 // repositioner stamps `seen` every frame it runs); an escorting squadmate's old
@@ -640,11 +647,88 @@ function allyClaims(root, scene) {
   for (const s of scene.soldiers || []) {
     if (!s.alive || s === root.soldier) continue;
     const a = s.agent;
-    const r = a && s !== root.leader ? a.repo : null;
+    const mate = a && s !== root.leader ? a : null;
+    const r = mate && mate.repo;
+    const c = mate && mate.cover;
     if (r && r.hold > 0 && r.dest && a.age - r.seen < 0.1) out.push({ x: r.dest.x, y: r.destFeet });
+    else if (c && c.dest && a.age - c.seen < 0.1) out.push({ x: c.dest.x, y: c.destFeet });
     else out.push({ x: s.x + s.w / 2, y: s.y + s.h });
   }
   return out;
+}
+
+// THE COVER CONTROLLER (tech/squad-survival.md, V3). Break contact: go to the
+// least exposed spot reachable within the cover horizon and inside the leader's
+// leash, and stand there. The commitment is held on the entity and keyed to the
+// motion object, the way followStation keys a station, so each entry to cover
+// is a fresh period and a fresh pick. Entering releases any reposition
+// commitment — the fight spot was chosen for conditions that sent it here.
+//
+// A reload caps the horizon at the time left in it, so a reloading squadmate
+// only goes somewhere it reaches before the magazine is back. Nowhere better
+// than here means taking cover where it stands.
+//
+// The held spot is re-checked on the repath tick by V2's rule, and being hurt
+// while holding it forces a re-pick at once.
+function coverRequest(root, ent, m, dt, scene) {
+  if (ent !== root || root.spec.body.gravity === 0) return { kind: "stop" };
+  const sv = root.survival;
+  let c = ent.cover;
+  if (!c || c.m !== m) {
+    if (root.repo) { release(root.repo, ent); root.repo.retry = 0; }
+    c = ent.cover = { m, dest: null, destFeet: 0, picked: false, recheck: 0, hurt: sv ? sv.sinceHurt : 0, seen: root.age };
+  }
+  c.seen = root.age;
+  const hurt = !!sv && sv.sinceHurt < c.hurt;
+  if (sv) c.hurt = sv.sinceHurt;
+
+  if (ent.onGround) {
+    c.recheck -= dt;
+    let pick = !c.picked || hurt;
+    if (!pick && c.recheck <= 0) {
+      c.recheck = config.navRepathInterval;
+      const at = c.dest || { x: cx(ent), y: ent.y + ent.h / 2 };
+      const feet = c.dest ? c.destFeet : ent.y + ent.h;
+      pick = spotExposure(root, scene, at.x, feet - STAND_H / 2) >= config.survivalExposureTrigger;
+    }
+    if (pick) {
+      // A held spot is what a re-check must beat; a first pick or a hit is
+      // measured against where the body stands now.
+      const holding = c.picked && !!c.dest && !hurt;
+      const stay = holding ? c.dest : { x: cx(ent), y: ent.y + ent.h / 2 };
+      const fresh = coverPoint(ent, scene, m.speed, spotScorer(root, ent, scene, stay, coverWeights()), coverHorizon(root), leash(root));
+      if (fresh || !holding) {
+        if (c.dest) abortRoute(ent);
+        c.dest = fresh; // null: nowhere beats here, so here is the cover
+        c.destFeet = fresh ? fresh.y + ent.h / 2 : 0;
+      }
+      c.picked = true;
+      c.recheck = config.navRepathInterval;
+    }
+  }
+
+  if (!c.dest) return { kind: "stop" };
+  if (ent.onGround && Math.abs(cx(ent) - c.dest.x) <= config.navArriveRadius
+    && Math.abs(ent.y + ent.h - c.destFeet) <= config.navArriveRadius) return { kind: "stop" };
+  return routeRequest(ent, c.dest, m.speed, scene, dt)
+    || { kind: "steer", point: c.dest, speed: m.speed, hopToward: reflexHop(ent, scene, m.speed, c.dest) };
+}
+
+function coverWeights() {
+  return { exposure: config.survivalCoverExposureWeight, shot: 0 };
+}
+
+function coverHorizon(root) {
+  const body = root.soldier;
+  const h = config.survivalCoverHorizon;
+  return root.sense.needReload && body && body.reloading > 0 ? Math.min(h, body.reloading) : h;
+}
+
+// The leader's leash, less its margin, as a circle a cover spot must be in —
+// so reaching cover never sets leaderFar by itself.
+function leash(root) {
+  if (!root.anchor) return null;
+  return { x: root.anchor.x, y: root.anchor.y, r: Math.max(0, config.survivalLeash - config.survivalLeashMargin) };
 }
 
 // Hand the agent back to `holdRange`. The route state goes with it: the follower

@@ -592,6 +592,39 @@ function scoredPoint(graph, dist, here, ent, tp, min, max, see, score) {
   return best;
 }
 
+// WHERE TO TAKE COVER (tech/squad-survival.md, V3). There is no band, so every
+// node reachable within `horizon` seconds offers three probes: the standable
+// point nearest the body and both ends of its span. `near`, when given, is a
+// circle { x, y, r } (the leader's leash) a probe must stand inside. Ranked by
+// the same scorer contract as scoredPoint, staying put included; null when
+// nowhere beats staying by the margin, which means "take cover right here".
+export function coverPoint(ent, scene, speed, score, horizon, near) {
+  if (!ent.onGround) return null;
+  const graph = navGraph(ent, scene, speed);
+  if (!graph) return null;
+  const here = nodeUnder(graph, ent.x, ent.y + ent.h);
+  if (!here) return null;
+  const nav = navState(ent, scene, graph);
+  const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null);
+
+  const st = score.stay;
+  const under = nodeUnder(graph, st.x - ent.w / 2, st.y + ent.h / 2);
+  let best = null;
+  let bestScore = score.of(st, under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0) - score.margin;
+  for (const n of graph.nodes) {
+    const c = dist[n.id];
+    if (!Number.isFinite(c) || c > horizon || c - score.floor >= bestScore) continue;
+    const y = n.y - ent.h / 2;
+    for (const left of [clamp(ent.x, n.a, n.b), n.a, n.b]) {
+      const p = { x: left + ent.w / 2, y };
+      if (near && dist2(p.x, p.y, near.x, near.y) > near.r * near.r) continue;
+      const v = score.of(p, c);
+      if (v < bestScore) { best = p; bestScore = v; }
+    }
+  }
+  return best;
+}
+
 // Where on one node a body could stand to hold the band, or null.
 //
 // `holdRange` measures centre-to-centre in TWO dimensions, so a node's height

@@ -200,6 +200,11 @@ function companionAgent(soldier, scene) {
     // still pull the trigger — and that round would leave down `facing`, into
     // empty air. The barrel is the authority on whether there is a shot.
     if (!soldier.aimVec) return;
+    // Nor on an empty magazine. The brain's gate reads sense.outOfAmmo, which
+    // is up to one sense tick stale, and the frame the last round leaves is the
+    // frame a stale gate would dry-click (tech/squad-survival.md, V3).
+    // autoReload has already started a reload if there is a spare.
+    if (soldier.ammo <= 0) return;
     fire(scene, soldier, soldier.fireDir(), "player", 0, aimAccuracy(soldier.data.stats.aim));
   };
   soldier.agent = a;

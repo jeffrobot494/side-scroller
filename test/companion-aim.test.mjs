@@ -23,7 +23,7 @@ import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
 import { nearestHostile } from "../src/mission/enemyspec/perception.js";
 import { updateProjectiles } from "../src/mission/combat.js";
-import { Soldier, Projectile, STAND_H, stepActor } from "../src/mission/entities.js";
+import { Soldier, Projectile, STAND_H, stepActor, tickReload } from "../src/mission/entities.js";
 import { config } from "../src/game/config.js";
 import { makeRng } from "../src/game/gen/rng.js";
 
@@ -160,6 +160,40 @@ function firefights(speed, opts = {}) {
     dealt: runs.reduce((a, r) => a + r.dealt, 0),
     first: runs.map((r) => r.first),
   };
+}
+
+
+// ---- cover (tech/squad-survival.md, V3) -----------------------------------
+// A floor, a low wall a squadmate can hop and hide behind (it blocks a level
+// sight line), a target dummy on the far side, and the leader behind the wall.
+// `drive` is the mission's own per-soldier order for what the tests need:
+// the central fire-cooldown and reload ticks, the bridge, the integrator.
+const magRifle = { ...rifle, magazine: 3, reloadTime: 1.2 };
+function coverScene(foeX = 800) {
+  const cues = [];
+  const sc = scene({
+    platforms: [{ x: 0, y: 500, w: 2400, h: 40 }, { x: 330, y: 440, w: 24, h: 60 }],
+    specRoots: [foeAt(foeX, 460)],
+    sound: (cue) => cues.push(cue),
+  });
+  sc.world.width = 2400;
+  const leader = new Soldier(roster("L"), rifle, 150, 500 - STAND_H);
+  const comp = new Soldier(roster("C"), magRifle, 420, 500 - STAND_H);
+  sc.soldiers.push(leader, comp);
+  return { sc, leader, comp, cues };
+}
+function drive(comp, sc, leader, seconds, log = []) {
+  for (let i = 0; i < Math.round(seconds / STEP); i++) {
+    if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+    tickReload(comp, STEP, sc);
+    updateCompanionSpec(comp, STEP, sc, leader, noopCtx);
+    stepActor(comp, STEP, sc.world, sc.platforms);
+    const a = comp.agent;
+    const st = a.brainState.current;
+    const prev = log.length ? log[log.length - 1].state : null;
+    if (st !== prev) log.push({ state: st, x: comp.x + comp.w / 2, reloading: comp.reloading, far: a.sense.leaderFar, dist: a.sense.dist });
+  }
+  return log;
 }
 
 export default async function run(t) {
@@ -481,5 +515,67 @@ export default async function run(t) {
     const sc = scene({ specRoots: [foeAt(650, 500 - 40)] });
     updateSpecEnemy(plain, STEP, sc, noopCtx);
     t.ok("survival: an agent nobody opted in publishes none of it", !("underFire" in plain.sense) && !("exposure" in plain.sense));
+  }
+
+  // ---- cover transitions: the outcome table (V3) ----------------------------
+  {
+    // Reloading, nobody shooting: cover inside the reload, then combat ONCE.
+    // Then out of ammo with the fight in range and the leader near: cover, held.
+    const { sc, leader, comp, cues } = coverScene();
+    comp.magsLeft = 1;
+    const log = drive(comp, sc, leader, 6);
+    const states = log.map((e) => e.state);
+    t.eq("cover: combat, cover for the reload, combat, cover when empty", states, ["combat", "cover", "combat", "cover"]);
+    t.ok(`cover: the reload's cover is behind the wall (${Math.round(log[2].x)}px, wall at 330)`, log[2].x < 330);
+    t.ok("cover: one switch each way per reload — it came out only once the reload was done", log[2].reloading === 0);
+    t.ok("cover: empty, it stays in cover while the fight lasts", comp.agent.brainState.current === "cover" && comp.ammo === 0);
+    t.eq("cover: and never dry-clicks", cues.filter((c) => c === "weapon.empty").length, 0);
+
+    // Out of ammo, leader walks away: it follows, exposed.
+    // (Away from the fight: walking past the hostile would bring the leader
+    // back inside the leash with a fight in range, which is cover again.)
+    leader.x = 2300;
+    const away = drive(comp, sc, leader, 7);
+    t.eq("cover: the leader walks off — the empty squadmate escorts", away.map((e) => e.state), ["cover", "escort"]);
+    t.ok(`cover: and follows (${Math.round(comp.x)} toward ${leader.x})`, comp.x > 1800);
+    // ...and re-enters cover only when the leader is back inside the leash and
+    // a hostile is within engage range.
+    leader.x = 150;
+    const back = drive(comp, sc, leader, 8);
+    const entry = back.find((e) => e.state === "cover");
+    t.ok("cover: it comes back and takes cover again", !!entry);
+    t.ok(`cover: only once the leader is near and the fight in range (far ${entry && entry.far}, ${Math.round(entry ? entry.dist : 0)}px)`,
+      !!entry && entry.far === false && entry.dist < 520);
+    t.ok("cover: never combat while empty", ![...away, ...back].some((e) => e.state === "combat"));
+
+    // Out of ammo, fight over: escort, and it does not re-enter.
+    sc.specRoots[0].alive = false;
+    const over = drive(comp, sc, leader, 3);
+    t.eq("cover: the fight over, the empty squadmate escorts and stays escorting", over.map((e) => e.state), ["cover", "escort"]);
+  }
+  {
+    // Wounded and hit beyond engage range: cover from escort, back on calm.
+    const { sc, leader, comp } = coverScene(1300);
+    drive(comp, sc, leader, 0.5);
+    t.eq("cover: out of range it escorts", comp.agent.brainState.current, "escort");
+    comp.health = comp.maxHealth * 0.3;
+    const log = drive(comp, sc, leader, 0.5);
+    t.eq("cover: wounded and hit, it takes cover", log.map((e) => e.state), ["escort", "cover"]);
+    const calm = drive(comp, sc, leader, config.survivalCalmTime + 0.5);
+    t.eq("cover: and escorts again once it is calm", calm.map((e) => e.state), ["cover", "escort"]);
+  }
+  {
+    // In cover when the last hostile dies: escort within calm time plus a tick.
+    const { sc, leader, comp } = coverScene();
+    drive(comp, sc, leader, 0.5);
+    comp.health = comp.maxHealth * 0.3;
+    drive(comp, sc, leader, 0.3);
+    t.eq("cover: wounded and hit in a fight, it takes cover", comp.agent.brainState.current, "cover");
+    sc.specRoots[0].alive = false;
+    let frames = 0;
+    while (comp.agent.brainState.current === "cover" && frames < 600) { drive(comp, sc, leader, STEP); frames++; }
+    const limit = config.survivalCalmTime + 0.2;
+    t.ok(`cover: the last hostile dead, it escorts within calm time plus a sense tick (${(frames * STEP).toFixed(2)}s ≤ ${limit}s)`,
+      comp.agent.brainState.current === "escort" && frames * STEP <= limit + STEP);
   }
 }
