@@ -224,6 +224,33 @@ export function spotExposure(root, scene, x, y) {
   return n;
 }
 
+// DANGEROUS ROUTES (tech/squad-survival.md, V5): the extra price, in seconds,
+// of taking graph edge `e` out of node `from` — `survivalRouteExposureWeight`
+// per hostile able to hit it, averaged over the edge's two ends: the point on
+// the source surface nearest the destination, and where that lands on the
+// destination. Handed to costsFrom as its per-caller weight, and kept in the
+// shared cache under the graph's key, since node ids only mean something inside
+// one graph. Null when the weight is 0, which routes exactly as before.
+export function edgeExposure(root, scene, graph) {
+  const w = config.survivalRouteExposureWeight;
+  if (!w) return null;
+  const c = exposureCache(scene);
+  return (from, e) => {
+    const k = `${graph.key}|${from}->${e.to}`;
+    let v = c.edges.get(k);
+    if (v === undefined) {
+      const a = graph.nodes[from];
+      const b = graph.nodes[e.to];
+      const ax = Math.min(Math.max((b.a + b.b) / 2, a.a), a.b);
+      const bx = Math.min(Math.max(ax, b.a), b.b);
+      v = (spotExposure(root, scene, ax + root.w / 2, a.y - STAND_H / 2)
+        + spotExposure(root, scene, bx + root.w / 2, b.y - STAND_H / 2)) / 2;
+      c.edges.set(k, v);
+    }
+    return w * v;
+  };
+}
+
 // ---- can-hit (tech/squad-survival.md, V4) ---------------------------------
 // Seeing is not hitting. The one predicate this system asks about shots, in both
 // directions, and it is the round's own flight: its origin, speed, gravity and

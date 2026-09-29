@@ -243,9 +243,17 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // the agent happens to be going; clearing it on every destination change means
   // a chaser following a moving target never accumulates three strikes and
   // throws itself at the same pillar forever (tech/agent-navigation.md N4).
+  //
+  // Except for a squadmate (tech/squad-survival.md, V5): its routes weigh
+  // exposure, so a fresh route can be a different way round, and a station that
+  // slides along with a walking leader would swap it every frame. A destination
+  // that moved but still resolves to the SAME goal node keeps the held path;
+  // the timed repath below decides whether a cheaper one replaces it.
   if (!nav.dest || dist2(destX, destY, nav.dest.x, nav.dest.y) > config.navArriveRadius ** 2) {
+    const keep = ent.survival && nav.path && nav.goal !== undefined
+      && (nearestNode(graph, destX, destY) || {}).id === nav.goal;
     nav.dest = { x: destX, y: destY };
-    nav.path = null;
+    if (!keep) nav.path = null;
   }
 
   // ---- airborne: no repathing, only air control ---------------------------
@@ -317,16 +325,23 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // ---- repath if the path is stale ----------------------------------------
   nav.repathIn -= dt;
   if (!nav.path || nav.path[0] !== here.id || nav.repathIn <= 0) {
+    // A timed repath of a path still in force, for a squadmate: only a route
+    // cheaper by the margin replaces it (V5).
+    const held = ent.survival && nav.path && nav.path[0] === here.id ? nav.path : null;
     nav.repathIn = config.navRepathInterval;
+    const weight = edgeWeightFor(ent, scene, graph);
     const goal = nearestNode(graph, destX, destY);
-    let r = goal ? route(graph, here.id, goal.id, nav.banned) : null;
+    let r = goal ? route(graph, here.id, goal.id, nav.banned, weight) : null;
     nav.reachable = !!r;
+    nav.goal = goal ? goal.id : undefined;
     if (!r) {
       // Unreachable — or reachable only over an edge this body has proven it
       // cannot fly. Either way: go as close as the graph allows and stop.
-      const partial = bestPartial(graph, here.id, destX, destY, nav.banned);
-      r = partial ? route(graph, here.id, partial.id, nav.banned) : null;
+      const partial = bestPartial(graph, here.id, destX, destY, nav.banned, weight);
+      r = partial ? route(graph, here.id, partial.id, nav.banned, weight) : null;
     }
+    if (held && r && held[held.length - 1] === r.path[r.path.length - 1]
+      && !(r.cost < pathCost(graph, held, weight) - config.survivalRouteMargin)) r = { path: held };
     nav.path = r ? r.path : null;
     // "Nowhere left to go": no route, and the best we can do is where we are.
     nav.blocked = !nav.reachable && (!nav.path || nav.path.length === 1);
@@ -523,6 +538,24 @@ export function abortRoute(ent) {
 // `score`, when a caller passes one, replaces the tiebreak with a RANKING
 // (tech/squad-survival.md, V2) and drops sight as a filter — see scoredPoint.
 // Absent, this is the rule above exactly, which is what every enemy gets.
+// The per-caller edge weight a body routes with: a squadmate's exposure price
+// (injected by the companion bridge as `ent.edgeWeight`), else none at all.
+function edgeWeightFor(ent, scene, graph) {
+  return ent.edgeWeight ? ent.edgeWeight(scene, graph) || undefined : undefined;
+}
+
+// What a held path costs now, under the same weight a fresh route would pay.
+// Infinity when an edge on it no longer exists.
+function pathCost(graph, path, weight) {
+  let c = 0;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const e = graph.edges[path[i]].find((x) => x.to === path[i + 1]);
+    if (!e) return Infinity;
+    c += e.cost + (weight ? weight(path[i], e) : 0);
+  }
+  return c;
+}
+
 export function holdPoint(ent, scene, speed, tp, min, max, see, score) {
   if (!config.navReposition) return null;
   if (!ent.onGround) return null; // "where I could stand" needs a node to stand on
@@ -537,7 +570,7 @@ export function holdPoint(ent, scene, speed, tp, min, max, see, score) {
   // over from another graph names an edge id that now means something else, and
   // would silently remove a perfectly good candidate.
   const nav = navState(ent, scene, graph);
-  const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null);
+  const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null, score ? edgeWeightFor(ent, scene, graph) : undefined);
   if (score) return scoredPoint(graph, dist, here, ent, tp, min, max, see, score);
 
   let best = null;
@@ -606,7 +639,12 @@ export function coverPoint(ent, scene, speed, score, horizon, near) {
   const here = nodeUnder(graph, ent.x, ent.y + ent.h);
   if (!here) return null;
   const nav = navState(ent, scene, graph);
-  const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null);
+  const banned = nav ? nav.banned : null;
+  // Two walks of the graph: the horizon is TIME, whatever the route's danger
+  // (a reload lasts as long as it lasts); the score pays the danger too.
+  const weight = edgeWeightFor(ent, scene, graph);
+  const time = costsFrom(graph, here.id, banned).dist;
+  const dist = weight ? costsFrom(graph, here.id, banned, weight).dist : time;
 
   const st = score.stay;
   const under = nodeUnder(graph, st.x - ent.w / 2, st.y + ent.h / 2);
@@ -614,7 +652,7 @@ export function coverPoint(ent, scene, speed, score, horizon, near) {
   let bestScore = score.of(st, under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0, Infinity) - score.margin;
   for (const n of graph.nodes) {
     const c = dist[n.id];
-    if (!Number.isFinite(c) || c > horizon || c - score.floor >= bestScore) continue;
+    if (!Number.isFinite(c) || time[n.id] > horizon || c - score.floor >= bestScore) continue;
     const y = n.y - ent.h / 2;
     for (const left of [clamp(ent.x, n.a, n.b), n.a, n.b]) {
       const p = { x: left + ent.w / 2, y };

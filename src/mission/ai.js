@@ -13,7 +13,7 @@ import { duckableShot } from "./combat.js";
 import { config } from "../game/config.js";
 import { weaponSound } from "../audio/cues.js";
 import { instantiate, updateSpecEnemy } from "./enemyspec/runtime.js";
-import { nearestHostile, aimFrom } from "./enemyspec/perception.js";
+import { nearestHostile, aimFrom, edgeExposure } from "./enemyspec/perception.js";
 import { DEFAULT_COMPANION_SPEC } from "../game/companionspecs.js";
 
 // Map a 1..10 Aim stat to a 0..1 accuracy (10 = perfectly tight, 1 = loosest).
@@ -189,6 +189,9 @@ function companionAgent(soldier, scene) {
   // that are. The two clocks are advanced by tickSurvival below; perception
   // reads them on its own cadence.
   a.survival = { sinceHurt: 99, sinceThreat: 99, hp: soldier.health, leaderFar: false, clock: (scene && scene.survivalClock) || 0 };
+  // Its routes pay for exposure (V5). Injected rather than imported by the
+  // router, which must not import perception.
+  a.edgeWeight = (sc, graph) => edgeExposure(a, sc, graph);
   // brain `fire` → the Soldier's EQUIPPED weapon, down the SAME barrel the
   // renderer draws: fireDir() reads the aimVec set in updateCompanionSpec below,
   // exactly as it does for the player. Through the shared fire() path, not the

@@ -556,7 +556,8 @@ export default async function run(t) {
     const SURVIVAL = ["survivalWounded", "survivalHurtWindow", "survivalLookahead", "survivalCalmTime", "survivalLeash", "survivalLeashMargin",
       "survivalExposureTrigger", "survivalExposureWeight", "survivalShotBonus", "survivalCrowdWeight", "survivalClaimRadius", "survivalSpotMargin",
       "survivalCoverHorizon", "survivalCoverExposureWeight",
-      "survivalLobFan", "survivalLobCount", "survivalContactReach", "survivalFlightStep"];
+      "survivalLobFan", "survivalLobCount", "survivalContactReach", "survivalFlightStep",
+      "survivalRouteExposureWeight", "survivalRouteMargin"];
     // The design's table (design/pause-menu.md), pinned by name.
     const SOLO = [
       ...VIEWPORT, ...SOUND,
