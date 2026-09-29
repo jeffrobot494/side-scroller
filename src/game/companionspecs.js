@@ -84,7 +84,7 @@ const DEFAULT_COMPANION = {
       // The trigger is gated on a usable shot and on having rounds, so an empty
       // squadmate does not dry-click (sense.shot is line of sight until V4).
       combat: {
-        enter: [{ setMotion: { type: "keepDistance", min: 220, max: 340, speed: 320 } }],
+        enter: [{ setMotion: { type: "keepDistance", min: 420, max: 600, speed: 320 } }],
         tracks: [FIGHT],
         transitions: [
           { when: "!sense.leaderFar && ((sense.underFire && sense.wounded) || sense.needReload || sense.outOfAmmo)", to: "cover" },

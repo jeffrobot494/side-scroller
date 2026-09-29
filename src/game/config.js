@@ -986,7 +986,7 @@ export const SCHEMA = [
         min: 0.05,
         max: 1,
         step: 0.05,
-        help: "Health fraction under which a squadmate counts as wounded (sense.wounded). A wounded squadmate that is under fire breaks off to cover.",
+        help: "Health fraction at or under which a squadmate counts as wounded (sense.wounded). A wounded squadmate that is under fire breaks off to cover. 1 = always wounded, so every squadmate takes cover whenever it is under fire.",
       },
       {
         key: "survivalHurtWindow",

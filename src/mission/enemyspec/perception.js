@@ -132,7 +132,9 @@ function publishSurvival(root, scene, dt) {
   const s = root.sense;
   const body = root.soldier || root;
 
-  s.wounded = (root.maxHealth ? Math.max(0, root.health) / root.maxHealth : 1) < config.survivalWounded;
+  // At or below, so the knob's top (1) means "always wounded": every squadmate
+  // takes cover whenever it is under fire, whatever its health.
+  s.wounded = (root.maxHealth ? Math.max(0, root.health) / root.maxHealth : 1) <= config.survivalWounded;
 
   // A round inbound on the STANDING box, whatever the stance: kneeling under a
   // round is being shot at. Blasts count here (predictHit leaves the explode rule

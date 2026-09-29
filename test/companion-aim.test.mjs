@@ -454,6 +454,11 @@ export default async function run(t) {
     t.ok("survival: the companion is opted in", !!a.survival);
     t.eq("survival: its HP is the soldier's, not the agent's constant 1", a.maxHealth, comp.maxHealth);
     t.ok("survival: healthy and unhurt is neither wounded nor under fire", a.sense.wounded === false && a.sense.underFire === false);
+    config.survivalWounded = 1;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: at the knob's top, even a squadmate at full health is wounded", a.sense.wounded === true);
+    config.survivalWounded = 0.5;
+    play(comp, sc, leader, 13, false);
     t.eq("survival: one hostile in sight is exposure 1", a.sense.exposure, 1);
     t.eq("survival: and until V4 a shot is exactly line of sight", a.sense.shot, a.sense.los);
 
