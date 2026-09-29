@@ -381,6 +381,14 @@ export const SCHEMA = [
         default: true,
         help: "Unlocks the pause menu's Debug screen and its key (` by default — rebindable in the Controls tool), which toggles the squad debug layers: the node graph, the routes squadmates are holding, and what they perceive and decide. Off means the Debug screen is not in the menu and the key does nothing, so a build handed to someone else cannot land in a debug view. Never in a room mission.",
       },
+      {
+        key: "debugPauseOnDeath",
+        label: "Pause on squadmate death",
+        type: "bool",
+        live: true,
+        default: true,
+        help: "With debug overlays on, the mission freezes when an AI squadmate dies, under a card saying who died, what killed it, what it was doing, its health before the hit, how many hostiles could hit it and its dodge tag. The pause key dismisses the card; the debug key opens the Debug screen over it. Never in a room mission.",
+      },
     ],
   },
   {

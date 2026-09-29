@@ -17,7 +17,7 @@ import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload,
 import { fire, updateCompanion, updateCompanionSpec, aimAccuracy, markVerdictHit } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
 import { drawProjectile, drawNavGraph, drawNavPath } from "./render.js";
-import { createDebugView, drawSquadDebug, drawSpeedLabel } from "./debugview.js";
+import { createDebugView, drawSquadDebug, drawSpeedLabel, drawDeathCard, tagText } from "./debugview.js";
 import { graphFor, soldierProfile } from "./navigation.js";
 import {
   updateSpecEnemy, collidables,
@@ -39,6 +39,20 @@ const MAX_FEEDBACK = 64;
 // The debug layers (tech/squad-debug.md), all off: a fresh set per deploy.
 function debugLayers() {
   return { graph: false, path: false, threats: false, spots: false, dodges: false, speed: 1 };
+}
+
+// Names for the death card (D4). The killer is the owner `_kill` was handed:
+// an enemy's ROOT (emitter rounds and contact damage both carry it), or a
+// soldier under friendly fire.
+function soldierName(s) {
+  const d = s.data || {};
+  return d.callsign || d.name || s.id || "soldier";
+}
+function killerName(o) {
+  if (!o) return "unknown";
+  if (o.kind === "soldier") return soldierName(o);
+  const r = o.root || o;
+  return (r.spec && (r.spec.name || r.spec.id)) || "enemy";
 }
 
 export class Mission {
@@ -86,6 +100,12 @@ export class Mission {
     // `screen` is the one it should open on ("debug" from the debug key).
     this.paused = false;
     this.onPauseChange = null;
+    // PAUSE ON SQUADMATE DEATH (tech/squad-debug.md, D4): the card up now, or
+    // null. A second reason to freeze beside `paused`, independent of the menu.
+    // Like `paused`, not gameplay state — only `_frame` honours it.
+    this.deathCard = null;
+    this._hpBefore = new Map(); // AI squadmate → health at the start of this step
+    this._hitBy = new Map(); // soldier → the round that last struck it this step
   }
 
   // Pause or resume. Resuming throws away the time that passed and every press
@@ -112,7 +132,16 @@ export class Mission {
   // Is this page holding its mission still? Only one it steps itself: a room's
   // mission is the room's, and one commander's menu does not stop it.
   _frozen() {
-    return this.paused && this.hosted && !this.remote;
+    return (this.paused || !!this.deathCard) && this.hosted && !this.remote;
+  }
+
+  // Dismiss the death card; the mission carries on. Drops the time that passed
+  // and the presses made meanwhile, as resuming from the menu does.
+  dismissDeathCard() {
+    if (!this.deathCard) return;
+    this.deathCard = null;
+    this.accumulator = 0;
+    this.input.dropPresses?.();
   }
 
   // Install (or, with null, remove) the external view. Mid-mission it begins at
@@ -261,7 +290,7 @@ export class Mission {
       kill: (t, o) => this._kill(t, o),
       // A record for the squad debug view (tech/squad-debug.md, D0): marks the
       // struck squadmate's dodge verdict for this round. Nothing reads it back.
-      hit: (p, t) => { if (t.kind === "soldier") markVerdictHit(t, p); },
+      hit: (p, t) => { if (t.kind === "soldier") { markVerdictHit(t, p); this._hitBy.set(t, p); } },
       spark: (x, y, c, n, s) => this._feedback("spk", [x, y, c, n, s]),
       burst: (x, y, c, n, s) => this._feedback("bst", [x, y, c, n, s]),
     };
@@ -297,6 +326,7 @@ export class Mission {
     this.running = true;
     this.accumulator = 0;
     this.setPaused(false); // a deploy starts unpaused; a menu left up belonged to the last one
+    this.deathCard = null; // ...and so did a card
     this.debug = debugLayers();
     this._debugView = createDebugView();
     this.fps.reset(); // don't carry a rate in from the previous deploy
@@ -321,6 +351,7 @@ export class Mission {
   stop() {
     this.running = false;
     this.setPaused(false);
+    this.deathCard = null;
     this._endView();
     this.input.disable();
     audio.stopAll(); // don't let a tail ring out over the results screen
@@ -344,8 +375,10 @@ export class Mission {
     // The pause is read once per FRAME, not per step, because while paused no
     // steps run to read it. Optional calls: suites swap in scripted inputs
     // that answer only the reads.
-    if (this.hosted && this.input.takePress?.("pause")) this.setPaused(!this.paused);
-    else if (this.hosted && this.debugAvailable() && this.input.takePress?.("debugMenu")) this.setPaused(!this.paused, "debug");
+    if (this.hosted && this.input.takePress?.("pause")) {
+      if (this.deathCard && !this.paused && !this.remote) this.dismissDeathCard();
+      else this.setPaused(!this.paused);
+    } else if (this.hosted && this.debugAvailable() && this.input.takePress?.("debugMenu")) this.setPaused(!this.paused, "debug");
     if (this._frozen()) {
       // No samples, no steps: the scene holds still. The camera is re-solved
       // so a zoom change from the menu stays centred on the soldier.
@@ -371,6 +404,7 @@ export class Mission {
       if (this.net) this.net.step(this);
       this.update(STEP);
       this.accumulator -= STEP;
+      if (this._frozen()) break; // a squadmate died: stop on the frame of it (D4)
     }
     this.render();
     requestAnimationFrame(this._frame);
@@ -726,6 +760,17 @@ export class Mission {
     const leaders = new Map();
     for (const o of this._owners) leaders.set(o, this.currentSoldier(o));
 
+    // The death card's records (D4), per step: the round that struck each
+    // soldier, and each AI squadmate's health at the start of the step — here
+    // rather than in _damage, because a burn tick lowers health and kills
+    // through ctx.kill without passing through it.
+    this._hitBy.clear();
+    this._hpBefore.clear();
+    if (this.hosted && !this.remote && config.debugOverlays && config.debugPauseOnDeath) {
+      const led = new Set(leaders.values());
+      for (const s of scene.soldiers) if (s.alive && !led.has(s)) this._hpBefore.set(s, s.health);
+    }
+
     // WHO IS PILOTED, AND BY WHAT (J7): leader -> the input driving it. It used
     // to be one soldier, `leaders.get(this.owner)`, because a Mission had one
     // input — so every commander but this one was stepped by the companion
@@ -922,12 +967,38 @@ export class Mission {
     }
     if (!target.alive) return;
     target.alive = false;
+    this._noteDeath(target, owner);
     const cx = target.x + target.w / 2;
     const cy = target.y + target.h / 2;
     // a soldier falling — a heavier, colder burst (enemies are spec-handled)
     this._burst(cx, cy, "#c9d4e6", 22, 300);
     this.scene.sound("soldier.death", { x: cx, y: cy });
     this._feedback("shk", [0.5, 0.9], null);
+  }
+
+  // Write the death card for an AI squadmate (tech/squad-debug.md, D4): this
+  // page's own mission, both knobs on, never a leader. Several deaths in one
+  // step share one card. Reads records; changes nothing the step reads.
+  _noteDeath(s, owner) {
+    if (!this.hosted || this.remote || !config.debugOverlays || !config.debugPauseOnDeath) return;
+    if (this._owners.some((o) => this.currentSoldier(o) === s)) return;
+    const a = s.agent;
+    const round = this._hitBy.get(s) || null;
+    const entry = a && round && s.duck ? s.duck.log.find((e) => e.round === round) : null;
+    const hp = this._hpBefore.get(s);
+    const row = {
+      who: soldierName(s),
+      killer: killerName(owner),
+      state: a ? a.brainState.current : null,
+      stateTime: a ? a.brainState.stateTime : null,
+      hp: hp === undefined ? null : Math.max(0, Math.round(hp)),
+      maxHp: s.maxHealth,
+      exposure: a && a.sense ? a.sense.exposure ?? 0 : null,
+      tag: a ? tagText(entry) || "no tag" : null,
+    };
+    const card = this.deathCard || (this.deathCard = { who: [], rows: [] });
+    card.who.push(s);
+    card.rows.push(row);
   }
 
   _updateStatuses(dt) {
@@ -1251,6 +1322,8 @@ export class Mission {
     this._drawVignette(ctx, W, H);
     this._drawHUD();
     if (this.debugAvailable() && this.debug.speed < 1) drawSpeedLabel(ctx, this.debug.speed, W);
+    // Flat layer, so it shows over the 3D view too; the menu, if open, is DOM above it.
+    if (this.deathCard) drawDeathCard(ctx, this.deathCard, W, H);
     if (this.introTimer > 0) this._drawIntro();
     // THIS commander's banner. Another commander extracting is not this page's
     // news and puts nothing on this screen (J2).

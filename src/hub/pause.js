@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 import { controlsHTML, controlsTabsHTML, bindControls, showControlsTab } from "./controls.js";
-import { config, setConfig, isDefault, pauseSchema } from "../game/config.js";
+import { config, setConfig, isDefault, pauseSchema, SCHEMA } from "../game/config.js";
 
 // The Debug screen's controls, as schema items the controls renderer draws.
 // A `debug.` key writes the mission's debug handle, never the config.
@@ -33,11 +33,17 @@ const DEBUG_LAYERS = [
 const SPEEDS = { full: 1, half: 0.5, quarter: 0.25 };
 const speedName = (v) => Object.keys(SPEEDS).find((k) => SPEEDS[k] === v) || "full";
 
+// Settings the Debug screen shows beside the layers: real config items, drawn
+// and written exactly as the Options screen draws and writes them.
+const DEBUG_SETTINGS = ["debugPauseOnDeath"];
+
 function debugHTML(debug) {
   const values = {};
   for (const it of DEBUG_LAYERS) values[it.key] = debug[it.key.slice(DEBUG_PREFIX.length)];
   values["debug.speed"] = speedName(debug.speed);
-  return controlsHTML([{ title: "Layers", items: DEBUG_LAYERS }], values, null);
+  const settings = SCHEMA.flatMap((g) => g.items).filter((it) => DEBUG_SETTINGS.includes(it.key));
+  return controlsHTML([{ title: "Layers", items: DEBUG_LAYERS }], values, null)
+    + controlsHTML([{ title: "Settings", items: settings }], config, isDefault);
 }
 
 export function createPauseMenu(container, { room = false, resume, onChange, screen: first = "menu", debug = null } = {}) {

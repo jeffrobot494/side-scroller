@@ -167,6 +167,44 @@ export function drawSpeedLabel(ctx, speed, W) {
   ctx.restore();
 }
 
+// The death card (D4), in the flat layer, centred. A field with no record (a
+// legacy-brain squadmate has no agent) prints as –.
+export function drawDeathCard(ctx, card, W, H) {
+  const dash = (v) => (v === null || v === undefined ? "–" : v);
+  const lines = [];
+  card.rows.forEach((r, i) => {
+    if (i) lines.push("");
+    lines.push(`${r.who} KILLED`);
+    lines.push(`by        ${r.killer}`);
+    lines.push(`doing     ${dash(r.state)}${r.stateTime === null ? "" : ` for ${r.stateTime.toFixed(1)}s`}`);
+    lines.push(`health    ${r.hp === null ? "–" : `${r.hp} / ${Math.round(r.maxHp)}`} before the hit`);
+    lines.push(`exposed   ${dash(r.exposure)} hostile${r.exposure === 1 ? "" : "s"} could hit it`);
+    lines.push(`dodge     ${dash(r.tag)}`);
+  });
+  lines.push("");
+  lines.push("pause key: carry on    debug key: Debug screen");
+  const lh = 17;
+  const w = 380;
+  const h = lines.length * lh + 24;
+  const x = Math.round((W - w) / 2);
+  const y = Math.round((H - h) / 2);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "rgba(10,14,18,0.88)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#ff5a5a";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
+  ctx.font = "13px monospace";
+  ctx.textAlign = "left";
+  lines.forEach((text, i) => {
+    ctx.fillStyle = /KILLED$/.test(text) ? "#ff5a5a" : i === lines.length - 1 ? "#a0a9ae" : "#e6edf0";
+    ctx.fillText(text, x + 16, y + 26 + i * lh);
+  });
+  ctx.restore();
+}
+
 // The tag a verdict entry prints as — the death card (D4) names it too.
 export function tagText(entry) {
   return entry ? (TAGS[entry.verdict] || [entry.verdict])[0] : null;

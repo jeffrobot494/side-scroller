@@ -379,6 +379,20 @@ section + the tests are the source of truth for what currently exists):
   jump (`agent.dodgeHold`, actuated by the SOLDIER locomotor). ~20 knobs in the
   config's "Squad survival" group, all on the pause menu. Cost is frozen as a
   COUNT of segment/box tests over 60 levels in `test/navigation.test.mjs`.
+- **Squad debug view (`tech/squad-debug.md` D0–D4 — built).** `` ` `` (the
+  `debugMenu` action, local-only; G/H and their actions are gone) opens the
+  pause menu on a **Debug screen**, only while `config.debugOverlays` is on and
+  never in a room: Nav graph, Squad routes, Threats, Spot choice, Dodges, Speed
+  (full/½/¼) and the `debugPauseOnDeath` setting. The layers read RECORDS that
+  change nothing (the golden is untouched): `soldier.duck.log` (one verdict per
+  judged round, marked hit/`late` through an optional `ctx.hit` in
+  `resolveHit`) and `agent.spotPass` (every probe `spotScorer` scored, with its
+  terms). `src/mission/debugview.js` draws them, DOM-free; threat lines are
+  recomputed there on their own clock, never through the exposure cache. Slow
+  motion scales `_frame`'s frame time only. A squadmate death freezes the
+  mission under a card (`mission.deathCard`, a second reason in `_frozen()`);
+  the pause key dismisses it without opening the menu. Suites that drive
+  `_frame` pin `debugPauseOnDeath` off.
 - **Enemy creation system (EnemySpec):** a full entity-composition enemy format
   + runtime (`src/game/enemyspec/` = schema/expr/validate/normalize/templates/
   dryrun/generate; `src/mission/enemyspec/` = runtime/brain/perception/render):
