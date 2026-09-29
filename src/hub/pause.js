@@ -25,6 +25,9 @@ const DEBUG_PREFIX = "debug.";
 const DEBUG_LAYERS = [
   { key: "debug.graph", label: "Nav graph", type: "bool", help: "Every place the squad's body can stand and every connection between them." },
   { key: "debug.path", label: "Squad routes", type: "bool", help: "The route each squadmate is walking, with its concern, health and exposure." },
+  { key: "debug.threats", label: "Threats", type: "bool", help: "A line from every hostile that can hit a squadmate where it stands." },
+  { key: "debug.spots", label: "Spot choice", type: "bool", help: "Every spot a squadmate weighed at its last pick, best green to worst red, the chosen one ringed and staying put a square. Labels: total, then travel, danger, shot, crowding; – is a term it never computed." },
+  { key: "debug.dodges", label: "Dodges", type: "bool", help: "A tag over a squadmate for each round it judged a threat: DUCK, JUMP, CAN'T, MISSED, LATE." },
 ];
 
 function debugHTML(debug) {

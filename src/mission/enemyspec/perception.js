@@ -36,7 +36,7 @@ import { predictHit } from "../combat.js";
 import { STAND_H } from "../entities.js";
 import { config } from "../../game/config.js";
 
-const SENSE_INTERVAL = 0.2;
+export const SENSE_INTERVAL = 0.2;
 const EDGE = 90;
 
 export function updateSense(root, scene, dt) {

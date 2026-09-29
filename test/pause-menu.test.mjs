@@ -174,6 +174,46 @@ export default async function run(t) {
     m.stop();
   }
 
+  // ---- D2: the three layers draw, and change nothing ------------------------
+  // Nothing asserts on pixels; what is pinned is that every layer draws over
+  // the harness's context without a throw, who it annotates, and that drawing
+  // leaves the scene and the shared exposure cache exactly as they were.
+  {
+    const m = build();
+    m.tick(240);
+    const mates = m._debugMates();
+    t.ok(`layers: the AI squadmates are annotated, the driven soldier is not (${mates.length})`,
+      mates.length > 0 && !mates.includes(m.currentSoldier()) && mates.every((s) => s.agent && s.alive));
+    // A pass and a verdict, as D0 would have written them, so every branch draws.
+    const s = mates[0];
+    s.agent.spotPass = { kind: "fight", t: 0, chosen: { x: 10, y: 20 }, probes: [
+      { x: 0, y: 20, travel: 0, crowd: 0, shot: 0, exposure: 1, total: 1, cut: false },
+      { x: 10, y: 20, travel: 0.4, crowd: 0, shot: -0.5, exposure: 0, total: -0.1, cut: false },
+      { x: 30, y: 20, travel: 2, crowd: 0, shot: null, exposure: null, total: 2, cut: true },
+    ] };
+    s.duck = s.duck || { hold: 0, wait: 0, pending: null, judged: new WeakSet(), log: [] };
+    s.duck.log.push({ round: {}, t: m.scene.survivalClock, verdict: "late", abandoned: false, hit: true });
+    Object.assign(m.debug, { graph: true, path: true, threats: true, spots: true, dodges: true });
+    const before = sampleScene(m.scene);
+    const cache = m.scene.exposureCache;
+    let threw = null;
+    try { m.render(); m.render(); } catch (e) { threw = e; }
+    t.eq("layers: every layer draws without a throw", threw && String(threw), null);
+    t.ok("layers: drawing changes nothing in the scene", firstSampleDiff(before, sampleScene(m.scene)) === null);
+    t.ok("layers: ...and never touches the shared exposure cache", m.scene.exposureCache === cache);
+    t.ok("layers: the threat set is held per squadmate", mates.every((x) => Array.isArray(m._debugView.threats.get(x))));
+    const held = m._debugView.threats;
+    m.render();
+    t.ok("layers: ...and not recomputed inside one sense interval", m._debugView.threats === held);
+    m.remote = true;
+    const drawn = m._debugView.threatT;
+    m.time += 1;
+    m.render();
+    t.eq("layers: a room viewer draws none of them", m._debugView.threatT, drawn);
+    m.remote = false;
+    m.stop();
+  }
+
   // ---- P3: the overlay, mounted headlessly --------------------------------
   // The harness DOM dispatches no events, so the overlay's root records its
   // listeners here and the test fires them with targets that answer closest().
@@ -243,7 +283,8 @@ export default async function run(t) {
     const dm = createPauseMenu(container, { room: false, screen: "debug", debug });
     const del = made.at(-1);
     t.eq("debug screen: the debug key's request opens it", dm.screen(), "debug");
-    t.eq("debug screen: Nav graph and Squad routes", rows(del.innerHTML), ["debug.graph", "debug.path"]);
+    t.eq("debug screen: the five layers", rows(del.innerHTML),
+      ["debug.graph", "debug.path", "debug.threats", "debug.spots", "debug.dodges"]);
     t.ok("debug screen: ...with a Back button", /data-pm="back"/.test(del.innerHTML));
     fire(del, "click", node({ key: "debug.graph", type: "bool" }, { toggle: true }));
     t.ok("debug screen: a toggle writes the mission's flag", debug.graph === true && debug.path === false);

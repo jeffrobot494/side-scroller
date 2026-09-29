@@ -17,6 +17,7 @@ import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload,
 import { fire, updateCompanion, updateCompanionSpec, aimAccuracy, markVerdictHit } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
 import { drawProjectile, drawNavGraph, drawNavPath } from "./render.js";
+import { createDebugView, drawSquadDebug } from "./debugview.js";
 import { graphFor, soldierProfile } from "./navigation.js";
 import {
   updateSpecEnemy, collidables,
@@ -34,6 +35,11 @@ const STEP = 1 / 60;
 // Feedback events kept per flush. A busy frame loses the tail of its sparks
 // rather than growing the packet (J8) — netproto's own cap, for its reason.
 const MAX_FEEDBACK = 64;
+
+// The debug layers (tech/squad-debug.md), all off: a fresh set per deploy.
+function debugLayers() {
+  return { graph: false, path: false, threats: false, spots: false, dodges: false };
+}
 
 export class Mission {
   // `canvas` is the HOST, and it is optional (tech/multiplayer-missions.md,
@@ -239,7 +245,8 @@ export class Mission {
     // Debug overlays (tech/squad-debug.md), off every deploy (start() resets
     // them). Toggled from the pause menu's Debug screen, which exists only
     // while config.debugOverlays is on and never on a room's mission.
-    this.debug = { graph: false, path: false };
+    this.debug = debugLayers();
+    this._debugView = createDebugView();
 
     // Bridge to the shared combat module: rules run in combat.js, cosmetics +
     // bookkeeping stay here. friendlyFire/damageMult read live from config.
@@ -290,7 +297,8 @@ export class Mission {
     this.running = true;
     this.accumulator = 0;
     this.setPaused(false); // a deploy starts unpaused; a menu left up belonged to the last one
-    this.debug = { graph: false, path: false };
+    this.debug = debugLayers();
+    this._debugView = createDebugView();
     this.fps.reset(); // don't carry a rate in from the previous deploy
     // The device and the loop, and NOTHING else, are what a host has (J6).
     // `running` is set either way: since J2 it means "the scene has not ended",
@@ -651,6 +659,16 @@ export class Mission {
     const s = this.currentSoldier();
     if (!s) return null;
     return graphFor(this.scene, soldierProfile(s.w, STAND_H, this.scene.world.gravity));
+  }
+
+  // Who the squad debug layers annotate: every AI squadmate with a spec agent
+  // (a legacy-brain one has no records), alive — or the one a death card is up
+  // for, so it can be inspected on its own frozen frame (D4).
+  _debugMates() {
+    const leaders = this._owners.map((o) => this.currentSoldier(o));
+    const card = this.deathCard;
+    return this.scene.soldiers.filter((s) => s.agent && !leaders.includes(s)
+      && (s.alive || (card && card.who.includes(s))));
   }
 
   // Routes the squad is HOLDING — read off each companion's own nav state, never
@@ -1204,6 +1222,13 @@ export class Mission {
         if (this.debug.path) this._drawSquadPaths(ctx, graph, z);
       }
       ctx.globalAlpha = 1;
+    }
+    // The squad debug layers (tech/squad-debug.md, D2): this page's own mission
+    // only — a room viewer holds a snapshot with none of the records.
+    if (config.debugOverlays && !this.remote && (this.debug.threats || this.debug.spots || this.debug.dodges)) {
+      drawSquadDebug(ctx, this._debugView, {
+        scene, mates: this._debugMates(), time: this.time, clock: scene.survivalClock || 0, layers: this.debug, z,
+      });
     }
     const drivenHere = this.currentSoldier(); // hoisted: an id lookup, and the loop asks per soldier
     if (use3d) {
