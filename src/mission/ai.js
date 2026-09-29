@@ -260,16 +260,19 @@ function tickDuck(soldier, agent, dt, scene, ctx) {
       // the round: one round can threaten more than one squadmate.
       if (d.judged.has(p)) continue;
       d.judged.add(p);
-      const kind = dodgeFor(soldier, agent, p, dt, scene, ctx);
-      if (!kind) continue;
+      // The reaction delay is known before the verdict, because a jump is
+      // timed and cannot be timed to launch sooner than the soldier can move.
+      const t = speedT(soldier);
+      const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
+      const plan = dodgeFor(soldier, agent, p, dt, scene, ctx, Math.ceil(latency / dt - 1e-9));
+      if (!plan) continue;
       // Whether they react at all is the roll; a failed one is spent, not
       // retried, which is what makes a soldier who was not paying attention
       // indistinguishable from one who was too slow.
-      const t = speedT(soldier);
       if (sceneRng(scene)() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) continue;
-      d.pending = { kind, round: p };
-      const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
-      if (latency > 0) d.wait = latency;
+      d.pending = { kind: plan.kind, round: p };
+      const wait = plan.kind === "jump" ? plan.delay * dt : latency;
+      if (wait > 0) d.wait = wait;
       else act(d, soldier, agent, dt, scene, ctx);
       break;
     }
@@ -277,9 +280,10 @@ function tickDuck(soldier, agent, dt, scene, ctx) {
   agent.crouchIntent = d.hold > 0;
 }
 
-// Carry out the dodge decided on. A duck is a duck. A jump is re-flown from the
-// body as it is NOW, because the latency has moved it; if it no longer clears,
-// the reflex falls back to the knee, then to nothing.
+// Carry out the dodge decided on. A duck is a duck. A jump is re-planned from
+// the body as it is NOW, because the wait has moved it: launched now if now
+// still clears, re-timed if a later frame does, and if no launch clears any
+// more the reflex falls back to the knee, then to nothing.
 function act(d, soldier, agent, dt, scene, ctx) {
   const pend = d.pending;
   d.pending = null;
@@ -287,20 +291,26 @@ function act(d, soldier, agent, dt, scene, ctx) {
   if (pend.kind === "duck") { d.hold = config.duckHoldTime; return; }
   if (!soldier.onGround) return;
   const steps = Math.ceil(config.duckLookahead / dt);
-  if (jumpClears(soldier, agent, pend.round, dt, steps, scene, ctx)) {
+  const delay = jumpDelay(soldier, agent, pend.round, dt, steps, scene, ctx, 0);
+  if (delay === 0) {
     // Drop the route leg first, so a dodge is never booked as a failed nav jump,
     // then hold zero input from launch to landing so it flies the predicted arc.
     abortRoute(agent);
     agent.pendingJump = true;
     agent.dodgeHold = { airborne: false };
+  } else if (delay > 0) {
+    d.pending = pend;
+    d.wait = delay * dt;
   } else if (crouchClears(soldier, pend.round, dt, steps, scene, ctx)) {
     d.hold = config.duckHoldTime;
   }
 }
 
-// Which dodge answers round `p`, if any: "duck", "jump", or null — null both
-// for a round that is no threat and for one nothing here can avoid.
-function dodgeFor(s, agent, p, dt, scene, ctx) {
+// Which dodge answers round `p`, if any: { kind: "duck" }, { kind: "jump",
+// delay } with the launch `delay` in frames, or null — null both for a round
+// that is no threat and for one nothing here can avoid. `minDelay` is the
+// soldier's reaction time in frames: no jump is planned to launch sooner.
+function dodgeFor(s, agent, p, dt, scene, ctx, minDelay = 0) {
   if ((p.effects || []).some((e) => e.kind === "explode")) return null;
   const steps = Math.ceil(config.duckLookahead / dt);
   const feet = s.y + s.h;
@@ -312,9 +322,9 @@ function dodgeFor(s, agent, p, dt, scene, ctx) {
   // A body standing still is judged on the frame the round reaches it, exactly
   // as duckableShot judges it; one that was moving stops to kneel, so the
   // crouched box must clear the whole flight.
-  if (crouchClears(s, p, dt, moving ? steps : k + 1, scene, ctx)) return "duck";
-  if (jumpClears(s, agent, p, dt, steps, scene, ctx)) return "jump";
-  return null;
+  if (crouchClears(s, p, dt, moving ? steps : k + 1, scene, ctx)) return { kind: "duck" };
+  const delay = jumpDelay(s, agent, p, dt, steps, scene, ctx, minDelay);
+  return delay >= 0 ? { kind: "jump", delay } : null;
 }
 
 function crouchClears(s, p, dt, steps, scene, ctx) {
@@ -322,21 +332,37 @@ function crouchClears(s, p, dt, steps, scene, ctx) {
   return predictHit(scene, p, s, () => crouch, dt, steps, ctx) < 0;
 }
 
-// Does a jump from here clear `p`? The body is flown on the mission's own
-// integrator under zero input — friction braking, as applyMovement applies it,
-// mirrored by `actuate` — until it lands. The landing must be somewhere the
-// squadmate's graph says is standable, and NO predicted round, `p` or any other,
-// may meet the arc.
-function jumpClears(s, agent, p, dt, steps, scene, ctx) {
-  const f = jumpFlight(s, dt, scene, Math.max(steps, Math.ceil(2 / dt)));
-  if (!f) return false;
+// WHEN does a jump clear `p`? (tech/squad-survival.md, V6, "timed jump".) A
+// jump lasts about 0.7s and comes back down through the line of fire, so one
+// launched the moment a round is seen is usually hit on the way down by a round
+// that takes about that long to arrive. The launch is timed instead: the first
+// frame, from `from` until the round would arrive, at which a jump carries the
+// body over it. Until then the body keeps going as it is.
+//
+// Each launch is flown on the mission's own integrator under zero input —
+// friction braking, as applyMovement applies it, mirrored by `actuate` — until
+// it lands. The landing must be somewhere the squadmate's graph says is
+// standable, and NO predicted round, `p` or any other, may meet the body before
+// or during the jump. Returns the delay in frames, or -1.
+function jumpDelay(s, agent, p, dt, steps, scene, ctx, from) {
+  const feet = s.y + s.h;
+  const go = (i) => ({ x: s.x + s.vx * dt * (i + 1), y: feet - STAND_H, w: s.w, h: STAND_H });
+  const k = predictHit(scene, p, s, go, dt, steps, ctx);
+  if (k < 0) return -1;
   const graph = navGraph(agent, scene, config.runSpeed);
-  if (!graph || !nodeUnder(graph, f.x, f.feet)) return false;
-  const at = (i) => f.boxes[Math.min(i, f.boxes.length - 1)];
-  for (const q of scene.projectiles) {
-    if (predictHit(scene, q, s, at, dt, steps, ctx) >= 0) return false;
+  if (!graph) return -1;
+  for (let L = from; L <= k; L++) {
+    const x = L > 0 ? go(L - 1).x : s.x;
+    const f = jumpFlight({ x, y: s.y, w: s.w, h: s.h, vx: s.vx, slow: s.slow }, dt, scene, Math.max(steps, Math.ceil(2 / dt)));
+    if (!f || !nodeUnder(graph, f.x, f.feet)) continue;
+    const at = (i) => (i < L ? go(i) : f.boxes[Math.min(i - L, f.boxes.length - 1)]);
+    let clear = true;
+    for (const q of scene.projectiles) {
+      if (predictHit(scene, q, s, at, dt, steps, ctx) >= 0) { clear = false; break; }
+    }
+    if (clear) return L;
   }
-  return true;
+  return -1;
 }
 
 function jumpFlight(s, dt, scene, frames) {

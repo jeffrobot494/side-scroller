@@ -643,7 +643,7 @@ export default async function run(t) {
   // A round at shin height meets the crouched box as surely as the standing
   // one, so the knee is no answer; a jump flown under zero input clears it.
   {
-    const shin = (off) => {
+    const shin = (off, from = 640) => {
       const saved = [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast, config.duckHoldTime];
       config.duckChanceSlow = config.duckChanceFast = 1;
       config.duckLatencySlow = config.duckLatencyFast = 0;
@@ -654,8 +654,9 @@ export default async function run(t) {
         comp.health = comp.maxHealth = 1e6;
         const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(1500, 460)] });
         const ctx = tally(comp);
-        sc.projectiles.push(new Projectile(640, 488, -900, 0, { w: 12, h: 4, color: "#fff", life: 2, gravity: 0 }, "enemy", [{ kind: "damage", amount: 5 }], null));
+        sc.projectiles.push(new Projectile(from, 488, -900, 0, { w: 12, h: 4, color: "#fff", life: 2, gravity: 0 }, "enemy", [{ kind: "damage", amount: 5 }], null));
         let rose = 0;
+        let first = -1;
         let knelt = false;
         let drift = 0;
         const x0 = comp.x;
@@ -664,10 +665,10 @@ export default async function run(t) {
           updateCompanionSpec(comp, STEP, sc, leader, ctx);
           stepActor(comp, STEP, sc.world, sc.platforms);
           updateProjectiles(sc, STEP, ctx);
-          if (!comp.onGround) { rose++; drift = Math.max(drift, Math.abs(comp.x - x0)); }
+          if (!comp.onGround) { rose++; drift = Math.max(drift, Math.abs(comp.x - x0)); if (first < 0) first = i; }
           if (comp.crouched) knelt = true;
         }
-        return { rose, knelt, dealt: ctx.dealt, landed: comp.onGround, drift };
+        return { rose, first, knelt, dealt: ctx.dealt, landed: comp.onGround, drift };
       } finally {
         [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast, config.duckHoldTime] = saved;
       }
@@ -678,6 +679,12 @@ export default async function run(t) {
     t.eq("jump: and it misses", on.dealt, 0);
     t.ok("jump: the squadmate lands again", on.landed === true);
     t.ok(`jump: flown under zero input, it comes down where it went up (${on.drift.toFixed(1)}px)`, on.drift < 4);
+    // A round ~0.7s out: a jump launched at once is coming back down through
+    // its line when it arrives, so the launch is TIMED to carry the body over it.
+    const late = shin(false, 1000);
+    t.ok(`timed: a round that arrives late is still jumped (${late.rose} frames up)`, late.rose > 0);
+    t.ok(`timed: the launch waits for it (first airborne frame ${late.first})`, late.first > 5);
+    t.eq("timed: and it misses", late.dealt, 0);
     const off = shin(true);
     t.ok(`jump: with the reflex off it takes the round (${off.dealt})`, off.rose === 0 && off.dealt > 0);
   }
