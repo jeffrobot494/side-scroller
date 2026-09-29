@@ -6,18 +6,17 @@ resolution: sharp
 related: [soldier-behavior, agent-navigation, squad-agent-development, advanced-agent-navigation]
 ---
 
-# Squadmate survival and orders
+# Squadmate survival
 
-How a squadmate stays alive while staying useful, and how it answers an order it
-judges too dangerous.
+How a squadmate stays alive while staying useful.
 
 ## The rule everything follows
 
 | | |
 |---|---|
-| **Survival first** | A squadmate protects itself by default and may refuse an order even when death is not certain |
+| **Survival first** | A squadmate protects itself by default |
 | **Useful, not hiding** | Safety is traded for usefulness only as far as the danger demands. When the pressure drops, it goes back to work |
-| **One idea of danger** | Where to stand, when to take cover, which way to walk and whether to obey all ask the same two questions: *what can hit me there* and *what can I hit from there* |
+| **One idea of danger** | Where to stand, when to take cover and which way to walk all ask the same two questions: *what can hit me there* and *what can I hit from there* |
 | **Fallible** | Awareness never becomes perfect evasion. A slow soldier still reacts late, and some shots still land |
 
 ## What a squadmate weighs
@@ -59,15 +58,14 @@ judges too dangerous.
 | **While there** | Reloads, and fires if it has a usable shot |
 | **Leaves** | When the fire has stopped for a while. Leaving takes calmer conditions than entering, so it never flickers in and out |
 | **Wounds do not pin it** | Low health may last the whole mission. It does not wait to heal before going back to work, but a wounded squadmate reaches for cover sooner than a healthy one |
-| **Afterwards** | It resumes what it was doing before: escorting you, or the order it was carrying out |
+| **Afterwards** | It goes back to fighting, or to escorting you if the fight is over |
 
 ## Travel
 
 | | |
 |---|---|
 | **Safer routes** | A route is judged by its danger as well as its length. A longer covered route beats a short exposed one when the difference is worth it |
-| **The destination does not change** | Taking cover partway keeps the destination. It carries on afterwards |
-| **Cover partway is a reaction** | It stops in cover when fire arrives, not at planned waypoints |
+| **Cover partway is a reaction** | It stops in cover when fire arrives, not at planned waypoints, then carries on to where it was going |
 | **Routes do not flip** | Small changes in danger do not reverse a route it has committed to |
 
 ## Dodging
@@ -81,41 +79,15 @@ judges too dangerous.
 | **One verdict per round** | A soldier who misses a round coming does not get a second look at it |
 | **Speed decides** | Whether it reacts at all is a chance, and how long it takes is a latency, both from Speed. Jumping follows the same rule as ducking |
 
-## Orders
-
-| Order | |
-|---|---|
-| **Move there** | You name a destination, not a route. Once there, it holds that position |
-| **Regroup** | It goes back to escorting you |
-
-**Accepting.** A squadmate weighs the danger of getting there and of staying
-there. A dangerous direct route with a reasonable safer way around is an ordinary
-order, and it takes the safer way without comment. A wounded squadmate accepts
-less danger than a healthy one.
-
-| Outcome | What it does | It says |
-|---|---|---|
-| **Active** | Carries out the order | "Moving!" |
-| **Delayed** | Takes cover, keeps the order, and goes once there is an opening | "Waiting for that gunner to stop firing!" |
-| **Refused** | Declines and stays with what it was doing, taking defensive action | "Are you crazy?! That's suicide!" |
-| **Abandoned** | Gives up a position it can no longer hold and falls back to escorting you | "I can't hold this position! Falling back!" |
-
-| | |
-|---|---|
-| **Impossible ≠ too dangerous** | A place it cannot reach and a place it will not go get different explanations |
-| **No silent return** | A refused or abandoned order does not come back when the danger passes. A delayed one does |
-| **You can see the state** | Active, delayed, refused and abandoned are visible on the squadmate, not only spoken |
-| **No force-obey** | There is no way to make a squadmate accept an order it has refused |
-
 ## What a squadmate is doing at any moment
 
 | Layer | Changes | Example |
 |---|---|---|
-| **Its goal** | When you order it, or when it gives up | Escort you · hold that doorway |
+| **Its goal** | Never — it escorts you | Stay with you |
 | **Its current concern** | As fights start and end | Travelling · fighting · in cover |
 | **Where it is standing next** | On arrival or a real change in danger | The crate top with a shot line |
 
-Fighting and cover are concerns, never goals. Both end and hand back to the goal.
+Fighting and cover are concerns, never goals. Both end and hand back to escorting you.
 
 ## How stats change it
 
@@ -130,9 +102,9 @@ Fighting and cover are concerns, never goals. Both end and hand back to the goal
 
 | | |
 |---|---|
+| **Orders** | You cannot direct a squadmate. It escorts you and fights on its own |
 | **Blasts** | Dodging and cover consider direct and arcing rounds only |
 | **Kneeling for cover** | A squadmate kneels only to duck |
 | **Planned cover stops** | Cover partway through a trip is a reaction to fire, never a waypoint |
 | **Hunting and searching** | A squadmate does not go looking for enemies it cannot perceive |
 | **Squad tactics** | No roles, flanking or coordinated attacks. Spreading out is the only thing squadmates do in relation to each other |
-| **Forcing an order** | See Orders |
