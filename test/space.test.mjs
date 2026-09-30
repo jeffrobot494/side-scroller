@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall } from "../src/space/sim.js";
 import { createView, draw } from "../src/space/view.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,7 +13,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
 // A world with nothing in it but the squad, for mechanics tests.
 function empty(opts = {}) {
-  return createWorld(7, { asteroids: 0, dummies: 0, ...opts });
+  return createWorld(7, { asteroids: 0, dummies: 0, ruins: 0, objective: false, ...opts });
 }
 
 // A stationary target `d` px along +x from a soldier at (2000, 2000).
@@ -230,6 +230,84 @@ export default async function run_(t) {
     run(g, { firePress: true, aimX: 2400, aimY: 2000 }, 1);
     run(g, {}, 30);
     t.ok("a blast pushes a rock far harder than a round", rock2.vx > rock.vx * 10);
+  }
+
+  // ---- S3: ruins, artifact, extraction -----------------------------------------
+  {
+    let ruinsOk = true, clearOk = true, artOk = true, exOk = true;
+    for (let seed = 1; seed <= 40; seed++) {
+      const w = createWorld(seed);
+      if (w.ruins.length < CFG.ruinsMin || w.ruins.length > CFG.ruinsMax) ruinsOk = false;
+      for (const r of w.ruins) for (const a of w.asteroids) if (Math.hypot(a.x - r.x, a.y - r.y) < r.R + a.r) clearOk = false;
+      const host = w.artifact.ruin;
+      if (!host || Math.hypot(w.artifact.x - host.x, w.artifact.y - host.y) > host.R) artOk = false;
+      if (Math.hypot(w.extract.x - w.start.x, w.extract.y - w.start.y) < CFG.extractMinDist) exOk = false;
+    }
+    t.ok("3–5 ruins per field (40 seeds)", ruinsOk);
+    t.ok("no asteroid spawns inside a ruin (40 seeds)", clearOk);
+    t.ok("the artifact is inside a ruin (40 seeds)", artOk);
+    t.ok("extraction is at least half the map from the start (40 seeds)", exOk);
+  }
+  {
+    // Every breach and door is wider than a soldier: a soldier-sized circle
+    // at its centre touches no wall. Sizes span the generator's range.
+    let ok = true, count = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const w = empty();
+      w.rng = makeRng(seed);
+      const r = addRuin(w, 2000, 2000, seed, 340 + (seed % 5) * 30, 170 + (seed % 3) * 25);
+      for (const [ox, oy] of r.openings) {
+        count++;
+        for (const wall of r.walls) {
+          const [cx, cy] = closestOnWall(wall, ox, oy);
+          if (Math.hypot(ox - cx, oy - cy) < CFG.soldierR + wall.t) ok = false;
+        }
+      }
+    }
+    t.ok(`every opening fits a soldier (${count} openings)`, ok);
+  }
+  {
+    const w = empty();
+    const s = w.soldiers[0];
+    const wall = { kind: "wall", x0: 2300, y0: 1800, x1: 2300, y1: 2200, t: CFG.wallHalf };
+    w.ruins.push({ x: 2300, y: 2000, R: 210, walls: [wall] });
+    w.walls.push(wall);
+    Object.assign(s, { x: 2000, y: 2000, vx: 1200, vy: 0 });
+    run(w, {}, 60);
+    t.ok("a soldier at 1200px/s bounces off a hull plate", s.x < 2300 && s.vx < 0);
+    t.eq("segWall: a round crossing the plate hits it", segWall(2280, 2000, 2320, 2000, wall, 2) !== null, true);
+    t.eq("segWall: a round beside the plate misses it", segWall(2280, 2300, 2320, 2300, wall, 2), null);
+    s.x = 2000; s.vx = 0; s.fireCd = 0;
+    run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
+    run(w, {}, 30);
+    t.eq("a round stops at a hull plate", w.projectiles.length, 0);
+  }
+  {
+    const w = createWorld(3, { squad: 2, asteroids: 0, dummies: 0 });
+    const [a, b] = w.soldiers;
+    const art = w.artifact;
+    Object.assign(a, { x: art.x, y: art.y, vx: 0, vy: 0 });
+    run(w, {}, 1);
+    t.ok("touching the artifact picks it up", art.carrier === a);
+    hurt(w, a, 999);
+    run(w, {}, 1);
+    t.ok("the carrier dies: the artifact drops where they fell", art.carrier === null && near(art.x, a.x, 1e-9));
+    t.ok("one soldier left: the mission goes on", !w.end);
+    Object.assign(b, { x: art.x, y: art.y, vx: 0, vy: 0 });
+    run(w, {}, 1);
+    t.ok("anyone can pick it up again", art.carrier === b);
+    Object.assign(b, { x: w.extract.x, y: w.extract.y });
+    run(w, {}, 1);
+    t.ok("carrier inside extraction: success", w.end && w.end.success === true);
+  }
+  {
+    const w = createWorld(3, { squad: 2, asteroids: 0, dummies: 0 });
+    Object.assign(w.soldiers[0], { x: w.extract.x, y: w.extract.y });
+    run(w, {}, 5);
+    t.ok("extraction without the artifact does nothing", !w.end);
+    for (const s of w.soldiers) hurt(w, s, 999);
+    run(w, {}, 1);
+    t.ok("squad dead: failure", w.end && w.end.success === false);
   }
 
   // ---- determinism ---------------------------------------------------------

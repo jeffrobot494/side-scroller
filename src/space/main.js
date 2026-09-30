@@ -63,6 +63,9 @@ resize();
 let world = createWorld(newSeed(), { squad: 1 });
 const view = createView();
 
+// For poking at it from the console: space.world().soldiers[0].hp = 999
+window.space = { world: () => world };
+
 function newSeed() {
   return (Math.random() * 2 ** 31) >>> 0;
 }

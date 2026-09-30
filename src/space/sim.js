@@ -40,6 +40,16 @@ export const CFG = {
   bulletPush: 60, // a round's impulse on a rock: Δv = bulletPush / mass (slight, P8)
   blastPush: 1500, // an explosion's peak impulse on a rock, falling off to its edge
 
+  ruinsMin: 3, // P3
+  ruinsMax: 5,
+  ruinGap: 900, // centre to centre
+  ruinStartGap: 700,
+  wallHalf: 6, // half a hull plate's thickness
+  breach: 90, // an opening in a hull; a soldier is 36 across
+  artifactR: 14,
+  extractR: 120,
+  extractMinDist: 2000, // half the map from the start (P10)
+
   dummyCount: 5, // S2 target dummies; S4 replaces them with enemies
   dummyHp: 60,
   dummyR: 20,
@@ -123,6 +133,12 @@ export function createWorld(seed = 1, opts = {}) {
     soldiers: [],
     enemies: [],
     projectiles: [],
+    ruins: [],
+    walls: [],
+    keepClear: [],
+    artifact: null,
+    extract: null,
+    end: null, // { success } once the mission resolves
     ctrl: 0,
     events: [], // one-shot happenings for the view (flashes); the view drains it
   };
@@ -142,6 +158,8 @@ export function createWorld(seed = 1, opts = {}) {
     world.soldiers.push(makeSoldier(r, world.start.x + (i - (squad - 1) / 2) * 50, world.start.y, weapon));
   }
 
+  if (opts.ruins !== 0) placeRuins(world, opts.ruins);
+  if (opts.objective !== false) placeObjective(world);
   placeAsteroids(world, opts.asteroids ?? CFG.asteroidCount);
 
   const dummies = opts.dummies ?? CFG.dummyCount;
@@ -242,6 +260,127 @@ function blockedByClearZones(world, x, y, r) {
   return false;
 }
 
+// ---- ruins, artifact, extraction --------------------------------------------
+// A ruin is a derelict hull: a pointed ship outline of wall segments, one or
+// two breaches cut in it, and a bulkhead with a door splitting the hold. The
+// artifact sits in the aft compartment of one of them.
+function placeRuins(world, want) {
+  const { rng, size } = world;
+  const count = want ?? CFG.ruinsMin + Math.floor(rng() * (CFG.ruinsMax - CFG.ruinsMin + 1));
+  let tries = 0;
+  while (world.ruins.length < count && tries++ < 400) {
+    const L = rand(rng, 340, 460);
+    const W = rand(rng, 170, 220);
+    const R = Math.hypot(L / 2, W / 2);
+    const x = rand(rng, R + 60, size - R - 60);
+    const y = rand(rng, R + 60, size - R - 60);
+    if (Math.hypot(x - world.start.x, y - world.start.y) < CFG.ruinStartGap + R) continue;
+    if (world.ruins.some((o) => Math.hypot(o.x - x, o.y - y) < CFG.ruinGap)) continue;
+    addRuin(world, x, y, rand(rng, 0, Math.PI * 2), L, W);
+  }
+}
+
+export function addRuin(world, x, y, angle, L, W) {
+  const { rng } = world;
+  const c = Math.cos(angle), sn = Math.sin(angle);
+  const toWorld = ([lx, ly]) => [x + lx * c - ly * sn, y + lx * sn + ly * c];
+  const hull = [[-L / 2, -W / 2], [L / 4, -W / 2], [L / 2, 0], [L / 4, W / 2], [-L / 2, W / 2]];
+  // Where along each edge a breach is centred. The long sides breach forward
+  // of the bulkhead, which meets them at x = -L/8 and would split a centred one.
+  const breachAt = [0.8, 0.5, 0.5, 0.2, 0.5];
+  // Which hull edges get a breach: one always, a second half the time.
+  const breached = new Set([Math.floor(rng() * hull.length)]);
+  if (rng() < 0.5) breached.add(Math.floor(rng() * hull.length));
+  const segs = [];
+  const openings = []; // centre of every breach and door, local
+  const lerp = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length];
+    if (breached.has(i)) {
+      segs.push(...cut(a, b, CFG.breach, breachAt[i]));
+      openings.push(lerp(a, b, breachAt[i]));
+    } else segs.push([a, b]);
+  }
+  // Bulkhead across the hold with a door in it.
+  segs.push(...cut([-L / 8, -W / 2], [-L / 8, W / 2], CFG.breach));
+  openings.push([-L / 8, 0]);
+  const ruin = {
+    x, y, angle, L, W,
+    R: Math.hypot(L / 2, W / 2) + CFG.wallHalf,
+    hull: hull.map(toWorld),
+    walls: [],
+    aft: toWorld([-L * 0.31, 0]), // mid aft compartment: the artifact's place
+    openings: openings.map(toWorld),
+  };
+  for (const [a, b] of segs) {
+    const [x0, y0] = toWorld(a);
+    const [x1, y1] = toWorld(b);
+    const w = { kind: "wall", x0, y0, x1, y1, t: CFG.wallHalf, ruin };
+    ruin.walls.push(w);
+    world.walls.push(w);
+  }
+  world.ruins.push(ruin);
+  world.keepClear.push({ x, y, r: ruin.R + 20 });
+  return ruin;
+}
+
+// Segment a→b with a gap of `gap` centred at fraction k removed: two segments.
+function cut(a, b, gap, k = 0.5) {
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const k0 = k - gap / 2 / L, k1 = k + gap / 2 / L;
+  const at = (k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
+  return [[a, at(k0)], [at(k1), b]];
+}
+
+function placeObjective(world) {
+  const { rng, size } = world;
+  if (world.ruins.length) {
+    const host = world.ruins[Math.floor(rng() * world.ruins.length)];
+    world.artifact = { x: host.aft[0], y: host.aft[1], r: CFG.artifactR, carrier: null, ruin: host };
+  } else {
+    world.artifact = { x: size / 2, y: size / 2, r: CFG.artifactR, carrier: null, ruin: null };
+  }
+  const r = CFG.extractR;
+  for (let tries = 0; tries < 400; tries++) {
+    const x = rand(rng, r + 40, size - r - 40);
+    const y = rand(rng, r + 40, size - r - 40);
+    if (Math.hypot(x - world.start.x, y - world.start.y) < CFG.extractMinDist) continue;
+    if (world.ruins.some((o) => Math.hypot(o.x - x, o.y - y) < o.R + r + 40)) continue;
+    world.extract = { x, y, r };
+    break;
+  }
+  // Fallback: the far corner, which always clears the distance on a 4000 map.
+  if (!world.extract) world.extract = { x: size - world.start.x, y: size - world.start.y, r };
+  world.keepClear.push({ x: world.extract.x, y: world.extract.y, r });
+}
+
+function tickObjective(world) {
+  const art = world.artifact;
+  if (art) {
+    if (art.carrier && !art.carrier.alive) art.carrier = null; // dropped where they died (P9)
+    if (art.carrier) {
+      art.x = art.carrier.x;
+      art.y = art.carrier.y;
+    } else {
+      for (const s of world.soldiers) {
+        if (s.alive && Math.hypot(s.x - art.x, s.y - art.y) < s.r + art.r) {
+          art.carrier = s;
+          world.events.push({ type: "pickup", x: art.x, y: art.y });
+          break;
+        }
+      }
+    }
+  }
+  const living = world.soldiers.filter((s) => s.alive);
+  if (!living.length) {
+    world.end = { success: false };
+    return;
+  }
+  const held = !art || (art.carrier && art.carrier.alive);
+  const ex = world.extract;
+  if (held && ex && living.some((s) => Math.hypot(s.x - ex.x, s.y - ex.y) < ex.r)) world.end = { success: true };
+}
+
 export const controlled = (world) => {
   const s = world.soldiers[world.ctrl];
   return s && s.alive ? s : null;
@@ -256,7 +395,7 @@ export function step(world, input = {}) {
   world.t += dt;
   if (world.events.length > 256) world.events.splice(0, world.events.length - 256);
 
-  const s = controlled(world);
+  const s = world.end ? null : controlled(world);
   if (s) {
     drive(s, input, dt);
     if (input.reload) startReload(s);
@@ -267,6 +406,7 @@ export function step(world, input = {}) {
   tickActors(world, dt);
   integrate(world, dt);
   updateProjectiles(world, dt);
+  if (!world.end) tickObjective(world);
 }
 
 // Rotate-and-thrust: turn at a fixed rate, push along facing. Aim is the
@@ -593,10 +733,61 @@ export function segCircle(x0, y0, x1, y1, cx, cy, R) {
   return t >= 0 && t <= 1 ? t : null;
 }
 
-// A round (radius r) against a wall segment: sampled against the thickened
-// segment. Filled in by S3; here so projectiles already test walls.
-function segWall() {
-  return null;
+// Closest point on wall segment w to (px, py).
+export function closestOnWall(w, px, py) {
+  const ex = w.x1 - w.x0, ey = w.y1 - w.y0;
+  const L2 = ex * ex + ey * ey || 1;
+  const k = clamp(((px - w.x0) * ex + (py - w.y0) * ey) / L2, 0, 1);
+  return [w.x0 + ex * k, w.y0 + ey * k];
+}
+
+// First t in [0,1] where a round of radius pr on p0→p1 touches the wall — the
+// wall as a capsule of half-thickness w.t: its two long faces, then its ends.
+export function segWall(x0, y0, x1, y1, w, pr) {
+  const R = w.t + pr;
+  const [cx, cy] = closestOnWall(w, x0, y0);
+  if (Math.hypot(x0 - cx, y0 - cy) <= R) return 0;
+  const ex = w.x1 - w.x0, ey = w.y1 - w.y0;
+  const L = Math.hypot(ex, ey) || 1;
+  const ux = ex / L, uy = ey / L, nx = -uy, ny = ux;
+  const dx = x1 - x0, dy = y1 - y0;
+  const dn = dx * nx + dy * ny;
+  const off = (x0 - w.x0) * nx + (y0 - w.y0) * ny;
+  let best = null;
+  if (dn !== 0) {
+    for (const side of [R, -R]) {
+      const t = (side - off) / dn;
+      if (t < 0 || t > 1) continue;
+      const along = (x0 + dx * t - w.x0) * ux + (y0 + dy * t - w.y0) * uy;
+      if (along >= 0 && along <= L && (best === null || t < best)) best = t;
+    }
+  }
+  for (const [px, py] of [[w.x0, w.y0], [w.x1, w.y1]]) {
+    const t = segCircle(x0, y0, x1, y1, px, py, R);
+    if (t !== null && (best === null || t < best)) best = t;
+  }
+  return best;
+}
+
+// A body against a wall: push out along the contact normal, reflect what was
+// moving into it. Walls do not move.
+function collideWall(b, w, e) {
+  const [cx, cy] = closestOnWall(w, b.x, b.y);
+  const dx = b.x - cx, dy = b.y - cy;
+  const min = b.r + w.t;
+  const d2 = dx * dx + dy * dy;
+  if (d2 >= min * min) return false;
+  const d = Math.sqrt(d2) || 0.0001;
+  const nx = dx / d, ny = dy / d;
+  b.x += nx * (min - d);
+  b.y += ny * (min - d);
+  foldShove(b);
+  const vn = b.vx * nx + b.vy * ny;
+  if (vn < 0) {
+    b.vx -= (1 + e) * vn * nx;
+    b.vy -= (1 + e) * vn * ny;
+  }
+  return true;
 }
 
 // ---- motion + collision ----------------------------------------------------
@@ -640,6 +831,10 @@ function collideAll(world, list) {
       // Bodies pass through each other; only rocks bounce things (P7).
       if (a.kind !== "asteroid" && b.kind !== "asteroid") continue;
       collide(a, b, e);
+    }
+    for (const r of world.ruins) {
+      if (Math.hypot(a.x - r.x, a.y - r.y) > r.R + a.r) continue;
+      for (const w of r.walls) collideWall(a, w, e);
     }
     edge(a, world.size, e);
   }

@@ -38,7 +38,10 @@ export function draw(ctx, view, world, vw, vh, dt) {
   ctx.save();
   ctx.translate(-Math.round(cam.x), -Math.round(cam.y));
   drawBounds(ctx, world);
+  if (world.extract) drawExtract(ctx, world.extract, world.t);
+  for (const r of world.ruins) drawRuin(ctx, r);
   for (const a of world.asteroids) drawAsteroid(ctx, a);
+  if (world.artifact) drawArtifact(ctx, world.artifact, world.t);
   for (const e of world.enemies) if (e.alive) drawEnemy(ctx, e);
   for (const s of world.soldiers) if (s.alive) drawSoldier(ctx, s, s === controlled(world));
   for (const p of world.projectiles) drawProjectile(ctx, p);
@@ -46,6 +49,7 @@ export function draw(ctx, view, world, vw, vh, dt) {
   drawParticles(ctx, view, dt);
   ctx.restore();
   drawHud(ctx, world, vw, vh);
+  if (world.end) drawEnd(ctx, world.end, vw, vh);
   return cam;
 }
 
@@ -237,10 +241,123 @@ function dot(ctx, x, y, r) {
   ctx.fill();
 }
 
+// ---- ruins + objective -------------------------------------------------------------
+function drawRuin(ctx, r) {
+  // Deck: the full outline, filled dark, so the inside reads as inside.
+  ctx.beginPath();
+  r.hull.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  ctx.fillStyle = "rgba(60,72,88,0.35)";
+  ctx.fill();
+  // Deck plating lines along the hull's axis.
+  ctx.save();
+  ctx.clip();
+  ctx.translate(r.x, r.y);
+  ctx.rotate(r.angle);
+  ctx.strokeStyle = "rgba(140,160,190,0.08)";
+  ctx.lineWidth = 1;
+  for (let y = -r.W / 2; y < r.W / 2; y += 22) {
+    ctx.beginPath();
+    ctx.moveTo(-r.L / 2, y);
+    ctx.lineTo(r.L / 2, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+  // Walls as they actually collide.
+  ctx.lineCap = "round";
+  for (const w of r.walls) {
+    ctx.strokeStyle = "#8a96a8";
+    ctx.lineWidth = w.t * 2;
+    ctx.beginPath();
+    ctx.moveTo(w.x0, w.y0);
+    ctx.lineTo(w.x1, w.y1);
+    ctx.stroke();
+    ctx.strokeStyle = "#c9d3e0";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  ctx.lineCap = "butt";
+}
+
+function drawArtifact(ctx, a, t) {
+  if (a.carrier) {
+    // Carried: a small glyph orbiting the carrier.
+    const x = a.x + Math.cos(t * 3) * (a.carrier.r + 10);
+    const y = a.y + Math.sin(t * 3) * (a.carrier.r + 10);
+    glyph(ctx, x, y, 7, t);
+    return;
+  }
+  ctx.fillStyle = "rgba(120,255,230,0.12)";
+  ctx.beginPath();
+  ctx.arc(a.x, a.y, a.r * (2.2 + Math.sin(t * 4) * 0.3), 0, Math.PI * 2);
+  ctx.fill();
+  glyph(ctx, a.x, a.y, a.r, t);
+}
+
+function glyph(ctx, x, y, r, t) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(t * 1.2);
+  ctx.shadowBlur = 16;
+  ctx.shadowColor = "#78ffe6";
+  ctx.fillStyle = "#78ffe6";
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    ctx[i ? "lineTo" : "moveTo"](Math.cos(a) * r, Math.sin(a) * r);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#0b2b28";
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawExtract(ctx, ex, t) {
+  ctx.fillStyle = "rgba(138,255,193,0.06)";
+  ctx.beginPath();
+  ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(138,255,193,${0.5 + Math.sin(t * 3) * 0.2})`;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 8]);
+  ctx.lineDashOffset = -t * 20;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#8affc1";
+  ctx.font = "bold 14px ui-monospace, Menlo, Consolas, monospace";
+  ctx.textAlign = "center";
+  ctx.fillText("EXTRACT", ex.x, ex.y + 5);
+  ctx.textAlign = "left";
+}
+
+function drawEnd(ctx, end, vw, vh) {
+  const col = end.success ? "#8affc1" : "#ff6a6a";
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, vh / 2 - 60, vw, 120);
+  ctx.textAlign = "center";
+  ctx.fillStyle = col;
+  ctx.font = "bold 36px ui-monospace, Menlo, Consolas, monospace";
+  ctx.fillText(end.success ? "EXTRACTION SUCCESSFUL" : "SQUAD WIPED", vw / 2, vh / 2 + 4);
+  ctx.fillStyle = "#dfe8ff";
+  ctx.font = "15px ui-monospace, Menlo, Consolas, monospace";
+  ctx.fillText("Press Enter for a new field", vw / 2, vh / 2 + 36);
+  ctx.textAlign = "left";
+}
+
+function objectiveText(world) {
+  const a = world.artifact;
+  if (!a) return "";
+  if (a.carrier) return "Artifact secured — reach EXTRACT";
+  return "Find the artifact in the derelicts";
+}
+
 // ---- HUD ------------------------------------------------------------------------
 function drawHud(ctx, world, vw, vh) {
   const s = controlled(world);
-  if (!s) return;
+  if (!s || world.end) return;
   ctx.font = "14px ui-monospace, Menlo, Consolas, monospace";
   ctx.textBaseline = "alphabetic";
   const w = s.weapon;
@@ -249,6 +366,11 @@ function drawHud(ctx, world, vw, vh) {
     `${s.name}   HP ${Math.ceil(s.hp)} / ${s.maxHp}`,
     `${w.name}   ${ammo}   mags ${s.magsLeft}`,
   ];
+  const obj = objectiveText(world);
+  if (obj) {
+    ctx.fillStyle = "#78ffe6";
+    ctx.fillText(obj, 22, 30);
+  }
   ctx.fillStyle = "rgba(0,0,0,0.5)";
   ctx.fillRect(12, vh - 58, 360, 46);
   ctx.fillStyle = "#dfe8ff";
