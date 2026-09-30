@@ -4,7 +4,7 @@
 // purpose: it never touches world.rng, so replays stay replays.
 // ---------------------------------------------------------------------------
 
-import { CFG, controlled, ENEMY_TYPES } from "./sim.js";
+import { CFG, controlled, ENEMY_TYPES, bootsState } from "./sim.js";
 
 const EDGE_PAD = 160; // how far past the map edge the camera may look
 export const ZOOM_MIN = 0.3;
@@ -611,6 +611,8 @@ function drawHud(ctx, world, vw, vh) {
     `${s.name}   HP ${Math.ceil(s.hp)} / ${s.maxHp}`,
     `${w.name}   ${ammo}   mags ${s.magsLeft}`,
   ];
+  // B6: whether Shift would switch the boots on, or they are on.
+  const boots = bootsState(world, s);
   const obj = objectiveText(world);
   if (obj) {
     ctx.fillStyle = "#78ffe6";
@@ -629,9 +631,15 @@ function drawHud(ctx, world, vw, vh) {
   ctx.fillStyle = "rgba(223,232,255,0.45)";
   ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
   ctx.textAlign = "right";
-  ctx.fillText("A/D turn · W thrust · mouse aim + fire · R reload · Tab swap · wheel zoom", vw - 16, vh - 16);
+  ctx.fillText(s.boots
+    ? "A/D walk · Space jump · mouse aim + fire · Shift boots off · R reload · Tab swap · wheel zoom"
+    : "A/D turn · W thrust · mouse aim + fire · Shift boots · R reload · Tab swap · wheel zoom", vw - 16, vh - 16);
   ctx.textAlign = "left";
   ctx.font = "14px ui-monospace, Menlo, Consolas, monospace";
+  if (boots) {
+    ctx.fillStyle = boots === "on" ? "#78ffe6" : "rgba(120,255,230,0.6)";
+    ctx.fillText(boots === "on" ? "BOOTS: ON" : "BOOTS: in range", 22, vh - 88);
+  }
   if (s.ammo <= 0 && s.reloading <= 0) {
     ctx.fillStyle = "#ff6a6a";
     ctx.fillText(s.magsLeft > 0 ? "EMPTY — press R" : "OUT OF AMMO", 22, vh - 70);

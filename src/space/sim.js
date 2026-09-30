@@ -27,6 +27,18 @@ export const CFG = {
 
   soldierR: 18, // ≈ the game's 30×46 soldier
   bodyLength: 42, // the drawn figure, head to feet (tech/space-magboots.md)
+
+  // Magnetic boots (tech/space-magboots.md). Gravity, walk and jump are copied
+  // from src/game/config.js; accel and friction from SOLDIER_TUNING.
+  bootsReach: 14, // activation: ⅓ of a body length from the feet
+  bootsHold: 200, // B2: once on, a surface must stay this close in the wedge
+  bootsWedge: Math.PI / 4, // the feet wedge is ± this about down
+  gravity: 2000,
+  walkSpeed: 320,
+  walkAccel: 2600,
+  walkFriction: 3000,
+  jumpSpeed: 700,
+  snapTol: 12, // a push past this knocks a standing soldier off its surface
   turnRate: 4, // rad/s
   thrust: 500, // px/s²
   aimArc: Math.PI / 2, // the player aims within this arc centred on facing
@@ -241,6 +253,12 @@ function makeSoldier(recruit, x, y, weaponId) {
     m: 1,
     angle: -Math.PI / 2, // facing: where the jetpack pushes
     dir: 1, // which side of facing the head is on: see upOf
+    boots: null, // null (floating), "air" or "ground"
+    ground: null, // the rock stood on
+    gphi: 0, // where on it, in the rock's own frame
+    gv: 0, // walk speed along the surface, + toward the rock's +angle
+    walkIn: 0,
+    pushed: 0, // px other things pushed a standing soldier this step
     aim: -Math.PI / 2, // where the gun points
     thrusting: false,
     hp: maxHp,
@@ -827,9 +845,9 @@ export const controlled = (world) => {
 };
 
 // ---- step ------------------------------------------------------------------
-// `input`: { turn: -1..1, thrust: bool, aimX, aimY, fire, firePress, reload,
-// swap } — presses already latched by the caller, so an edge never falls
-// between two steps.
+// `input`: { turn: -1..1, thrust: bool, aimX, aimY, fire, firePress (the
+// mouse), space, spacePress, boots (Shift), reload, swap } — presses already
+// latched by the caller, so an edge never falls between two steps.
 export function step(world, input = {}) {
   const dt = CFG.step;
   world.t += dt;
@@ -837,11 +855,17 @@ export function step(world, input = {}) {
 
   if (input.swap && !world.end) swapControl(world);
   const s = world.end ? null : controlled(world);
+  // Only the soldier you fly wears boots: swapping away switches them off.
+  for (const o of world.soldiers) if (o.boots && o !== s) bootsOff(o);
   if (s) {
+    if (input.boots) toggleBoots(world, s);
+    if (s.boots === "ground" && input.spacePress) jump(s);
     drive(s, input, dt);
     if (input.reload) startReload(s, world);
-    // Semi-auto takes the press, auto the hold — as the mission does.
-    const want = s.weapon.auto ? input.fire : input.firePress;
+    // Semi-auto takes the press, auto the hold — as the mission does. Space
+    // fires only while floating; with the boots on it is jump, and the mouse
+    // is the trigger.
+    const want = s.weapon.auto ? input.fire || (!s.boots && input.space) : input.firePress || (!s.boots && input.spacePress);
     if (want) fire(world, s, s.aim, aimAccuracy(s.stats.aim));
   }
   if (!world.end) updateSquad(world, dt);
@@ -852,6 +876,7 @@ export function step(world, input = {}) {
   }
   tickActors(world, dt);
   integrate(world, dt);
+  settleBoots(world, dt);
   updateProjectiles(world, dt);
   if (!world.end) tickObjective(world);
 }
@@ -859,8 +884,19 @@ export function step(world, input = {}) {
 // Rotate-and-thrust: turn at a fixed rate, push along facing. Aim is the
 // mouse, independent of facing.
 export function drive(s, input, dt) {
-  s.angle += (input.turn || 0) * CFG.turnRate * dt;
-  s.thrusting = !!input.thrust;
+  const k = Math.sign(input.turn || 0);
+  s.walkIn = 0;
+  if (s.boots === "ground") {
+    // A/D walk, and facing is the walk direction. Turning round is the one
+    // thing that flips dir: facing reverses and up stays (see upOf).
+    if (k && k !== s.dir) {
+      s.dir = k;
+      s.angle += Math.PI;
+    }
+    s.walkIn = k;
+  } else s.angle += (input.turn || 0) * CFG.turnRate * dt;
+  // The jetpack does nothing with the boots on.
+  s.thrusting = !!input.thrust && !s.boots;
   // Aim follows the mouse, clamped to the arc in front: a cursor behind you
   // pins the gun to the arc's nearer edge. Re-clamped every step, so turning
   // with a still mouse drags the aim along.
@@ -869,6 +905,12 @@ export function drive(s, input, dt) {
     s.aim = s.angle + clamp(want, -CFG.aimArc / 2, CFG.aimArc / 2);
   }
   if (s.thrusting) thrust(s, CFG.thrust, dt);
+  // In the air with the boots on, gravity pulls along the feet (B1).
+  if (s.boots === "air") {
+    const [ux, uy] = upOf(s);
+    s.vx -= ux * CFG.gravity * dt;
+    s.vy -= uy * CFG.gravity * dt;
+  }
 }
 
 // Thrust adds along facing for as long as it is held: no speed cap (Bo,
@@ -876,6 +918,159 @@ export function drive(s, input, dt) {
 export function thrust(b, accel, dt, angle = b.angle) {
   b.vx += Math.cos(angle) * accel * dt;
   b.vy += Math.sin(angle) * accel * dt;
+}
+
+// ---- magnetic boots (tech/space-magboots.md) ------------------------------------
+// The feet wedge: ±bootsWedge about down, from the body's centre. For each rock,
+// its nearest point inside the wedge — along the centre line if that is inside,
+// else the nearer edge ray's first hit — measured from the feet. Returns the
+// nearest rock within `range` of the feet, or null. Rocks only (M1).
+export function surfaceInWedge(world, s, range) {
+  const [ux, uy] = upOf(s);
+  const dx = -ux, dy = -uy;
+  const fx = s.x + dx * s.r, fy = s.y + dy * s.r;
+  const reach = s.r + range;
+  const cosW = Math.cos(CFG.bootsWedge), sinW = Math.sin(CFG.bootsWedge);
+  let best = null, bd = Infinity;
+  for (const a of world.asteroids) {
+    const rx = a.x - s.x, ry = a.y - s.y;
+    const rd = Math.hypot(rx, ry);
+    if (rd - a.r > reach || rd <= a.r) continue;
+    let px, py;
+    if (rx * dx + ry * dy >= cosW * rd) {
+      px = a.x - (rx / rd) * a.r;
+      py = a.y - (ry / rd) * a.r;
+    } else {
+      let bt = Infinity;
+      for (const sg of [-1, 1]) {
+        const ex = dx * cosW - dy * sinW * sg, ey = dx * sinW * sg + dy * cosW;
+        const t = segCircle(s.x, s.y, s.x + ex * reach, s.y + ey * reach, a.x, a.y, a.r);
+        if (t !== null && t < bt) {
+          bt = t;
+          px = s.x + ex * reach * t;
+          py = s.y + ey * reach * t;
+        }
+      }
+      if (bt === Infinity) continue;
+    }
+    const d = Math.hypot(px - fx, py - fy);
+    if (d <= range && d < bd) {
+      bd = d;
+      best = a;
+    }
+  }
+  return best;
+}
+
+// For the HUD (B6): "on", "ready" (Shift would work) or null.
+export function bootsState(world, s) {
+  if (!s || !s.alive) return null;
+  if (s.boots) return "on";
+  return surfaceInWedge(world, s, CFG.bootsReach) ? "ready" : null;
+}
+
+function toggleBoots(world, s) {
+  if (s.boots) bootsOff(s);
+  else if (surfaceInWedge(world, s, CFG.bootsReach)) s.boots = "air";
+}
+
+// Back to floating, with whatever world velocity it had.
+function bootsOff(s) {
+  s.boots = null;
+  s.ground = null;
+  s.gv = 0;
+  s.walkIn = 0;
+}
+
+function jump(s) {
+  const [ux, uy] = upOf(s);
+  s.boots = "air";
+  s.ground = null;
+  s.vx += ux * CFG.jumpSpeed;
+  s.vy += uy * CFG.jumpSpeed;
+}
+
+// The velocity of a rock's surface (drift + spin) at a world point.
+function surfaceVel(a, x, y) {
+  return [a.vx - a.spin * (y - a.y), a.vy + a.spin * (x - a.x)];
+}
+
+// Up along the surface normal, keeping dir: facing is where that puts it.
+function standOn(s, nx, ny) {
+  s.angle = Math.atan2(s.dir * nx, -s.dir * ny);
+}
+
+// A booted soldier against a rock: the boots' own contact, never `collide`.
+// One-sided: it is pushed out and loses what it had into the surface, no bounce,
+// and the rock gets no impulse (answer 4). Feet-first within the wedge lands.
+function bootContact(s, a) {
+  if (s.ground === a) return;
+  const dx = s.x - a.x, dy = s.y - a.y;
+  const min = s.r + a.r;
+  const d2 = dx * dx + dy * dy;
+  if (d2 >= min * min) return;
+  const d = Math.sqrt(d2) || 0.0001;
+  const nx = dx / d, ny = dy / d;
+  s.x += nx * (min - d);
+  s.y += ny * (min - d);
+  if (s.boots === "ground") {
+    s.pushed += min - d;
+    return;
+  }
+  foldShove(s);
+  const [svx, svy] = surfaceVel(a, s.x, s.y);
+  const vn = (s.vx - svx) * nx + (s.vy - svy) * ny;
+  if (vn < 0) {
+    s.vx -= vn * nx;
+    s.vy -= vn * ny;
+  }
+  const [ux, uy] = upOf(s);
+  if (nx * ux + ny * uy >= Math.cos(CFG.bootsWedge)) {
+    s.boots = "ground";
+    s.ground = a;
+    s.gphi = Math.atan2(ny, nx) - a.rot;
+    s.gv = 0;
+    s.pushed = 0;
+    standOn(s, nx, ny);
+    [s.vx, s.vy] = surfaceVel(a, s.x, s.y);
+  }
+}
+
+// After integrate has moved the rocks: a standing soldier is carried by its
+// rock, walks, and is snapped feet-on-surface; one in the air must still have a
+// surface in the wedge within the hold range.
+function settleBoots(world, dt) {
+  for (const s of world.soldiers) {
+    if (!s.alive || !s.boots) continue;
+    if (s.boots === "air") {
+      if (!surfaceInWedge(world, s, CFG.bootsHold)) bootsOff(s);
+      continue;
+    }
+    // Knocked off: a shove, or a push past the snap tolerance. It keeps the
+    // world velocity it had and falls back under its own boots.
+    if (s.pushed > CFG.snapTol || s.sx || s.sy) {
+      s.boots = "air";
+      s.ground = null;
+      s.pushed = 0;
+      continue;
+    }
+    s.pushed = 0;
+    const g = s.ground;
+    const R = g.r + s.r;
+    const target = s.walkIn * CFG.walkSpeed;
+    const rate = (s.walkIn ? CFG.walkAccel : CFG.walkFriction) * dt;
+    s.gv += clamp(target - s.gv, -rate, rate);
+    s.gphi += (s.gv * dt) / R;
+    const th = g.rot + s.gphi;
+    const nx = Math.cos(th), ny = Math.sin(th);
+    s.x = g.x + nx * R;
+    s.y = g.y + ny * R;
+    standOn(s, nx, ny);
+    // The true world velocity: companions match it and a jump inherits it.
+    const [svx, svy] = surfaceVel(g, s.x, s.y);
+    s.vx = svx - ny * s.gv;
+    s.vy = svy + nx * s.gv;
+  }
 }
 
 // ---- per-actor ticks: cooldowns, reload, status, shove, respawn ------------
@@ -962,6 +1157,7 @@ function kill(world, t) {
   t.alive = false;
   t.hp = 0;
   t.burn = t.slow = null;
+  if (t.kind === "soldier") bootsOff(t);
   const color = t.color || (t.type && ENEMY_TYPES[t.type].color);
   world.events.push({ type: "death", x: t.x, y: t.y, r: t.r, kind: t.kind, enemy: t.type, color });
   if (t.kind === "dummy") t.respawn = CFG.dummyRespawn;
@@ -1261,13 +1457,16 @@ function integrate(world, dt) {
   let maxV = 0;
   let minR = Infinity;
   for (const b of list) {
-    maxV = Math.max(maxV, Math.hypot(b.vx + (b.sx || 0), b.vy + (b.sy || 0)));
     minR = Math.min(minR, b.r);
+    // A standing soldier is carried by its rock after this, not moved here.
+    if (b.boots === "ground") continue;
+    maxV = Math.max(maxV, Math.hypot(b.vx + (b.sx || 0), b.vy + (b.sy || 0)));
   }
   const n = Math.max(1, Math.ceil((maxV * dt) / (minR * 0.5)));
   const h = dt / n;
   for (let k = 0; k < n; k++) {
     for (const b of list) {
+      if (b.boots === "ground") continue;
       // Slow scales the body's whole displacement (the game scales horizontal).
       const f = b.slow && b.slow.time > 0 ? b.slow.factor : 1;
       b.x += (b.vx + (b.sx || 0)) * h * f;
@@ -1286,11 +1485,20 @@ function collideAll(world, list) {
       const b = list[j];
       // Bodies pass through each other; only rocks bounce things (P7).
       if (a.kind !== "asteroid" && b.kind !== "asteroid") continue;
-      collide(a, b, e);
+      if (a.boots) bootContact(a, b);
+      else if (b.boots) bootContact(b, a);
+      else collide(a, b, e);
     }
     for (const r of world.ruins) {
       if (Math.hypot(a.x - r.x, a.y - r.y) > r.R + a.r) continue;
-      for (const w of r.walls) collideWall(a, w, e);
+      for (const w of r.walls) {
+        if (!a.boots) collideWall(a, w, e);
+        else {
+          // Booted: no bounce. A standing soldier pushed by a wall counts it.
+          const x = a.x, y = a.y;
+          if (collideWall(a, w, 0) && a.boots === "ground") a.pushed += Math.hypot(a.x - x, a.y - y);
+        }
+      }
     }
     edge(a, world.size, e);
   }

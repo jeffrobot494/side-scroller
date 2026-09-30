@@ -42,6 +42,12 @@ Each slice is one commit on branch `space-prototype`. The prototype is its own p
 | M3 | **The camera turns to your feet.** While grounded, the view's roll eases toward the soldier's up (**B3**). Airborne with the boots on, it holds the roll of the surface you left and does not follow a spin. When the boots switch off, it eases back to world-up. It is view-only state, like zoom. Everything that maps between screen and world takes the roll: the 3D camera's up vector, the 2D overlay transform, the edge arrows, mouse aim in `src/space/main.js`, and sound pan in `src/space/audio.js`. The HUD stays screen-fixed. While floating the roll is back at world-up, so the M0 band rule matches what the player sees | View only | Walking round a rock turns the world, not you |
 | M4 | **How it looks and sounds.** On a surface the figure stands (no trailing-leg kick) and strides while walking, a copy of the game's stride. Up changes instantly at an inside corner in the sim, but the figure's turn is eased in the view. Boot soles glow while the boots are on. Sim events for boots on/off, jump, land and footsteps, played by `audio.js` | View and audio only | Readable and audible |
 
+**As built, M1.**
+- **Walk speed is measured at the body's centre**, not the feet. On a rock of r 120 the centre circles at r + 18, so the soles move about 13% slower than 320px/s. At a wall end in M2 the feet barely move while the body swings round, which is why the centre is the one to measure.
+- **The standing jump's apex is 117px**, not 122. The fixed step applies gravity before motion, which loses about v·dt/2 ≈ 6px. The takeoff spot is hit exactly.
+- **A booted soldier against a ruin wall** uses `collideWall` with restitution 0. Walls do not move, so that is the one-sided contact already. A standing soldier pushed by a wall counts the push towards the snap tolerance.
+- **The HUD line** sits above the weapon panel, and the key hint at the bottom right changes while the boots are on.
+
 M1 is the first playable slice. Every slice lands alone: M0 changes only how a floating figure is turned, M1 needs only rocks and cannot reach walls, M2 adds walls to a working mechanic, and M3 and M4 touch only the page side.
 
 ## Reuses

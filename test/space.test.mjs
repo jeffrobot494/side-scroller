@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove } from "../src/space/sim.js";
 import { createView, draw, cameraFor, zoomBy, figurePose, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
 import { createAudio } from "../src/space/audio.js";
 
@@ -567,10 +567,175 @@ export default async function run_(t) {
     t.ok("the feet are the collision radius straight down", near(fx, 3000, 1e-9) && near(fy, 3000 + CFG.soldierR, 1e-9));
   }
 
+  // ---- magnetic boots M1: rocks ----------------------------------------------
+  {
+    // One rock at (4000, 4000) and a soldier over its top, head up, feet `gap`
+    // px above the surface.
+    const onRock = (r = 120, gap = 5, rock = {}, opts = {}) => {
+      const w = empty(opts);
+      const a = makeAsteroid(makeRng(3), 4000, 4000, r);
+      Object.assign(a, { vx: 0, vy: 0, spin: 0, rot: 0 }, rock);
+      w.asteroids.push(a);
+      const s = w.soldiers[0];
+      Object.assign(s, { x: 4000, y: 4000 - r - s.r - gap, vx: 0, vy: 0, angle: 0, dir: 1 });
+      return { w, s, a };
+    };
+    const land = (w, s) => { step(w, { boots: true }); for (let i = 0; i < 60 && s.boots !== "ground"; i++) step(w, {}); };
+    const R = (s, a) => Math.hypot(s.x - a.x, s.y - a.y);
+
+    {
+      const { w, s, a } = onRock(120, 5);
+      t.eq("HUD: in range 5px above a rock", bootsState(w, s), "ready");
+      land(w, s);
+      t.eq("Shift within 14px of a rock: the boots come on and it lands", s.boots, "ground");
+      t.ok("standing: feet on the surface", near(R(s, a), a.r + s.r, 1e-9));
+      step(w, { boots: true });
+      t.eq("Shift again: floating", s.boots, null);
+    }
+    {
+      const { w, s } = onRock(120, 20);
+      step(w, { boots: true });
+      t.eq("20px above: Shift does nothing", s.boots, null);
+    }
+    {
+      // Beside a rock, head up: its nearest point is 5px from the side of the
+      // body but outside the feet wedge.
+      const { w, s, a } = onRock(120, 0);
+      Object.assign(s, { x: a.x + a.r + s.r + 5, y: a.y });
+      step(w, { boots: true });
+      t.eq("a rock beside you, outside the wedge: no boots", s.boots, null);
+    }
+    {
+      // M1 counts rocks only: a hull plate under the feet does not.
+      const w = empty();
+      addRuin(w, 3000, 3000, 0, 400, 200);
+      const s = w.soldiers[0];
+      Object.assign(s, { x: 2950, y: 3000 - 100 - CFG.wallHalf - s.r - 5, vx: 0, vy: 0, angle: 0, dir: 1 });
+      step(w, { boots: true });
+      t.eq("a wall under the feet does not switch the boots on (M1)", s.boots, null);
+    }
+    {
+      // Walking on a still rock: feet stay on it, at the walk speed.
+      const { w, s, a } = onRock(120, 5);
+      land(w, s);
+      let worst = 0, align = 1;
+      run(w, (i) => {
+        if (i > 0) {
+          worst = Math.max(worst, Math.abs(R(s, a) - a.r - s.r));
+          const v = Math.hypot(s.vx, s.vy);
+          if (v > 1) align = Math.min(align, (s.vx * Math.cos(s.angle) + s.vy * Math.sin(s.angle)) / v);
+        }
+        return { turn: 1 };
+      }, 240);
+      t.ok(`walking keeps the feet on the rock (worst ${worst.toExponential(1)}px)`, worst < 1);
+      t.ok(`walking reaches the walk speed (${Math.hypot(s.vx, s.vy).toFixed(2)})`, near(Math.hypot(s.vx, s.vy), CFG.walkSpeed, 1e-6));
+      t.ok("facing is the walk direction", align > 0.999);
+      const f0 = s.angle;
+      step(w, { turn: -1 });
+      const [ux, uy] = upOf(s);
+      const n = [(s.x - a.x) / R(s, a), (s.y - a.y) / R(s, a)];
+      t.ok("turning round flips dir and facing, and up stays the surface normal",
+        s.dir === -1 && Math.cos(s.angle - f0) < -0.99 && near(ux, n[0], 1e-9) && near(uy, n[1], 1e-9));
+      run(w, {}, 60);
+      t.ok("no input: friction stops the walk", Math.hypot(s.vx, s.vy) < 1e-9);
+      run(w, { thrust: true }, 30);
+      t.ok("W with the boots on adds nothing", Math.hypot(s.vx, s.vy) < 1e-9 && !s.thrusting);
+    }
+    {
+      // A drifting, spinning rock carries a still soldier.
+      const { w, s, a } = onRock(120, 5, { vx: 30, vy: -20, spin: 0.5 });
+      land(w, s);
+      const rel = () => Math.atan2(s.y - a.y, s.x - a.x) - a.rot;
+      const r0 = rel();
+      run(w, {}, 200);
+      const dr = Math.abs(Math.atan2(Math.sin(rel() - r0), Math.cos(rel() - r0)));
+      t.ok(`a still soldier keeps its spot on a spinning rock (${dr.toExponential(1)} rad)`, dr < 1e-9 && near(R(s, a), a.r + s.r, 1e-9));
+      const sv = [a.vx - a.spin * (s.y - a.y), a.vy + a.spin * (s.x - a.x)];
+      t.ok("its velocity is the rock's surface velocity there", near(s.vx, sv[0], 1e-9) && near(s.vy, sv[1], 1e-9));
+    }
+    {
+      // A standing jump comes back to where it left.
+      const { w, s, a } = onRock(120, 5);
+      land(w, s);
+      run(w, {}, 5);
+      const x0 = s.x, y0 = s.y;
+      step(w, { spacePress: true, space: true });
+      t.eq("Space jumps", s.boots, "air");
+      let apex = 0, n = 0;
+      while (s.boots === "air" && n++ < 200) { apex = Math.max(apex, R(s, a) - a.r - s.r); step(w, {}); }
+      const want = CFG.jumpSpeed ** 2 / (2 * CFG.gravity);
+      t.ok(`the jump's apex is v²/2g (${apex.toFixed(1)} vs ${want.toFixed(1)})`, near(apex, want, 8));
+      t.ok(`and it lands back on its takeoff spot (${Math.hypot(s.x - x0, s.y - y0).toFixed(2)}px)`, s.boots === "ground" && Math.hypot(s.x - x0, s.y - y0) < 3);
+    }
+    {
+      // Landing on a small rock at jump speed does not push it (answer 4).
+      const { w, s, a } = onRock(30, 5);
+      step(w, { boots: true });
+      s.vy = CFG.jumpSpeed;
+      for (let i = 0; i < 30 && s.boots !== "ground"; i++) step(w, {});
+      t.ok("landing on a small rock leaves its velocity unchanged", s.boots === "ground" && a.vx === 0 && a.vy === 0);
+    }
+    {
+      // Spin the feet away mid-jump: the boots switch off, the velocity stays.
+      const { w, s } = onRock(120, 5);
+      land(w, s);
+      step(w, { spacePress: true });
+      let n = 0;
+      while (s.boots && n++ < 120) step(w, { turn: 1 });
+      const v0 = [s.vx, s.vy];
+      run(w, {}, 10);
+      t.ok(`spinning the feet away switches the boots off (after ${n} steps)`, s.boots === null && n < 120);
+      t.ok("and it floats on with its velocity", Math.hypot(v0[0], v0[1]) > 1 && s.vx === v0[0] && s.vy === v0[1]);
+    }
+    {
+      // Knockback throws a standing soldier into the air; gravity brings it back.
+      const { w, s } = onRock(120, 5);
+      land(w, s);
+      shove(s, 300, 0);
+      step(w, {});
+      t.eq("a knockback knocks a standing soldier off", s.boots, "air");
+      for (let i = 0; i < 120 && s.boots !== "ground"; i++) step(w, {});
+      t.eq("and its boots bring it back down", s.boots, "ground");
+    }
+    {
+      // Space: fire while floating, never with the boots on; the mouse always fires.
+      const { w, s } = onRock(120, 5);
+      const ammo0 = s.ammo;
+      step(w, { space: true, spacePress: true });
+      t.eq("floating, Space fires", s.ammo, ammo0 - 1);
+      s.fireCd = 0;
+      land(w, s);
+      const ammo1 = s.ammo;
+      run(w, { space: true }, 30);
+      t.eq("booted, Space held never fires", s.ammo, ammo1);
+      run(w, { fire: true, firePress: true }, 1);
+      t.eq("booted, the mouse fires", s.ammo, ammo1 - 1);
+    }
+    {
+      // Swapping away switches the boots off; companions never wear them.
+      const { w, s } = onRock(120, 5, {}, { squad: 2 });
+      land(w, s);
+      step(w, { swap: true });
+      t.eq("swapping away switches the boots off", s.boots, null);
+    }
+    {
+      // Determinism with a boots trace.
+      const trace = (i) => ({ turn: i % 90 < 30 ? 1 : i % 90 < 45 ? -1 : 0, thrust: i % 50 < 35, boots: i % 120 === 0, space: i % 40 < 10, spacePress: i % 40 === 0, fire: i % 7 < 3, firePress: i % 7 === 0 });
+      const a = createWorld(42, { squad: 3 });
+      const b = createWorld(42, { squad: 3 });
+      let booted = 0;
+      run(a, (i) => { if (a.soldiers[a.ctrl].boots) booted++; return trace(i); }, 900);
+      run(b, trace, 900);
+      const sig = (w) => JSON.stringify([w.soldiers.map((s) => [s.x, s.y, s.hp, s.boots]), w.asteroids.map((o) => [o.x, o.y])]);
+      t.ok("same seed + same boots trace = same world", sig(a) === sig(b));
+    }
+  }
+
   // ---- view smoke ----------------------------------------------------------
   {
     const w = createWorld(5, { squad: 3 });
     run(w, { thrust: true, turn: 1 }, 30);
+    w.soldiers[w.ctrl].boots = "air"; // the HUD's boot line
     let threw = null;
     try { draw(ctx2d(), createView(), w, 960, 540, 1 / 60); } catch (e) { threw = e; }
     t.ok(`view draws a world${threw ? ": " + threw.message : ""}`, !threw);

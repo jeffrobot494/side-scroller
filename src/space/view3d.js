@@ -209,6 +209,9 @@ function poseSoldier(v, s, t, isCtrl) {
   v.root.position.set(s.x, -s.y, 0);
   v.root.rotation.z = p.rot;
   v.body.scale.x = p.dir;
+  // The sim's feet are at r (18), the drawn ones at half the figure (21): with
+  // the boots on, lift the figure so its soles meet the surface.
+  v.body.position.y = s.boots ? FIGURE_H / 2 - s.r : 0;
   // A slow drift of the whole figure so nobody floats like a statue.
   v.body.rotation.z = Math.sin(t * 1.3 + s.x * 0.01) * 0.04;
 
