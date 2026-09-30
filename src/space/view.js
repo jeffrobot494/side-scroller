@@ -4,7 +4,7 @@
 // purpose: it never touches world.rng, so replays stay replays.
 // ---------------------------------------------------------------------------
 
-import { controlled, ENEMY_TYPES } from "./sim.js";
+import { CFG, controlled, ENEMY_TYPES } from "./sim.js";
 
 const EDGE_PAD = 160; // how far past the map edge the camera may look
 
@@ -518,7 +518,6 @@ function drawArrows(ctx, world, cam, vw, vh) {
   ctx.globalAlpha = 1;
   const dist = (x, y) => (from ? `${Math.round(Math.hypot(x - from.x, y - from.y) / 10) * 10}` : "");
   const art = world.artifact;
-  if (art && !art.carrier) arrow(art.x, art.y, "#78ffe6", 13, dist(art.x, art.y));
   if (world.extract && art && art.carrier) arrow(world.extract.x, world.extract.y, "#8affc1", 13, dist(world.extract.x, world.extract.y));
 }
 
@@ -687,6 +686,21 @@ function drawSoldier(ctx, s, isCtrl) {
   ctx.fillStyle = "#cfe8ff"; // visor, toward facing
   ctx.fillRect(3, -5, 7, 10);
   ctx.restore();
+  // The player's aim arc: a faint wedge in front of the soldier you fly.
+  if (isCtrl) {
+    ctx.save();
+    ctx.rotate(s.angle);
+    const half = CFG.aimArc / 2;
+    ctx.strokeStyle = "rgba(138,255,193,0.18)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(-half) * (s.r + 8), Math.sin(-half) * (s.r + 8));
+    ctx.lineTo(Math.cos(-half) * 90, Math.sin(-half) * 90);
+    ctx.arc(0, 0, 90, -half, half);
+    ctx.lineTo(Math.cos(half) * (s.r + 8), Math.sin(half) * (s.r + 8));
+    ctx.stroke();
+    ctx.restore();
+  }
   // Gun, toward aim.
   ctx.rotate(s.aim);
   ctx.fillStyle = "#d8d8d8";

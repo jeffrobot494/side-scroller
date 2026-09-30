@@ -7,13 +7,17 @@ import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
 import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS } from "../src/space/sim.js";
 import { createView, draw } from "../src/space/view.js";
+import { createAudio } from "../src/space/audio.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
 // A world with nothing in it but the squad, for mechanics tests.
+// Soldiers face +x, the way the fixtures fire, so the aim arc never clamps them.
 function empty(opts = {}) {
-  return createWorld(7, { asteroids: 0, dummies: 0, ruins: 0, objective: false, enemies: 0, waveEvery: 1e9, ...opts });
+  const w = createWorld(7, { asteroids: 0, dummies: 0, ruins: 0, objective: false, enemies: 0, waveEvery: 1e9, ...opts });
+  for (const s of w.soldiers) s.angle = 0;
+  return w;
 }
 
 // A stationary target `d` px along +x from a soldier at (2000, 2000).
@@ -65,6 +69,22 @@ export default async function run_(t) {
     s.x = s.y = 2000; s.vx = 900; s.vy = 0; s.angle = 0;
     run(w, { thrust: true }, 1);
     t.ok("thrust does not brake a body already past the cap", near(s.vx, 900, 1e-9));
+  }
+  {
+    // The player aims within 90° of facing; outside it, the nearer edge.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000, angle: 0 });
+    run(w, { aimX: 2100, aimY: 2030 }, 1);
+    t.ok("aim inside the arc follows the mouse", near(s.aim, Math.atan2(30, 100), 1e-9));
+    run(w, { aimX: 2000, aimY: 2100 }, 1);
+    t.ok("aim 90° off facing clamps to the arc edge", near(s.aim, Math.PI / 4, 1e-9));
+    run(w, { aimX: 1900, aimY: 1990 }, 1);
+    t.ok("aim behind clamps to the nearer edge", near(s.aim, -Math.PI / 4, 1e-9));
+    s.fireCd = 0;
+    run(w, { aimX: 1900, aimY: 1990, fire: true }, 1);
+    const p = w.projectiles[0];
+    t.ok("a round leaves inside the arc (± spread)", Math.abs(Math.atan2(p.vy, p.vx)) <= Math.PI / 4 + 0.2);
   }
   {
     const w = empty();
@@ -192,6 +212,23 @@ export default async function run_(t) {
     run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
     run(w, {}, 20);
     t.ok("chain jumps twice within range", b.hp < 1000 && c.hp < 1000 && far.hp === 1000);
+    // Every event the sim emits must carry a finite position — the chain
+    // event once did not, and the NaN froze the page through the sound pan.
+    const w2 = createWorld(9, { squad: 3 });
+    for (const s2 of w2.soldiers) s2.hp = s2.maxHp = 1e9;
+    const seen = new Set();
+    const unplaced = new Set();
+    const lead = () => w2.soldiers[w2.ctrl];
+    for (let i = 0; i < 60 * 90; i++) {
+      const e = w2.enemies.find((o) => o.alive);
+      step(w2, { turn: 1, thrust: i % 90 < 40, aimX: e ? e.x : 0, aimY: e ? e.y : 0, fire: true, firePress: i % 8 === 0, reload: i % 240 === 0, swap: i % 600 === 0 });
+      for (const ev of w2.events) {
+        seen.add(ev.type);
+        if (ev.type !== "wave" && !(Number.isFinite(ev.x) && Number.isFinite(ev.y))) unplaced.add(ev.type);
+      }
+      w2.events.length = 0;
+    }
+    t.ok(`every positional event has a finite x, y (saw ${[...seen].sort().join(", ")})${unplaced.size ? " — missing: " + [...unplaced].join(", ") : ""}`, unplaced.size === 0 && seen.has("chain"));
   }
   {
     const { w, s, t: d } = range("ripper", 200, { dummies: 2 });
@@ -467,6 +504,14 @@ export default async function run_(t) {
     run(b, trace, 900);
     const sig = (w) => JSON.stringify([w.soldiers.map((s) => [s.x, s.y, s.hp]), w.asteroids.map((o) => [o.x, o.y])]);
     t.ok("same seed + same trace = same world", sig(a) === sig(b));
+  }
+
+  // ---- audio: silent and harmless without WebAudio (node) ------------------
+  {
+    const a = createAudio();
+    let threw = null;
+    try { a.unlock(); a.handle([{ type: "explode", x: 0, y: 0 }], 0, 0); a.setThrust(true); a.end(true); } catch (e) { threw = e; }
+    t.ok(`audio is a no-op without WebAudio${threw ? ": " + threw.message : ""}`, !threw);
   }
 
   // ---- view smoke ----------------------------------------------------------

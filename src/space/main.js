@@ -6,6 +6,7 @@
 
 import { CFG, createWorld, step } from "./sim.js";
 import { createView, draw, cameraFor } from "./view.js";
+import { createAudio } from "./audio.js";
 
 const canvas = document.getElementById("space");
 const ctx = canvas.getContext("2d");
@@ -19,6 +20,10 @@ const KEYS = {
   Tab: "swap", KeyK: "swap",
   Enter: "restart",
 };
+
+const audio = createAudio();
+addEventListener("keydown", audio.unlock);
+addEventListener("mousedown", audio.unlock);
 
 const held = new Set();
 const pressed = new Set(); // latched until a step reads it
@@ -87,6 +92,7 @@ function sample() {
   return input;
 }
 
+let ended = false;
 let last = performance.now();
 let acc = 0;
 function frame(now) {
@@ -99,6 +105,18 @@ function frame(now) {
     else step(world, input);
     acc -= CFG.step;
   }
+  // Sound reads the events before the view drains them.
+  const cam = cameraFor(world, vw, vh);
+  // Sound is decoration: a failure in it must never stop the loop.
+  try {
+    audio.handle(world.events, cam.x + vw / 2, cam.y + vh / 2);
+    const lead = world.soldiers[world.ctrl];
+    audio.setThrust(!!(lead && lead.alive && lead.thrusting && !world.end));
+    if (world.end && !ended) audio.end(world.end.success);
+  } catch (e) {
+    console.error(e);
+  }
+  ended = !!world.end;
   draw(ctx, view, world, vw, vh, dt);
   requestAnimationFrame(frame);
 }

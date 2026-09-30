@@ -14,7 +14,7 @@ export const CFG = {
   step: 1 / 60, // fixed step, as Mission._frame
   maxFrame: 0.25, // frame clamp, as Mission._frame
 
-  mapSize: 4000,
+  mapSize: 8000,
   restitution: 0.6,
 
   asteroidCount: 70,
@@ -29,6 +29,7 @@ export const CFG = {
   turnRate: 4, // rad/s
   thrust: 500, // px/s²
   thrustCap: 420, // thrust cannot push speed past this; a bounce can
+  aimArc: Math.PI / 2, // the player aims within this arc centred on facing
 
   // Copied from src/game/config.js defaults.
   aimSpread: 0.12,
@@ -48,7 +49,7 @@ export const CFG = {
   breach: 90, // an opening in a hull; a soldier is 36 across
   artifactR: 14,
   extractR: 120,
-  extractMinDist: 2000, // half the map from the start (P10)
+  extractMinDist: 4000, // half the map from the start (P10)
 
   standoff: 90, // companion station distance: 90 ± 40, as companionspecs.js authors it
   standoffSpread: 40,
@@ -705,7 +706,7 @@ function updateMine(world, m, T, dt) {
   }
   if (m.age < T.arm) return;
   for (const s of world.soldiers) {
-    if (s.alive && Math.hypot(s.x - m.x, s.y - m.y) < T.trigger) { m.fuse = T.fuse; break; }
+    if (s.alive && Math.hypot(s.x - m.x, s.y - m.y) < T.trigger) { m.fuse = T.fuse; world.events.push({ type: "fuse", x: m.x, y: m.y }); break; }
   }
 }
 
@@ -755,7 +756,7 @@ function companion(world, s, lead, dt) {
   pilot(s, dvx, dvy, dt);
 
   // Guns: aim is independent of facing, as the game's companions do.
-  if (s.weapon.magazine && s.ammo <= 0 && !(s.reloading > 0)) startReload(s); // autoReload, ai.js
+  if (s.weapon.magazine && s.ammo <= 0 && !(s.reloading > 0)) startReload(s, world); // autoReload, ai.js
   if ((s.senseT = (s.senseT || 0) - dt) <= 0) {
     s.senseT = CFG.senseEvery;
     s.foe = pickFoe(world, s);
@@ -824,7 +825,7 @@ export function step(world, input = {}) {
   const s = world.end ? null : controlled(world);
   if (s) {
     drive(s, input, dt);
-    if (input.reload) startReload(s);
+    if (input.reload) startReload(s, world);
     // Semi-auto takes the press, auto the hold — as the mission does.
     const want = s.weapon.auto ? input.fire : input.firePress;
     if (want) fire(world, s, s.aim, aimAccuracy(s.stats.aim));
@@ -846,7 +847,13 @@ export function step(world, input = {}) {
 export function drive(s, input, dt) {
   s.angle += (input.turn || 0) * CFG.turnRate * dt;
   s.thrusting = !!input.thrust;
-  if (input.aimX != null) s.aim = Math.atan2(input.aimY - s.y, input.aimX - s.x);
+  // Aim follows the mouse, clamped to the arc in front: a cursor behind you
+  // pins the gun to the arc's nearer edge. Re-clamped every step, so turning
+  // with a still mouse drags the aim along.
+  if (input.aimX != null) {
+    const want = wrapAngle(Math.atan2(input.aimY - s.y, input.aimX - s.x) - s.angle);
+    s.aim = s.angle + clamp(want, -CFG.aimArc / 2, CFG.aimArc / 2);
+  }
   if (s.thrusting) thrust(s, CFG.thrust, dt);
 }
 
@@ -876,7 +883,7 @@ function tickActors(world, dt) {
     if (a.fireCd > 0) a.fireCd -= dt;
     if (a.flash > 0) a.flash -= dt;
     if (a.muzzle > 0) a.muzzle -= dt;
-    tickReload(a, dt);
+    tickReload(a, dt, world);
     // Status ticks, src/mission/combat.js: burn damages, slow expires.
     if (a.burn) {
       const burn = a.burn;
@@ -893,20 +900,22 @@ function tickActors(world, dt) {
 }
 
 // startReload / tickReload, src/mission/entities.js.
-export function startReload(a) {
+export function startReload(a, world) {
   const w = a.weapon;
   if (!w || !w.magazine) return false;
   if (a.reloading > 0 || a.ammo >= w.magazine) return false;
   if (a.magsLeft !== undefined && a.magsLeft <= 0) return false;
   a.reloading = w.reloadTime || 1.5;
+  if (world) world.events.push({ type: "reload", x: a.x, y: a.y });
   return true;
 }
 
-function tickReload(a, dt) {
+function tickReload(a, dt, world) {
   if (!(a.reloading > 0)) return;
   a.reloading -= dt;
   if (a.reloading <= 0) {
     a.reloading = 0;
+    world.events.push({ type: "reloaded", x: a.x, y: a.y });
     a.ammo = a.weapon.magazine;
     if (a.magsLeft !== undefined && a.magsLeft !== Infinity) a.magsLeft -= 1;
   }
@@ -937,6 +946,7 @@ export function hurt(world, t, amount, owner, quiet = false) {
   if (!t.alive || !(amount > 0)) return;
   t.hp -= amount;
   if (t.kind === "enemy") t.alert = true;
+  if (t.kind === "soldier" && !quiet) world.events.push({ type: "hurt", x: t.x, y: t.y });
   if (!quiet) t.flash = 0.12;
   if (t.hp <= 0) kill(world, t, owner);
 }
@@ -946,7 +956,7 @@ function kill(world, t) {
   t.hp = 0;
   t.burn = t.slow = null;
   const color = t.color || (t.type && ENEMY_TYPES[t.type].color);
-  world.events.push({ type: "death", x: t.x, y: t.y, r: t.r, kind: t.kind, color });
+  world.events.push({ type: "death", x: t.x, y: t.y, r: t.r, kind: t.kind, enemy: t.type, color });
   if (t.kind === "dummy") t.respawn = CFG.dummyRespawn;
   // The controlled soldier died: control passes on, as mission.js does.
   if (t.kind === "soldier" && world.soldiers[world.ctrl] === t) swapControl(world);
@@ -998,7 +1008,7 @@ export function fire(world, shooter, angle, accuracy = 1) {
     });
   }
   shooter.muzzle = 0.055;
-  world.events.push({ type: "muzzle", x: shooter.x + Math.cos(angle) * (shooter.r + 14), y: shooter.y + Math.sin(angle) * (shooter.r + 14), color: spec.color });
+  world.events.push({ type: "muzzle", x: shooter.x + Math.cos(angle) * (shooter.r + 14), y: shooter.y + Math.sin(angle) * (shooter.r + 14), color: spec.color, shape: spec.shape, team: shooter.team, pellets: count > 1 });
   return true;
 }
 
@@ -1125,7 +1135,7 @@ export function applyEffects(world, target, effects, owner, at) {
             if (d <= (fx.range || 0) && d < bd) { bd = d; next = o; }
           }
           if (!next) break;
-          world.events.push({ type: "chain", x0: from.x, y0: from.y, x1: next.x, y1: next.y });
+          world.events.push({ type: "chain", x: next.x, y: next.y, x0: from.x, y0: from.y, x1: next.x, y1: next.y });
           hurt(world, next, (fx.amount || 0) * mult, owner);
           done.add(next);
           from = next;
