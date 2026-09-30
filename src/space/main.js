@@ -5,11 +5,18 @@
 // ---------------------------------------------------------------------------
 
 import { CFG, createWorld, step } from "./sim.js";
-import { createView, draw, cameraFor } from "./view.js";
+import { createView, draw, cameraFor, zoomBy } from "./view.js";
 import { createAudio } from "./audio.js";
 
 const canvas = document.getElementById("space");
 const ctx = canvas.getContext("2d");
+
+// The world in 3D, underneath; the flat view draws everything until (unless)
+// Three arrives from the CDN.
+let view3d = null;
+import("./view3d.js")
+  .then((m) => { view3d = m.createView3D(document.getElementById("space3d")); })
+  .catch((e) => console.warn("space: no 3D view, staying flat —", e));
 
 const KEYS = {
   KeyA: "left", ArrowLeft: "left",
@@ -49,6 +56,10 @@ canvas.addEventListener("mousedown", (e) => {
 });
 addEventListener("mouseup", (e) => { if (e.button === 0) mouse.down = false; });
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  zoomBy(view, e.deltaY);
+}, { passive: false });
 
 let vw = 0;
 let vh = 0;
@@ -58,15 +69,13 @@ function resize() {
   vh = innerHeight;
   canvas.width = vw * dpr;
   canvas.height = vh * dpr;
-  canvas.style.width = vw + "px";
-  canvas.style.height = vh + "px";
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 addEventListener("resize", resize);
 resize();
 
-let world = createWorld(newSeed(), { squad: 3 });
 const view = createView();
+let world = createWorld(newSeed(), { squad: 3 });
 
 // For poking at it from the console: space.world().soldiers[0].hp = 999
 window.space = { world: () => world };
@@ -76,12 +85,12 @@ function newSeed() {
 }
 
 function sample() {
-  const cam = cameraFor(world, vw, vh);
+  const cam = cameraFor(world, vw, vh, view.zoom);
   const input = {
     turn: (held.has("right") ? 1 : 0) - (held.has("left") ? 1 : 0),
     thrust: held.has("thrust"),
-    aimX: mouse.x + cam.x,
-    aimY: mouse.y + cam.y,
+    aimX: cam.x + mouse.x / cam.zoom,
+    aimY: cam.y + mouse.y / cam.zoom,
     fire: held.has("fire") || mouse.down,
     firePress: pressed.has("fire"),
     reload: pressed.has("reload"),
@@ -105,11 +114,11 @@ function frame(now) {
     else step(world, input);
     acc -= CFG.step;
   }
-  // Sound reads the events before the view drains them.
-  const cam = cameraFor(world, vw, vh);
+  // Sound and the 3D view read the events before view.js drains them.
+  const cam = cameraFor(world, vw, vh, view.zoom);
   // Sound is decoration: a failure in it must never stop the loop.
   try {
-    audio.handle(world.events, cam.x + vw / 2, cam.y + vh / 2);
+    audio.handle(world.events, cam.x + cam.w / 2, cam.y + cam.h / 2);
     const lead = world.soldiers[world.ctrl];
     audio.setThrust(!!(lead && lead.alive && lead.thrusting && !world.end));
     if (world.end && !ended) audio.end(world.end.success);
@@ -117,7 +126,17 @@ function frame(now) {
     console.error(e);
   }
   ended = !!world.end;
-  draw(ctx, view, world, vw, vh, dt);
+  let three = false;
+  if (view3d) {
+    try {
+      view3d.draw(world, vw, vh, view.zoom, dt);
+      three = true;
+    } catch (e) {
+      console.error("space: 3D view failed, staying flat —", e);
+      view3d = null;
+    }
+  }
+  draw(ctx, view, world, vw, vh, dt, three);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

@@ -7,16 +7,40 @@
 import { CFG, controlled, ENEMY_TYPES } from "./sim.js";
 
 const EDGE_PAD = 160; // how far past the map edge the camera may look
+export const ZOOM_MIN = 0.3;
+export const ZOOM_MAX = 2.5;
 
-export function cameraFor(world, vw, vh) {
+// The view rectangle in world px: top-left (x, y), size (w, h) = the screen
+// divided by the zoom. The 3D camera frames exactly this rectangle at z=0, so
+// the 2D overlay, mouse aim and sound placement all use it unchanged.
+export function cameraFor(world, vw, vh, zoom = 1) {
   const s = controlled(world) || world.soldiers.find((o) => o.alive) || world.soldiers[0];
   const fx = s ? s.x : world.size / 2;
   const fy = s ? s.y : world.size / 2;
+  const w = vw / zoom, h = vh / zoom;
   const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
   return {
-    x: clamp(fx - vw / 2, -EDGE_PAD, world.size + EDGE_PAD - vw),
-    y: clamp(fy - vh / 2, -EDGE_PAD, world.size + EDGE_PAD - vh),
+    x: clamp(fx - w / 2, -EDGE_PAD, world.size + EDGE_PAD - w),
+    y: clamp(fy - h / 2, -EDGE_PAD, world.size + EDGE_PAD - h),
+    w, h, zoom,
   };
+}
+
+// One wheel notch is about ±15%.
+export function zoomBy(view, deltaY) {
+  view.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.zoom * Math.exp(-deltaY * 0.0015)));
+  return view.zoom;
+}
+
+// How the side-view figure is turned (view3d.js). The model faces +x with its
+// head up (+y, Three's y-up); facing is the sim's `angle`, y-down. A figure
+// facing left is the model MIRRORED, so it is never drawn upside down, and the
+// flip has a band around vertical so it does not flicker there. Returns the
+// mirror (dir) and the z rotation in Three's frame.
+export function figurePose(angle, prevDir = 1) {
+  const c = Math.cos(angle);
+  const dir = c > 0.15 ? 1 : c < -0.15 ? -1 : prevDir;
+  return { dir, rot: dir > 0 ? -angle : Math.PI - angle };
 }
 
 export function createView() {
@@ -26,28 +50,39 @@ export function createView() {
       stars.push({ x: Math.random() * 2400, y: Math.random() * 2400, z: 0.15 + layer * 0.2, s: 0.6 + layer * 0.5, a: 0.3 + Math.random() * 0.5 });
     }
   }
-  return { stars, particles: [] };
+  return { stars, particles: [], zoom: 1 };
 }
 
-export function draw(ctx, view, world, vw, vh, dt) {
-  const cam = cameraFor(world, vw, vh);
-  ctx.fillStyle = "#05070d";
-  ctx.fillRect(0, 0, vw, vh);
-  drawStars(ctx, view, cam, vw, vh);
+// `three`: the world itself is drawn by view3d.js on the canvas underneath, so
+// this one is a transparent overlay of tells, bars, arrows and HUD. Without it
+// (Three failed to load, or a test) this draws the whole flat view.
+export function draw(ctx, view, world, vw, vh, dt, three = false) {
+  const cam = cameraFor(world, vw, vh, view.zoom);
+  if (three) ctx.clearRect(0, 0, vw, vh);
+  else {
+    ctx.fillStyle = "#05070d";
+    ctx.fillRect(0, 0, vw, vh);
+    drawStars(ctx, view, cam, vw, vh);
+  }
 
   ctx.save();
-  ctx.translate(-Math.round(cam.x), -Math.round(cam.y));
-  drawBounds(ctx, world);
-  if (world.extract) drawExtract(ctx, world.extract, world.t);
-  for (const r of world.ruins) drawRuin(ctx, r);
-  for (const a of world.asteroids) drawAsteroid(ctx, a);
-  if (world.artifact) drawArtifact(ctx, world.artifact, world.t);
-  for (const e of world.enemies) if (e.alive) drawEnemy(ctx, e, world.t);
-  for (const s of world.soldiers) if (s.alive) drawSoldier(ctx, s, s === controlled(world));
-  for (const p of world.projectiles) drawProjectile(ctx, p);
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.translate(-cam.x, -cam.y);
+  if (three) drawTells(ctx, world);
+  else {
+    drawBounds(ctx, world);
+    if (world.extract) drawExtract(ctx, world.extract, world.t);
+    for (const r of world.ruins) drawRuin(ctx, r);
+    for (const a of world.asteroids) drawAsteroid(ctx, a);
+    if (world.artifact) drawArtifact(ctx, world.artifact, world.t);
+    for (const e of world.enemies) if (e.alive) drawEnemy(ctx, e, world.t);
+    for (const s of world.soldiers) if (s.alive) drawSoldier(ctx, s, s === controlled(world));
+    for (const p of world.projectiles) drawProjectile(ctx, p);
+  }
   drainEvents(view, world);
-  drawParticles(ctx, view, dt);
+  if (!three) drawParticles(ctx, view, dt);
   ctx.restore();
+  if (three) drawBars(ctx, world, cam);
   drawArrows(ctx, world, cam, vw, vh);
   drawHurt(ctx, view, world, vw, vh, dt);
   drawHud(ctx, world, vw, vh);
@@ -76,6 +111,7 @@ function burst(view, x, y, color, n, speed, life = 0.35, size = 2) {
 
 function drainEvents(view, world) {
   for (const ev of world.events) {
+    if (ev.type === "wave") view.waveBanner = { n: ev.n, t: 2.5 };
     switch (ev.type) {
       case "muzzle": view.particles.push({ x: ev.x, y: ev.y, vx: 0, vy: 0, life: 0.06, max: 0.06, color: "#fff4c8", size: 7, glow: true }); break;
       case "spark": burst(view, ev.x, ev.y, ev.color, 4, 90); break;
@@ -85,7 +121,6 @@ function drainEvents(view, world) {
         burst(view, ev.x, ev.y, "#ff9b4a", 18, 260, 0.5, 3);
         break;
       case "chain": view.particles.push({ line: true, x: ev.x0, y: ev.y0, x1: ev.x1, y1: ev.y1, life: 0.15, max: 0.15, color: "#8fd0ff" }); break;
-      case "wave": view.waveBanner = { n: ev.n, t: 2.5 }; break;
       case "pickup": burst(view, ev.x, ev.y, "#78ffe6", 24, 200, 0.6, 3); break;
       case "death": burst(view, ev.x, ev.y, ev.color || "#ff6a6a", 22, 220, 0.6, 3); break;
     }
@@ -478,7 +513,7 @@ function drawArrows(ctx, world, cam, vw, vh) {
   const cx = vw / 2, cy = vh / 2;
   const pad = 28;
   const arrow = (x, y, color, size, label) => {
-    const sx = x - cam.x, sy = y - cam.y;
+    const sx = (x - cam.x) * cam.zoom, sy = (y - cam.y) * cam.zoom;
     if (sx > 0 && sx < vw && sy > 0 && sy < vh) return false; // on screen
     const dx = sx - cx, dy = sy - cy;
     // Scale onto the padded screen rectangle.
@@ -596,7 +631,7 @@ function drawHud(ctx, world, vw, vh) {
   ctx.fillStyle = "rgba(223,232,255,0.45)";
   ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
   ctx.textAlign = "right";
-  ctx.fillText("A/D turn · W thrust · mouse aim + fire · R reload · Tab swap", vw - 16, vh - 16);
+  ctx.fillText("A/D turn · W thrust · mouse aim + fire · R reload · Tab swap · wheel zoom", vw - 16, vh - 16);
   ctx.textAlign = "left";
   ctx.font = "14px ui-monospace, Menlo, Consolas, monospace";
   if (s.ammo <= 0 && s.reloading <= 0) {
@@ -656,15 +691,9 @@ function drawAsteroid(ctx, a) {
 function drawSoldier(ctx, s, isCtrl) {
   statusTint(ctx, s);
   hpBar(ctx, s, s.y - s.r - 12);
+  if (isCtrl) drawCtrlTell(ctx, s);
   ctx.save();
   ctx.translate(s.x, s.y);
-  if (isCtrl) {
-    ctx.strokeStyle = "rgba(138,255,193,0.55)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, s.r + 7, 0, Math.PI * 2);
-    ctx.stroke();
-  }
   // Body turned to facing: pack behind, flame out the back when thrusting.
   ctx.save();
   ctx.rotate(s.angle);
@@ -686,24 +715,87 @@ function drawSoldier(ctx, s, isCtrl) {
   ctx.fillStyle = "#cfe8ff"; // visor, toward facing
   ctx.fillRect(3, -5, 7, 10);
   ctx.restore();
-  // The player's aim arc: a faint wedge in front of the soldier you fly.
-  if (isCtrl) {
-    ctx.save();
-    ctx.rotate(s.angle);
-    const half = CFG.aimArc / 2;
-    ctx.strokeStyle = "rgba(138,255,193,0.18)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(-half) * (s.r + 8), Math.sin(-half) * (s.r + 8));
-    ctx.lineTo(Math.cos(-half) * 90, Math.sin(-half) * 90);
-    ctx.arc(0, 0, 90, -half, half);
-    ctx.lineTo(Math.cos(half) * (s.r + 8), Math.sin(half) * (s.r + 8));
-    ctx.stroke();
-    ctx.restore();
-  }
   // Gun, toward aim.
   ctx.rotate(s.aim);
   ctx.fillStyle = "#d8d8d8";
   ctx.fillRect(4, -2, 18, 4);
   ctx.restore();
+}
+
+// The soldier you fly: a ring, and a faint wedge for the arc the gun can reach.
+function drawCtrlTell(ctx, s) {
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.strokeStyle = "rgba(138,255,193,0.55)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(0, 0, s.r + 9, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.rotate(s.angle);
+  const half = CFG.aimArc / 2;
+  ctx.strokeStyle = "rgba(138,255,193,0.18)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(-half) * (s.r + 10), Math.sin(-half) * (s.r + 10));
+  ctx.lineTo(Math.cos(-half) * 90, Math.sin(-half) * 90);
+  ctx.arc(0, 0, 90, -half, half);
+  ctx.lineTo(Math.cos(half) * (s.r + 10), Math.sin(half) * (s.r + 10));
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---- over the 3D view: what a model cannot say --------------------------------
+// World space (the caller has applied the zoom): the controlled soldier's arc,
+// a shot being wound up, a mine about to go.
+function drawTells(ctx, world) {
+  const lead = controlled(world);
+  if (lead && lead.alive) drawCtrlTell(ctx, lead);
+  for (const e of world.enemies) {
+    if (!e.alive || e.kind !== "enemy") continue;
+    const T = ENEMY_TYPES[e.type];
+    if (e.tele > 0) {
+      ctx.strokeStyle = "rgba(255,255,255,0.8)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.r + 4 + (T.tele - e.tele) * 20, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (e.type === "mine" && e.fuse > 0) {
+      ctx.strokeStyle = "rgba(255,80,64,0.5)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, T.blast.radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+// Screen space, so they stay readable at any zoom: health bars and the
+// extraction label.
+function drawBars(ctx, world, cam) {
+  const z = cam.zoom;
+  const at = (x, y) => [(x - cam.x) * z, (y - cam.y) * z];
+  const bar = (a, lift) => {
+    const [x, y] = at(a.x, a.y);
+    const w = Math.max(24, a.r * 2 * z);
+    const top = y - lift * z - 8;
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(x - w / 2, top, w, 4);
+    ctx.fillStyle = a.team === "player" ? "#8affc1" : "#ff6a6a";
+    ctx.fillRect(x - w / 2, top, w * Math.max(0, a.hp / a.maxHp), 4);
+  };
+  // A soldier's figure is taller than its circle (FIGURE_H in view3d.js).
+  for (const s of world.soldiers) if (s.alive) bar(s, 24);
+  for (const e of world.enemies) {
+    if (!e.alive || e.type === "mine") continue;
+    if (e.kind === "dummy" || e.hp < e.maxHp) bar(e, e.r + 4);
+  }
+  if (world.extract) {
+    const [x, y] = at(world.extract.x, world.extract.y);
+    ctx.fillStyle = "#8affc1";
+    ctx.font = "bold 14px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("EXTRACT", x, y + 5);
+    ctx.textAlign = "left";
+  }
 }

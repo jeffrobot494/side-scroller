@@ -481,7 +481,9 @@ section + the tests are the source of truth for what currently exists):
   space level works. `src/space/` imports only itself (a test scans for it) —
   weapons, effects, HP, magazines and recruit stats are COPIED from the game, so
   a game change never reaches it. `sim.js` is DOM-free and seeded (the suite
-  drives it), `view.js` draws, `main.js` owns input and the fixed step, and
+  drives it), `view3d.js` draws the world in three.js (side-view soldiers,
+  wheel zoom) under `view.js`'s overlay of tells and HUD — `view.js` alone is the
+  flat fallback — `main.js` owns input and the fixed step, and
   `window.space.world()` exposes the world in the console. Placeholders Bo
   has not decided are listed at the end of the spec.
 - **Pause menu (`tech/pause-menu.md` P0–P3 — built).** Escape (the `pause`

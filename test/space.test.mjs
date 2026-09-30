@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
 import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS } from "../src/space/sim.js";
-import { createView, draw } from "../src/space/view.js";
+import { createView, draw, cameraFor, zoomBy, figurePose, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
 import { createAudio } from "../src/space/audio.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,7 +40,10 @@ export default async function run_(t) {
   const outside = [];
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
     for (const m of readFileSync(join(dir, f), "utf8").matchAll(/from\s+["']([^"']+)["']/g)) {
-      if (!m[1].startsWith("./")) outside.push(`${f} → ${m[1]}`);
+      // Three is a library, not the game — and only the 3D view may load it,
+      // so the sim and the flat view stay importable under node.
+      const three = m[1] === "three" || m[1].startsWith("three/addons/");
+      if (!m[1].startsWith("./") && !(three && f === "view3d.js")) outside.push(`${f} → ${m[1]}`);
     }
   }
   t.ok(`src/space imports nothing outside itself${outside.length ? ": " + outside.join(", ") : ""}`, outside.length === 0);
@@ -64,11 +67,10 @@ export default async function run_(t) {
     const dir = Math.atan2(s.vy, s.vx);
     t.ok("thrust accelerates along facing", near(dir, 0.7, 1e-9));
     t.ok("thrust magnitude = accel × t", near(Math.hypot(s.vx, s.vy), CFG.thrust * 0.5, 1e-6));
-    run(w, { thrust: true }, 600);
-    t.ok("thrust cannot pass the cap", Math.hypot(s.vx, s.vy) <= CFG.thrustCap + 1e-9);
-    s.x = s.y = 2000; s.vx = 900; s.vy = 0; s.angle = 0;
-    run(w, { thrust: true }, 1);
-    t.ok("thrust does not brake a body already past the cap", near(s.vx, 900, 1e-9));
+    // No cap: 1s more of thrust from the middle of the map, clear of the edge.
+    s.x = s.y = w.size / 2; s.vx = 900; s.vy = 0; s.angle = 0;
+    run(w, { thrust: true }, 60);
+    t.ok("thrust has no speed cap", near(s.vx, 900 + CFG.thrust, 1e-6));
   }
   {
     // The player aims within 90° of facing; outside it, the nearer edge.
@@ -514,6 +516,40 @@ export default async function run_(t) {
     t.ok(`audio is a no-op without WebAudio${threw ? ": " + threw.message : ""}`, !threw);
   }
 
+  // ---- camera, zoom, figure ---------------------------------------------------
+  {
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 3000, y: 3000 });
+    const c1 = cameraFor(w, 1280, 720, 1);
+    const c2 = cameraFor(w, 1280, 720, 0.5);
+    t.ok("zoom 1 frames the screen in world px", c1.w === 1280 && c1.h === 720);
+    t.ok("zoom 0.5 frames twice the world", c2.w === 2560 && c2.h === 1440);
+    t.ok("the frame stays centred on the soldier at any zoom", Math.abs(c2.x + c2.w / 2 - 3000) < 1e-9 && Math.abs(c1.y + c1.h / 2 - 3000) < 1e-9);
+    // The mouse at screen centre aims at the soldier's own position, zoomed or not.
+    const aim = (c) => [c.x + 640 / c.zoom, c.y + 360 / c.zoom];
+    t.ok("screen → world undoes the zoom", aim(c2).every((v) => Math.abs(v - 3000) < 1e-9));
+    const v = createView();
+    for (let i = 0; i < 50; i++) zoomBy(v, 100);
+    t.eq("zoom out clamps", v.zoom, ZOOM_MIN);
+    for (let i = 0; i < 80; i++) zoomBy(v, -100);
+    t.eq("zoom in clamps", v.zoom, ZOOM_MAX);
+
+    // The figure faces +x, head +y, in Three's y-up frame; mirrored by dir.
+    let worst = 0, headDown = 0, dir = 1;
+    for (let k = 0; k < 720; k++) {
+      const a = (k / 720) * Math.PI * 4 - Math.PI * 2;
+      const p = figurePose(a, dir);
+      dir = p.dir;
+      const fwd = [p.dir * Math.cos(p.rot), p.dir * Math.sin(p.rot)]; // model +x, mirrored then turned
+      worst = Math.max(worst, Math.hypot(fwd[0] - Math.cos(a), fwd[1] + Math.sin(a)));
+      if (Math.cos(p.rot) < -0.2) headDown++; // the head's up-component, past the flip band
+    }
+    t.ok(`the figure faces where the jetpack pushes (worst ${worst.toExponential(1)})`, worst < 1e-9);
+    t.eq("the figure is never drawn head-down", headDown, 0);
+    t.eq("no flip inside the vertical band", figurePose(Math.PI / 2 + 0.1, 1).dir, 1);
+  }
+
   // ---- view smoke ----------------------------------------------------------
   {
     const w = createWorld(5, { squad: 3 });
@@ -521,5 +557,10 @@ export default async function run_(t) {
     let threw = null;
     try { draw(ctx2d(), createView(), w, 960, 540, 1 / 60); } catch (e) { threw = e; }
     t.ok(`view draws a world${threw ? ": " + threw.message : ""}`, !threw);
+    threw = null;
+    const v = createView();
+    v.zoom = 0.4;
+    try { draw(ctx2d(), v, w, 960, 540, 1 / 60, true); } catch (e) { threw = e; }
+    t.ok(`view draws the overlay over a 3D view, zoomed out${threw ? ": " + threw.message : ""}`, !threw);
   }
 }

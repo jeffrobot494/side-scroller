@@ -28,7 +28,6 @@ export const CFG = {
   soldierR: 18, // ≈ the game's 30×46 soldier
   turnRate: 4, // rad/s
   thrust: 500, // px/s²
-  thrustCap: 420, // thrust cannot push speed past this; a bounce can
   aimArc: Math.PI / 2, // the player aims within this arc centred on facing
 
   // Copied from src/game/config.js defaults.
@@ -55,6 +54,7 @@ export const CFG = {
   standoffSpread: 40,
   companionRange: 700, // engage range, capped by what the weapon reaches
   stationGain: 1.2, // px/s of closing speed per px off station
+  stationClose: 420, // most closing speed a companion adds on top of the leader's velocity
 
   enemyCount: 12, // placed in the field at start
   enemyStartGap: 1000,
@@ -746,11 +746,9 @@ function companion(world, s, lead, dt) {
     const py = lead.y + Math.sin(s.station.a) * s.station.d;
     const ex = px - s.x, ey = py - s.y;
     const d = Math.hypot(ex, ey) || 1;
-    const close = Math.min(CFG.thrustCap, d * CFG.stationGain);
+    const close = Math.min(CFG.stationClose, d * CFG.stationGain);
     dvx = lead.vx + (ex / d) * close;
     dvy = lead.vy + (ey / d) * close;
-    const sp = Math.hypot(dvx, dvy);
-    if (sp > CFG.thrustCap) { dvx *= CFG.thrustCap / sp; dvy *= CFG.thrustCap / sp; }
   }
   [dvx, dvy] = avoid(world, s, dvx, dvy);
   pilot(s, dvx, dvy, dt);
@@ -857,18 +855,11 @@ export function drive(s, input, dt) {
   if (s.thrusting) thrust(s, CFG.thrust, dt);
 }
 
-// Thrust adds along facing, but may not raise speed past the cap. A body
-// already faster (a bounce, a blast) keeps its speed: no drag, ever.
+// Thrust adds along facing for as long as it is held: no speed cap (Bo,
+// 2026-09-30) and no drag, ever.
 export function thrust(b, accel, dt, angle = b.angle) {
-  const before = Math.hypot(b.vx, b.vy);
   b.vx += Math.cos(angle) * accel * dt;
   b.vy += Math.sin(angle) * accel * dt;
-  const after = Math.hypot(b.vx, b.vy);
-  const limit = Math.max(before, CFG.thrustCap);
-  if (after > limit) {
-    b.vx *= limit / after;
-    b.vy *= limit / after;
-  }
 }
 
 // ---- per-actor ticks: cooldowns, reload, status, shove, respawn ------------
