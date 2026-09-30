@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, createWorld, step, collide, makeAsteroid, makeRng } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy } from "../src/space/sim.js";
 import { createView, draw } from "../src/space/view.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,7 +13,17 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
 // A world with nothing in it but the squad, for mechanics tests.
 function empty(opts = {}) {
-  return createWorld(7, { asteroids: 0, ...opts });
+  return createWorld(7, { asteroids: 0, dummies: 0, ...opts });
+}
+
+// A stationary target `d` px along +x from a soldier at (2000, 2000).
+function range(weapon, d = 200, opts = {}) {
+  const w = empty({ weapons: [weapon], dummies: 1, ...opts });
+  const s = w.soldiers[0];
+  Object.assign(s, { x: 2000, y: 2000, vx: 0, vy: 0, aim: 0 });
+  const target = w.enemies[0];
+  Object.assign(target, { x: 2000 + d, y: 2000, homeX: 2000 + d, homeY: 2000, hp: 1000, maxHp: 1000 });
+  return { w, s, t: target };
 }
 
 function run(world, input, steps) {
@@ -102,6 +112,124 @@ export default async function run_(t) {
     }
     t.eq("no asteroids overlap at spawn", overlap, 0);
     t.ok("start is clear", w.asteroids.every((a) => Math.hypot(a.x - w.start.x, a.y - w.start.y) > a.r + CFG.soldierR));
+  }
+
+  // ---- S2: guns --------------------------------------------------------------
+  {
+    const { w, s, t: d } = range("carbine");
+    run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
+    t.eq("fire spends a round", s.ammo, WEAPONS.carbine.magazine - 1);
+    run(w, {}, 30);
+    t.ok("carbine round × playerDamageMult 1.25 = 17.5", near(1000 - d.hp, 14 * 1.25, 1e-9));
+  }
+  {
+    const { w, s } = range("carbine");
+    s.ammo = 0;
+    t.ok("empty magazine does not fire", !fire(w, s, 0, 1));
+    t.ok("R starts a reload", startReload(s));
+    run(w, {}, Math.ceil(WEAPONS.carbine.reloadTime * 60) + 1);
+    t.eq("reload refills the magazine", s.ammo, WEAPONS.carbine.magazine);
+    t.eq("reload spends a spare", s.magsLeft, CFG.soldierMagazines - 2);
+    s.ammo = 0; s.magsLeft = 0;
+    t.ok("no spares, no reload", !startReload(s));
+  }
+  {
+    const { w, s } = range("scattergun");
+    s.ammo = 6;
+    run(w, { fire: true, firePress: false, aimX: 2400, aimY: 2000 }, 20);
+    t.eq("semi-auto ignores a held trigger", s.ammo, 6);
+    run(w, { firePress: true, aimX: 2400, aimY: 2000 }, 1);
+    t.eq("semi-auto fires on the press", s.ammo, 5);
+    t.eq("pellets: one shell, five rounds", w.projectiles.length, 5);
+  }
+  {
+    // Spread follows the copied formula: w.spread + (1 - acc) × aimSpread.
+    const { w, s } = range("carbine", 200);
+    s.stats.aim = 1; // accuracy 0
+    const lim = WEAPONS.carbine.spread + CFG.aimSpread;
+    let worst = 0;
+    for (let i = 0; i < 200; i++) {
+      s.fireCd = 0; s.ammo = 10;
+      fire(w, s, 0, aimAccuracy(s.stats.aim));
+      const p = w.projectiles.pop();
+      worst = Math.max(worst, Math.abs(Math.atan2(p.vy, p.vx)));
+    }
+    t.ok("spread stays within the Aim-scaled cone", worst <= lim + 1e-9 && worst > lim * 0.8);
+  }
+  {
+    // Effects in authored order: burn ticks, slow expires, knockback decays.
+    const { w, t: d } = range("carbine");
+    const s = w.soldiers[0];
+    applyEffects(w, d, [{ kind: "burn", dps: 8, duration: 1.2 }], s, { x: d.x, y: d.y, vx: 1, vy: 0, team: "player" });
+    run(w, {}, 90);
+    t.ok("burn: dps × 1.25 × duration", near(1000 - d.hp, 8 * 1.25 * 1.2, 0.3) && !d.burn);
+    applyEffects(w, d, [{ kind: "slow", factor: 0.5, duration: 1.5 }], s, { x: d.x, y: d.y, vx: 1, vy: 0, team: "player" });
+    d.vx = 100; const x0 = d.x;
+    run(w, {}, 30);
+    t.ok("slow halves displacement", near(d.x - x0, 25, 1e-6));
+    d.vx = 0;
+    applyEffects(w, d, [{ kind: "knockback", force: 0.3 }], s, { x: d.x, y: d.y, vx: 0, vy: 5, team: "player" });
+    t.ok("knockback shoves along the round, divided by √mass", near(d.sy, (0.3 * CFG.knockbackMaxV) / Math.sqrt(d.m), 1e-9) && d.sx === 0);
+    run(w, {}, 60);
+    t.ok("the shove decays to rest (no permanent drift)", d.sx === 0 && d.sy === 0);
+  }
+  {
+    // Explode hits the direct target twice and anything else in the radius.
+    const { w, t: d } = range("grenade_launcher", 200, { dummies: 2 });
+    const d2 = w.enemies[1];
+    Object.assign(d2, { x: d.x + 100, y: d.y, hp: 1000, maxHp: 1000 });
+    run(w, { firePress: true, aimX: 2400, aimY: 2000 }, 1);
+    run(w, {}, 40);
+    t.ok("grenade: direct 10 + blast 40, ×1.25", near(1000 - d.hp, 50 * 1.25, 1e-9));
+    t.ok("grenade: blast reaches a neighbour", near(1000 - d2.hp, 40 * 1.25, 1e-9));
+  }
+  {
+    const { w, t: d } = range("arc_tazer", 200, { dummies: 4 });
+    const [, b, c, far] = w.enemies;
+    Object.assign(b, { x: d.x + 150, y: d.y, hp: 1000, maxHp: 1000 });
+    Object.assign(c, { x: d.x + 300, y: d.y + 60, hp: 1000, maxHp: 1000 });
+    Object.assign(far, { x: d.x, y: d.y + 900, hp: 1000, maxHp: 1000 });
+    run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
+    run(w, {}, 20);
+    t.ok("chain jumps twice within range", b.hp < 1000 && c.hp < 1000 && far.hp === 1000);
+  }
+  {
+    const { w, s, t: d } = range("ripper", 200, { dummies: 2 });
+    const d2 = w.enemies[1];
+    Object.assign(d2, { x: d.x + 100, y: d.y, hp: 1000, maxHp: 1000 });
+    run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
+    run(w, {}, 30);
+    t.ok("pierce passes through one body into the next", d.hp < 1000 && d2.hp < 1000);
+  }
+  {
+    const { w, t: d } = range("seeker", 300);
+    d.y = 2150; // off the line of fire
+    run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
+    run(w, {}, 60);
+    t.ok("homing turns onto a target off the line", d.hp < 1000);
+  }
+  {
+    // A round stops at a rock and pushes it — slightly.
+    const w = empty({ weapons: ["carbine"] });
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000 });
+    const rock = makeAsteroid(makeRng(2), 2300, 2000, 60);
+    rock.vx = rock.vy = 0;
+    w.asteroids.push(rock);
+    run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
+    run(w, {}, 30);
+    t.ok("a round stops at a rock", w.projectiles.length === 0);
+    t.ok("and pushes it slightly", rock.vx > 0 && rock.vx < 10);
+    // A blast on a rock pushes it hard (explosive rounds detonate on terrain).
+    const g = empty({ weapons: ["grenade_launcher"] });
+    const gs = g.soldiers[0];
+    Object.assign(gs, { x: 2000, y: 2000 });
+    const rock2 = makeAsteroid(makeRng(2), 2300, 2000, 60);
+    rock2.vx = rock2.vy = 0;
+    g.asteroids.push(rock2);
+    run(g, { firePress: true, aimX: 2400, aimY: 2000 }, 1);
+    run(g, {}, 30);
+    t.ok("a blast pushes a rock far harder than a round", rock2.vx > rock.vx * 10);
   }
 
   // ---- determinism ---------------------------------------------------------
