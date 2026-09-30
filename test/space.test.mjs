@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf } from "../src/space/sim.js";
 import { createView, draw, cameraFor, zoomBy, figurePose, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
 import { createAudio } from "../src/space/audio.js";
 
@@ -535,19 +535,36 @@ export default async function run_(t) {
     for (let i = 0; i < 80; i++) zoomBy(v, -100);
     t.eq("zoom in clamps", v.zoom, ZOOM_MAX);
 
-    // The figure faces +x, head +y, in Three's y-up frame; mirrored by dir.
-    let worst = 0, headDown = 0, dir = 1;
-    for (let k = 0; k < 720; k++) {
-      const a = (k / 720) * Math.PI * 4 - Math.PI * 2;
-      const p = figurePose(a, dir);
-      dir = p.dir;
-      const fwd = [p.dir * Math.cos(p.rot), p.dir * Math.sin(p.rot)]; // model +x, mirrored then turned
-      worst = Math.max(worst, Math.hypot(fwd[0] - Math.cos(a), fwd[1] + Math.sin(a)));
-      if (Math.cos(p.rot) < -0.2) headDown++; // the head's up-component, past the flip band
+    // M0: the figure is read from the sim. Model +x is forward and +y the head,
+    // in Three's y-up frame, mirrored by dir: both must match the sim, either dir.
+    let worst = 0;
+    for (const dir of [1, -1]) {
+      for (let k = 0; k < 360; k++) {
+        const a = (k / 360) * Math.PI * 4 - Math.PI * 2;
+        const p = figurePose({ angle: a, dir });
+        const fwd = [p.dir * Math.cos(p.rot), p.dir * Math.sin(p.rot)]; // model +x, mirrored then turned
+        const head = [-Math.sin(p.rot), Math.cos(p.rot)]; // model +y, turned
+        const [ux, uy] = upOf({ angle: a, dir });
+        worst = Math.max(worst, Math.hypot(fwd[0] - Math.cos(a), fwd[1] + Math.sin(a)), Math.hypot(head[0] - ux, head[1] + uy));
+      }
     }
-    t.ok(`the figure faces where the jetpack pushes (worst ${worst.toExponential(1)})`, worst < 1e-9);
-    t.eq("the figure is never drawn head-down", headDown, 0);
-    t.eq("no flip inside the vertical band", figurePose(Math.PI / 2 + 0.1, 1).dir, 1);
+    t.ok(`the figure faces where the jetpack pushes, head along the sim's up (worst ${worst.toExponential(1)})`, worst < 1e-9);
+
+    // A full spin while floating never flips dir: the head goes round with the body.
+    const f = empty();
+    const fs = f.soldiers[0];
+    Object.assign(fs, { x: 3000, y: 3000, angle: 0 });
+    let flips = 0, headDown = false;
+    run(f, (i) => {
+      if (fs.dir !== 1) flips++;
+      if (upOf(fs)[1] > 0.9) headDown = true;
+      return { turn: 1 };
+    }, Math.ceil((Math.PI * 2) / (CFG.turnRate * CFG.step)) + 2);
+    t.eq("a floating 360° spin never flips dir", flips, 0);
+    t.ok("no mirroring: facing left, a floating soldier is upside down", headDown);
+    Object.assign(fs, { angle: 0, dir: 1 });
+    const [fx, fy] = feetOf(fs);
+    t.ok("the feet are the collision radius straight down", near(fx, 3000, 1e-9) && near(fy, 3000 + CFG.soldierR, 1e-9));
   }
 
   // ---- view smoke ----------------------------------------------------------

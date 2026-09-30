@@ -26,6 +26,7 @@ export const CFG = {
   startClear: 420,
 
   soldierR: 18, // ≈ the game's 30×46 soldier
+  bodyLength: 42, // the drawn figure, head to feet (tech/space-magboots.md)
   turnRate: 4, // rad/s
   thrust: 500, // px/s²
   aimArc: Math.PI / 2, // the player aims within this arc centred on facing
@@ -239,6 +240,7 @@ function makeSoldier(recruit, x, y, weaponId) {
     r: CFG.soldierR,
     m: 1,
     angle: -Math.PI / 2, // facing: where the jetpack pushes
+    dir: 1, // which side of facing the head is on: see upOf
     aim: -Math.PI / 2, // where the gun points
     thrusting: false,
     hp: maxHp,
@@ -797,6 +799,20 @@ export function pilot(s, dvx, dvy, dt) {
     s.thrusting = true;
     thrust(s, Math.min(CFG.thrust, e / dt), dt);
   }
+}
+
+// Which way is up for a soldier: facing turned a quarter, on the side `dir`
+// says. A spin turns facing and up together, rigidly — a floating soldier can
+// be upside down (Bo: no mirroring). Only turning round to walk the other way
+// on a surface flips dir (tech/space-magboots.md M0).
+export function upOf(s) {
+  return [s.dir * Math.sin(s.angle), -s.dir * Math.cos(s.angle)];
+}
+
+// The feet: the collision circle's edge, straight down from the centre.
+export function feetOf(s) {
+  const [ux, uy] = upOf(s);
+  return [s.x - ux * s.r, s.y - uy * s.r];
 }
 
 function wrapAngle(a) {

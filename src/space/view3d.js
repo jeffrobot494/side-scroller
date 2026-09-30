@@ -25,12 +25,12 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { controlled, ENEMY_TYPES } from "./sim.js";
+import { CFG, controlled, ENEMY_TYPES } from "./sim.js";
 import { cameraFor, figurePose } from "./view.js";
 
 const FOV = 30; // degrees, as the game's VIEW3D_FOV
 const FIGURE_W = 28; // the soldier figure, ≈ the game's 30×46 in an r=18 circle
-const FIGURE_H = 42;
+const FIGURE_H = CFG.bodyLength;
 
 // ---- shared geometry --------------------------------------------------------------
 const BOX = new THREE.BoxGeometry(1, 1, 1);
@@ -162,7 +162,7 @@ function place(m, r) {
 
 function makeSoldier(s) {
   const root = new THREE.Group(); // at the soldier, turned to its facing
-  const body = new THREE.Group(); // mirrored when facing left
+  const body = new THREE.Group(); // mirrored when the sim says dir -1
   root.add(body);
   const mats = [];
   const parts = {};
@@ -201,12 +201,11 @@ function makeSoldier(s) {
   const sight = mesh(BOX, hot("#7ad7ff", 1.2), gun);
   sight.scale.set(4, 2, 3);
   sight.position.set(8, 3, 0);
-  return { root, body, gun, flame, flameGlow, mats, dir: 1 };
+  return { root, body, gun, flame, flameGlow, mats };
 }
 
 function poseSoldier(v, s, t, isCtrl) {
-  const p = figurePose(s.angle, v.dir);
-  v.dir = p.dir;
+  const p = figurePose(s);
   v.root.position.set(s.x, -s.y, 0);
   v.root.rotation.z = p.rot;
   v.body.scale.x = p.dir;

@@ -33,14 +33,12 @@ export function zoomBy(view, deltaY) {
 }
 
 // How the side-view figure is turned (view3d.js). The model faces +x with its
-// head up (+y, Three's y-up); facing is the sim's `angle`, y-down. A figure
-// facing left is the model MIRRORED, so it is never drawn upside down, and the
-// flip has a band around vertical so it does not flicker there. Returns the
-// mirror (dir) and the z rotation in Three's frame.
-export function figurePose(angle, prevDir = 1) {
-  const c = Math.cos(angle);
-  const dir = c > 0.15 ? 1 : c < -0.15 ? -1 : prevDir;
-  return { dir, rot: dir > 0 ? -angle : Math.PI - angle };
+// head up (+y, Three's y-up); facing is the sim's `angle`, y-down. The sim's
+// `dir` says which side of facing the head is on (upOf in sim.js): -1 draws the
+// model mirrored. The view keeps no pose state of its own. Returns the mirror
+// (dir) and the z rotation in Three's frame.
+export function figurePose(s) {
+  return { dir: s.dir, rot: s.dir > 0 ? -s.angle : Math.PI - s.angle };
 }
 
 export function createView() {
