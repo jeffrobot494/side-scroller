@@ -587,23 +587,27 @@ export default async function run_(t) {
       const { w, s, a } = onRock(120, 5);
       t.eq("HUD: in range 5px above a rock", bootsState(w, s), "ready");
       land(w, s);
-      t.eq("Shift within 14px of a rock: the boots come on and it lands", s.boots, "ground");
+      t.eq(`Shift within ${CFG.bootsReach}px of a rock: the boots come on and it lands`, s.boots, "ground");
       t.ok("standing: feet on the surface", near(R(s, a), a.r + s.r, 1e-9));
       step(w, { boots: true });
       t.eq("Shift again: floating", s.boots, null);
     }
     {
-      const { w, s } = onRock(120, 20);
+      const { w, s } = onRock(120, CFG.bootsReach - 2);
       step(w, { boots: true });
-      t.eq("20px above: Shift does nothing", s.boots, null);
+      t.eq(`${CFG.bootsReach - 2}px above: Shift works`, s.boots, "air");
     }
     {
-      // Beside a rock, head up: its nearest point is 5px from the side of the
-      // body but outside the feet wedge.
-      const { w, s, a } = onRock(120, 0);
-      Object.assign(s, { x: a.x + a.r + s.r + 5, y: a.y });
+      const { w, s } = onRock(120, CFG.bootsReach + 2);
       step(w, { boots: true });
-      t.eq("a rock beside you, outside the wedge: no boots", s.boots, null);
+      t.eq(`${CFG.bootsReach + 2}px above: Shift does nothing`, s.boots, null);
+    }
+    {
+      // Under a rock, head up: 5px from the head, but nowhere in the feet wedge.
+      const { w, s, a } = onRock(120, 0);
+      Object.assign(s, { x: a.x, y: a.y + a.r + s.r + 5 });
+      step(w, { boots: true });
+      t.eq("a rock over your head, outside the wedge: no boots", s.boots, null);
     }
     {
       // Walking on a still rock: feet stay on it, at the walk speed.

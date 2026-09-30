@@ -30,7 +30,7 @@ export const CFG = {
 
   // Magnetic boots (tech/space-magboots.md). Gravity, walk and jump are copied
   // from src/game/config.js; accel and friction from SOLDIER_TUNING.
-  bootsReach: 14, // activation: ⅓ of a body length from the feet
+  bootsReach: 40, // activation: this far from the feet (Bo, 2026-09-30; the brief said ⅓ of a body, 14)
   bootsHold: 200, // B2: once on, a surface must stay this close in the wedge
   bootsWedge: Math.PI / 4, // the feet wedge is ± this about down
   gravity: 2000,
