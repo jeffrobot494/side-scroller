@@ -117,3 +117,5 @@ There is none into the game. Internally the seam is `sim.js` ↔ page. The sim t
 | P12 | Loadout | Carbine, Grenade Launcher, Arc Tazer, one per soldier (3 soldiers) |
 | P13 | Does reloading slow turning or thrust? | No, matching `reloadSpeedMult` 1 |
 | — | Numbers | Map 4000×4000, ~40 asteroids r 30–160, turn 4 rad/s, thrust 500px/s², thrust cap 420px/s |
+
+*As built (S1):* 40 asteroids read as empty space at 1280×720, so it is 70; soldier radius is 18 (≈ the game's 30×46 body), not 14. The run-up of every body to a common substep count covers walls too, which is what "swept" became.
