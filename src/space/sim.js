@@ -50,6 +50,11 @@ export const CFG = {
   extractR: 120,
   extractMinDist: 2000, // half the map from the start (P10)
 
+  standoff: 90, // companion station distance: 90 ± 40, as companionspecs.js authors it
+  standoffSpread: 40,
+  companionRange: 700, // engage range, capped by what the weapon reaches
+  stationGain: 1.2, // px/s of closing speed per px off station
+
   enemyCount: 12, // placed in the field at start
   enemyStartGap: 1000,
   enemyCap: 30, // a wave is skipped while this many are alive
@@ -193,7 +198,14 @@ export function createWorld(seed = 1, opts = {}) {
   for (let i = 0; i < squad; i++) {
     const r = RECRUITS[i % RECRUITS.length];
     const weapon = (opts.weapons && opts.weapons[i]) || LOADOUT[i % LOADOUT.length];
-    world.soldiers.push(makeSoldier(r, world.start.x + (i - (squad - 1) / 2) * 50, world.start.y, weapon));
+    const s = makeSoldier(r, world.start.x + (i - (squad - 1) / 2) * 50, world.start.y, weapon);
+    // A station beside whoever leads, rolled once per soldier: a bearing
+    // (spread around the squad) and a distance within spread of the standoff.
+    s.station = {
+      a: (i / squad) * Math.PI * 2 + rng() * 0.8,
+      d: CFG.standoff + (rng() * 2 - 1) * CFG.standoffSpread,
+    };
+    world.soldiers.push(s);
   }
 
   if (opts.ruins !== 0) placeRuins(world, opts.ruins);
@@ -702,6 +714,98 @@ function releaseMine(m) {
   m.owner = null;
 }
 
+// ---- squad -----------------------------------------------------------------------
+// Control moves to the next living soldier (Tab/K, and on the leader's death).
+export function swapControl(world) {
+  const n = world.soldiers.length;
+  for (let k = 1; k <= n; k++) {
+    const i = (world.ctrl + k) % n;
+    if (world.soldiers[i].alive) {
+      world.ctrl = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+function updateSquad(world, dt) {
+  const lead = controlled(world);
+  for (const s of world.soldiers) {
+    if (s.alive && s !== lead) companion(world, s, lead, dt);
+  }
+}
+
+// A companion on the SAME rotate-and-thrust body the player flies: it wants a
+// velocity (match the leader, close on its station, bend around obstacles) and
+// can only get it by turning toward the difference and firing the pack.
+function companion(world, s, lead, dt) {
+  let dvx = 0, dvy = 0;
+  if (lead) {
+    const px = lead.x + Math.cos(s.station.a) * s.station.d;
+    const py = lead.y + Math.sin(s.station.a) * s.station.d;
+    const ex = px - s.x, ey = py - s.y;
+    const d = Math.hypot(ex, ey) || 1;
+    const close = Math.min(CFG.thrustCap, d * CFG.stationGain);
+    dvx = lead.vx + (ex / d) * close;
+    dvy = lead.vy + (ey / d) * close;
+    const sp = Math.hypot(dvx, dvy);
+    if (sp > CFG.thrustCap) { dvx *= CFG.thrustCap / sp; dvy *= CFG.thrustCap / sp; }
+  }
+  [dvx, dvy] = avoid(world, s, dvx, dvy);
+  pilot(s, dvx, dvy, dt);
+
+  // Guns: aim is independent of facing, as the game's companions do.
+  if (s.weapon.magazine && s.ammo <= 0 && !(s.reloading > 0)) startReload(s); // autoReload, ai.js
+  if ((s.senseT = (s.senseT || 0) - dt) <= 0) {
+    s.senseT = CFG.senseEvery;
+    s.foe = pickFoe(world, s);
+  }
+  const f = s.foe && s.foe.alive ? s.foe : null;
+  if (f) {
+    s.aim = Math.atan2(f.y - s.y, f.x - s.x);
+    fire(world, s, s.aim, aimAccuracy(s.stats.aim));
+  }
+}
+
+// Nearest living enemy in reach with a clear line.
+function pickFoe(world, s) {
+  const p = s.weapon.projectile;
+  const reach = Math.min(CFG.companionRange, p.speed * p.life * 0.9);
+  let best = null, bd = Infinity;
+  for (const e of world.enemies) {
+    if (!e.alive) continue;
+    const d = Math.hypot(e.x - s.x, e.y - s.y);
+    if (d > reach || d >= bd) continue;
+    if (!hasLos(world, s.x, s.y, e.x, e.y)) continue;
+    bd = d;
+    best = e;
+  }
+  return best;
+}
+
+// Rotate-and-thrust toward a velocity change: turn at the body's rate, and
+// fire the pack only when roughly pointed the right way. Braking is turning
+// around.
+export function pilot(s, dvx, dvy, dt) {
+  const ex = dvx - s.vx, ey = dvy - s.vy;
+  const e = Math.hypot(ex, ey);
+  s.thrusting = false;
+  if (e < 12) return;
+  const want = Math.atan2(ey, ex);
+  const turn = CFG.turnRate * dt;
+  s.angle += clamp(wrapAngle(want - s.angle), -turn, turn);
+  if (Math.abs(wrapAngle(want - s.angle)) < 0.35) {
+    s.thrusting = true;
+    thrust(s, Math.min(CFG.thrust, e / dt), dt);
+  }
+}
+
+function wrapAngle(a) {
+  while (a > Math.PI) a -= 2 * Math.PI;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  return a;
+}
+
 export const controlled = (world) => {
   const s = world.soldiers[world.ctrl];
   return s && s.alive ? s : null;
@@ -716,6 +820,7 @@ export function step(world, input = {}) {
   world.t += dt;
   if (world.events.length > 256) world.events.splice(0, world.events.length - 256);
 
+  if (input.swap && !world.end) swapControl(world);
   const s = world.end ? null : controlled(world);
   if (s) {
     drive(s, input, dt);
@@ -724,6 +829,7 @@ export function step(world, input = {}) {
     const want = s.weapon.auto ? input.fire : input.firePress;
     if (want) fire(world, s, s.aim, aimAccuracy(s.stats.aim));
   }
+  if (!world.end) updateSquad(world, dt);
   updateEnemies(world, dt);
   if (!world.end && (world.wave.t -= dt) <= 0) {
     world.wave.t = CFG.waveEvery;
@@ -842,6 +948,8 @@ function kill(world, t) {
   const color = t.color || (t.type && ENEMY_TYPES[t.type].color);
   world.events.push({ type: "death", x: t.x, y: t.y, r: t.r, kind: t.kind, color });
   if (t.kind === "dummy") t.respawn = CFG.dummyRespawn;
+  // The controlled soldier died: control passes on, as mission.js does.
+  if (t.kind === "soldier" && world.soldiers[world.ctrl] === t) swapControl(world);
   if (t.type === "mine") releaseMine(t);
   // Prune long-dead enemies so the list does not grow for the whole mission.
   if (t.kind === "enemy" && world.enemies.length > 80) world.enemies = world.enemies.filter((e) => e.alive || e === t);

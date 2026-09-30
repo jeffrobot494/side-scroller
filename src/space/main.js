@@ -60,7 +60,7 @@ function resize() {
 addEventListener("resize", resize);
 resize();
 
-let world = createWorld(newSeed(), { squad: 1 });
+let world = createWorld(newSeed(), { squad: 3 });
 const view = createView();
 
 // For poking at it from the console: space.world().soldiers[0].hp = 999
@@ -95,7 +95,7 @@ function frame(now) {
   acc += dt;
   while (acc >= CFG.step) {
     const input = sample();
-    if (input.restart && world.end) world = createWorld(newSeed(), { squad: 1 });
+    if (input.restart && world.end) world = createWorld(newSeed(), { squad: 3 });
     else step(world, input);
     acc -= CFG.step;
   }

@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS } from "../src/space/sim.js";
 import { createView, draw } from "../src/space/view.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -401,6 +401,61 @@ export default async function run_(t) {
     const bad = [...w.soldiers, ...w.enemies, ...w.asteroids].filter((b) => !Number.isFinite(b.x + b.y + b.vx + b.vy));
     t.eq("two minutes of play: no NaN positions", bad.length, 0);
     t.ok("waves arrived", w.wave.n >= 3);
+  }
+
+  // ---- S5: squad --------------------------------------------------------------------
+  {
+    const w = empty({ squad: 3 });
+    t.eq("HP = 15 + health × 2", w.soldiers.map((s) => s.maxHp), RECRUITS.map((r) => soldierMaxHp(r.stats)));
+    t.eq("default loadout, one weapon each", w.soldiers.map((s) => s.weapon.id), ["carbine", "grenade_launcher", "arc_tazer"]);
+    run(w, { swap: true }, 1);
+    t.eq("swap moves control to the next soldier", w.ctrl, 1);
+    hurt(w, w.soldiers[2], 999);
+    run(w, { swap: true }, 1);
+    t.eq("swap skips the dead", w.ctrl, 0);
+    hurt(w, w.soldiers[0], 999);
+    t.eq("the leader dies: control passes on", w.ctrl, 1);
+  }
+  {
+    // Station-keeping on the thrust body: the leader cruises for 10s, the
+    // squad keeps up and holds near its stations.
+    const w = empty({ squad: 3 });
+    const lead = w.soldiers[0];
+    Object.assign(lead, { x: 800, y: 800, vx: 180, vy: 120 });
+    w.soldiers[1].x = 760; w.soldiers[1].y = 800;
+    w.soldiers[2].x = 840; w.soldiers[2].y = 800;
+    let worst = 0;
+    for (let i = 0; i < 600; i++) {
+      run(w, {}, 1);
+      if (i < 240) continue; // settle first
+      for (const s of w.soldiers.slice(1)) {
+        const px = lead.x + Math.cos(s.station.a) * s.station.d;
+        const py = lead.y + Math.sin(s.station.a) * s.station.d;
+        worst = Math.max(worst, Math.hypot(s.x - px, s.y - py));
+      }
+    }
+    t.ok(`companions hold station behind a cruising leader (worst ${worst.toFixed(0)}px off)`, worst < 60);
+  }
+  {
+    // A companion engages a foe in line of sight, and reloads itself.
+    const w = empty({ squad: 2, weapons: ["carbine", "carbine"], dummies: 1 });
+    const [lead, mate] = w.soldiers;
+    Object.assign(lead, { x: 2000, y: 2000 });
+    Object.assign(mate, { x: 2000 + Math.cos(mate.station.a) * mate.station.d, y: 2000 + Math.sin(mate.station.a) * mate.station.d });
+    const d = w.enemies[0];
+    Object.assign(d, { x: 2400, y: 2000, homeX: 2400, homeY: 2000, hp: 1e6, maxHp: 1e6 });
+    mate.ammo = 2;
+    run(w, {}, 240);
+    t.ok("a companion shoots a foe it can see", d.hp < 1e6);
+    t.ok("and reloads itself when dry", mate.magsLeft === CFG.soldierMagazines - 2);
+    // Behind a rock it holds fire.
+    const rock = makeAsteroid(makeRng(8), 2200, 2000, 120);
+    rock.vx = rock.vy = 0; rock.m = 1e9;
+    w.asteroids.push(rock);
+    run(w, {}, 30);
+    const hp = d.hp;
+    for (let i = 0; i < 120; i++) { Object.assign(lead, { x: 2000, y: 2000, vx: 0, vy: 0 }); Object.assign(d, { x: 2400, y: 2000 }); run(w, {}, 1); }
+    t.ok("a companion holds fire without line of sight", d.hp === hp);
   }
 
   // ---- determinism ---------------------------------------------------------
