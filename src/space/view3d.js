@@ -153,6 +153,9 @@ const LAYOUT = [
   ["pad", 0.14, 0.27, 0.42, 0.38, 7, 3],
   ["helmet", 0.24, 0.05, 0.76, 0.31, 0, 16],
 ];
+const LEGS = ["legFar", "legNear", "kneePad"];
+const LEG_KICK = 0.18;
+const TURN_TAU = 0.05; // s: the standing figure's eased turn (M4)
 const TONE = { legFar: -30, legNear: -22, kneePad: 4, pack: -34, torso: 0, stripe: 20, pad: 8, helmet: -22 };
 
 function place(m, r) {
@@ -174,8 +177,23 @@ function makeSoldier(s) {
     parts[r[0]] = mesh(geo, mat, body);
     place(parts[r[0]], r);
   }
-  // Legs trail a little in zero g: a slight kick back at the hip.
-  for (const k of ["legFar", "legNear", "kneePad"]) parts[k].rotation.z = 0.18;
+  // Legs trail a little in zero g: a slight kick back at the hip (poseSoldier
+  // straightens them while the boots are on).
+  const legs = {};
+  for (const k of LEGS) {
+    parts[k].rotation.z = LEG_KICK;
+    legs[k] = parts[k];
+  }
+  // Boot soles, lit while the boots are on (M4).
+  const soles = {};
+  for (const k of ["legFar", "legNear"]) {
+    const r = LAYOUT.find((l) => l[0] === k);
+    const sole = mesh(BOX, hot("#78ffe6", 1.6), body);
+    sole.scale.set((r[3] - r[1]) * FIGURE_W + 1, 2.5, r[6] + 1);
+    sole.position.set(((r[1] + r[3]) / 2 - 0.5) * FIGURE_W, -FIGURE_H / 2 + 1, r[5]);
+    sole.visible = false;
+    soles[k] = sole;
+  }
   const visor = mesh(BOX, std("#7ad7ff", { emissive: "#3aa8e0", emissiveIntensity: 1.4, roughness: 0.2, metalness: 0.6 }), body);
   mats.push(visor.material);
   place(visor, ["visor", 0.48, 0.12, 0.8, 0.2, 4, 9]);
@@ -202,19 +220,45 @@ function makeSoldier(s) {
   const sight = mesh(BOX, hot("#7ad7ff", 1.2), gun);
   sight.scale.set(4, 2, 3);
   sight.position.set(8, 3, 0);
-  return { root, body, gun, flame, flameGlow, mats };
+  return { root, body, gun, flame, flameGlow, mats, legs, soles, rot: null };
 }
 
-function poseSoldier(v, s, t, isCtrl) {
+function poseSoldier(v, s, t, dt, isCtrl) {
   const p = figurePose(s);
+  // Standing, up can change at once (an inside corner, a landing); the figure
+  // turns there over a moment rather than snapping. Everywhere else it is the
+  // sim's rotation exactly.
+  let rot = p.rot;
+  if (s.boots === "ground" && v.rot != null) {
+    const d = Math.atan2(Math.sin(p.rot - v.rot), Math.cos(p.rot - v.rot));
+    rot = v.rot + d * (1 - Math.exp(-dt / TURN_TAU));
+  }
+  v.rot = rot;
   v.root.position.set(s.x, -s.y, 0);
-  v.root.rotation.z = p.rot;
+  v.root.rotation.z = rot;
   v.body.scale.x = p.dir;
   // The sim's feet are at r (18), the drawn ones at half the figure (21): with
   // the boots on, lift the figure so its soles meet the surface.
-  v.body.position.y = s.boots ? FIGURE_H / 2 - s.r : 0;
-  // A slow drift of the whole figure so nobody floats like a statue.
-  v.body.rotation.z = Math.sin(t * 1.3 + s.x * 0.01) * 0.04;
+  const booted = !!s.boots;
+  v.body.position.y = booted ? FIGURE_H / 2 - s.r : 0;
+  // A slow drift of the whole figure so nobody floats like a statue; on the
+  // boots it stands still.
+  v.body.rotation.z = booted ? 0 : Math.sin(t * 1.3 + s.x * 0.01) * 0.04;
+  // Legs: kicked back floating, straight on the boots, striding while walking
+  // (the game's stride, src/mission/view3d/soldier.js).
+  const stride = s.boots === "ground" && Math.abs(s.gv) > 20 ? Math.sin(t * 16) * FIGURE_W * 0.12 : 0;
+  for (const k of LEGS) {
+    const leg = v.legs[k];
+    leg.rotation.z = booted ? 0 : LEG_KICK;
+    if (leg.userData.x0 == null) leg.userData.x0 = leg.position.x;
+    leg.position.x = leg.userData.x0 + (k === "legFar" ? -stride : stride);
+  }
+  for (const k in v.soles) {
+    const sole = v.soles[k];
+    sole.visible = booted;
+    if (sole.userData.x0 == null) sole.userData.x0 = sole.position.x;
+    sole.position.x = sole.userData.x0 + (k === "legFar" ? -stride : stride);
+  }
 
   const on = s.thrusting;
   v.flame.visible = on;
@@ -232,7 +276,7 @@ function poseSoldier(v, s, t, isCtrl) {
   // is a gun held over its head, so an idle one rests along its facing.
   v.gun.position.set(p.dir * 2, 0.1 * FIGURE_H, 10);
   const idle = !isCtrl && !(s.foe && s.foe.alive);
-  const g = -(idle ? s.angle : s.aim) - p.rot;
+  const g = -(idle ? s.angle : s.aim) - rot;
   v.gun.rotation.z = g;
   v.gun.scale.y = Math.cos(g) < 0 ? -1 : 1;
 
@@ -662,6 +706,7 @@ export function createView3D(canvas) {
         case "chain": particles.push({ line: true, x: ev.x0, y: ev.y0, x1: ev.x1, y1: ev.y1, life: 0.15, max: 0.15 }); break;
         case "pickup": burst(ev.x, ev.y, "#78ffe6", 24, 200, 0.6, 14); break;
         case "death": burst(ev.x, ev.y, ev.color || "#ff6a6a", 22, 220, 0.6, 16); break;
+        case "land": if (ev.speed > 150) burst(ev.x, ev.y, "#78ffe6", 6, 90, 0.25, 6); break;
       }
     }
   }
@@ -704,7 +749,7 @@ export function createView3D(canvas) {
     const lead = controlled(world);
     for (const s of world.soldiers) {
       if (!s.alive) continue;
-      poseSoldier(soldiers.get(s), s, t, s === lead);
+      poseSoldier(soldiers.get(s), s, t, dt, s === lead);
       if (s.muzzle > 0) halo(s.x + Math.cos(s.aim) * (s.r + 12), s.y + Math.sin(s.aim) * (s.r + 12), 26, "#fff4c8", 1, 14);
       status(s);
     }

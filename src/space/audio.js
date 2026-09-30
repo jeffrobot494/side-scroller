@@ -10,7 +10,7 @@ const FALLOFF = 650; // px: distance at which a sound is at half level
 const MAX_VOICES = 32;
 
 // Per-sound minimum spacing, so a squad of autos is a rattle rather than a wall.
-const SPACING = { spark: 0.03, hit: 0.025, fire: 0.02, "fire-enemy": 0.04, reload: 0.05, reloaded: 0.05, hurt: 0.08 };
+const SPACING = { spark: 0.03, hit: 0.025, fire: 0.02, "fire-enemy": 0.04, reload: 0.05, reloaded: 0.05, hurt: 0.08, step: 0.07 };
 
 export function createAudio() {
   const AC = typeof window !== "undefined" && (window.AudioContext || window.webkitAudioContext);
@@ -144,6 +144,24 @@ export function createAudio() {
       case "pickup":
         [523, 659, 784, 1047].forEach((f, i) => tone({ type: "sine", f0: f, dur: 0.18, level: 0.25, delay: i * 0.07 }));
         break;
+      // Magnetic boots (tech/space-magboots.md M4): a mag clamp engaging or
+      // letting go, a push off, a landing as hard as it was, and steps.
+      case "boots":
+        if (ev.on) {
+          tone({ type: "square", f0: 180, f1: 420, dur: 0.1, level: v * 0.1, pan: p });
+          noise({ f0: 2600, q: 5, dur: 0.04, level: v * 0.25, pan: p });
+        } else {
+          tone({ type: "square", f0: 420, f1: 150, dur: 0.12, level: v * 0.08, pan: p });
+        }
+        break;
+      case "jump": noise({ f0: 700, f1: 200, q: 0.8, kind: "lowpass", dur: 0.12, level: v * 0.3, pan: p }); break;
+      case "land": {
+        const k = Math.min(1, 0.35 + (ev.speed || 0) / 900);
+        tone({ type: "sine", f0: 130, f1: 45, dur: 0.14, level: v * 0.45 * k, pan: p });
+        noise({ f0: 1800, f1: 400, q: 2, dur: 0.06, level: v * 0.3 * k, pan: p });
+        break;
+      }
+      case "step": noise({ f0: 2200 + Math.random() * 400, q: 4, dur: 0.035, level: v * 0.14, pan: p }); break;
       case "wave":
         for (let i = 0; i < 2; i++) {
           tone({ type: "square", f0: 440, dur: 0.16, level: 0.1, delay: i * 0.36 });

@@ -870,6 +870,33 @@ export default async function run_(t) {
     t.ok(`boots off: back to world-up (${v.roll.toFixed(4)})`, q.boots === null && Math.abs(v.roll) < 1e-3);
   }
 
+  // ---- magnetic boots M4: events for the sound -------------------------------
+  {
+    const w = empty();
+    const rock = makeAsteroid(makeRng(3), 4000, 4000, 120);
+    Object.assign(rock, { vx: 0, vy: 0, spin: 0, rot: 0 });
+    w.asteroids.push(rock);
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 4000, y: 4000 - 120 - s.r - 5, vx: 0, vy: 0, angle: 0, dir: 1 });
+    const seen = [];
+    const go = (input, n = 1) => { for (let i = 0; i < n; i++) { w.events.length = 0; step(w, input); for (const e of w.events) seen.push(e); } };
+    const count = (type, f = () => true) => seen.filter((e) => e.type === type && f(e)).length;
+    go({ boots: true });
+    go({}, 30);
+    t.ok("events: boots on, then a landing", count("boots", (e) => e.on) === 1 && count("land") === 1);
+    go({ turn: 1 }, 120);
+    const walked = s.stride;
+    t.eq(`events: a footstep every ${CFG.footstep}px walked (${walked.toFixed(0)}px)`, count("step"), Math.floor(walked / CFG.footstep));
+    go({ spacePress: true });
+    t.eq("events: a jump", count("jump"), 1);
+    go({ boots: true });
+    t.ok("events: boots off", count("boots", (e) => !e.on) === 1);
+    const a = createAudio();
+    let threw = null;
+    try { a.handle(seen, 4000, 4000, 0.5); } catch (e) { threw = e; }
+    t.ok(`audio takes the boots events${threw ? ": " + threw.message : ""}`, !threw);
+  }
+
   // ---- view smoke ----------------------------------------------------------
   {
     const w = createWorld(5, { squad: 3 });

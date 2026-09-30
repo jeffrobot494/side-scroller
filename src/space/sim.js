@@ -39,6 +39,7 @@ export const CFG = {
   walkFriction: 3000,
   jumpSpeed: 700,
   snapTol: 12, // a push past this knocks a standing soldier off its surface
+  footstep: 34, // px walked per footstep event (M4)
   turnRate: 4, // rad/s
   thrust: 500, // px/s²
   aimArc: Math.PI / 2, // the player aims within this arc centred on facing
@@ -259,6 +260,7 @@ function makeSoldier(recruit, x, y, weaponId) {
     gv: 0, // walk speed along the surface, + toward the rock's +angle
     walkIn: 0,
     pushed: 0, // px other things pushed a standing soldier this step
+    stride: 0, // px walked since landing: footsteps, and the view's stride
     aim: -Math.PI / 2, // where the gun points
     thrusting: false,
     hp: maxHp,
@@ -861,10 +863,10 @@ export function step(world, input = {}) {
   if (input.swap && !world.end) swapControl(world);
   const s = world.end ? null : controlled(world);
   // Only the soldier you fly wears boots: swapping away switches them off.
-  for (const o of world.soldiers) if (o.boots && o !== s) bootsOff(o);
+  for (const o of world.soldiers) if (o.boots && o !== s) bootsOff(o, world);
   if (s) {
     if (input.boots) toggleBoots(world, s);
-    if (s.boots === "ground" && input.spacePress) jump(s);
+    if (s.boots === "ground" && input.spacePress) jump(world, s);
     drive(s, input, dt);
     if (input.reload) startReload(s, world);
     // Semi-auto takes the press, auto the hold — as the mission does. Space
@@ -1014,24 +1016,41 @@ export function bootsState(world, s) {
 }
 
 function toggleBoots(world, s) {
-  if (s.boots) bootsOff(s);
-  else if (surfaceInWedge(world, s, CFG.bootsReach)) s.boots = "air";
+  if (s.boots) bootsOff(s, world);
+  else if (surfaceInWedge(world, s, CFG.bootsReach)) {
+    s.boots = "air";
+    world.events.push({ type: "boots", on: true, x: s.x, y: s.y });
+  }
 }
 
-// Back to floating, with whatever world velocity it had.
-function bootsOff(s) {
+// Back to floating, with whatever world velocity it had. `world` is for the
+// sound; a death switches them off silently.
+function bootsOff(s, world = null) {
+  if (world && s.boots) world.events.push({ type: "boots", on: false, x: s.x, y: s.y });
   s.boots = null;
   s.ground = null;
   s.gv = 0;
   s.walkIn = 0;
 }
 
-function jump(s) {
+function jump(world, s) {
   const [ux, uy] = upOf(s);
   s.boots = "air";
   s.ground = null;
   s.vx += ux * CFG.jumpSpeed;
   s.vy += uy * CFG.jumpSpeed;
+  world.events.push({ type: "jump", x: s.x, y: s.y });
+}
+
+// Grounded, on a rock or a wall: the landing sound carries how hard.
+function landOn(world, s, g, nx, ny, speed) {
+  s.boots = "ground";
+  s.ground = g;
+  s.gv = 0;
+  s.pushed = 0;
+  s.stride = 0;
+  standOn(s, nx, ny);
+  world.events.push({ type: "land", x: s.x, y: s.y, speed });
 }
 
 // The velocity of a rock's surface (drift + spin) at a world point.
@@ -1047,7 +1066,7 @@ function standOn(s, nx, ny) {
 // A booted soldier against a rock: the boots' own contact, never `collide`.
 // One-sided: it is pushed out and loses what it had into the surface, no bounce,
 // and the rock gets no impulse (answer 4). Feet-first within the wedge lands.
-function bootContact(s, a) {
+function bootContact(world, s, a) {
   if (s.ground === a) return;
   const dx = s.x - a.x, dy = s.y - a.y;
   const min = s.r + a.r;
@@ -1070,19 +1089,15 @@ function bootContact(s, a) {
   }
   const [ux, uy] = upOf(s);
   if (nx * ux + ny * uy >= Math.cos(CFG.bootsWedge)) {
-    s.boots = "ground";
-    s.ground = a;
+    landOn(world, s, a, nx, ny, Math.max(0, -vn));
     s.gphi = Math.atan2(ny, nx) - a.rot;
-    s.gv = 0;
-    s.pushed = 0;
-    standOn(s, nx, ny);
     [s.vx, s.vy] = surfaceVel(a, s.x, s.y);
   }
 }
 
 // The same against a hull plate. Walls do not move, so there is no impulse
 // question; a soldier standing on this ruin is placed by walkWalls instead.
-function bootWall(s, w) {
+function bootWall(world, s, w) {
   if (s.boots === "ground" && s.ground.kind === "wall" && s.ground.ruin === w.ruin) return;
   const [cx, cy] = closestOnWall(w, s.x, s.y);
   const dx = s.x - cx, dy = s.y - cy;
@@ -1105,11 +1120,7 @@ function bootWall(s, w) {
   }
   const [ux, uy] = upOf(s);
   if (nx * ux + ny * uy >= Math.cos(CFG.bootsWedge)) {
-    s.boots = "ground";
-    s.ground = w;
-    s.gv = 0;
-    s.pushed = 0;
-    standOn(s, nx, ny);
+    landOn(world, s, w, nx, ny, Math.max(0, -vn));
     s.vx = s.vy = 0;
   }
 }
@@ -1186,7 +1197,7 @@ function settleBoots(world, dt) {
   for (const s of world.soldiers) {
     if (!s.alive || !s.boots) continue;
     if (s.boots === "air") {
-      if (!surfaceInWedge(world, s, CFG.bootsHold)) bootsOff(s);
+      if (!surfaceInWedge(world, s, CFG.bootsHold)) bootsOff(s, world);
       continue;
     }
     // Knocked off: a shove, or a push past the snap tolerance. It keeps the
@@ -1202,6 +1213,9 @@ function settleBoots(world, dt) {
     const target = s.walkIn * CFG.walkSpeed;
     const rate = (s.walkIn ? CFG.walkAccel : CFG.walkFriction) * dt;
     s.gv += clamp(target - s.gv, -rate, rate);
+    const before = Math.floor(s.stride / CFG.footstep);
+    s.stride += Math.abs(s.gv) * dt;
+    if (Math.floor(s.stride / CFG.footstep) > before) world.events.push({ type: "step", x: s.x, y: s.y });
     if (g.kind === "wall") {
       const [nx, ny] = walkWalls(s, s.gv * dt);
       standOn(s, nx, ny);
@@ -1635,14 +1649,14 @@ function collideAll(world, list) {
       const b = list[j];
       // Bodies pass through each other; only rocks bounce things (P7).
       if (a.kind !== "asteroid" && b.kind !== "asteroid") continue;
-      if (a.boots) bootContact(a, b);
-      else if (b.boots) bootContact(b, a);
+      if (a.boots) bootContact(world, a, b);
+      else if (b.boots) bootContact(world, b, a);
       else collide(a, b, e);
     }
     for (const r of world.ruins) {
       if (Math.hypot(a.x - r.x, a.y - r.y) > r.R + a.r) continue;
       for (const w of r.walls) {
-        if (a.boots) bootWall(a, w);
+        if (a.boots) bootWall(world, a, w);
         else collideWall(a, w, e);
       }
     }

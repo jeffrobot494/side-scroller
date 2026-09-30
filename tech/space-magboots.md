@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: unbuilt
+status: built
 resolution: sharp
 needs: [space-prototype]
 related: [space-prototype]
@@ -59,6 +59,12 @@ Each slice is one commit on branch `space-prototype`. The prototype is its own p
 - **One screen ↔ world mapping.** `toScreen`/`toWorld` in `src/space/view.js` are the one pair every mapping goes through: the overlay's canvas transform, the bars, the edge arrows and mouse aim. `cameraFor` now also returns the rectangle's centre and the roll.
 - **Sound** pans on the listener's screen x, which is the event offset turned by the roll.
 - **Roll 0** keeps the old arithmetic exactly.
+
+**As built, M4.**
+- **The legs straighten and the soles light whenever the boots are on**, in the air too, not only on a surface. Boots on means feet first. The stride plays only while walking faster than 20px/s.
+- **The eased turn** has a 0.05s time constant and runs only while standing. Floating or in the air, the figure is the sim's rotation exactly, so it never lags a spin or the aim.
+- **Turning round needs no easing.** The figure's rotation is the same either side of a `dir` flip, and only the mirror changes.
+- **Footsteps** fire every 34px walked (`CFG.footstep`), counted on `s.stride` from each landing. A landing carries its impact speed, which sets how loud it is and whether the view puffs.
 
 M1 is the first playable slice. Every slice lands alone: M0 changes only how a floating figure is turned, M1 needs only rocks and cannot reach walls, M2 adds walls to a working mechanic, and M3 and M4 touch only the page side.
 

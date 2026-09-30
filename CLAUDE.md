@@ -484,6 +484,10 @@ section + the tests are the source of truth for what currently exists):
   drives it), `view3d.js` draws the world in three.js (side-view soldiers,
   wheel zoom) under `view.js`'s overlay of tells and HUD — `view.js` alone is the
   flat fallback — `main.js` owns input and the fixed step, and
+  **magnetic boots** (`tech/space-magboots.md` M0–M4 — built: Shift clamps to a
+  rock or a hull, walk it all the way round, camera rolls to your feet; `dir`
+  and `upOf` in `sim.js` are the one definition of up, and every screen ↔ world
+  mapping goes through `toScreen`/`toWorld` in `view.js`), and
   `window.space.world()` exposes the world in the console. Placeholders Bo
   has not decided are listed at the end of the spec.
 - **Pause menu (`tech/pause-menu.md` P0–P3 — built).** Escape (the `pause`
