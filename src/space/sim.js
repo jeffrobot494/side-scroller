@@ -354,7 +354,9 @@ function placeRuins(world, want) {
   }
 }
 
-export function addRuin(world, x, y, angle, L, W) {
+// `breaches` (hull edge indices) fixes where the hull is cut, for tests; left
+// out, it is rolled, as in play.
+export function addRuin(world, x, y, angle, L, W, breaches = null) {
   const { rng } = world;
   const c = Math.cos(angle), sn = Math.sin(angle);
   const toWorld = ([lx, ly]) => [x + lx * c - ly * sn, y + lx * sn + ly * c];
@@ -363,8 +365,11 @@ export function addRuin(world, x, y, angle, L, W) {
   // of the bulkhead, which meets them at x = -L/8 and would split a centred one.
   const breachAt = [0.8, 0.5, 0.5, 0.2, 0.5];
   // Which hull edges get a breach: one always, a second half the time.
-  const breached = new Set([Math.floor(rng() * hull.length)]);
-  if (rng() < 0.5) breached.add(Math.floor(rng() * hull.length));
+  let breached = breaches && new Set(breaches);
+  if (!breached) {
+    breached = new Set([Math.floor(rng() * hull.length)]);
+    if (rng() < 0.5) breached.add(Math.floor(rng() * hull.length));
+  }
   const segs = [];
   const openings = []; // centre of every breach and door, local
   const lerp = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
@@ -923,8 +928,10 @@ export function thrust(b, accel, dt, angle = b.angle) {
 // ---- magnetic boots (tech/space-magboots.md) ------------------------------------
 // The feet wedge: ±bootsWedge about down, from the body's centre. For each rock,
 // its nearest point inside the wedge — along the centre line if that is inside,
-// else the nearer edge ray's first hit — measured from the feet. Returns the
-// nearest rock within `range` of the feet, or null. Rocks only (M1).
+// else the nearer edge ray's first hit — measured from the feet. A ruin wall's
+// segment is clipped to the wedge exactly, and its nearest point to the feet,
+// less the plate's half-thickness, is the distance. Returns the nearest rock or
+// wall within `range` of the feet, or null.
 export function surfaceInWedge(world, s, range) {
   const [ux, uy] = upOf(s);
   const dx = -ux, dy = -uy;
@@ -959,7 +966,44 @@ export function surfaceInWedge(world, s, range) {
       best = a;
     }
   }
+  for (const r of world.ruins) {
+    if (Math.hypot(r.x - s.x, r.y - s.y) > r.R + reach) continue;
+    for (const w of r.walls) {
+      const k = clipToWedge(s.x, s.y, dx, dy, w);
+      if (!k) continue;
+      const ex = w.x1 - w.x0, ey = w.y1 - w.y0;
+      const t = clamp(((fx - w.x0) * ex + (fy - w.y0) * ey) / (ex * ex + ey * ey || 1), k[0], k[1]);
+      const d = Math.hypot(w.x0 + ex * t - fx, w.y0 + ey * t - fy) - w.t;
+      if (d <= range && d < bd) {
+        bd = d;
+        best = w;
+      }
+    }
+  }
   return best;
+}
+
+// The part of wall w's segment inside the wedge at (cx, cy) about (dx, dy), as
+// [t0, t1] along it, or null. The 90° wedge is exactly the two half-planes
+// bounded by its edge rays' lines, each on the side where down is.
+function clipToWedge(cx, cy, dx, dy, w) {
+  const cosW = Math.cos(CFG.bootsWedge), sinW = Math.sin(CFG.bootsWedge);
+  const ex = w.x1 - w.x0, ey = w.y1 - w.y0;
+  let t0 = 0, t1 = 1;
+  for (const sg of [-1, 1]) {
+    const rx = dx * cosW - dy * sinW * sg, ry = dx * sinW * sg + dy * cosW;
+    let mx = -ry, my = rx;
+    if (mx * dx + my * dy < 0) { mx = -mx; my = -my; }
+    const f0 = mx * (w.x0 - cx) + my * (w.y0 - cy);
+    const df = mx * ex + my * ey;
+    if (df === 0) {
+      if (f0 < 0) return null;
+      continue;
+    }
+    if (df > 0) t0 = Math.max(t0, -f0 / df);
+    else t1 = Math.min(t1, -f0 / df);
+  }
+  return t0 <= t1 ? [t0, t1] : null;
 }
 
 // For the HUD (B6): "on", "ready" (Shift would work) or null.
@@ -1036,6 +1080,105 @@ function bootContact(s, a) {
   }
 }
 
+// The same against a hull plate. Walls do not move, so there is no impulse
+// question; a soldier standing on this ruin is placed by walkWalls instead.
+function bootWall(s, w) {
+  if (s.boots === "ground" && s.ground.kind === "wall" && s.ground.ruin === w.ruin) return;
+  const [cx, cy] = closestOnWall(w, s.x, s.y);
+  const dx = s.x - cx, dy = s.y - cy;
+  const min = s.r + w.t;
+  const d2 = dx * dx + dy * dy;
+  if (d2 >= min * min) return;
+  const d = Math.sqrt(d2) || 0.0001;
+  const nx = dx / d, ny = dy / d;
+  s.x += nx * (min - d);
+  s.y += ny * (min - d);
+  if (s.boots === "ground") {
+    s.pushed += min - d;
+    return;
+  }
+  foldShove(s);
+  const vn = s.vx * nx + s.vy * ny;
+  if (vn < 0) {
+    s.vx -= vn * nx;
+    s.vy -= vn * ny;
+  }
+  const [ux, uy] = upOf(s);
+  if (nx * ux + ny * uy >= Math.cos(CFG.bootsWedge)) {
+    s.boots = "ground";
+    s.ground = w;
+    s.gv = 0;
+    s.pushed = 0;
+    standOn(s, nx, ny);
+    s.vx = s.vy = 0;
+  }
+}
+
+// Standing on a ruin: its walkable surface is the edge of the union of its
+// wall capsules, and the body's centre rides r + t (24px) off it. Walk in
+// steps of at most 2px so a plate's rounded end is followed as an arc. Each
+// step snaps: onto the nearest wall, then out of any other it lies in until
+// clear. The ground is then, of the walls it touches, the one most against the
+// move — at an inside corner that is the next wall, which is how up turns
+// from one to the other — else the one it was on.
+function walkWalls(s, dist) {
+  const walls = s.ground.ruin.walls;
+  const R = s.r + CFG.wallHalf;
+  const n = Math.max(1, Math.ceil(Math.abs(dist) / 2));
+  let [nx, ny] = wallNormal(s.ground, s.x, s.y);
+  for (let k = 0; k <= n; k++) {
+    let tx = 0, ty = 0;
+    if (k > 0) {
+      tx = -ny * Math.sign(dist);
+      ty = nx * Math.sign(dist);
+      s.x += tx * Math.abs(dist / n);
+      s.y += ty * Math.abs(dist / n);
+    }
+    let w = s.ground;
+    let bd = wallDist(w, s.x, s.y);
+    for (const o of walls) {
+      const d = wallDist(o, s.x, s.y);
+      if (d < bd - 1e-6) { bd = d; w = o; }
+    }
+    placeOff(s, w, R);
+    for (let it = 0; it < 32; it++) {
+      let hit = null;
+      for (const o of walls) if (wallDist(o, s.x, s.y) < R - 1e-9) { hit = o; break; }
+      if (!hit) break;
+      placeOff(s, hit, R);
+    }
+    let g = null, against = Infinity;
+    for (const o of walls) {
+      if (wallDist(o, s.x, s.y) > R + 1e-6) continue;
+      const [ox, oy] = wallNormal(o, s.x, s.y);
+      const d = ox * tx + oy * ty;
+      if (d < against - 1e-9 || (d < against + 1e-9 && o === s.ground)) { against = d; g = o; }
+    }
+    s.ground = g || w;
+    [nx, ny] = wallNormal(s.ground, s.x, s.y);
+  }
+  return [nx, ny];
+}
+
+function wallDist(w, x, y) {
+  const [cx, cy] = closestOnWall(w, x, y);
+  return Math.hypot(x - cx, y - cy);
+}
+
+function wallNormal(w, x, y) {
+  const [cx, cy] = closestOnWall(w, x, y);
+  const d = Math.hypot(x - cx, y - cy) || 1;
+  return [(x - cx) / d, (y - cy) / d];
+}
+
+// Put the body's centre R off wall w, straight out from where it is.
+function placeOff(s, w, R) {
+  const [cx, cy] = closestOnWall(w, s.x, s.y);
+  const [nx, ny] = wallNormal(w, s.x, s.y);
+  s.x = cx + nx * R;
+  s.y = cy + ny * R;
+}
+
 // After integrate has moved the rocks: a standing soldier is carried by its
 // rock, walks, and is snapped feet-on-surface; one in the air must still have a
 // surface in the wedge within the hold range.
@@ -1056,10 +1199,17 @@ function settleBoots(world, dt) {
     }
     s.pushed = 0;
     const g = s.ground;
-    const R = g.r + s.r;
     const target = s.walkIn * CFG.walkSpeed;
     const rate = (s.walkIn ? CFG.walkAccel : CFG.walkFriction) * dt;
     s.gv += clamp(target - s.gv, -rate, rate);
+    if (g.kind === "wall") {
+      const [nx, ny] = walkWalls(s, s.gv * dt);
+      standOn(s, nx, ny);
+      s.vx = -ny * s.gv;
+      s.vy = nx * s.gv;
+      continue;
+    }
+    const R = g.r + s.r;
     s.gphi += (s.gv * dt) / R;
     const th = g.rot + s.gphi;
     const nx = Math.cos(th), ny = Math.sin(th);
@@ -1492,12 +1642,8 @@ function collideAll(world, list) {
     for (const r of world.ruins) {
       if (Math.hypot(a.x - r.x, a.y - r.y) > r.R + a.r) continue;
       for (const w of r.walls) {
-        if (!a.boots) collideWall(a, w, e);
-        else {
-          // Booted: no bounce. A standing soldier pushed by a wall counts it.
-          const x = a.x, y = a.y;
-          if (collideWall(a, w, 0) && a.boots === "ground") a.pushed += Math.hypot(a.x - x, a.y - y);
-        }
+        if (a.boots) bootWall(a, w);
+        else collideWall(a, w, e);
       }
     }
     edge(a, world.size, e);

@@ -48,6 +48,12 @@ Each slice is one commit on branch `space-prototype`. The prototype is its own p
 - **A booted soldier against a ruin wall** uses `collideWall` with restitution 0. Walls do not move, so that is the one-sided contact already. A standing soldier pushed by a wall counts the push towards the snap tolerance.
 - **The HUD line** sits above the weapon panel, and the key hint at the bottom right changes while the boots are on.
 
+**As built, M2.**
+- **The snap needed a rule for which wall is the ground, and the plan had none.** Projecting onto the nearest wall and resolving the others is right for where the body goes. But taking the last wall it was pushed out of as the ground left a soldier walking into any inside corner that is not square, for ever. The 400×200 hull's corners are all 90°, where one push settles it, which is why that case alone did not show it. Now the body is pushed out of walls until it is clear. Then, of the walls it touches, the one whose normal is most against the move becomes the ground, with the current one winning a tie. A test walks 460×195 and 340×220 hulls as well.
+- **A wall's wedge distance** is its segment clipped to the wedge, then the clipped part's nearest point to the feet, less the half-thickness. A rock's is its nearest in-wedge point to the centre, measured to the feet. The two agree when standing on either.
+- **`addRuin` takes an optional list of breached edges**, so tests can build one-breach and two-breach hulls. Left out, the breaches are rolled as before, with the same draws.
+- Fuzzed on 150 rolled hulls of every size, starting inside and out: none stuck, none entered a plate. All 93 one-breach hulls were covered, both faces of every plate over 100px, in one walk.
+
 M1 is the first playable slice. Every slice lands alone: M0 changes only how a floating figure is turned, M1 needs only rocks and cannot reach walls, M2 adds walls to a working mechanic, and M3 and M4 touch only the page side.
 
 ## Reuses

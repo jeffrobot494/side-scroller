@@ -606,15 +606,6 @@ export default async function run_(t) {
       t.eq("a rock beside you, outside the wedge: no boots", s.boots, null);
     }
     {
-      // M1 counts rocks only: a hull plate under the feet does not.
-      const w = empty();
-      addRuin(w, 3000, 3000, 0, 400, 200);
-      const s = w.soldiers[0];
-      Object.assign(s, { x: 2950, y: 3000 - 100 - CFG.wallHalf - s.r - 5, vx: 0, vy: 0, angle: 0, dir: 1 });
-      step(w, { boots: true });
-      t.eq("a wall under the feet does not switch the boots on (M1)", s.boots, null);
-    }
-    {
       // Walking on a still rock: feet stay on it, at the walk speed.
       const { w, s, a } = onRock(120, 5);
       land(w, s);
@@ -728,6 +719,103 @@ export default async function run_(t) {
       run(b, trace, 900);
       const sig = (w) => JSON.stringify([w.soldiers.map((s) => [s.x, s.y, s.hp, s.boots]), w.asteroids.map((o) => [o.x, o.y])]);
       t.ok("same seed + same boots trace = same world", sig(a) === sig(b));
+    }
+  }
+
+  // ---- magnetic boots M2: derelicts as one surface --------------------------
+  {
+    const RW = CFG.soldierR + CFG.wallHalf; // the body's centre rides this far off a plate
+    // A soldier over wall `wi` of a ruin, `at` along it, on the face away from
+    // the ruin's centre (or toward it: `inside`), feet `gap` px off, head up.
+    const overWall = (w, ruin, wi, at, gap = 5, inside = false) => {
+      const wall = ruin.walls[wi];
+      const px = wall.x0 + (wall.x1 - wall.x0) * at, py = wall.y0 + (wall.y1 - wall.y0) * at;
+      const L = Math.hypot(wall.x1 - wall.x0, wall.y1 - wall.y0);
+      let nx = -(wall.y1 - wall.y0) / L, ny = (wall.x1 - wall.x0) / L;
+      if ((nx * (px - ruin.x) + ny * (py - ruin.y) < 0) !== inside) { nx = -nx; ny = -ny; }
+      const s = w.soldiers[0];
+      Object.assign(s, { x: px + nx * (RW + gap), y: py + ny * (RW + gap), vx: 0, vy: 0, dir: 1, angle: Math.atan2(nx, -ny) });
+      return s;
+    };
+    // Walk one way until back at the start. Records, per wall, which faces the
+    // body passed along the middle of, the closest it came to any plate, the
+    // largest move in one step, and whether it ever left the surface.
+    const walkRound = (w, ruin, s) => {
+      step(w, { boots: true });
+      for (let i = 0; i < 60 && s.boots !== "ground"; i++) step(w, {});
+      const x0 = s.x, y0 = s.y;
+      const faces = new Map(ruin.walls.map((wl) => [wl, new Set()]));
+      let path = 0, closest = Infinity, jump = 0, off = false, closed = false;
+      for (let i = 0; i < 4000; i++) {
+        const px = s.x, py = s.y;
+        step(w, { turn: 1 });
+        if (s.boots !== "ground") { off = true; break; }
+        const d = Math.hypot(s.x - px, s.y - py);
+        path += d;
+        jump = Math.max(jump, d);
+        for (const wl of ruin.walls) {
+          const [cx, cy] = closestOnWall(wl, s.x, s.y);
+          const dist = Math.hypot(s.x - cx, s.y - cy);
+          closest = Math.min(closest, dist);
+          const ex = wl.x1 - wl.x0, ey = wl.y1 - wl.y0;
+          const k = ((s.x - wl.x0) * ex + (s.y - wl.y0) * ey) / (ex * ex + ey * ey);
+          if (k > 0.1 && k < 0.9 && dist < RW + 0.01) faces.get(wl).add(Math.sign(ex * (s.y - wl.y0) - ey * (s.x - wl.x0)));
+        }
+        if (path > 200 && Math.hypot(s.x - x0, s.y - y0) < CFG.walkSpeed * CFG.step) { closed = true; break; }
+      }
+      return { faces, closest, jump, off, closed, path };
+    };
+    const long = (wl) => Math.hypot(wl.x1 - wl.x0, wl.y1 - wl.y0) > 100;
+
+    {
+      const w = empty();
+      const ruin = addRuin(w, 3000, 3000, 0.4, 400, 200);
+      const s = overWall(w, ruin, 0, 0.5);
+      t.eq("HUD: in range over a hull plate", bootsState(w, s), "ready");
+      step(w, { boots: true });
+      for (let i = 0; i < 60 && s.boots !== "ground"; i++) step(w, {});
+      t.eq("the boots come on against a hull plate, and it lands", s.boots, "ground");
+    }
+    // One breach (the lower nose): one surface, walked all the way round. The
+    // 400×200 hull's inside corners are all square; the others are not, which
+    // is what caught a walk that stuck in an inside corner.
+    for (const [angle, L, W] of [[0, 400, 200], [1.1, 460, 195], [2.3, 340, 220]]) {
+      const w = empty();
+      const ruin = addRuin(w, 3000, 3000, angle, L, W, [2]);
+      const s = overWall(w, ruin, 0, 0.3);
+      const r = walkRound(w, ruin, s);
+      const missed = ruin.walls.filter((wl) => long(wl) && r.faces.get(wl).size < 2).length;
+      t.ok(`one breach, ${L}×${W} turned ${angle}: one walk comes back to its start (${r.path.toFixed(0)}px)`, r.closed && !r.off);
+      t.eq(`one breach, ${L}×${W} turned ${angle}: it passes both faces of every plate`, missed, 0);
+      t.ok(`one breach, ${L}×${W} turned ${angle}: never inside a plate (closest ${r.closest.toFixed(6)})`, r.closest > RW - 1e-6);
+      t.ok(`one breach, ${L}×${W} turned ${angle}: never more than a walk step at once (${r.jump.toFixed(3)}px)`, r.jump <= CFG.walkSpeed * CFG.step + 1e-6);
+    }
+    {
+      // Two breaches, top and bottom at the same station: two pieces, each
+      // walked all the way round; together they cover every plate.
+      const w = empty();
+      const ruin = addRuin(w, 3000, 3000, 0.7, 400, 200, [0, 3]);
+      const aft = overWall(w, ruin, 0, 0.3);
+      const r1 = walkRound(w, ruin, aft);
+      step(w, { boots: true }); // off, to be placed on the other piece
+      const front = overWall(w, ruin, 1, 0.5); // the stub of the top edge ahead of the breach
+      const r2 = walkRound(w, ruin, front);
+      const missed = ruin.walls.filter((wl) => long(wl) && new Set([...r1.faces.get(wl), ...r2.faces.get(wl)]).size < 2).length;
+      t.ok("two breaches: each piece is walked round back to its start", r1.closed && r2.closed && !r1.off && !r2.off);
+      t.ok("two breaches: the pieces are different surfaces", ruin.walls.some((wl) => r1.faces.get(wl).size && !r2.faces.get(wl).size));
+      t.eq("two breaches: between them, both faces of every plate", missed, 0);
+    }
+    {
+      // Inside a hull, a jump comes back down to the floor it left.
+      const w = empty();
+      const ruin = addRuin(w, 3000, 3000, 0, 400, 200, [2]);
+      const s = overWall(w, ruin, 0, 0.3, 5, true);
+      step(w, { boots: true });
+      for (let i = 0; i < 60 && s.boots !== "ground"; i++) step(w, {});
+      const x0 = s.x, y0 = s.y;
+      step(w, { spacePress: true });
+      for (let i = 0; i < 200 && s.boots !== "ground"; i++) step(w, {});
+      t.ok(`inside a hull, a jump lands back where it left (${Math.hypot(s.x - x0, s.y - y0).toFixed(2)}px)`, s.boots === "ground" && Math.hypot(s.x - x0, s.y - y0) < 3);
     }
   }
 
