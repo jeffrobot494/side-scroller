@@ -153,8 +153,10 @@ export function createAudio() {
     }
   }
 
-  // Events carry world positions; the listener is the camera's centre.
-  function handle(events, lx, ly) {
+  // Events carry world positions; the listener is the camera's centre, and
+  // pan is left-right on the screen, so it turns with the camera's roll.
+  function handle(events, lx, ly, roll = 0) {
+    const c = Math.cos(roll), sn = Math.sin(roll);
     if (!live()) return;
     const now = ctx.currentTime;
     for (const ev of events) {
@@ -166,7 +168,7 @@ export function createAudio() {
         const d = Math.hypot(dx, dy);
         if (d > HEAR) continue;
         v = 1 / (1 + (d / FALLOFF) ** 2);
-        p = Math.max(-1, Math.min(1, dx / 700));
+        p = Math.max(-1, Math.min(1, (dx * c + dy * sn) / 700));
       }
       const key = ev.type === "muzzle" ? (ev.team === "enemy" ? "fire-enemy" : "fire") : ev.type;
       if (SPACING[key] && now - (last[key] || -1) < SPACING[key]) continue;

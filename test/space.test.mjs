@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
 import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove } from "../src/space/sim.js";
-import { createView, draw, cameraFor, zoomBy, figurePose, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
+import { createView, draw, cameraFor, zoomBy, figurePose, toScreen, toWorld, updateRoll, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
 import { createAudio } from "../src/space/audio.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -819,6 +819,57 @@ export default async function run_(t) {
     }
   }
 
+  // ---- magnetic boots M3: the camera turns to the feet ----------------------
+  {
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 3000, y: 3000 });
+    let worst = 0, centre = 0;
+    for (const zoom of [0.3, 1, 2.5]) {
+      for (const roll of [0, 0.4, -2, Math.PI]) {
+        const cam = cameraFor(w, 1280, 720, zoom, roll);
+        for (const [sx, sy] of [[0, 0], [1280, 0], [311, 522], [1280, 720]]) {
+          const [x, y] = toWorld(cam, sx, sy);
+          const [bx, by] = toScreen(cam, x, y);
+          worst = Math.max(worst, Math.hypot(bx - sx, by - sy));
+        }
+        const [mx, my] = toWorld(cam, 640, 360);
+        centre = Math.max(centre, Math.hypot(mx - cam.cx, my - cam.cy));
+      }
+    }
+    t.ok(`screen → world → screen round-trips under any roll and zoom (worst ${worst.toExponential(1)})`, worst < 1e-9);
+    t.ok("the screen centre is the camera centre under any roll", centre < 1e-9);
+    const c0 = cameraFor(w, 1280, 720, 0.5);
+    const [ax, ay] = toWorld(c0, 200, 100);
+    t.ok("roll 0 is the unrolled mapping", ax === c0.x + 200 / 0.5 && ay === c0.y + 100 / 0.5);
+    // Rolled so the soldier's up is screen-up: the top of the screen is along up.
+    Object.assign(s, { angle: 0.9, dir: -1 });
+    const [ux, uy] = upOf(s);
+    const cr = cameraFor(w, 1280, 720, 1, Math.atan2(uy, ux) + Math.PI / 2);
+    const [tx, ty] = toWorld(cr, 640, 60);
+    t.ok("rolled to the feet, screen-up is the soldier's up", near((tx - cr.cx) / 300, ux, 1e-9) && near((ty - cr.cy) / 300, uy, 1e-9));
+
+    // The roll: eases to up while standing, holds in the air, back when off.
+    const r = createWorld(9, { asteroids: 0, dummies: 0, ruins: 0, objective: false, enemies: 0, waveEvery: 1e9 });
+    const rock = makeAsteroid(makeRng(3), 4000, 4000, 120);
+    Object.assign(rock, { vx: 0, vy: 0, spin: 0, rot: 0 });
+    r.asteroids.push(rock);
+    const q = r.soldiers[0];
+    // On the rock's right-hand side: up is +x, so the roll wants +90°.
+    Object.assign(q, { x: 4000 + 120 + q.r + 5, y: 4000, vx: 0, vy: 0, angle: Math.PI / 2, dir: 1 });
+    const v = createView();
+    step(r, { boots: true });
+    for (let i = 0; i < 60; i++) { step(r, {}); updateRoll(v, r, CFG.step); }
+    t.ok(`standing, the roll eases to the feet (${v.roll.toFixed(4)})`, q.boots === "ground" && near(v.roll, Math.PI / 2, 1e-3));
+    step(r, { spacePress: true });
+    const held = v.roll;
+    for (let i = 0; i < 5; i++) { step(r, { turn: 1 }); updateRoll(v, r, CFG.step); }
+    t.ok("in the air it holds, and does not follow a spin", q.boots === "air" && near(v.roll, held, 1e-3));
+    step(r, { boots: true });
+    for (let i = 0; i < 60; i++) { step(r, {}); updateRoll(v, r, CFG.step); }
+    t.ok(`boots off: back to world-up (${v.roll.toFixed(4)})`, q.boots === null && Math.abs(v.roll) < 1e-3);
+  }
+
   // ---- view smoke ----------------------------------------------------------
   {
     const w = createWorld(5, { squad: 3 });
@@ -830,7 +881,8 @@ export default async function run_(t) {
     threw = null;
     const v = createView();
     v.zoom = 0.4;
+    v.roll = 1.3;
     try { draw(ctx2d(), v, w, 960, 540, 1 / 60, true); } catch (e) { threw = e; }
-    t.ok(`view draws the overlay over a 3D view, zoomed out${threw ? ": " + threw.message : ""}`, !threw);
+    t.ok(`view draws the overlay over a 3D view, zoomed out and rolled${threw ? ": " + threw.message : ""}`, !threw);
   }
 }

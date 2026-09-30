@@ -9,8 +9,9 @@
 // Reads the world, writes nothing back. Cosmetic randomness is Math.random.
 //
 // THE INVARIANT (as src/mission/camera.js solveCamera3D): the camera looks
-// straight down -z and its z=0 slice is exactly cameraFor()'s rectangle, so
-// the overlay, mouse aim and sound need no 3D knowledge. One unit = one world
+// straight down -z and its z=0 slice is exactly cameraFor()'s rectangle,
+// turned by the view's roll about its centre, so the overlay, mouse aim and
+// sound need no 3D knowledge beyond toScreen/toWorld in view.js. One unit = one world
 // px; the sim is y-down and Three is y-up, so every placement negates y and
 // every angle.
 //
@@ -665,7 +666,7 @@ export function createView3D(canvas) {
     }
   }
 
-  function draw(world, vw, vh, zoom, dt) {
+  function draw(world, vw, vh, zoom, dt, roll = 0) {
     if (world !== current) rebuild(world);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const W = Math.round(vw * dpr), H = Math.round(vh * dpr);
@@ -682,6 +683,8 @@ export function createView3D(canvas) {
     camera.near = dist * 0.05;
     camera.far = dist + 13000;
     camera.position.set(cx, -cy, dist);
+    // Roll (M3): screen-up is the world direction R(roll)·(0, -1), in Three's y-up.
+    camera.up.set(Math.sin(roll), Math.cos(roll), 0);
     camera.lookAt(cx, -cy, 0);
     camera.updateProjectionMatrix();
 

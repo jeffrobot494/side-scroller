@@ -4,26 +4,61 @@
 // purpose: it never touches world.rng, so replays stay replays.
 // ---------------------------------------------------------------------------
 
-import { CFG, controlled, ENEMY_TYPES, bootsState } from "./sim.js";
+import { CFG, controlled, ENEMY_TYPES, bootsState, upOf } from "./sim.js";
 
 const EDGE_PAD = 160; // how far past the map edge the camera may look
 export const ZOOM_MIN = 0.3;
 export const ZOOM_MAX = 2.5;
 
+const ROLL_TAU = 0.07; // s: the roll's easing time constant, ≈95% in 0.2s (B3)
+
 // The view rectangle in world px: top-left (x, y), size (w, h) = the screen
-// divided by the zoom. The 3D camera frames exactly this rectangle at z=0, so
-// the 2D overlay, mouse aim and sound placement all use it unchanged.
-export function cameraFor(world, vw, vh, zoom = 1) {
+// divided by the zoom, centre (cx, cy). The 3D camera frames exactly this
+// rectangle at z=0, turned by `roll` about its centre (M3), so the 2D overlay,
+// mouse aim and sound placement all map through toScreen/toWorld. The clamp to
+// the map uses the unrolled rectangle.
+export function cameraFor(world, vw, vh, zoom = 1, roll = 0) {
   const s = controlled(world) || world.soldiers.find((o) => o.alive) || world.soldiers[0];
   const fx = s ? s.x : world.size / 2;
   const fy = s ? s.y : world.size / 2;
   const w = vw / zoom, h = vh / zoom;
   const clamp = (v, lo, hi) => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
-  return {
-    x: clamp(fx - w / 2, -EDGE_PAD, world.size + EDGE_PAD - w),
-    y: clamp(fy - h / 2, -EDGE_PAD, world.size + EDGE_PAD - h),
-    w, h, zoom,
-  };
+  const x = clamp(fx - w / 2, -EDGE_PAD, world.size + EDGE_PAD - w);
+  const y = clamp(fy - h / 2, -EDGE_PAD, world.size + EDGE_PAD - h);
+  return { x, y, w, h, zoom, roll, vw, vh, cx: x + w / 2, cy: y + h / 2 };
+}
+
+// World → screen px, and back. Screen = R(-roll) · (world - centre) · zoom +
+// the screen's centre; roll 0 is the plain (world - top-left) · zoom.
+export function toScreen(cam, x, y) {
+  if (!cam.roll) return [(x - cam.x) * cam.zoom, (y - cam.y) * cam.zoom];
+  const c = Math.cos(cam.roll), sn = Math.sin(cam.roll);
+  const dx = x - cam.cx, dy = y - cam.cy;
+  return [cam.vw / 2 + (dx * c + dy * sn) * cam.zoom, cam.vh / 2 + (-dx * sn + dy * c) * cam.zoom];
+}
+
+export function toWorld(cam, sx, sy) {
+  if (!cam.roll) return [cam.x + sx / cam.zoom, cam.y + sy / cam.zoom];
+  const c = Math.cos(cam.roll), sn = Math.sin(cam.roll);
+  const dx = (sx - cam.vw / 2) / cam.zoom, dy = (sy - cam.vh / 2) / cam.zoom;
+  return [cam.cx + dx * c - dy * sn, cam.cy + dx * sn + dy * c];
+}
+
+// M3: the camera turns to the feet. Standing, the roll eases toward the
+// soldier's up; in the air with the boots on it holds; floating, it eases back
+// to world-up. View state, like zoom — it never reaches the sim.
+export function updateRoll(view, world, dt) {
+  const s = controlled(world);
+  let target = view.roll;
+  if (!s || !s.boots || world.end) target = 0;
+  else if (s.boots === "ground") {
+    const [ux, uy] = upOf(s);
+    target = Math.atan2(uy, ux) + Math.PI / 2;
+  }
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  view.roll = wrap(view.roll + wrap(target - view.roll) * (1 - Math.exp(-dt / ROLL_TAU)));
+  if (Math.abs(view.roll) < 1e-6 && target === 0) view.roll = 0;
+  return view.roll;
 }
 
 // One wheel notch is about ±15%.
@@ -48,14 +83,14 @@ export function createView() {
       stars.push({ x: Math.random() * 2400, y: Math.random() * 2400, z: 0.15 + layer * 0.2, s: 0.6 + layer * 0.5, a: 0.3 + Math.random() * 0.5 });
     }
   }
-  return { stars, particles: [], zoom: 1 };
+  return { stars, particles: [], zoom: 1, roll: 0 };
 }
 
 // `three`: the world itself is drawn by view3d.js on the canvas underneath, so
 // this one is a transparent overlay of tells, bars, arrows and HUD. Without it
 // (Three failed to load, or a test) this draws the whole flat view.
 export function draw(ctx, view, world, vw, vh, dt, three = false) {
-  const cam = cameraFor(world, vw, vh, view.zoom);
+  const cam = cameraFor(world, vw, vh, view.zoom, view.roll);
   if (three) ctx.clearRect(0, 0, vw, vh);
   else {
     ctx.fillStyle = "#05070d";
@@ -64,8 +99,10 @@ export function draw(ctx, view, world, vw, vh, dt, three = false) {
   }
 
   ctx.save();
+  ctx.translate(vw / 2, vh / 2);
+  ctx.rotate(-cam.roll);
   ctx.scale(cam.zoom, cam.zoom);
-  ctx.translate(-cam.x, -cam.y);
+  ctx.translate(-cam.cx, -cam.cy);
   if (three) drawTells(ctx, world);
   else {
     drawBounds(ctx, world);
@@ -511,7 +548,7 @@ function drawArrows(ctx, world, cam, vw, vh) {
   const cx = vw / 2, cy = vh / 2;
   const pad = 28;
   const arrow = (x, y, color, size, label) => {
-    const sx = (x - cam.x) * cam.zoom, sy = (y - cam.y) * cam.zoom;
+    const [sx, sy] = toScreen(cam, x, y);
     if (sx > 0 && sx < vw && sy > 0 && sy < vh) return false; // on screen
     const dx = sx - cx, dy = sy - cy;
     // Scale onto the padded screen rectangle.
@@ -780,7 +817,7 @@ function drawTells(ctx, world) {
 // extraction label.
 function drawBars(ctx, world, cam) {
   const z = cam.zoom;
-  const at = (x, y) => [(x - cam.x) * z, (y - cam.y) * z];
+  const at = (x, y) => toScreen(cam, x, y);
   const bar = (a, lift) => {
     const [x, y] = at(a.x, a.y);
     const w = Math.max(24, a.r * 2 * z);

@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { CFG, createWorld, step } from "./sim.js";
-import { createView, draw, cameraFor, zoomBy } from "./view.js";
+import { createView, draw, cameraFor, zoomBy, toWorld, updateRoll } from "./view.js";
 import { createAudio } from "./audio.js";
 
 const canvas = document.getElementById("space");
@@ -86,12 +86,12 @@ function newSeed() {
 }
 
 function sample() {
-  const cam = cameraFor(world, vw, vh, view.zoom);
+  const [aimX, aimY] = toWorld(cameraFor(world, vw, vh, view.zoom, view.roll), mouse.x, mouse.y);
   const input = {
     turn: (held.has("right") ? 1 : 0) - (held.has("left") ? 1 : 0),
     thrust: held.has("thrust"),
-    aimX: cam.x + mouse.x / cam.zoom,
-    aimY: cam.y + mouse.y / cam.zoom,
+    aimX,
+    aimY,
     fire: mouse.down,
     firePress: pressed.has("fire"),
     space: held.has("space"),
@@ -118,11 +118,12 @@ function frame(now) {
     else step(world, input);
     acc -= CFG.step;
   }
+  updateRoll(view, world, dt);
   // Sound and the 3D view read the events before view.js drains them.
-  const cam = cameraFor(world, vw, vh, view.zoom);
+  const cam = cameraFor(world, vw, vh, view.zoom, view.roll);
   // Sound is decoration: a failure in it must never stop the loop.
   try {
-    audio.handle(world.events, cam.x + cam.w / 2, cam.y + cam.h / 2);
+    audio.handle(world.events, cam.cx, cam.cy, cam.roll);
     const lead = world.soldiers[world.ctrl];
     audio.setThrust(!!(lead && lead.alive && lead.thrusting && !world.end));
     if (world.end && !ended) audio.end(world.end.success);
@@ -133,7 +134,7 @@ function frame(now) {
   let three = false;
   if (view3d) {
     try {
-      view3d.draw(world, vw, vh, view.zoom, dt);
+      view3d.draw(world, vw, vh, view.zoom, dt, view.roll);
       three = true;
     } catch (e) {
       console.error("space: 3D view failed, staying flat —", e);
