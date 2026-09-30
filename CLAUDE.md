@@ -476,6 +476,14 @@ section + the tests are the source of truth for what currently exists):
   `poll`'s `onTick`/`signal` to the client without changing any existing method.
   The Lab reads `GAME_CLIENT_ID` from `src/player2/config.js`, never the game's
   config, and has no schema knobs.
+- **Space prototype (`tech/space-prototype.md` S1–S6 — built).** `space.html`
+  at the repo root, linked from nothing: one zero-g mission to test whether a
+  space level works. `src/space/` imports only itself (a test scans for it) —
+  weapons, effects, HP, magazines and recruit stats are COPIED from the game, so
+  a game change never reaches it. `sim.js` is DOM-free and seeded (the suite
+  drives it), `view.js` draws, `main.js` owns input and the fixed step, and
+  `window.space.world()` exposes the world in the console. Placeholders Bo
+  has not decided are listed at the end of the spec.
 - **Pause menu (`tech/pause-menu.md` P0–P3 — built).** Escape (the `pause`
   action, rebindable, local-only on the wire) opens `src/hub/pause.js` over a
   mission: Options and Resume. Options is `src/hub/controls.js` (moved from

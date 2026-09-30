@@ -48,7 +48,10 @@ export function draw(ctx, view, world, vw, vh, dt) {
   drainEvents(view, world);
   drawParticles(ctx, view, dt);
   ctx.restore();
+  drawArrows(ctx, world, cam, vw, vh);
+  drawHurt(ctx, view, world, vw, vh, dt);
   drawHud(ctx, world, vw, vh);
+  drawSquad(ctx, world, vw);
   if (view.waveBanner && (view.waveBanner.t -= dt) > 0 && !world.end) {
     ctx.globalAlpha = Math.min(1, view.waveBanner.t);
     ctx.fillStyle = "#ff8a8a";
@@ -470,6 +473,100 @@ function objectiveText(world) {
   return "Find the artifact in the derelicts";
 }
 
+// ---- edge arrows: what is offscreen and where ------------------------------------
+function drawArrows(ctx, world, cam, vw, vh) {
+  const cx = vw / 2, cy = vh / 2;
+  const pad = 28;
+  const arrow = (x, y, color, size, label) => {
+    const sx = x - cam.x, sy = y - cam.y;
+    if (sx > 0 && sx < vw && sy > 0 && sy < vh) return false; // on screen
+    const dx = sx - cx, dy = sy - cy;
+    // Scale onto the padded screen rectangle.
+    const k = Math.min((vw / 2 - pad) / Math.abs(dx || 1e-6), (vh / 2 - pad) / Math.abs(dy || 1e-6));
+    const ax = cx + dx * k, ay = cy + dy * k;
+    ctx.save();
+    ctx.translate(ax, ay);
+    ctx.rotate(Math.atan2(dy, dx));
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(size, 0);
+    ctx.lineTo(-size * 0.7, -size * 0.7);
+    ctx.lineTo(-size * 0.3, 0);
+    ctx.lineTo(-size * 0.7, size * 0.7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    if (label) {
+      ctx.fillStyle = color;
+      ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(label, ax - Math.cos(Math.atan2(dy, dx)) * 26, ay - Math.sin(Math.atan2(dy, dx)) * 26 + 4);
+      ctx.textAlign = "left";
+    }
+    return true;
+  };
+  const lead = controlled(world);
+  const from = lead || world.soldiers.find((s) => s.alive);
+  // Hostiles within 1600px, fading with distance; mines only when near.
+  for (const e of world.enemies) {
+    if (!e.alive || e.kind !== "enemy" || !from) continue;
+    const d = Math.hypot(e.x - from.x, e.y - from.y);
+    if (d > (e.type === "mine" ? 500 : 1600)) continue;
+    ctx.globalAlpha = 0.35 + 0.65 * (1 - d / 1600);
+    arrow(e.x, e.y, e.alert ? "#ff6a6a" : "#b07070", e.alert ? 9 : 7);
+  }
+  ctx.globalAlpha = 1;
+  const dist = (x, y) => (from ? `${Math.round(Math.hypot(x - from.x, y - from.y) / 10) * 10}` : "");
+  const art = world.artifact;
+  if (art && !art.carrier) arrow(art.x, art.y, "#78ffe6", 13, dist(art.x, art.y));
+  if (world.extract && art && art.carrier) arrow(world.extract.x, world.extract.y, "#8affc1", 13, dist(world.extract.x, world.extract.y));
+}
+
+// A red edge flash when the soldier you fly takes damage.
+function drawHurt(ctx, view, world, vw, vh, dt) {
+  const s = controlled(world);
+  if (s && view.lastHp && view.lastWho === s && s.hp < view.lastHp) view.hurt = 0.35;
+  view.lastHp = s ? s.hp : 0;
+  view.lastWho = s;
+  if (!(view.hurt > 0)) return;
+  view.hurt -= dt;
+  const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.35, vw / 2, vh / 2, Math.max(vw, vh) * 0.7);
+  g.addColorStop(0, "rgba(255,40,40,0)");
+  g.addColorStop(1, `rgba(255,40,40,${Math.max(0, view.hurt) * 0.9})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, vw, vh);
+}
+
+// Squad list, top right: who you fly, who carries the artifact, who is down.
+function drawSquad(ctx, world, vw) {
+  const x = vw - 250;
+  let y = 16;
+  ctx.font = "13px ui-monospace, Menlo, Consolas, monospace";
+  world.soldiers.forEach((s, i) => {
+    const me = i === world.ctrl && s.alive;
+    ctx.fillStyle = me ? "rgba(138,255,193,0.14)" : "rgba(0,0,0,0.45)";
+    ctx.fillRect(x, y, 236, 38);
+    ctx.fillStyle = s.alive ? s.color : "#555";
+    ctx.fillRect(x, y, 4, 38);
+    ctx.fillStyle = s.alive ? "#dfe8ff" : "#666";
+    const tag = world.artifact && world.artifact.carrier === s ? "  ◆" : "";
+    ctx.fillText(`${me ? "▶ " : ""}${s.name}${tag}`, x + 12, y + 15);
+    if (s.alive) {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillRect(x + 12, y + 23, 120, 5);
+      ctx.fillStyle = "#8affc1";
+      ctx.fillRect(x + 12, y + 23, 120 * Math.max(0, s.hp / s.maxHp), 5);
+      ctx.fillStyle = "#9aa6b8";
+      const ammo = s.reloading > 0 ? "reload" : `${s.ammo}/${s.weapon.magazine}`;
+      ctx.fillText(ammo, x + 142, y + 30);
+    } else {
+      ctx.fillStyle = "#884444";
+      ctx.fillText("KIA", x + 12, y + 31);
+    }
+    y += 44;
+  });
+}
+
 // ---- HUD ------------------------------------------------------------------------
 function drawHud(ctx, world, vw, vh) {
   const s = controlled(world);
@@ -491,6 +588,18 @@ function drawHud(ctx, world, vw, vh) {
   ctx.fillRect(12, vh - 58, 360, 46);
   ctx.fillStyle = "#dfe8ff";
   lines.forEach((l, i) => ctx.fillText(l, 22, vh - 38 + i * 18));
+  if (s.reloading > 0) {
+    ctx.fillStyle = "rgba(255,255,255,0.15)";
+    ctx.fillRect(22, vh - 20, 340, 3);
+    ctx.fillStyle = "#ffd36a";
+    ctx.fillRect(22, vh - 20, 340 * (1 - s.reloading / w.reloadTime), 3);
+  }
+  ctx.fillStyle = "rgba(223,232,255,0.45)";
+  ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+  ctx.textAlign = "right";
+  ctx.fillText("A/D turn · W thrust · mouse aim + fire · R reload · Tab swap", vw - 16, vh - 16);
+  ctx.textAlign = "left";
+  ctx.font = "14px ui-monospace, Menlo, Consolas, monospace";
   if (s.ammo <= 0 && s.reloading <= 0) {
     ctx.fillStyle = "#ff6a6a";
     ctx.fillText(s.magsLeft > 0 ? "EMPTY — press R" : "OUT OF AMMO", 22, vh - 70);
