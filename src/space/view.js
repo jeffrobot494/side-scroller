@@ -4,7 +4,7 @@
 // purpose: it never touches world.rng, so replays stay replays.
 // ---------------------------------------------------------------------------
 
-import { controlled } from "./sim.js";
+import { controlled, ENEMY_TYPES } from "./sim.js";
 
 const EDGE_PAD = 160; // how far past the map edge the camera may look
 
@@ -42,13 +42,22 @@ export function draw(ctx, view, world, vw, vh, dt) {
   for (const r of world.ruins) drawRuin(ctx, r);
   for (const a of world.asteroids) drawAsteroid(ctx, a);
   if (world.artifact) drawArtifact(ctx, world.artifact, world.t);
-  for (const e of world.enemies) if (e.alive) drawEnemy(ctx, e);
+  for (const e of world.enemies) if (e.alive) drawEnemy(ctx, e, world.t);
   for (const s of world.soldiers) if (s.alive) drawSoldier(ctx, s, s === controlled(world));
   for (const p of world.projectiles) drawProjectile(ctx, p);
   drainEvents(view, world);
   drawParticles(ctx, view, dt);
   ctx.restore();
   drawHud(ctx, world, vw, vh);
+  if (view.waveBanner && (view.waveBanner.t -= dt) > 0 && !world.end) {
+    ctx.globalAlpha = Math.min(1, view.waveBanner.t);
+    ctx.fillStyle = "#ff8a8a";
+    ctx.font = "bold 20px ui-monospace, Menlo, Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(`WAVE ${view.waveBanner.n} INBOUND`, vw / 2, 60);
+    ctx.textAlign = "left";
+    ctx.globalAlpha = 1;
+  }
   if (world.end) drawEnd(ctx, world.end, vw, vh);
   return cam;
 }
@@ -73,6 +82,8 @@ function drainEvents(view, world) {
         burst(view, ev.x, ev.y, "#ff9b4a", 18, 260, 0.5, 3);
         break;
       case "chain": view.particles.push({ line: true, x: ev.x0, y: ev.y0, x1: ev.x1, y1: ev.y1, life: 0.15, max: 0.15, color: "#8fd0ff" }); break;
+      case "wave": view.waveBanner = { n: ev.n, t: 2.5 }; break;
+      case "pickup": burst(view, ev.x, ev.y, "#78ffe6", 24, 200, 0.6, 3); break;
       case "death": burst(view, ev.x, ev.y, ev.color || "#ff6a6a", 22, 220, 0.6, 3); break;
     }
   }
@@ -145,7 +156,8 @@ function statusTint(ctx, a) {
   }
 }
 
-function drawEnemy(ctx, e) {
+function drawEnemy(ctx, e, t) {
+  if (e.kind === "enemy") return drawAlien(ctx, e, t);
   statusTint(ctx, e);
   // S2 target dummy: a ringed drone.
   ctx.fillStyle = e.flash > 0 ? "#ffffff" : "#7a3b3b";
@@ -158,6 +170,110 @@ function drawEnemy(ctx, e) {
   ctx.arc(e.x, e.y, e.r * 0.55, 0, Math.PI * 2);
   ctx.stroke();
   hpBar(ctx, e, e.y - e.r - 10);
+}
+
+function drawAlien(ctx, e, t) {
+  const T = ENEMY_TYPES[e.type];
+  const col = e.flash > 0 ? "#ffffff" : T.color;
+  statusTint(ctx, e);
+  ctx.save();
+  ctx.translate(e.x, e.y);
+  const face = e.target && e.alert ? Math.atan2(e.target.y - e.y, e.target.x - e.x) : Math.atan2(e.vy, e.vx);
+  // Wind-up tell: a swelling ring while a shot is telegraphed.
+  if (e.tele > 0) {
+    ctx.strokeStyle = "rgba(255,255,255,0.8)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, e.r + 4 + (T.tele - e.tele) * 20, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = col;
+  switch (e.type) {
+    case "charger": {
+      ctx.rotate(Math.atan2(e.vy, e.vx));
+      ctx.fillStyle = "rgba(255,120,80,0.7)";
+      ctx.beginPath();
+      ctx.moveTo(-e.r, -4); ctx.lineTo(-e.r - 8 - Math.random() * 8, 0); ctx.lineTo(-e.r, 4);
+      ctx.fill();
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(e.r + 4, 0); ctx.lineTo(0, -e.r); ctx.lineTo(-e.r, 0); ctx.lineTo(0, e.r);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case "gunner": {
+      ctx.rotate(face);
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        ctx[i ? "lineTo" : "moveTo"](Math.cos(a) * e.r, Math.sin(a) * e.r);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#3b1a45";
+      ctx.fillRect(4, -4, e.r + 6, 8);
+      ctx.fillStyle = "#8affc1";
+      ctx.beginPath();
+      ctx.arc(0, 0, 5, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+    case "swarmer": {
+      ctx.rotate(Math.atan2(e.vy, e.vx));
+      ctx.beginPath();
+      ctx.moveTo(e.r + 3, 0); ctx.lineTo(-e.r, -e.r * 0.8); ctx.lineTo(-e.r * 0.4, 0); ctx.lineTo(-e.r, e.r * 0.8);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    case "minelayer": {
+      const pulse = 1 + Math.sin(t * 3 + e.heading) * 0.06;
+      ctx.scale(pulse, 1 / pulse);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, e.r * 1.2, e.r * 0.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(191,242,154,0.8)";
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(-6 + i * 6, 3, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case "mine": {
+      const armed = e.age >= T.arm;
+      const hot = e.fuse > 0;
+      const blink = hot ? Math.sin(t * 60) > 0 : armed ? Math.sin(t * 6) > 0.6 : false;
+      ctx.rotate(t * 1.5);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * e.r * 0.6, Math.sin(a) * e.r * 0.6);
+        ctx.lineTo(Math.cos(a) * (e.r + 5), Math.sin(a) * (e.r + 5));
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#3a4a2a";
+      ctx.beginPath();
+      ctx.arc(0, 0, e.r * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = hot ? "#ff5040" : blink ? "#ffec80" : "#6a7a4a";
+      ctx.beginPath();
+      ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      if (hot) {
+        ctx.strokeStyle = "rgba(255,80,64,0.5)";
+        ctx.beginPath();
+        ctx.arc(0, 0, T.blast.radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      break;
+    }
+  }
+  ctx.restore();
+  if (e.type !== "mine" && e.hp < e.maxHp) hpBar(ctx, e, e.y - e.r - 10);
 }
 
 // ---- projectiles (the look of drawProjectile, src/mission/render.js) ----------

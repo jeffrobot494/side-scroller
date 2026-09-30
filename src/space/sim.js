@@ -50,7 +50,17 @@ export const CFG = {
   extractR: 120,
   extractMinDist: 2000, // half the map from the start (P10)
 
-  dummyCount: 5, // S2 target dummies; S4 replaces them with enemies
+  enemyCount: 12, // placed in the field at start
+  enemyStartGap: 1000,
+  enemyCap: 30, // a wave is skipped while this many are alive
+  waveEvery: 30, // P5
+  waveBase: 3, // enemies in the first wave; +1 per wave, never ends
+  waveDistMin: 900, // offscreen from the squad at 1280×720
+  waveDistMax: 1100,
+  senseEvery: 0.2, // the game's perception cadence
+  alertRange: 650,
+
+  dummyCount: 0, // S2 target dummies: a test fixture now, none in play
   dummyHp: 60,
   dummyR: 20,
   dummyRespawn: 2,
@@ -103,6 +113,34 @@ export const WEAPONS = {
 };
 
 export const LOADOUT = ["carbine", "grenade_launcher", "arc_tazer"]; // P12
+
+// ---- enemies (P4) --------------------------------------------------------------
+// New zero-g types, each seeded from one roster entry in src/game/enemyspecs.js
+// for HP, damage and projectile. Enemies thrust directly in any direction;
+// only soldiers rotate-and-thrust.
+const enemyGun = (projectile, damage) => ({
+  fireRate: 1000, auto: true, spread: 0, magazine: 0, // cadence is the brain's
+  projectile, effects: [{ kind: "damage", amount: damage }],
+});
+
+export const ENEMY_TYPES = {
+  // ← husk_charger: HP 24, contact 10, chase 210.
+  charger: { name: "Charger", r: 14, hp: 24, speed: 210, accel: 380, contact: 10, color: "#e05a5a" },
+  // ← lurk_gunner: HP 46, keepDistance 260–420 at 140, orb 460 / 14, telegraph 0.5, wait 1.4.
+  gunner: { name: "Gunner", r: 20, hp: 46, speed: 140, accel: 260, keepMin: 260, keepMax: 420, tele: 0.5, wait: [1.4, 1.4],
+    weapon: enemyGun({ speed: 460, w: 14, h: 14, color: "#8affc1", life: 2.2, shape: "orb" }, 14), color: "#c261e0" },
+  // ← strafe_raider: bullet 540 / 8, telegraph 0.45; HP 36 lowered to 14 for packs of three.
+  swarmer: { name: "Swarmer", r: 11, hp: 14, speed: 300, accel: 600, orbit: 240, tele: 0.45, wait: [0.9, 1.5], pack: 3,
+    weapon: enemyGun({ speed: 540, w: 10, h: 5, color: "#ffcf5c", life: 1.6, shape: "bullet" }, 8), color: "#e0975a" },
+  // ← spore_wisp: HP 30, drift 60, a volley every 1.6–2.4s — released as mines.
+  minelayer: { name: "Mine-layer", r: 18, hp: 30, speed: 60, accel: 120, keep: 350, drop: [1.6, 2.4], maxMines: 6, color: "#5ac8e0" },
+  // A mine: shootable (HP 4, like the boss's seeker), arms, then fuses on proximity.
+  mine: { name: "Mine", r: 9, hp: 4, arm: 0.8, trigger: 70, fuse: 0.35, life: 25,
+    blast: { kind: "explode", amount: 12, radius: 80 }, color: "#bff29a" },
+};
+
+// Weighted mix for placement and waves (a swarmer entry is a pack).
+const ENEMY_MIX = [["charger", 35], ["gunner", 25], ["swarmer", 25], ["minelayer", 15]];
 
 // ---- recruits (copied from src/game/soldiers.js) ---------------------------
 export const RECRUITS = [
@@ -161,6 +199,9 @@ export function createWorld(seed = 1, opts = {}) {
   if (opts.ruins !== 0) placeRuins(world, opts.ruins);
   if (opts.objective !== false) placeObjective(world);
   placeAsteroids(world, opts.asteroids ?? CFG.asteroidCount);
+
+  world.wave = { n: 0, t: opts.waveEvery ?? CFG.waveEvery };
+  if (opts.enemies !== 0) placeEnemies(world, opts.enemies ?? CFG.enemyCount);
 
   const dummies = opts.dummies ?? CFG.dummyCount;
   for (let i = 0; i < dummies; i++) {
@@ -381,6 +422,286 @@ function tickObjective(world) {
   if (held && ex && living.some((s) => Math.hypot(s.x - ex.x, s.y - ex.y) < ex.r)) world.end = { success: true };
 }
 
+// ---- enemy construction + placement ---------------------------------------------
+export function makeEnemy(world, type, x, y) {
+  const T = ENEMY_TYPES[type];
+  const rng = world.rng;
+  return {
+    kind: "enemy", type, team: "enemy",
+    x, y, vx: 0, vy: 0, sx: 0, sy: 0,
+    r: T.r, m: (T.r / CFG.soldierR) ** 2,
+    hp: T.hp, maxHp: T.hp, alive: true,
+    burn: null, slow: null, flash: 0, muzzle: 0,
+    weapon: T.weapon || null, fireCd: 0,
+    alert: false, target: null, los: false,
+    senseT: rng() * CFG.senseEvery,
+    tele: 0, // > 0 while winding up a shot
+    cool: rand(rng, 0.5, 1.5), // until the next shot / mine
+    contactCd: 0,
+    heading: rng() * Math.PI * 2,
+    orbitDir: rng() < 0.5 ? -1 : 1,
+    age: 0, owner: null, mines: 0, fuse: 0,
+  };
+}
+
+function pickType(rng) {
+  let total = 0;
+  for (const [, w] of ENEMY_MIX) total += w;
+  let k = rng() * total;
+  for (const [type, w] of ENEMY_MIX) if ((k -= w) < 0) return type;
+  return ENEMY_MIX[0][0];
+}
+
+// A type at a point: a swarmer is a pack spread around it.
+function spawnGroup(world, type, x, y, alert) {
+  const n = ENEMY_TYPES[type].pack || 1;
+  const dir = world.rng() < 0.5 ? -1 : 1;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const e = makeEnemy(world, type, x + (n > 1 ? Math.cos(a) * 40 : 0), y + (n > 1 ? Math.sin(a) * 40 : 0));
+    e.alert = alert;
+    if (n > 1) e.orbitDir = dir; // a pack circles one way
+    world.enemies.push(e);
+  }
+}
+
+function freeSpot(world, x, y, r) {
+  if (x < r || y < r || x > world.size - r || y > world.size - r) return false;
+  if (world.asteroids.some((a) => Math.hypot(a.x - x, a.y - y) < a.r + r + 10)) return false;
+  if (world.ruins.some((o) => Math.hypot(o.x - x, o.y - y) < o.R + r)) return false;
+  return true;
+}
+
+function placeEnemies(world, count) {
+  const { rng, size } = world;
+  // One gunner guards the hull that holds the artifact, just outside it.
+  const host = world.artifact && world.artifact.ruin;
+  if (host) {
+    const a = rng() * Math.PI * 2;
+    spawnGroup(world, "gunner", host.x + Math.cos(a) * (host.R + 60), host.y + Math.sin(a) * (host.R + 60), false);
+  }
+  let tries = 0;
+  let placed = 0;
+  while (placed < count && tries++ < count * 50) {
+    const x = rand(rng, 80, size - 80);
+    const y = rand(rng, 80, size - 80);
+    if (Math.hypot(x - world.start.x, y - world.start.y) < CFG.enemyStartGap) continue;
+    if (!freeSpot(world, x, y, 60)) continue;
+    spawnGroup(world, pickType(rng), x, y, false);
+    placed++;
+  }
+}
+
+function squadCentre(world) {
+  const living = world.soldiers.filter((s) => s.alive);
+  if (!living.length) return null;
+  let x = 0, y = 0;
+  for (const s of living) { x += s.x; y += s.y; }
+  return { x: x / living.length, y: y / living.length };
+}
+
+// A wave: offscreen, at a random bearing from the squad — any angle, not just
+// the map edge. Bearings whose point the map clamps back toward the squad are
+// rerolled.
+export function spawnWave(world) {
+  const c = squadCentre(world);
+  if (!c) return;
+  const alive = world.enemies.filter((e) => e.alive && e.type !== "mine").length;
+  world.wave.n++;
+  if (alive >= CFG.enemyCap) return;
+  const { rng, size } = world;
+  const count = CFG.waveBase + world.wave.n - 1;
+  for (let i = 0; i < count; i++) {
+    for (let tries = 0; tries < 16; tries++) {
+      const a = rng() * Math.PI * 2;
+      const d = rand(rng, CFG.waveDistMin, CFG.waveDistMax);
+      const x = clamp(c.x + Math.cos(a) * d, 60, size - 60);
+      const y = clamp(c.y + Math.sin(a) * d, 60, size - 60);
+      if (Math.hypot(x - c.x, y - c.y) < CFG.waveDistMin * 0.85) continue;
+      if (!freeSpot(world, x, y, 40)) continue;
+      spawnGroup(world, pickType(rng), x, y, true);
+      break;
+    }
+  }
+  world.events.push({ type: "wave", n: world.wave.n });
+}
+
+// ---- enemy behaviour -------------------------------------------------------------
+export function hasLos(world, ax, ay, bx, by) {
+  for (const a of world.asteroids) if (segCircle(ax, ay, bx, by, a.x, a.y, a.r) !== null) return false;
+  for (const w of world.walls) if (segWall(ax, ay, bx, by, w, 0) !== null) return false;
+  return true;
+}
+
+function nearestSoldier(world, e) {
+  let best = null, bd = Infinity;
+  for (const s of world.soldiers) {
+    if (!s.alive) continue;
+    const d = Math.hypot(s.x - e.x, s.y - e.y);
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+
+// Obstacle avoidance: bend a desired velocity away from the rock or hull plate
+// the body would reach within `look` seconds. Shared by enemies and the squad.
+export function avoid(world, b, dvx, dvy, look = 0.7) {
+  const sp = Math.hypot(dvx, dvy);
+  if (!sp) return [dvx, dvy];
+  const ux = dvx / sp, uy = dvy / sp;
+  const reach = sp * look + b.r;
+  let px = 0, py = 0;
+  for (const a of world.asteroids) {
+    const rx = a.x - b.x, ry = a.y - b.y;
+    const ahead = rx * ux + ry * uy;
+    if (ahead <= 0 || ahead > reach + a.r) continue;
+    const lat = rx * -uy + ry * ux; // signed: + is to the left of travel
+    const clear = a.r + b.r + 16;
+    if (Math.abs(lat) >= clear) continue;
+    const k = (1 - Math.abs(lat) / clear) * (1 - ahead / (reach + a.r));
+    const side = lat >= 0 ? -1 : 1; // steer to the side it is not on
+    px += -uy * side * k;
+    py += ux * side * k;
+  }
+  for (const r of world.ruins) {
+    if (Math.hypot(r.x - b.x, r.y - b.y) > r.R + reach) continue;
+    const fx = b.x + ux * Math.min(reach, sp * look * 0.5 + b.r);
+    const fy = b.y + uy * Math.min(reach, sp * look * 0.5 + b.r);
+    for (const w of r.walls) {
+      const [cx, cy] = closestOnWall(w, fx, fy);
+      const d = Math.hypot(fx - cx, fy - cy) || 0.001;
+      const clear = b.r + w.t + 16;
+      if (d >= clear) continue;
+      const k = 1 - d / clear;
+      px += ((fx - cx) / d) * k;
+      py += ((fy - cy) / d) * k;
+    }
+  }
+  if (!px && !py) return [dvx, dvy];
+  const nx = ux + px * 2, ny = uy + py * 2;
+  const n = Math.hypot(nx, ny) || 1;
+  return [(nx / n) * sp, (ny / n) * sp];
+}
+
+// Direct thrust: accelerate toward a desired velocity (brakes too).
+function steerTo(b, dvx, dvy, accel, dt) {
+  const ex = dvx - b.vx, ey = dvy - b.vy;
+  const e = Math.hypot(ex, ey);
+  if (!e) return;
+  const k = Math.min(1, (accel * dt) / e);
+  b.vx += ex * k;
+  b.vy += ey * k;
+}
+
+function updateEnemies(world, dt) {
+  for (const e of world.enemies) {
+    if (!e.alive || e.kind !== "enemy") continue;
+    const T = ENEMY_TYPES[e.type];
+    e.age += dt;
+    if (e.contactCd > 0) e.contactCd -= dt;
+    if (e.cool > 0) e.cool -= dt;
+
+    if (e.type === "mine") { updateMine(world, e, T, dt); continue; }
+
+    if ((e.senseT -= dt) <= 0) {
+      e.senseT = CFG.senseEvery;
+      e.target = nearestSoldier(world, e);
+      e.los = !!e.target && hasLos(world, e.x, e.y, e.target.x, e.target.y);
+      if (!e.alert && e.target && e.los && Math.hypot(e.target.x - e.x, e.target.y - e.y) < CFG.alertRange) e.alert = true;
+    }
+    const t = e.target && e.target.alive ? e.target : null;
+    let dvx = 0, dvy = 0;
+    if (!e.alert || !t) {
+      // Idle: a slow drift on a wandering heading.
+      e.heading += (world.rng() - 0.5) * dt;
+      dvx = Math.cos(e.heading) * 25;
+      dvy = Math.sin(e.heading) * 25;
+    } else {
+      const dx = t.x - e.x, dy = t.y - e.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const ux = dx / d, uy = dy / d;
+      if (e.type === "charger") {
+        dvx = ux * T.speed; dvy = uy * T.speed;
+      } else if (e.type === "gunner") {
+        const radial = d < T.keepMin ? -1 : d > T.keepMax ? 1 : 0;
+        dvx = (ux * radial + -uy * e.orbitDir * 0.4) * T.speed;
+        dvy = (uy * radial + ux * e.orbitDir * 0.4) * T.speed;
+      } else if (e.type === "swarmer") {
+        const pull = clamp((d - T.orbit) / 120, -1, 1);
+        dvx = (-uy * e.orbitDir + ux * pull) * T.speed;
+        dvy = (ux * e.orbitDir + uy * pull) * T.speed;
+      } else if (e.type === "minelayer") {
+        e.heading += (world.rng() - 0.5) * dt * 2;
+        const away = d < T.keep ? -1 : 0;
+        dvx = (Math.cos(e.heading) + ux * away * 2) * T.speed;
+        dvy = (Math.sin(e.heading) + uy * away * 2) * T.speed;
+      }
+      shoot(world, e, T, t, dt);
+    }
+    [dvx, dvy] = avoid(world, e, dvx, dvy);
+    steerTo(e, dvx, dvy, T.accel, dt);
+
+    // Contact damage, runtime.js: once per contact cooldown (0.6s), per enemy.
+    if (T.contact && e.contactCd <= 0) {
+      for (const s of world.soldiers) {
+        if (!s.alive || Math.hypot(s.x - e.x, s.y - e.y) >= s.r + e.r) continue;
+        hurt(world, s, T.contact, e);
+        e.contactCd = 0.6;
+        break;
+      }
+    }
+  }
+}
+
+// Telegraph, then fire aimed; only with line of sight. Mine-layers drop mines.
+function shoot(world, e, T, t, dt) {
+  if (e.type === "minelayer") {
+    if (e.cool <= 0 && e.mines < T.maxMines) {
+      const m = makeEnemy(world, "mine", e.x, e.y);
+      m.vx = e.vx * 0.2; m.vy = e.vy * 0.2;
+      m.owner = e;
+      m.alert = true;
+      e.mines++;
+      world.enemies.push(m);
+      e.cool = rand(world.rng, T.drop[0], T.drop[1]);
+    }
+    return;
+  }
+  if (!T.weapon) return;
+  if (e.tele > 0) {
+    e.tele -= dt;
+    if (e.tele <= 0) {
+      e.fireCd = 0;
+      fire(world, e, Math.atan2(t.y - e.y, t.x - e.x), 1);
+      e.cool = rand(world.rng, T.wait[0], T.wait[1]);
+    }
+    return;
+  }
+  if (e.cool <= 0 && e.los) e.tele = T.tele;
+}
+
+function updateMine(world, m, T, dt) {
+  if (m.age > T.life) { m.alive = false; releaseMine(m); return; }
+  if (m.fuse > 0) {
+    m.fuse -= dt;
+    if (m.fuse <= 0) {
+      m.alive = false;
+      releaseMine(m);
+      explode(world, T.blast, m.x, m.y, "enemy", m);
+    }
+    return;
+  }
+  if (m.age < T.arm) return;
+  for (const s of world.soldiers) {
+    if (s.alive && Math.hypot(s.x - m.x, s.y - m.y) < T.trigger) { m.fuse = T.fuse; break; }
+  }
+}
+
+function releaseMine(m) {
+  if (m.owner) m.owner.mines = Math.max(0, m.owner.mines - 1);
+  m.owner = null;
+}
+
 export const controlled = (world) => {
   const s = world.soldiers[world.ctrl];
   return s && s.alive ? s : null;
@@ -402,6 +723,11 @@ export function step(world, input = {}) {
     // Semi-auto takes the press, auto the hold — as the mission does.
     const want = s.weapon.auto ? input.fire : input.firePress;
     if (want) fire(world, s, s.aim, aimAccuracy(s.stats.aim));
+  }
+  updateEnemies(world, dt);
+  if (!world.end && (world.wave.t -= dt) <= 0) {
+    world.wave.t = CFG.waveEvery;
+    spawnWave(world);
   }
   tickActors(world, dt);
   integrate(world, dt);
@@ -504,6 +830,7 @@ function decayShove(a, dt) {
 export function hurt(world, t, amount, owner, quiet = false) {
   if (!t.alive || !(amount > 0)) return;
   t.hp -= amount;
+  if (t.kind === "enemy") t.alert = true;
   if (!quiet) t.flash = 0.12;
   if (t.hp <= 0) kill(world, t, owner);
 }
@@ -512,8 +839,12 @@ function kill(world, t) {
   t.alive = false;
   t.hp = 0;
   t.burn = t.slow = null;
-  world.events.push({ type: "death", x: t.x, y: t.y, r: t.r, kind: t.kind, color: t.color });
+  const color = t.color || (t.type && ENEMY_TYPES[t.type].color);
+  world.events.push({ type: "death", x: t.x, y: t.y, r: t.r, kind: t.kind, color });
   if (t.kind === "dummy") t.respawn = CFG.dummyRespawn;
+  if (t.type === "mine") releaseMine(t);
+  // Prune long-dead enemies so the list does not grow for the whole mission.
+  if (t.kind === "enemy" && world.enemies.length > 80) world.enemies = world.enemies.filter((e) => e.alive || e === t);
 }
 
 const opponentsOf = (world, team) => (team === "player" ? world.enemies : world.soldiers);

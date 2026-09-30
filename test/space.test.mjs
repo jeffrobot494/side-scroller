@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES } from "../src/space/sim.js";
 import { createView, draw } from "../src/space/view.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -13,7 +13,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
 // A world with nothing in it but the squad, for mechanics tests.
 function empty(opts = {}) {
-  return createWorld(7, { asteroids: 0, dummies: 0, ruins: 0, objective: false, ...opts });
+  return createWorld(7, { asteroids: 0, dummies: 0, ruins: 0, objective: false, enemies: 0, waveEvery: 1e9, ...opts });
 }
 
 // A stationary target `d` px along +x from a soldier at (2000, 2000).
@@ -283,7 +283,7 @@ export default async function run_(t) {
     t.eq("a round stops at a hull plate", w.projectiles.length, 0);
   }
   {
-    const w = createWorld(3, { squad: 2, asteroids: 0, dummies: 0 });
+    const w = createWorld(3, { squad: 2, asteroids: 0, dummies: 0, enemies: 0 });
     const [a, b] = w.soldiers;
     const art = w.artifact;
     Object.assign(a, { x: art.x, y: art.y, vx: 0, vy: 0 });
@@ -301,13 +301,106 @@ export default async function run_(t) {
     t.ok("carrier inside extraction: success", w.end && w.end.success === true);
   }
   {
-    const w = createWorld(3, { squad: 2, asteroids: 0, dummies: 0 });
+    const w = createWorld(3, { squad: 2, asteroids: 0, dummies: 0, enemies: 0 });
     Object.assign(w.soldiers[0], { x: w.extract.x, y: w.extract.y });
     run(w, {}, 5);
     t.ok("extraction without the artifact does nothing", !w.end);
     for (const s of w.soldiers) hurt(w, s, 999);
     run(w, {}, 1);
     t.ok("squad dead: failure", w.end && w.end.success === false);
+  }
+
+  // ---- S4: enemies ------------------------------------------------------------------
+  {
+    // A charger reaches a soldier in open space; contact lands once per 0.6s.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000, hp: 1000, maxHp: 1000 });
+    const e = makeEnemy(w, "charger", 2400, 2000);
+    e.alert = true;
+    w.enemies.push(e);
+    let first = null;
+    for (let i = 0; i < 600 && first === null; i++) { run(w, {}, 1); if (s.hp < 1000) first = i; }
+    t.ok("a charger reaches and hits a soldier", first !== null);
+    const hp = s.hp;
+    // Pin it on the soldier for one second of contact.
+    for (let i = 0; i < 60; i++) { Object.assign(e, { x: s.x + 5, y: s.y, vx: 0, vy: 0 }); run(w, {}, 1); }
+    const hits = Math.round((hp - s.hp) / ENEMY_TYPES.charger.contact);
+    t.ok(`contact damage at most once per 0.6s (${hits} hits in 1s)`, hits >= 1 && hits <= 2);
+  }
+  {
+    // A gunner does not fire through a rock, and does fire with a clear line.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000, hp: 1000, maxHp: 1000 });
+    const rock = makeAsteroid(makeRng(4), 2170, 2000, 60);
+    rock.vx = rock.vy = 0; rock.m = 1e9; // parked
+    w.asteroids.push(rock);
+    const g = makeEnemy(w, "gunner", 2340, 2000);
+    g.alert = true;
+    w.enemies.push(g);
+    t.ok("hasLos: a rock blocks the line", !hasLos(w, g.x, g.y, s.x, s.y));
+    let shots = 0;
+    for (let i = 0; i < 180; i++) {
+      Object.assign(g, { x: 2340, y: 2000, vx: 0, vy: 0 }); // hold it behind the rock
+      Object.assign(s, { x: 2000, y: 2000, vx: 0, vy: 0 });
+      run(w, {}, 1);
+      shots += w.projectiles.filter((p) => p.team === "enemy" && !p.counted && (p.counted = true)).length;
+    }
+    t.eq("a gunner holds fire without line of sight", shots, 0);
+    w.asteroids.length = 0;
+    for (let i = 0; i < 180; i++) {
+      Object.assign(g, { x: 2340, y: 2000, vx: 0, vy: 0 });
+      run(w, {}, 1);
+      shots += w.projectiles.filter((p) => p.team === "enemy" && !p.counted && (p.counted = true)).length;
+    }
+    t.ok("and fires once it has one", shots >= 1);
+  }
+  {
+    // A mine arms, fuses on proximity, and its blast hurts.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000, hp: 1000, maxHp: 1000 });
+    const m = makeEnemy(w, "mine", 2050, 2000);
+    w.enemies.push(m);
+    run(w, {}, Math.ceil((ENEMY_TYPES.mine.arm + ENEMY_TYPES.mine.fuse) * 60) + 3);
+    t.ok("a mine near a soldier detonates", !m.alive);
+    t.ok("its blast damages the soldier", near(1000 - s.hp, ENEMY_TYPES.mine.blast.amount, 1e-9));
+  }
+  {
+    // Waves arrive from every side, offscreen.
+    const quads = new Set();
+    let offscreen = true;
+    for (let seed = 1; seed <= 12; seed++) {
+      const w = createWorld(seed, { enemies: 0, asteroids: 20 });
+      const s = w.soldiers[0];
+      Object.assign(s, { x: 2000, y: 2000 }); // mid-map, so no bearing is clamped away
+      spawnWave(w);
+      for (const e of w.enemies) {
+        const d = Math.hypot(e.x - s.x, e.y - s.y);
+        if (d < CFG.waveDistMin * 0.8) offscreen = false;
+        quads.add((e.x > s.x ? 1 : 0) + (e.y > s.y ? 2 : 0));
+      }
+    }
+    t.ok("wave enemies spawn offscreen", offscreen);
+    t.eq("wave enemies come from all four quadrants (12 seeds)", quads.size, 4);
+  }
+  {
+    let ok = true;
+    for (let seed = 1; seed <= 20; seed++) {
+      const w = createWorld(seed);
+      for (const e of w.enemies) if (!e.alert && Math.hypot(e.x - w.start.x, e.y - w.start.y) < CFG.alertRange) ok = false;
+    }
+    t.ok("no placed enemy starts within alert range of the squad (20 seeds)", ok);
+  }
+  {
+    // Smoke: a whole mission runs for two minutes with waves, and nothing NaNs.
+    const w = createWorld(9, { squad: 1 });
+    w.soldiers[0].hp = w.soldiers[0].maxHp = 1e9;
+    run(w, (i) => ({ turn: Math.sin(i / 50), thrust: i % 120 < 60, aimX: 2000, aimY: 2000, fire: true, firePress: i % 20 === 0 }), 60 * 120);
+    const bad = [...w.soldiers, ...w.enemies, ...w.asteroids].filter((b) => !Number.isFinite(b.x + b.y + b.vx + b.vy));
+    t.eq("two minutes of play: no NaN positions", bad.length, 0);
+    t.ok("waves arrived", w.wave.n >= 3);
   }
 
   // ---- determinism ---------------------------------------------------------
