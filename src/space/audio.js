@@ -161,6 +161,12 @@ export function createAudio() {
         noise({ f0: 1800, f1: 400, q: 2, dur: 0.06, level: v * 0.3 * k, pan: p });
         break;
       }
+      case "crash": {
+        const k = Math.min(1, (ev.speed || 0) / 1500);
+        noise({ f0: 900, f1: 60, q: 0.6, kind: "lowpass", dur: 0.4, level: v * (0.4 + 0.6 * k), pan: p });
+        tone({ type: "sine", f0: 90, f1: 30, dur: 0.3, level: v * 0.5 * k, pan: p });
+        break;
+      }
       case "step": noise({ f0: 2200 + Math.random() * 400, q: 4, dur: 0.035, level: v * 0.14, pan: p }); break;
       case "wave":
         for (let i = 0; i < 2; i++) {

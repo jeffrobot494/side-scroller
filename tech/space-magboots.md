@@ -128,7 +128,7 @@ Same as the prototype's: the sim ↔ page split. The per-step input gains `boots
 | ~~B1~~ | ~~In the air, along the feet or toward the surface?~~ | Decided: along the feet |
 | B2 | Hold range once the boots are on | 200px from the feet, inside the wedge (a full jump rises about 122px) |
 | B3 | Camera roll speed; what it does in the air and when the boots switch off | Eases over about 0.2s. Holds in the air; eases back to world-up when the boots switch off |
-| B4 | Aim on a surface | Unchanged: 90° about facing, and facing is the walk direction, so you cannot aim straight up off a rock without jumping and spinning |
+| ~~B4~~ | ~~Aim on a surface~~ | Decided: the aim arc is gone everywhere (Bo), so you aim in any direction on a surface too |
 | B5 | W with the boots on | Does nothing |
 | B6 | Telling the player the boots can switch on | A HUD line: "BOOTS: in range" / "ON" / nothing |
 | ~~B7~~ | ~~Two-breach hulls~~ | Decided: kept, two pieces joined by a jump |

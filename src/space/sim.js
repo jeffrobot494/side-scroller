@@ -40,9 +40,17 @@ export const CFG = {
   jumpSpeed: 700,
   snapTol: 12, // a push past this knocks a standing soldier off its surface
   footstep: 34, // px walked per footstep event (M4)
+
+  // Crashes: a soldier hitting a rock or a hull plate is hurt by its closing
+  // speed — nothing up to crashSafe, all its HP at crashLethal. A feet-first
+  // landing with the boots on is safe up to landSafe instead, above a boots
+  // jump's 700, so landing one is free.
+  crashSafe: 500, // was 750 (Bo)
+  landSafe: 750,
+  crashLethal: 1125, // was 1500; Bo: double the damage
+  companionCrash: 0.7, // a companion takes this share of crash damage (Bo)
   turnRate: 4, // rad/s
   thrust: 500, // px/s²
-  aimArc: Math.PI / 2, // the player aims within this arc centred on facing
 
   // Copied from src/game/config.js defaults.
   aimSpread: 0.12,
@@ -904,13 +912,8 @@ export function drive(s, input, dt) {
   } else s.angle += (input.turn || 0) * CFG.turnRate * dt;
   // The jetpack does nothing with the boots on.
   s.thrusting = !!input.thrust && !s.boots;
-  // Aim follows the mouse, clamped to the arc in front: a cursor behind you
-  // pins the gun to the arc's nearer edge. Re-clamped every step, so turning
-  // with a still mouse drags the aim along.
-  if (input.aimX != null) {
-    const want = wrapAngle(Math.atan2(input.aimY - s.y, input.aimX - s.x) - s.angle);
-    s.aim = s.angle + clamp(want, -CFG.aimArc / 2, CFG.aimArc / 2);
-  }
+  // Aim follows the mouse, in any direction (Bo, 2026-09-30: no arc).
+  if (input.aimX != null) s.aim = Math.atan2(input.aimY - s.y, input.aimX - s.x);
   if (s.thrusting) thrust(s, CFG.thrust, dt);
   // In the air with the boots on, gravity pulls along the feet (B1).
   if (s.boots === "air") {
@@ -1076,19 +1079,23 @@ function bootContact(world, s, a) {
   const nx = dx / d, ny = dy / d;
   s.x += nx * (min - d);
   s.y += ny * (min - d);
+  const [svx, svy] = surfaceVel(a, s.x, s.y);
   if (s.boots === "ground") {
+    // Standing, a rock that runs into you still hits you.
     s.pushed += min - d;
+    crash(world, s, -((s.vx - svx) * nx + (s.vy - svy) * ny));
     return;
   }
   foldShove(s);
-  const [svx, svy] = surfaceVel(a, s.x, s.y);
   const vn = (s.vx - svx) * nx + (s.vy - svy) * ny;
+  const [ux, uy] = upOf(s);
+  const lands = nx * ux + ny * uy >= Math.cos(CFG.bootsWedge);
+  crash(world, s, -vn, lands ? CFG.landSafe : CFG.crashSafe);
   if (vn < 0) {
     s.vx -= vn * nx;
     s.vy -= vn * ny;
   }
-  const [ux, uy] = upOf(s);
-  if (nx * ux + ny * uy >= Math.cos(CFG.bootsWedge)) {
+  if (lands) {
     landOn(world, s, a, nx, ny, Math.max(0, -vn));
     s.gphi = Math.atan2(ny, nx) - a.rot;
     [s.vx, s.vy] = surfaceVel(a, s.x, s.y);
@@ -1114,12 +1121,14 @@ function bootWall(world, s, w) {
   }
   foldShove(s);
   const vn = s.vx * nx + s.vy * ny;
+  const [ux, uy] = upOf(s);
+  const lands = nx * ux + ny * uy >= Math.cos(CFG.bootsWedge);
+  crash(world, s, -vn, lands ? CFG.landSafe : CFG.crashSafe);
   if (vn < 0) {
     s.vx -= vn * nx;
     s.vy -= vn * ny;
   }
-  const [ux, uy] = upOf(s);
-  if (nx * ux + ny * uy >= Math.cos(CFG.bootsWedge)) {
+  if (lands) {
     landOn(world, s, w, nx, ny, Math.max(0, -vn));
     s.vx = s.vy = 0;
   }
@@ -1603,7 +1612,31 @@ function collideWall(b, w, e) {
     b.vx -= (1 + e) * vn * nx;
     b.vy -= (1 + e) * vn * ny;
   }
-  return true;
+  return Math.max(0, -vn); // the closing speed, for crash
+}
+
+// How fast two overlapping bodies are closing along their centre line, shoves
+// included (collide folds them in). 0 if apart or separating.
+function closing(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const d = Math.hypot(dx, dy);
+  if (!d || d >= a.r + b.r) return 0;
+  const rv = ((b.vx + (b.sx || 0)) - (a.vx + (a.sx || 0))) * dx / d + ((b.vy + (b.sy || 0)) - (a.vy + (a.sy || 0))) * dy / d;
+  return Math.max(0, -rv);
+}
+
+// A soldier hitting something at `v` px/s: nothing up to crashSafe, all its HP
+// at crashLethal, and in proportion in between (Bo: a squared curve hurt too
+// little — a third of the way to lethal should cost a third of your HP).
+// Companions take companionCrash of it. k is not capped at 1, so a fast enough
+// hit still kills a companion in one (from about 1390px/s at 0.7). `safe` is
+// landSafe for a feet-first booted landing.
+function crash(world, s, v, safe = CFG.crashSafe) {
+  if (s.kind !== "soldier" || !s.alive || !(v > safe)) return;
+  const k = (v - safe) / (CFG.crashLethal - safe);
+  const share = s === controlled(world) ? 1 : CFG.companionCrash;
+  world.events.push({ type: "crash", x: s.x, y: s.y, speed: v });
+  hurt(world, s, k * share * s.maxHp, null);
 }
 
 // ---- motion + collision ----------------------------------------------------
@@ -1651,13 +1684,20 @@ function collideAll(world, list) {
       if (a.kind !== "asteroid" && b.kind !== "asteroid") continue;
       if (a.boots) bootContact(world, a, b);
       else if (b.boots) bootContact(world, b, a);
-      else collide(a, b, e);
+      else {
+        const s = a.kind === "soldier" ? a : b.kind === "soldier" ? b : null;
+        const v = s ? closing(a, b) : 0;
+        if (collide(a, b, e) && s) crash(world, s, v);
+      }
     }
     for (const r of world.ruins) {
       if (Math.hypot(a.x - r.x, a.y - r.y) > r.R + a.r) continue;
       for (const w of r.walls) {
         if (a.boots) bootWall(world, a, w);
-        else collideWall(a, w, e);
+        else {
+          const v = collideWall(a, w, e);
+          if (v) crash(world, a, v);
+        }
       }
     }
     edge(a, world.size, e);

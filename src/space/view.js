@@ -765,7 +765,7 @@ function drawSoldier(ctx, s, isCtrl) {
   ctx.restore();
 }
 
-// The soldier you fly: a ring, and a faint wedge for the arc the gun can reach.
+// The soldier you fly: a ring.
 function drawCtrlTell(ctx, s) {
   ctx.save();
   ctx.translate(s.x, s.y);
@@ -774,21 +774,11 @@ function drawCtrlTell(ctx, s) {
   ctx.beginPath();
   ctx.arc(0, 0, s.r + 9, 0, Math.PI * 2);
   ctx.stroke();
-  ctx.rotate(s.angle);
-  const half = CFG.aimArc / 2;
-  ctx.strokeStyle = "rgba(138,255,193,0.18)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(Math.cos(-half) * (s.r + 10), Math.sin(-half) * (s.r + 10));
-  ctx.lineTo(Math.cos(-half) * 90, Math.sin(-half) * 90);
-  ctx.arc(0, 0, 90, -half, half);
-  ctx.lineTo(Math.cos(half) * (s.r + 10), Math.sin(half) * (s.r + 10));
-  ctx.stroke();
   ctx.restore();
 }
 
 // ---- over the 3D view: what a model cannot say --------------------------------
-// World space (the caller has applied the zoom): the controlled soldier's arc,
+// World space (the caller has applied the zoom): the controlled soldier's ring,
 // a shot being wound up, a mine about to go.
 function drawTells(ctx, world) {
   const lead = controlled(world);

@@ -11,9 +11,10 @@ import { createAudio } from "../src/space/audio.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 // A world with nothing in it but the squad, for mechanics tests.
-// Soldiers face +x, the way the fixtures fire, so the aim arc never clamps them.
+// Soldiers face +x, the way the fixtures fire.
 function empty(opts = {}) {
   const w = createWorld(7, { asteroids: 0, dummies: 0, ruins: 0, objective: false, enemies: 0, waveEvery: 1e9, ...opts });
   for (const s of w.soldiers) s.angle = 0;
@@ -73,20 +74,21 @@ export default async function run_(t) {
     t.ok("thrust has no speed cap", near(s.vx, 900 + CFG.thrust, 1e-6));
   }
   {
-    // The player aims within 90° of facing; outside it, the nearer edge.
+    // The player aims in any direction, whatever the facing (no arc).
     const w = empty();
     const s = w.soldiers[0];
     Object.assign(s, { x: 2000, y: 2000, angle: 0 });
     run(w, { aimX: 2100, aimY: 2030 }, 1);
-    t.ok("aim inside the arc follows the mouse", near(s.aim, Math.atan2(30, 100), 1e-9));
+    t.ok("aim follows the mouse", near(s.aim, Math.atan2(30, 100), 1e-9));
     run(w, { aimX: 2000, aimY: 2100 }, 1);
-    t.ok("aim 90° off facing clamps to the arc edge", near(s.aim, Math.PI / 4, 1e-9));
+    t.ok("aim 90° off facing is not clamped", near(s.aim, Math.PI / 2, 1e-9));
     run(w, { aimX: 1900, aimY: 1990 }, 1);
-    t.ok("aim behind clamps to the nearer edge", near(s.aim, -Math.PI / 4, 1e-9));
+    t.ok("aim behind is not clamped", near(s.aim, Math.atan2(-10, -100), 1e-9));
     s.fireCd = 0;
     run(w, { aimX: 1900, aimY: 1990, fire: true }, 1);
     const p = w.projectiles[0];
-    t.ok("a round leaves inside the arc (± spread)", Math.abs(Math.atan2(p.vy, p.vx)) <= Math.PI / 4 + 0.2);
+    const off = Math.abs(wrap(Math.atan2(p.vy, p.vx) - Math.atan2(-10, -100)));
+    t.ok("a round leaves behind you, at the mouse (± spread)", off <= 0.2);
   }
   {
     const w = empty();
@@ -216,8 +218,10 @@ export default async function run_(t) {
     t.ok("chain jumps twice within range", b.hp < 1000 && c.hp < 1000 && far.hp === 1000);
     // Every event the sim emits must carry a finite position — the chain
     // event once did not, and the NaN froze the page through the sound pan.
-    const w2 = createWorld(9, { squad: 3 });
-    for (const s2 of w2.soldiers) s2.hp = s2.maxHp = 1e9;
+    // Seed 4: a run that sees every event kind, chain and fuse included (seed
+    // 9 stopped chaining once the aim arc went).
+    const w2 = createWorld(4, { squad: 3 });
+    for (const s2 of w2.soldiers) s2.hp = 1e9; // hp alone: crash damage is a share of maxHp
     const seen = new Set();
     const unplaced = new Set();
     const lead = () => w2.soldiers[w2.ctrl];
@@ -320,6 +324,56 @@ export default async function run_(t) {
     run(w, { fire: true, aimX: 2400, aimY: 2000 }, 1);
     run(w, {}, 30);
     t.eq("a round stops at a hull plate", w.projectiles.length, 0);
+  }
+  // ---- crashes: hitting things fast hurts, very fast kills ---------------------
+  {
+    // A soldier flying at `v` into a still rock (or a hull plate, `wall`).
+    const into = (v, wall = false) => {
+      const w = empty();
+      const s = w.soldiers[0];
+      if (wall) {
+        const pl = { kind: "wall", x0: 2300, y0: 1800, x1: 2300, y1: 2200, t: CFG.wallHalf };
+        w.ruins.push({ x: 2300, y: 2000, R: 210, walls: [pl] });
+        w.walls.push(pl);
+      } else {
+        const a = makeAsteroid(makeRng(3), 2400, 2000, 100);
+        Object.assign(a, { vx: 0, vy: 0, spin: 0 });
+        w.asteroids.push(a);
+      }
+      Object.assign(s, { x: 2000, y: 2000, vx: v, vy: 0 });
+      run(w, {}, 60);
+      return s;
+    };
+    const safe = into(CFG.crashSafe - 20);
+    t.ok(`under ${CFG.crashSafe}px/s a rock does not hurt`, safe.hp === safe.maxHp);
+    const mid = into(950);
+    const want = ((950 - CFG.crashSafe) / (CFG.crashLethal - CFG.crashSafe)) * mid.maxHp;
+    t.ok(`at 950px/s it hurts, and you live (${(mid.maxHp - mid.hp).toFixed(1)} of ${mid.maxHp})`, mid.alive && near(mid.maxHp - mid.hp, want, 1e-6));
+    t.ok(`at ${CFG.crashLethal}px/s one hit into a rock kills`, !into(CFG.crashLethal).alive);
+    t.ok(`at ${CFG.crashLethal}px/s one hit into a hull plate kills`, !into(CFG.crashLethal, true).alive);
+    {
+      // A companion takes 30% less: the same 950px/s hit, with control swapped away.
+      const w = empty({ squad: 2 });
+      const s = w.soldiers[0];
+      const a = makeAsteroid(makeRng(3), 2400, 2000, 100);
+      Object.assign(a, { vx: 0, vy: 0, spin: 0 });
+      w.asteroids.push(a);
+      w.ctrl = 1;
+      Object.assign(w.soldiers[1], { x: 6000, y: 6000 });
+      Object.assign(s, { x: 2000, y: 2000, vx: 950, vy: 0 });
+      for (let i = 0; i < 40 && s.hp === s.maxHp; i++) step(w, {});
+      const lead = ((950 - CFG.crashSafe) / (CFG.crashLethal - CFG.crashSafe)) * s.maxHp;
+      t.ok(`a companion takes ${CFG.companionCrash} of crash damage (${(s.maxHp - s.hp).toFixed(2)} vs ${lead.toFixed(2)})`, near(s.maxHp - s.hp, lead * CFG.companionCrash, 1e-6));
+    }
+    // A rock running into you counts the same as you running into it.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000, vx: 0, vy: 0 });
+    const rock = makeAsteroid(makeRng(3), 1700, 2000, 60);
+    Object.assign(rock, { vx: CFG.crashLethal, vy: 0, spin: 0 });
+    w.asteroids.push(rock);
+    run(w, {}, 30);
+    t.ok("a rock hitting you at lethal speed kills", !s.alive);
   }
   {
     const w = createWorld(3, { squad: 2, asteroids: 0, dummies: 0, enemies: 0 });
@@ -435,7 +489,7 @@ export default async function run_(t) {
   {
     // Smoke: a whole mission runs for two minutes with waves, and nothing NaNs.
     const w = createWorld(9, { squad: 1 });
-    w.soldiers[0].hp = w.soldiers[0].maxHp = 1e9;
+    w.soldiers[0].hp = 1e9; // hp alone: crash damage is a share of maxHp
     run(w, (i) => ({ turn: Math.sin(i / 50), thrust: i % 120 < 60, aimX: 2000, aimY: 2000, fire: true, firePress: i % 20 === 0 }), 60 * 120);
     const bad = [...w.soldiers, ...w.enemies, ...w.asteroids].filter((b) => !Number.isFinite(b.x + b.y + b.vx + b.vy));
     t.eq("two minutes of play: no NaN positions", bad.length, 0);
@@ -660,6 +714,7 @@ export default async function run_(t) {
       while (s.boots === "air" && n++ < 200) { apex = Math.max(apex, R(s, a) - a.r - s.r); step(w, {}); }
       const want = CFG.jumpSpeed ** 2 / (2 * CFG.gravity);
       t.ok(`the jump's apex is v²/2g (${apex.toFixed(1)} vs ${want.toFixed(1)})`, near(apex, want, 8));
+      t.ok("landing a jump does not hurt", s.hp === s.maxHp);
       t.ok(`and it lands back on its takeoff spot (${Math.hypot(s.x - x0, s.y - y0).toFixed(2)}px)`, s.boots === "ground" && Math.hypot(s.x - x0, s.y - y0) < 3);
     }
     {
@@ -669,6 +724,14 @@ export default async function run_(t) {
       s.vy = CFG.jumpSpeed;
       for (let i = 0; i < 30 && s.boots !== "ground"; i++) step(w, {});
       t.ok("landing on a small rock leaves its velocity unchanged", s.boots === "ground" && a.vx === 0 && a.vy === 0);
+    }
+    {
+      // Boots are no cushion: coming down at lethal speed still kills.
+      const { w, s } = onRock(120, 5);
+      step(w, { boots: true });
+      s.vy = CFG.crashLethal;
+      run(w, {}, 10);
+      t.ok("a booted landing at lethal speed kills", !s.alive);
     }
     {
       // Spin the feet away mid-jump: the boots switch off, the velocity stays.
