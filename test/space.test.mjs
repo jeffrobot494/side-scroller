@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, addDerelict, placeWarden, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, addDerelict, placeWarden, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove, isBody, walk, LOADOUT } from "../src/space/sim.js";
 import { createView, draw, cameraFor, zoomBy, figurePose, toScreen, toWorld, updateRoll, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
 import { createAudio } from "../src/space/audio.js";
 
@@ -1129,6 +1129,52 @@ export default async function run_(t) {
     let threw = null;
     try { a.handle(seen, 4000, 4000, 0.5); } catch (e) { threw = e; }
     t.ok(`audio takes the boots events${threw ? ": " + threw.message : ""}`, !threw);
+  }
+
+  // ---- troopers T0: the squad's body on the enemy team (tech/space-troopers.md)
+  // A trooper above a still rock, feet down (angle 0 puts the feet at +y).
+  function trooperOver(R = 100, gap = 30, opts = {}) {
+    const w = empty(opts);
+    const rock = makeAsteroid(makeRng(1), 2000, 2000, R);
+    Object.assign(rock, { vx: 0, vy: 0, spin: 0 });
+    w.asteroids.push(rock);
+    const e = makeEnemy(w, "trooper", 2000, 2000 - R - CFG.soldierR - gap);
+    e.angle = 0;
+    w.enemies.push(e);
+    w.soldiers[0].x = 200; w.soldiers[0].y = 200; // far away
+    return { w, e, rock };
+  }
+  {
+    const { e } = trooperOver();
+    t.ok("a trooper is an enemy with a soldier body", e.kind === "enemy" && e.team === "enemy" && isBody(e) && e.r === CFG.soldierR);
+    t.ok("its HP is the squad's formula on its rolled Health", e.hp === soldierMaxHp(e.stats) && e.stats.aim >= 3 && e.stats.aim <= 6);
+    t.ok("unlimited spare magazines", e.magsLeft === Infinity && e.ammo === e.weapon.magazine);
+    const seen = new Set();
+    for (let seed = 1; seed <= 40; seed++) seen.add(makeEnemy(createWorld(seed, { enemies: 0, asteroids: 0, ruins: 0, objective: false }), "trooper", 0, 0).weapon.id);
+    t.eq("its gun is one of the three soldier weapons, each turning up", [...seen].sort(), [...LOADOUT].sort());
+    const g = makeEnemy(empty(), "trooper", 0, 0);
+    const k = CFG.trooperDamage;
+    const amount = (w, kind) => w.effects.find((f) => f.kind === kind)?.amount;
+    t.ok("its gun is a scaled copy; the squad's is untouched", amount(g.weapon, "damage") === amount(WEAPONS[g.weapon.id], "damage") * k && g.weapon !== WEAPONS[g.weapon.id]);
+  }
+  {
+    const { w, e, rock } = trooperOver();
+    e.boots = "air";
+    run(w, {}, 60);
+    t.ok("booted in the air, a trooper falls onto the rock and stands", e.boots === "ground" && e.ground === rock);
+    t.ok("landing a short fall is free", e.hp === e.maxHp);
+    const phi = e.gphi;
+    walk(e, 1);
+    run(w, {}, 30);
+    t.ok("walk moves it round the rock at the standing radius", e.gphi !== phi && near(Math.hypot(e.x - rock.x, e.y - rock.y), rock.r + e.r, 0.01));
+    hurt(w, e, 1000, null);
+    t.ok("dead, its boots are off", !e.alive && e.boots === null);
+  }
+  {
+    const { w, e } = trooperOver(100, 60);
+    e.vy = 900; // unbooted, into the rock
+    run(w, {}, 10);
+    t.ok("a trooper slammed into a rock takes crash damage (the companions' share)", near(e.maxHp - e.hp, ((900 - CFG.crashSafe) / (CFG.crashLethal - CFG.crashSafe)) * CFG.companionCrash * e.maxHp, e.maxHp * 0.05));
   }
 
   // ---- view smoke ----------------------------------------------------------

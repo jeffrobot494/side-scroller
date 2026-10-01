@@ -95,6 +95,10 @@ export const CFG = {
   waveDistMin: 900, // offscreen from the squad at 1280×720
   waveDistMax: 1100,
   senseEvery: 0.2, // the game's perception cadence
+  // Troopers (tech/space-troopers.md, K1–K6): soldier bodies on the enemy team.
+  trooperDamage: 0.5, // K3: each effect amount on a trooper's gun copy
+  trooperAim: [3, 6], // K2: rolled per trooper; the recruits are 5–8
+  trooperHealth: [4, 7],
   alertRange: 650,
 
   dummyCount: 0, // S2 target dummies: a test fixture now, none in play
@@ -177,6 +181,9 @@ export const ENEMY_TYPES = {
   warden: { name: "Warden", r: 30, hp: 320, speed: 230, patrol: 140, accel: 340, keepMin: 320, keepMax: 560,
     sight: 900, giveUp: 6, tele: 0.6, wait: [1.8, 2.6], burst: 4, burstGap: 0.11, lead: true, elite: true,
     weapon: enemyGun({ speed: 760, w: 14, h: 5, color: "#ffb347", life: 1.6, shape: "bolt" }, 7), color: "#d9a441" },
+  // A soldier body on the enemy team (tech/space-troopers.md): stats, HP and
+  // gun are rolled per trooper by makeEnemy, so this holds only what a type can.
+  trooper: { name: "Trooper", r: 18, soldier: true, pack: 2, tele: 0.35, color: "#d8524a" },
   // A mine: shootable (HP 4, like the boss's seeker), arms, then fuses on proximity.
   mine: { name: "Mine", r: 9, hp: 4, arm: 0.8, trigger: 70, fuse: 0.35, life: 25,
     blast: { kind: "explode", amount: 12, radius: 80 }, color: "#bff29a" },
@@ -614,8 +621,34 @@ export function makeEnemy(world, type, x, y) {
     home: null, // a crewman's room: idle, it stays near it
     route: null, leg: 0, lost: 0, // a warden's patrol loop, and time out of sight
     burstLeft: 0, burstT: 0,
+    ...(T.soldier ? trooperBody(world) : null),
   };
 }
+
+// The squad's body (makeSoldier's fields) for a trooper: rolled stats, HP by
+// the squad's formula, unlimited spare magazines, and its own copy of a random
+// LOADOUT gun with every effect amount scaled by trooperDamage (K3) — fire()
+// hands rounds the weapon's own effects, so the scale lives in the copy.
+function trooperBody(world) {
+  const { rng } = world;
+  const roll = ([lo, hi]) => lo + Math.floor(rng() * (hi - lo + 1));
+  const stats = { aim: roll(CFG.trooperAim), health: roll(CFG.trooperHealth), speed: 5, nerve: 5 };
+  const base = WEAPONS[LOADOUT[Math.floor(rng() * LOADOUT.length)]];
+  const k = CFG.trooperDamage;
+  const weapon = { ...base, effects: base.effects.map((fx) => ({ ...fx, ...(fx.amount != null && { amount: fx.amount * k }), ...(fx.dps != null && { dps: fx.dps * k }) })) };
+  const hp = soldierMaxHp(stats);
+  return {
+    stats, hp, maxHp: hp, weapon,
+    ammo: weapon.magazine, magsLeft: Infinity, reloading: 0,
+    angle: -Math.PI / 2, dir: 1, aim: -Math.PI / 2, thrusting: false,
+    boots: null, ground: null, gphi: 0, gv: 0, walkIn: 0, pushed: 0, stride: 0,
+    foe: null,
+  };
+}
+
+// A soldier body: a squad soldier or a trooper. Boots, walking and crash
+// damage are the body's, whichever list it is in.
+export const isBody = (a) => a.kind === "soldier" || a.type === "trooper";
 
 function pickType(rng, mix = ENEMY_MIX) {
   let total = 0;
@@ -816,6 +849,7 @@ function updateEnemies(world, dt) {
     if (e.cool > 0) e.cool -= dt;
 
     if (e.type === "mine") { updateMine(world, e, T, dt); continue; }
+    if (T.soldier) { bootsPull(e, dt); continue; } // a trooper's brain: T1
 
     if ((e.senseT -= dt) <= 0) {
       e.senseT = CFG.senseEvery;
@@ -1108,23 +1142,32 @@ export function drive(s, input, dt) {
   if (s.boots === "ground") {
     // A/D walk, and facing is the walk direction. Turning round is the one
     // thing that flips dir: facing reverses and up stays (see upOf).
-    if (k && k !== s.dir) {
-      s.dir = k;
-      s.angle += Math.PI;
-    }
-    s.walkIn = k;
+    walk(s, k);
   } else s.angle += (input.turn || 0) * CFG.turnRate * dt;
   // The jetpack does nothing with the boots on.
   s.thrusting = !!input.thrust && !s.boots;
   // Aim follows the mouse, in any direction (Bo, 2026-09-30: no arc).
   if (input.aimX != null) s.aim = Math.atan2(input.aimY - s.y, input.aimX - s.x);
   if (s.thrusting) thrust(s, CFG.thrust, dt);
-  // In the air with the boots on, gravity pulls along the feet (B1).
-  if (s.boots === "air") {
-    const [ux, uy] = upOf(s);
-    s.vx -= ux * CFG.gravity * dt;
-    s.vy -= uy * CFG.gravity * dt;
+  bootsPull(s, dt);
+}
+
+// Walk a standing body: -1, 0 or 1 along the surface. Turning round is the
+// one thing that flips dir: facing reverses and up stays (see upOf).
+export function walk(s, k) {
+  if (k && k !== s.dir) {
+    s.dir = k;
+    s.angle += Math.PI;
   }
+  s.walkIn = k;
+}
+
+// In the air with the boots on, gravity pulls along the feet (B1).
+function bootsPull(s, dt) {
+  if (s.boots !== "air") return;
+  const [ux, uy] = upOf(s);
+  s.vx -= ux * CFG.gravity * dt;
+  s.vy -= uy * CFG.gravity * dt;
 }
 
 // Thrust adds along facing for as long as it is held: no speed cap (Bo,
@@ -1407,7 +1450,7 @@ function placeOff(s, w, R) {
 // rock, walks, and is snapped feet-on-surface; one in the air must still have a
 // surface in the wedge within the hold range.
 function settleBoots(world, dt) {
-  for (const s of world.soldiers) {
+  for (const s of [...world.soldiers, ...world.enemies]) {
     if (!s.alive || !s.boots) continue;
     if (s.boots === "air") {
       if (!surfaceInWedge(world, s, CFG.bootsHold)) bootsOff(s, world);
@@ -1534,7 +1577,7 @@ function kill(world, t) {
   t.alive = false;
   t.hp = 0;
   t.burn = t.slow = null;
-  if (t.kind === "soldier") bootsOff(t);
+  if (isBody(t)) bootsOff(t);
   const color = t.color || (t.type && ENEMY_TYPES[t.type].color);
   world.events.push({ type: "death", x: t.x, y: t.y, r: t.r, kind: t.kind, enemy: t.type, color });
   if (t.kind === "dummy") t.respawn = CFG.dummyRespawn;
@@ -1836,7 +1879,7 @@ function closing(a, b) {
 // hit still kills a companion in one (from about 1390px/s at 0.7). `safe` is
 // landSafe for a feet-first booted landing.
 function crash(world, s, v, safe = CFG.crashSafe) {
-  if (s.kind !== "soldier" || !s.alive || !(v > safe)) return;
+  if (!isBody(s) || !s.alive || !(v > safe)) return;
   const k = (v - safe) / (CFG.crashLethal - safe);
   const share = s === controlled(world) ? 1 : CFG.companionCrash;
   world.events.push({ type: "crash", x: s.x, y: s.y, speed: v });
@@ -1889,7 +1932,7 @@ function collideAll(world, list) {
       if (a.boots) bootContact(world, a, b);
       else if (b.boots) bootContact(world, b, a);
       else {
-        const s = a.kind === "soldier" ? a : b.kind === "soldier" ? b : null;
+        const s = isBody(a) ? a : isBody(b) ? b : null;
         const v = s ? closing(a, b) : 0;
         if (collide(a, b, e) && s) crash(world, s, v);
       }
