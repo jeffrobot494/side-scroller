@@ -125,6 +125,8 @@ const hud = createHud();
 window.space = {
   world: () => world,
   step: (input = {}, n = 1) => { for (let i = 0; i < n; i++) step(world, input); },
+  // A trooper pair at a point, for looking at them.
+  troopers: async (x, y, z) => (await import("./ai.js")).spawnGroup(world, "trooper", x, y, z, true),
   face: (x, y, z) => {
     const s = world.soldiers[world.ctrl];
     const f = [x - s.x, y - s.y, z - s.z];

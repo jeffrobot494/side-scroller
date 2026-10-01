@@ -1168,7 +1168,7 @@ export function jump(world, s) {
 
 // In the air with the boots on: pulled toward the nearest surface, and the
 // feet turned to it at the body's turn rate.
-function bootsPull(world, s, dt) {
+export function bootsPull(world, s, dt) {
   if (s.boots !== "air") return;
   const hit = nearestSurface(world, s, CFG.bootsHold);
   if (!hit) return;

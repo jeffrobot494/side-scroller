@@ -5,8 +5,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled, fire, startReload, WEAPONS, hasLos, ruinToLocal, ruinToWorld, inPoly, hurt, bootsState, nearestSurface, shove, addRuin3 } from "../src/space3d/sim.js";
-import { makeRng, addDerelict } from "../src/space/sim.js";
-import { makeEnemy, spawnGroup, spawnWave, placeWarden, ENEMY_TYPES } from "../src/space3d/ai.js";
+import { makeRng, addDerelict, LOADOUT as LOADOUT2, WEAPONS as WEAPONS2 } from "../src/space/sim.js";
+import { makeEnemy, spawnGroup, spawnWave, placeWarden, ENEMY_TYPES, insideHull } from "../src/space3d/ai.js";
 import { swapControl } from "../src/space3d/sim.js";
 import { dot, len, norm, sub, qrot, qaxis, qmul, qconj, qlook, randomDir } from "../src/space3d/vec.js";
 const dot4 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
@@ -710,8 +710,150 @@ export default async function suite(t) {
     step(w, {});
     t.ok("F5: and the next soldier picks it up", a.carrier === s1);
   }
+
+  // ---- F6: troopers -----------------------------------------------------------------
+  {
+    const w = empty();
+    const [a, b] = spawnGroup(w, "trooper", 3000, 3000, 3000, false);
+    t.ok("F6: troopers come in pairs on one wing", a.wing && a.wing === b.wing && a.wing.members.length === 2);
+    const base = WEAPONS2[a.weapon.id];
+    t.ok("F6: a squad gun, its effect amounts halved (K3)", LOADOUT2.includes(a.weapon.id) && a.weapon !== base && near(a.weapon.effects[0].amount ?? a.weapon.effects[0].dps, (base.effects[0].amount ?? base.effects[0].dps) * CFG.trooperDamage, 1e-9));
+    t.ok("F6: unlimited spare magazines, rolled Aim and Health (K2)", a.magsLeft === Infinity && a.stats.aim >= 3 && a.stats.aim <= 6 && a.maxHp === 15 + a.stats.health * 2);
+    t.ok("F6: a trooper is a soldier body", isBodyT(a) && Array.isArray(a.q) && a.boots === null);
+  }
+  // A still rock of radius r at the centre, a soldier `sd` out along +x, and a
+  // trooper pair `td` out on the far side, alert.
+  const perched = (r = 250, sd = 650, td = 600, seed = 3) => {
+    const w = empty();
+    const rock = makeAsteroid(makeRng(seed), 3000, 3000, 3000, r);
+    Object.assign(rock, { vx: 0, vy: 0, vz: 0, w: [0, 0, 0.05] });
+    w.asteroids.push(rock);
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 3000 + sd, y: 3000, z: 3000, vx: 0, vy: 0, vz: 0, hp: 1e5, maxHp: 1e5 });
+    const pair = spawnGroup(w, "trooper", 3000 - td, 3000 + 150, 3000 - 80, true);
+    return { w, s, rock, pair };
+  };
+  {
+    // The landing approach, from several distances onto several rocks.
+    let all = true, worst = 0, slow = 0;
+    for (const [r, td] of [[80, 400], [150, 700], [250, 900], [400, 1200], [120, 1000], [300, 500]]) {
+      const { w, pair } = perched(r, 2000, td);
+      for (const e of pair) e.alert = false;
+      // Idle and alone, given the rock as its perch: the approach alone lands it.
+      const e = pair[0];
+      pair[1].alive = false;
+      e.perch = w.asteroids[0];
+      let t0 = null;
+      for (let i = 0; i < 60 * 12 && e.boots !== "ground"; i++) {
+        const before = Math.hypot(e.vx, e.vy, e.vz);
+        step(w, {});
+        if (e.boots === "ground") { t0 = i; worst = Math.max(worst, before); }
+      }
+      if (e.boots !== "ground" || e.hp < e.maxHp) all = false;
+      if (t0 === null || t0 > 60 * 10) slow++;
+    }
+    t.ok(`F6: a trooper lands on a rock unhurt, every time (fastest touchdown ${worst.toFixed(0)}px/s)`, all && worst < CFG.landSafe);
+    t.ok("F6: within 10s", slow === 0);
+  }
+  {
+    const { w, s, pair } = perched();
+    for (const e of pair) e.alert = false;
+    pair[0].alert = true;
+    step(w, {});
+    t.ok("F6: a pair alerts together", pair[1].alert);
+  }
+  {
+    const { w, s, pair } = perched();
+    const N = 60 * 30;
+    let hidden = [0, 0], both = 0, shots = 0, losShots = 0;
+    for (let i = 0; i < N; i++) {
+      step(w, {});
+      for (const ev of w.events) if (ev.type === "muzzle" && ev.team === "enemy") shots++;
+      w.events.length = 0;
+      pair.forEach((e, k) => { if (!hasLos(w, s, e)) hidden[k]++; });
+      if (pair.every((e) => e.alive && e.dance === "peek")) both++;
+    }
+    t.ok(`F6: on a rock, each trooper is out of sight much of the time (${hidden.map((h) => (h / N).toFixed(2)).join(", ")})`, hidden.every((h) => h / N > 0.4));
+    t.ok("F6: the two never peek at once", both === 0);
+    t.ok(`F6: and they shoot (${shots} rounds in 30s)`, shots > 10);
+  }
+  {
+    // Shot at while peeking, before the burst: straight back to cover.
+    const { w, s, pair } = perched();
+    const e = pair[0];
+    let flinched = false;
+    for (let i = 0; i < 60 * 20 && !flinched; i++) {
+      step(w, {});
+      if (e.dance === "peek" && !e.burstDone && e.burstLeft === 0 && e.tele > 0) {
+        hurt(w, e, 1, s);
+        step(w, {});
+        flinched = e.dance === "cover";
+      }
+    }
+    t.ok("F6: hit while winding up a peek, it flinches back to cover", flinched);
+  }
+  {
+    // On a derelict, starting outside: never inside.
+    let inside = 0, hiddenAll = 0, landed = 0;
+    for (const seed of [1, 2, 3]) {
+      const w = empty();
+      const lay = addDerelict({ rng: makeRng(seed), walls: [], ruins: [], keepClear: [] }, 0, 0, 0, 1300, 580);
+      const r = addRuin3(w, lay, 3000, 3000, 3000, qaxis(norm([seed, 1, 0.3]), seed), 290);
+      const s = w.soldiers[0];
+      const out = qrot(r.q, [0, 0, 1]);
+      Object.assign(s, { x: 3000 + out[0] * 650, y: 3000 + out[1] * 650, z: 3000 + out[2] * 650, vx: 0, vy: 0, vz: 0, hp: 1e5, maxHp: 1e5 });
+      const side = qrot(r.q, [0, 1, 0]);
+      const pair = spawnGroup(w, "trooper", 3000 + side[0] * 700, 3000 + side[1] * 700, 3000 + side[2] * 700, true);
+      for (let i = 0; i < 60 * 20; i++) {
+        step(w, {});
+        for (const e of pair) {
+          if (insideHull(r, e)) inside++;
+          if (e.boots === "ground" && !hasLos(w, s, e)) hiddenAll++;
+          if (e.boots === "ground") landed++;
+        }
+      }
+    }
+    t.ok("F6: on a derelict, a trooper starting outside never goes in", inside === 0);
+    t.ok(`F6: and perches there, out of sight a share of the time (${(hiddenAll / Math.max(1, landed)).toFixed(2)})`, landed > 0 && hiddenAll / landed > 0.25);
+  }
+  {
+    // You run, they follow: a soldier flying at 250px/s for a minute.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 600, y: 600, z: 600, vx: 0, vy: 0, vz: 0, hp: 1e5, maxHp: 1e5 });
+    const pair = spawnGroup(w, "trooper", 300, 600, 600, true);
+    let worst = 0;
+    for (let i = 0; i < 60 * 40; i++) {
+      Object.assign(s, { vx: 144, vy: 144, vz: 144 }); // 250px/s along the diagonal
+      step(w, {});
+      if (i > 60 * 8) for (const e of pair) worst = Math.max(worst, Math.hypot(e.x - s.x, e.y - s.y, e.z - s.z));
+    }
+    t.ok(`F6: a pair follows a soldier who runs (never more than ${worst.toFixed(0)}px behind)`, worst < 1100);
+  }
+  {
+    // Until they find you, they patrol.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 5900, y: 5900, z: 5900 });
+    for (let i = 0; i < 40; i++) {
+      const a = makeAsteroid(makeRng(100 + i), 0, 0, 0, 60 + (i % 5) * 40);
+      Object.assign(a, { x: 1000 + (i % 4) * 900, y: 1000 + Math.floor(i / 4) % 4 * 900, z: 1000 + Math.floor(i / 16) * 900, vx: 0, vy: 0, vz: 0, w: [0, 0, 0] });
+      w.asteroids.push(a);
+    }
+    const pair = spawnGroup(w, "trooper", 2500, 2500, 2500, false);
+    let rests = 0, was = false;
+    for (let i = 0; i < 60 * 90; i++) {
+      step(w, {});
+      const r = pair[0].boots === "ground";
+      if (r && !was) rests++;
+      was = r;
+    }
+    t.ok(`F6: an idle pair patrols, perching to rest on the way (${pair[0].wing.legId} legs, ${rests} rests in 90s)`, pair[0].wing.legId >= 3 && rests >= 2);
+  }
 }
 
+
+const isBodyT = (a) => a.kind === "soldier" || a.type === "trooper";
 
 // The gap from a local point to a slab's surface (as the sim measures it).
 function surfDistT(sd, l) {
