@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, addDerelict, placeWarden, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove, isBody, walk, LOADOUT } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, addDerelict, placeWarden, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove, isBody, walk, LOADOUT, probeSurface } from "../src/space/sim.js";
 import { createView, draw, cameraFor, zoomBy, figurePose, toScreen, toWorld, updateRoll, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
 import { createAudio } from "../src/space/audio.js";
 
@@ -29,6 +29,15 @@ function range(weapon, d = 200, opts = {}) {
   const target = w.enemies[0];
   Object.assign(target, { x: 2000 + d, y: 2000, homeX: 2000 + d, homeY: 2000, hp: 1000, maxHp: 1000 });
   return { w, s, t: target };
+}
+
+function pointIn(poly, x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 function run(world, input, steps) {
@@ -1232,20 +1241,21 @@ export default async function run_(t) {
   }
   {
     // On top of the rock, the soldier 400px above it: in sight and in range.
+    // It dances (T2), so over 12s it fires in bursts from its peeks.
     const { w, e, s } = standing(2000, 2000 - 100 - 18 - 400);
     e.weapon = { ...WEAPONS.carbine }; e.ammo = 24;
     const times = [];
-    for (let i = 0; i < 360; i++) { const a = e.ammo; step(w, {}); if (e.ammo < a) times.push(i); }
+    let blind = 0;
+    for (let i = 0; i < 720; i++) {
+      const a = e.ammo;
+      step(w, {});
+      if (e.ammo < a) { times.push(i); if (!hasLos(w, e.x, e.y, s.x, s.y)) blind++; }
+    }
     const gaps = times.slice(1).map((v, i) => v - times[i]);
-    t.ok(`in sight and in range, a standing trooper fires (${times.length} rounds in 6s)`, times.length >= 6 && e.boots === "ground");
+    t.ok(`in sight and in range, a perched trooper fires (${times.length} rounds in 12s)`, times.length >= 6 && e.boots === "ground");
+    t.ok("every round had a line of sight", blind === 0);
     t.ok("the rounds of a burst come at the gun's fire rate, no faster", gaps.every((g) => g >= Math.floor(60 / e.weapon.fireRate)));
     t.ok("bursts are separated by a wait", gaps.some((g) => g >= 0.8 * 60));
-    // Behind the rock (and still in range, so it does not relocate): no line, no rounds.
-    Object.assign(s, { x: 2000, y: 2000 + 100 + 300 });
-    run(w, {}, 30);
-    let shots = 0;
-    for (let i = 0; i < 240; i++) { const a = e.ammo; step(w, {}); if (e.ammo < a) shots++; }
-    t.ok(`with the rock between them, it does not fire (${shots} rounds, boots ${e.boots})`, shots === 0 && e.boots === "ground");
   }
   {
     // The soldier leaves at 250px/s: the trooper lets go of its rock and follows.
@@ -1260,6 +1270,104 @@ export default async function run_(t) {
     t.ok("a soldier running off pulls a trooper off its rock", left);
     t.ok(`and it keeps up: within 900px for the last 10s (most ${Math.round(maxGap)})`, maxGap < 900);
     t.ok("it chased without crashing", e.hp === e.maxHp);
+  }
+
+  // ---- troopers T2: the cover dance ------------------------------------------
+  // A pair on a rock of radius R, the soldier `d` px off its top.
+  function pairOn(R, d) {
+    const w = empty();
+    const rock = makeAsteroid(makeRng(1), 2000, 2000, R);
+    Object.assign(rock, { vx: 0, vy: 0, spin: 0.1 });
+    w.asteroids.push(rock);
+    const mk = (dx) => {
+      const e = makeEnemy(w, "trooper", 2000 + dx, 2000 - R - CFG.soldierR);
+      Object.assign(e, { angle: 0, boots: "air", strollT: 1e9 });
+      w.enemies.push(e);
+      return e;
+    };
+    const a = mk(-10), b = mk(10);
+    a.wing = b.wing = { members: [a, b], peeker: null };
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000 - R - d, vx: 0, vy: 0, hp: 1e9, maxHp: 1e9 });
+    run(w, {}, 30);
+    a.alert = true;
+    return { w, a, b, s, rock };
+  }
+  for (const R of [100, 250]) {
+    const { w, a, b, s } = pairOn(R, 450);
+    let hidden = 0, waitSeen = 0, bothPeek = 0, shots = 0, n = 0;
+    for (let i = 0; i < 20 * 60; i++) {
+      const am = a.ammo + b.ammo;
+      step(w, {});
+      if (a.ammo + b.ammo < am) shots++;
+      for (const e of [a, b]) {
+        const seen = hasLos(w, s.x, s.y, e.x, e.y);
+        n++;
+        if (!seen) hidden++;
+        if (seen && e.dance === "wait") waitSeen++;
+      }
+      if (a.dance === "peek" && b.dance === "peek") bothPeek++;
+    }
+    t.ok(`r ${R}: troopers spend much of the fight out of sight (${Math.round((100 * hidden) / n)}%)`, hidden / n >= 0.5);
+    t.ok(`r ${R}: and come out to shoot (${shots} rounds in 20s)`, shots >= 15);
+    t.ok(`r ${R}: waiting is done in cover (${waitSeen} steps seen)`, waitSeen <= 12);
+    t.ok(`r ${R}: a pair takes turns: never both peeking`, bothPeek === 0);
+  }
+  {
+    // Hit while peeking, before the burst: straight back to cover.
+    const { w, a, b } = pairOn(100, 450);
+    let done = false;
+    for (let i = 0; i < 1200 && !done; i++) {
+      step(w, {});
+      for (const e of [a, b]) {
+        if (e.dance === "peek" && e.tele > 0) {
+          hurt(w, e, 1, null);
+          step(w, {});
+          t.ok(`shot at as it winds up, a trooper drops the shot and goes back to cover (${e.dance} tele ${e.tele} burst ${e.burstLeft})`, e.dance === "cover" && e.tele === 0 && e.burstLeft === 0);
+          done = true;
+          break;
+        }
+      }
+    }
+    t.ok("(the flinch case was reached)", done);
+  }
+  {
+    // Probing a derelict from outside never offers a point inside its hull,
+    // and each point is a standing distance off the plates.
+    const w = empty();
+    const r = addDerelict(w, 4000, 4000, 0.4, 1300, 560);
+    const [cx, cy] = closestOnWall(r.walls[0], 4000, 3000);
+    const e = makeEnemy(w, "trooper", cx, cy - 60);
+    Object.assign(e, { strollT: 1e9, perch: r, repickT: 99 });
+    w.enemies.push(e);
+    w.soldiers[0].x = 200; w.soldiers[0].y = 200;
+    run(w, {}, 600);
+    t.ok("a trooper lands on a derelict's hull", e.boots === "ground" && e.ground.ruin === r);
+    const runs = probeSurface(e, 24, 1200);
+    const pts = runs.flat();
+    const inside = pts.filter((p) => pointIn(r.hull, p.x, p.y)).length;
+    const off = pts.map((p) => Math.min(...r.walls.map((wl) => { const [qx, qy] = closestOnWall(wl, p.x, p.y); return Math.hypot(p.x - qx, p.y - qy); })));
+    t.ok(`probe points stay outside the hull (${pts.length} points)`, pts.length >= 20 && inside === 0);
+    t.ok("probe points ride a standing distance off the plates", off.every((d) => near(d, CFG.soldierR + CFG.wallHalf, 0.5)));
+  }
+  {
+    // A derelict fight: over eight hulls, a trooper outside stays outside and fires.
+    let inside = 0, shots = 0;
+    for (let seed = 1; seed <= 8; seed++) {
+      const w = empty();
+      const r = addDerelict(w, 4000, 4000, seed * 0.7, 1300, 560);
+      let best = null;
+      for (const wl of r.walls) { const [qx, qy] = closestOnWall(wl, 4000, 3000); const d = Math.hypot(qx - 4000, qy - 3000); if (!best || d < best.d) best = { d, qx, qy }; }
+      const e = makeEnemy(w, "trooper", best.qx, best.qy - 60);
+      Object.assign(e, { strollT: 1e9, perch: r, repickT: 99 });
+      w.enemies.push(e);
+      const s = w.soldiers[0];
+      Object.assign(s, { x: best.qx + 500, y: best.qy - 250, hp: 1e9, maxHp: 1e9 });
+      run(w, {}, 300);
+      e.alert = true;
+      for (let i = 0; i < 900; i++) { const a = e.ammo; step(w, {}); if (e.ammo < a) shots++; if (pointIn(r.hull, e.x, e.y)) inside++; }
+    }
+    t.ok(`on derelicts, a trooper outside never walks in (${shots} rounds over 8 fights)`, inside === 0 && shots >= 40);
   }
 
   // ---- view smoke ----------------------------------------------------------

@@ -488,7 +488,11 @@ section + the tests are the source of truth for what currently exists):
   rock or a hull, walk it all the way round, camera rolls to your feet; `dir`
   and `upOf` in `sim.js` are the one definition of up, and every screen ↔ world
   mapping goes through `toScreen`/`toWorld` in `view.js`), and
-  `window.space.world()` exposes the world in the console. Placeholders Bo
+  `window.space.world()` exposes the world in the console. **Enemy troopers**
+  (`tech/space-troopers.md` T0–T2 — built) are soldier bodies on the enemy
+  team, in pairs, that perch on rocks and hulls with the boots, walk round them
+  into cover and back out to shoot, and follow you; `isBody` in `sim.js` is
+  what lets the boots and crash code run on them. Placeholders Bo
   has not decided are listed at the end of the spec.
 - **Pause menu (`tech/pause-menu.md` P0–P3 — built).** Escape (the `pause`
   action, rebindable, local-only on the wire) opens `src/hub/pause.js` over a

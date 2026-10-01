@@ -191,7 +191,9 @@ export const ENEMY_TYPES = {
     approachMax: 8, skipFor: 5, repick: 1,
     keep: [280, 520], floatSpeed: 260, // floating combat, as a gunner holds range
     chaseV: 150, // a target moving faster than this is chased, not perched ahead of
-    wait: [0.8, 2.0], burstAuto: [3, 5] }, // K4
+    wait: [0.8, 2.0], burstAuto: [3, 5], // K4
+    probeStep: 24, probeDist: 600, coverFrom: 1100, coverMargin: 2, // the cover dance (T2)
+    peekMax: [2, 4], peekGiveUp: 3, noPeek: 1.5, linger: 0.2 }, // K6
   // A mine: shootable (HP 4, like the boss's seeker), arms, then fuses on proximity.
   mine: { name: "Mine", r: 9, hp: 4, arm: 0.8, trigger: 70, fuse: 0.35, life: 25,
     blast: { kind: "explode", amount: 12, radius: 80 }, color: "#bff29a" },
@@ -653,6 +655,8 @@ function trooperBody(world) {
     color: ENEMY_TYPES.trooper.color, foe: null,
     mode: null, perch: null, lastPerch: null, left: null, skip: null,
     approachT: 0, repickT: 0, strollT: 0, think: false, wing: null,
+    dance: null, danceOn: null, danceT: 0, walkGoal: 0, peeks: 0, peekMax: 0, peekT: 0, noPeekT: 0,
+    burstDone: false, hpAtPeek: 0, lingerT: null, mayShoot: true,
   };
 }
 
@@ -1049,7 +1053,7 @@ function peekDist(p, t) {
 // A perch to fly to, or null. Idle: the nearest within idleSearch, near the
 // partner. Alert: one whose near side is in the range band of the target,
 // close to fly to, near the partner, and not the surface it just left.
-function pickPerch(world, e, t) {
+function pickPerch(world, e, t, exclude = null) {
   const T = ENEMY_TYPES.trooper;
   const mate = partnerOf(e);
   const mp = mate && (mate.perch || (mate.boots === "ground" ? perchOf(mate.ground) : null));
@@ -1057,7 +1061,7 @@ function pickPerch(world, e, t) {
   const mid = (T.band[0] + hi) / 2;
   let best = null, bs = Infinity;
   const consider = (p) => {
-    if (e.skip && e.skip.p === p && world.t < e.skip.until) return;
+    if (p === exclude || (e.skip && e.skip.p === p && world.t < e.skip.until)) return;
     if (mp === p && p.kind === "asteroid" && p.r < T.shareR) return; // the partner's alone
     const s = perchInfo(e, p);
     const flight = Math.max(0, s.gap);
@@ -1115,15 +1119,204 @@ function trooperGrounded(world, e, T, t, dt) {
     }
     return;
   }
-  walk(e, 0);
-  // The target is out of range: go after it (K6).
-  if (e.think && Math.hypot(t.x - e.x, t.y - e.y) > bandMax(e) * T.relocate) leavePerch(world, e, t, here);
+  // The target is out of range of this perch's near side: go after it (K6).
+  // Measured from the perch, as perch choice does, so hiding round the back
+  // of a big rock is not "out of range".
+  if (e.think && peekDist(here, t) > bandMax(e) * T.relocate) return leavePerch(world, e, t, here);
+  coverDance(world, e, T, t, here, dt);
+}
+
+// ---- the cover dance (T2) ----
+// Cover → wait its turn → peek and fire a burst → back to cover; relocate when
+// this surface has no peek, or after peekMax peeks. Places it is not standing
+// are judged by probing the surface it stands on.
+function coverDance(world, e, T, t, here, dt) {
+  if (e.danceOn !== here) {
+    e.danceOn = here;
+    e.dance = "cover";
+    e.peeks = 0;
+    e.peekMax = T.peekMax[0] + Math.floor(world.rng() * (T.peekMax[1] - T.peekMax[0] + 1));
+    e.noPeekT = 0;
+    e.walkGoal = 0;
+  }
+  const wing = e.wing;
+  // Walking to a probe point: the signed distance left, run down by the walk.
+  if (e.walkGoal) {
+    const left = e.walkGoal - e.gv * dt;
+    e.walkGoal = Math.sign(left) !== Math.sign(e.walkGoal) || Math.abs(left) < 6 ? 0 : left;
+  }
+  e.mayShoot = false;
+
+  if (e.dance === "cover") {
+    e.mayShoot = !e.walkGoal; // only while holding a spot with no cover
+    if (e.think) {
+      if (!exposed(world, e.x, e.y, T)) {
+        if (!e.walkGoal) {
+          e.dance = "wait";
+          e.danceT = rand(world.rng, T.wait[0], T.wait[1]);
+          if (e.ammo < e.weapon.magazine / 2) startReload(e, world);
+        }
+      } else {
+        const goal = coverPoint(world, e, T);
+        if (goal !== null) e.walkGoal = goal;
+        else {
+          // Nowhere to hide here: somewhere else, or stand and fight.
+          const next = pickPerch(world, e, t, here);
+          if (next) return leavePerch(world, e, t, here, next);
+          e.walkGoal = 0;
+        }
+      }
+    }
+  } else if (e.dance === "wait") {
+    e.walkGoal = 0;
+    if (e.think && exposed(world, e.x, e.y, T)) e.dance = "cover"; // the target moved round
+    else if ((e.danceT -= dt) <= 0 && !(e.reloading > 0) && turnFree(world, e, wing)) {
+      e.dance = "peek";
+      e.peekT = 0;
+      e.burstDone = false;
+      e.hpAtPeek = e.hp;
+      e.cool = 0; // the wait was the pause between bursts
+      if (wing) { wing.peeker = e; wing.since = world.t; }
+    }
+  } else if (e.dance === "peek") {
+    e.peekT += dt;
+    const reach = Math.hypot(t.x - e.x, t.y - e.y) <= reachOf(e) * 0.95;
+    e.los = hasLos(world, e.x, e.y, t.x, t.y);
+    const firing = e.tele > 0 || e.burstLeft > 0;
+    if (e.los && reach) {
+      e.walkGoal = 0;
+      e.mayShoot = true;
+      e.noPeekT = 0;
+    } else if (e.think && !firing) {
+      const goal = peekPoint(world, e, T, t);
+      if (goal === null) {
+        if ((e.noPeekT += CFG.senseEvery) > T.noPeek) { endPeek(e, wing); return leavePerch(world, e, t, here); }
+      } else e.walkGoal = goal;
+    }
+    // Shot at before it could fire: straight back.
+    const flinch = e.hp < e.hpAtPeek && !e.burstDone && e.burstLeft === 0;
+    if (flinch) e.tele = 0;
+    if (e.burstDone) e.lingerT = (e.lingerT ?? T.linger) - dt;
+    if (flinch || (e.burstDone && e.lingerT <= 0) || e.peekT > T.peekGiveUp) {
+      e.lingerT = null;
+      endPeek(e, wing);
+      e.dance = "cover";
+      e.mayShoot = false;
+      // Enough from here: move, if anywhere else fits — else keep at it.
+      if (++e.peeks >= e.peekMax) {
+        const next = pickPerch(world, e, t, here);
+        if (next) return leavePerch(world, e, t, here, next);
+        e.peeks = 0;
+      }
+    }
+  }
+  walk(e, e.walkGoal ? Math.sign(e.walkGoal) : 0);
+}
+
+function endPeek(e, wing) {
+  if (wing && wing.peeker === e) wing.peeker = null;
+  e.walkGoal = 0;
+}
+
+// A pair takes turns: one peeks at a time, and a turn frees itself after
+// peekGiveUp seconds whatever happens.
+function turnFree(world, e, wing) {
+  const p = wing && wing.peeker;
+  return !p || p === e || !p.alive || p.boots !== "ground" || world.t - wing.since > ENEMY_TYPES.trooper.peekGiveUp;
+}
+
+// In a line from any living soldier within coverFrom: what cover hides from.
+function exposed(world, x, y, T) {
+  for (const s of world.soldiers) {
+    if (s.alive && Math.hypot(s.x - x, s.y - y) < T.coverFrom && hasLos(world, s.x, s.y, x, y)) return true;
+  }
+  return false;
+}
+
+// The nearest hidden probe point, walked coverMargin points further while
+// those are hidden too: a signed walk distance, or null.
+function coverPoint(world, e, T) {
+  const pts = probeSurface(e, T.probeStep, T.probeDist * (e.ground.kind === "wall" ? 2 : 1));
+  let best = null;
+  for (const run of pts) {
+    for (let i = 0; i < run.length; i++) {
+      if (exposed(world, run[i].x, run[i].y, T)) continue;
+      let j = i;
+      while (j < i + T.coverMargin && j + 1 < run.length && !exposed(world, run[j + 1].x, run[j + 1].y, T)) j++;
+      if (best === null || Math.abs(run[j].d) < Math.abs(best)) best = run[j].d;
+      break;
+    }
+  }
+  return best;
+}
+
+// The nearest probe point with a line to the target, in reach, or null.
+function peekPoint(world, e, T, t) {
+  const pts = probeSurface(e, T.probeStep, T.probeDist);
+  const reach = reachOf(e) * 0.95;
+  let best = null;
+  for (const run of pts) {
+    for (const p of run) {
+      if (Math.hypot(t.x - p.x, t.y - p.y) > reach || !hasLos(world, p.x, p.y, t.x, t.y)) continue;
+      if (best === null || Math.abs(p.d) < Math.abs(best)) best = p.d;
+      break;
+    }
+  }
+  return best;
+}
+
+// Points along the surface a standing body is on, `step` apart, out to `max`
+// each way: two runs (walkIn +1, then -1) of { x, y, d }, d the signed walk
+// distance. On a rock, the standing circle (half way round at most). On a
+// derelict, a copy of the body walked by walkWalls — exactly where walking
+// would put it — stopping where it would go inside the hull, for a trooper
+// standing outside it.
+export function probeSurface(e, step, max) {
+  const g = e.ground;
+  const runs = [];
+  if (g.kind === "asteroid") {
+    const R = g.r + e.r;
+    const lim = Math.min(max, Math.PI * R);
+    for (const sg of [1, -1]) {
+      const run = [];
+      for (let d = step; d <= lim; d += step) {
+        const th = g.rot + e.gphi + (sg * d) / R;
+        run.push({ x: g.x + Math.cos(th) * R, y: g.y + Math.sin(th) * R, d: sg * d });
+      }
+      runs.push(run);
+    }
+    return runs;
+  }
+  const hull = g.ruin.hull;
+  const outside = !inPoly(hull, e.x, e.y);
+  for (const sg of [1, -1]) {
+    const run = [];
+    const c = { x: e.x, y: e.y, r: e.r, ground: g };
+    for (let d = step; d <= max; d += step) {
+      walkWalls(c, sg * step);
+      if (outside && inPoly(hull, c.x, c.y)) break;
+      run.push({ x: c.x, y: c.y, d: sg * d });
+    }
+    runs.push(run);
+  }
+  return runs;
+}
+
+function inPoly(poly, x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 // Boots off and away, to a new perch if one fits — else it floats and chases.
-function leavePerch(world, e, t, here) {
+function leavePerch(world, e, t, here, next = undefined) {
+  endPeek(e, e.wing);
+  e.danceOn = null;
   e.left = here;
-  e.perch = pickPerch(world, e, t);
+  e.perch = next === undefined ? pickPerch(world, e, t) : next;
   e.approachT = 0;
   e.repickT = ENEMY_TYPES.trooper.repick;
   e.tele = 0;
@@ -1199,8 +1392,8 @@ function trooperTrigger(world, e, T, t, dt) {
   const wait = () => rand(world.rng, T.wait[0], T.wait[1]);
   if (e.burstLeft > 0) {
     if (e.fireCd > 0) return;
-    if (!hasLos(world, e.x, e.y, t.x, t.y)) { e.burstLeft = 0; e.cool = wait(); return; }
-    if (fire(world, e, e.aim, aimAccuracy(e.stats.aim)) && --e.burstLeft === 0) e.cool = wait();
+    if (!hasLos(world, e.x, e.y, t.x, t.y)) { e.burstLeft = 0; e.cool = wait(); e.burstDone = true; return; }
+    if (fire(world, e, e.aim, aimAccuracy(e.stats.aim)) && --e.burstLeft === 0) { e.cool = wait(); e.burstDone = true; }
     return;
   }
   if (e.tele > 0) {

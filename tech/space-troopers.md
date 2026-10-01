@@ -1,7 +1,7 @@
 ---
 type: tech
 category: gameplay-systems
-status: planned
+status: built
 resolution: sharp
 needs: [space-prototype, space-magboots]
 related: [space-prototype, space-magboots]
@@ -38,6 +38,14 @@ Each slice is one commit on branch `space-prototype`. The prototype is its own p
 - **A running target is chased, not perched ahead of** (new, `chaseV`). When the target moves faster than 150px/s, a flying trooper drops its perch and flies the float rule, which runs at full speed past twice the keep range. Without it, a pair following a soldier at 250px/s kept landing on rocks the soldier had already passed. Measured: at 250px/s it holds 300–630px behind for a minute and fires on the way.
 - **Firing while flying** is allowed in every mode. The cover dance (T2) is what restricts a grounded trooper to its peeks.
 - **Troopers die fast to companions.** At 23–29 HP against a carbine's 17.5, two companions kill a pair in about 2s once they have a line. That is K2's numbers working as written, so it is not adjusted here.
+
+**As built, T2.**
+- **"Out of range" is measured from the perch, not the trooper.** The plan measured the trooper's own distance to the target (T1's rule). Behind an r 250 rock that distance passes the relocation limit, so a trooper that had just walked into cover left, landed on the same rock, and looped, never firing. Now it is the perch's near side to the target, the measure perch choice uses.
+- **No cover anywhere on this surface** (the plan did not say): fly to another perch if one fits, else hold the spot and shoot.
+- **The peek quota moves it only if another perch fits.** Otherwise the count resets and it keeps dancing. Leaving anyway put a trooper in open space with nowhere to go.
+- **Cover is judged against soldiers within 1100px** (planned 900). 1100 is past the squad's longest reach (the grenade launcher, 1050), so a trooper further than that really is safe.
+- **On a derelict the cover probe reaches 1200px** (planned 600 everywhere). The far face of a 1300px hull is usually further than 600px of walk, round the end.
+- **Measured.** A pair on a rock 450px from a still soldier, over 20s: each trooper out of sight 54–69% of the time, about 33–42 rounds a minute between them, and the two never peek at once. On eight derelicts, a trooper starting outside never went in (0 of 14,400 steps) and was out of sight 40–74% of the time, except where the hull had nowhere hidden within 1200px of walk. Cost: 0.74ms a step with four alert troopers dancing, against 0.53 without.
 
 ## Reuses
 
