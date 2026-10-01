@@ -300,6 +300,25 @@ function drawAlien(ctx, e, t) {
       ctx.fill();
       break;
     }
+    case "warden": {
+      ctx.rotate(face);
+      ctx.beginPath();
+      ctx.moveTo(e.r * 1.4, 0); ctx.lineTo(e.r * 0.4, -e.r * 0.75); ctx.lineTo(-e.r * 1.1, -e.r * 0.6);
+      ctx.lineTo(-e.r * 1.1, e.r * 0.6); ctx.lineTo(e.r * 0.4, e.r * 0.75);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#ffcf6a";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = "#3a3020";
+      ctx.fillRect(0, -e.r * 0.7, e.r, 6);
+      ctx.fillRect(0, e.r * 0.7 - 6, e.r, 6);
+      ctx.fillStyle = "#ff6a3a";
+      ctx.beginPath();
+      ctx.arc(e.r * 0.7, 0, 5, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
     case "minelayer": {
       const pulse = 1 + Math.sin(t * 3 + e.heading) * 0.06;
       ctx.scale(pulse, 1 / pulse);
@@ -577,13 +596,17 @@ function drawArrows(ctx, world, cam, vw, vh) {
   };
   const lead = controlled(world);
   const from = lead || world.soldiers.find((s) => s.alive);
-  // Hostiles within 1600px, fading with distance; mines only when near.
+  // Hostiles within 1600px, fading with distance; mines only when near; an
+  // elite from further, in its own colour.
   for (const e of world.enemies) {
     if (!e.alive || e.kind !== "enemy" || !from) continue;
+    const elite = ENEMY_TYPES[e.type].elite;
+    const range = e.type === "mine" ? 500 : elite ? 2600 : 1600;
     const d = Math.hypot(e.x - from.x, e.y - from.y);
-    if (d > (e.type === "mine" ? 500 : 1600)) continue;
-    ctx.globalAlpha = 0.35 + 0.65 * (1 - d / 1600);
-    arrow(e.x, e.y, e.alert ? "#ff6a6a" : "#b07070", e.alert ? 9 : 7);
+    if (d > range) continue;
+    ctx.globalAlpha = 0.35 + 0.65 * (1 - d / range);
+    if (elite) arrow(e.x, e.y, e.alert ? "#ffb347" : "#b8955a", 12);
+    else arrow(e.x, e.y, e.alert ? "#ff6a6a" : "#b07070", e.alert ? 9 : 7);
   }
   ctx.globalAlpha = 1;
   const dist = (x, y) => (from ? `${Math.round(Math.hypot(x - from.x, y - from.y) / 10) * 10}` : "");

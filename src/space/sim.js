@@ -19,7 +19,7 @@ export const CFG = {
 
   asteroidCount: 70,
   asteroidMinR: 30,
-  asteroidMaxR: 160,
+  asteroidMaxR: 480, // was 160 (Bo: three times as big)
   asteroidMaxSpeed: 40,
   asteroidGap: 30,
   asteroidDensity: 2, // mass = (r / soldierR)² × density; a soldier is mass 1
@@ -64,7 +64,9 @@ export const CFG = {
 
   ruinsMin: 3, // P3
   ruinsMax: 5,
-  ruinGap: 900, // centre to centre
+  derelictL: [1100, 1500], // P15: a derelict's length and beam (was 340–460 × 170–220)
+  derelictW: [500, 650],
+  ruinGap: 2100, // centre to centre (was 900, for the old size)
   ruinStartGap: 700,
   wallHalf: 6, // half a hull plate's thickness
   breach: 90, // an opening in a hull; a soldier is 36 across
@@ -79,6 +81,13 @@ export const CFG = {
   stationClose: 420, // most closing speed a companion adds on top of the leader's velocity
 
   enemyCount: 12, // placed in the field at start
+  crewMin: 2, // P16: groups placed inside each derelict, one per room
+  crewMax: 4,
+  crewLeash: 40, // an idle crewman drifts back to its room past this
+  eliteCount: 2, // P17: wardens patrolling the field
+  patrolPoints: 5, // waypoints in a warden's loop
+  patrolStartGap: 1500, // no waypoint nearer the start than this
+  patrolReach: 150, // a waypoint counts as reached within this
   enemyStartGap: 1000,
   enemyCap: 30, // a wave is skipped while this many are alive
   waveEvery: 30, // P5
@@ -162,6 +171,12 @@ export const ENEMY_TYPES = {
     weapon: enemyGun({ speed: 540, w: 10, h: 5, color: "#ffcf5c", life: 1.6, shape: "bullet" }, 8), color: "#e0975a" },
   // ← spore_wisp: HP 30, drift 60, a volley every 1.6–2.4s — released as mines.
   minelayer: { name: "Mine-layer", r: 18, hp: 30, speed: 60, accel: 120, keep: 350, drop: [1.6, 2.4], maxMines: 6, color: "#5ac8e0" },
+  // Elite (P17): new, nothing in the roster to copy. Patrols a loop of the
+  // field; on sight it holds range and fires led bursts; out of sight for
+  // giveUp seconds, it returns to its route.
+  warden: { name: "Warden", r: 30, hp: 320, speed: 230, patrol: 140, accel: 340, keepMin: 320, keepMax: 560,
+    sight: 900, giveUp: 6, tele: 0.6, wait: [1.8, 2.6], burst: 4, burstGap: 0.11, lead: true, elite: true,
+    weapon: enemyGun({ speed: 760, w: 14, h: 5, color: "#ffb347", life: 1.6, shape: "bolt" }, 7), color: "#d9a441" },
   // A mine: shootable (HP 4, like the boss's seeker), arms, then fuses on proximity.
   mine: { name: "Mine", r: 9, hp: 4, arm: 0.8, trigger: 70, fuse: 0.35, life: 25,
     blast: { kind: "explode", amount: 12, radius: 80 }, color: "#bff29a" },
@@ -169,6 +184,8 @@ export const ENEMY_TYPES = {
 
 // Weighted mix for placement and waves (a swarmer entry is a pack).
 const ENEMY_MIX = [["charger", 35], ["gunner", 25], ["swarmer", 25], ["minelayer", 15]];
+// Who crews a derelict (P16): no mine-layers, whose mines would fill a room.
+const CREW_MIX = [["gunner", 45], ["charger", 40], ["swarmer", 15]];
 
 // ---- recruits (copied from src/game/soldiers.js) ---------------------------
 export const RECRUITS = [
@@ -236,7 +253,7 @@ export function createWorld(seed = 1, opts = {}) {
   placeAsteroids(world, opts.asteroids ?? CFG.asteroidCount);
 
   world.wave = { n: 0, t: opts.waveEvery ?? CFG.waveEvery };
-  if (opts.enemies !== 0) placeEnemies(world, opts.enemies ?? CFG.enemyCount);
+  if (opts.enemies !== 0) placeEnemies(world, opts.enemies ?? CFG.enemyCount, opts.elites ?? CFG.eliteCount);
 
   const dummies = opts.dummies ?? CFG.dummyCount;
   for (let i = 0; i < dummies; i++) {
@@ -345,22 +362,23 @@ function blockedByClearZones(world, x, y, r) {
 }
 
 // ---- ruins, artifact, extraction --------------------------------------------
-// A ruin is a derelict hull: a pointed ship outline of wall segments, one or
-// two breaches cut in it, and a bulkhead with a door splitting the hold. The
-// artifact sits in the aft compartment of one of them.
+// A ruin is a derelict hull: wall segments with breaches cut in the hull and
+// doors in the bulkheads. In play every ruin is a derelict (addDerelict); the
+// small one-bulkhead hull (addRuin) is the fixture the boots tests walk round.
+// The artifact sits in the aft compartment of one of them.
 function placeRuins(world, want) {
   const { rng, size } = world;
   const count = want ?? CFG.ruinsMin + Math.floor(rng() * (CFG.ruinsMax - CFG.ruinsMin + 1));
   let tries = 0;
   while (world.ruins.length < count && tries++ < 400) {
-    const L = rand(rng, 340, 460);
-    const W = rand(rng, 170, 220);
+    const L = rand(rng, CFG.derelictL[0], CFG.derelictL[1]);
+    const W = rand(rng, CFG.derelictW[0], CFG.derelictW[1]);
     const R = Math.hypot(L / 2, W / 2);
     const x = rand(rng, R + 60, size - R - 60);
     const y = rand(rng, R + 60, size - R - 60);
     if (Math.hypot(x - world.start.x, y - world.start.y) < CFG.ruinStartGap + R) continue;
     if (world.ruins.some((o) => Math.hypot(o.x - x, o.y - y) < CFG.ruinGap)) continue;
-    addRuin(world, x, y, rand(rng, 0, Math.PI * 2), L, W);
+    addDerelict(world, x, y, rand(rng, 0, Math.PI * 2), L, W);
   }
 }
 
@@ -368,8 +386,6 @@ function placeRuins(world, want) {
 // out, it is rolled, as in play.
 export function addRuin(world, x, y, angle, L, W, breaches = null) {
   const { rng } = world;
-  const c = Math.cos(angle), sn = Math.sin(angle);
-  const toWorld = ([lx, ly]) => [x + lx * c - ly * sn, y + lx * sn + ly * c];
   const hull = [[-L / 2, -W / 2], [L / 4, -W / 2], [L / 2, 0], [L / 4, W / 2], [-L / 2, W / 2]];
   // Where along each edge a breach is centred. The long sides breach forward
   // of the bulkhead, which meets them at x = -L/8 and would split a centred one.
@@ -382,7 +398,6 @@ export function addRuin(world, x, y, angle, L, W, breaches = null) {
   }
   const segs = [];
   const openings = []; // centre of every breach and door, local
-  const lerp = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
   for (let i = 0; i < hull.length; i++) {
     const a = hull[i], b = hull[(i + 1) % hull.length];
     if (breached.has(i)) {
@@ -393,15 +408,120 @@ export function addRuin(world, x, y, angle, L, W, breaches = null) {
   // Bulkhead across the hold with a door in it.
   segs.push(...cut([-L / 8, -W / 2], [-L / 8, W / 2], CFG.breach));
   openings.push([-L / 8, 0]);
+  return buildRuin(world, x, y, angle, L, W, { hull, segs, openings, aft: [-L * 0.31, 0], rooms: [[-L * 0.31, 0], [L * 0.15, 0]] });
+}
+
+// A derelict (P15): an eight-sided hull, three bulkheads and a keel wall
+// splitting the middle two bays — six rooms: aft, four amidships, fore. Every
+// bulkhead half has a door, so every room is reachable from every breach; the
+// keel wall has a door in each bay half the time. One to three breaches, each
+// centred in a stretch of hull plate clear of the bulkheads that meet it.
+// `breaches` fixes them by index into the candidate stretches, for tests.
+export function addDerelict(world, x, y, angle, L, W, breaches = null) {
+  const { rng } = world;
+  const hull = [
+    [-L / 2, -0.32 * W], [-0.38 * L, -W / 2], [0.18 * L, -W / 2], [L / 2, -0.12 * W],
+    [L / 2, 0.12 * W], [0.18 * L, W / 2], [-0.38 * L, W / 2], [-L / 2, 0.32 * W],
+  ];
+  // The hull's top (−y) at station x; it is symmetric about the keel.
+  const top = (px) => {
+    let best = 0;
+    for (let i = 0; i < hull.length; i++) {
+      const [ax, ay] = hull[i], [bx, by] = hull[(i + 1) % hull.length];
+      if (ay > 0 || by > 0 || (px - ax) * (px - bx) > 0 || ax === bx) continue;
+      best = Math.min(best, ay + ((by - ay) * (px - ax)) / (bx - ax));
+    }
+    return best;
+  };
+  const jit = () => (rng() * 2 - 1) * 0.03 * L;
+  const bulk = [-0.26 * L + jit(), -0.02 * L + jit(), 0.28 * L + jit()];
+  const segs = [];
+  const openings = [];
+  const door = (a, b, lo, hi) => {
+    const k = rand(rng, lo, hi);
+    segs.push(...cut(a, b, CFG.breach, k));
+    openings.push(lerp(a, b, k));
+  };
+  // Bulkheads, each in two halves meeting the keel wall.
+  const junctions = []; // where a bulkhead meets the hull, local
+  for (const bx of bulk) {
+    const ty = top(bx);
+    junctions.push([bx, ty], [bx, -ty]);
+    door([bx, ty], [bx, 0], 0.35, 0.65);
+    door([bx, 0], [bx, -ty], 0.35, 0.65);
+  }
+  // The keel wall, between the aft and fore bulkheads, split at the middle one.
+  for (const [x0, x1] of [[bulk[0], bulk[1]], [bulk[1], bulk[2]]]) {
+    if (rng() < 0.5) door([x0, 0], [x1, 0], 0.3, 0.7);
+    else segs.push([[x0, 0], [x1, 0]]);
+  }
+  // Breach candidates: the middle of every stretch of hull plate between a
+  // corner and a junction that is long enough to cut.
+  const cands = []; // [edge, k]
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const ks = [0, 1];
+    for (const [jx, jy] of junctions) {
+      const k = ((jx - a[0]) * (b[0] - a[0]) + (jy - a[1]) * (b[1] - a[1])) / (len * len);
+      const [px, py] = lerp(a, b, k);
+      if (k > 0 && k < 1 && Math.hypot(px - jx, py - jy) < 1e-6) ks.push(k);
+    }
+    ks.sort((p, q) => p - q);
+    for (let j = 0; j + 1 < ks.length; j++) {
+      if ((ks[j + 1] - ks[j]) * len >= CFG.breach + 80) cands.push([i, (ks[j] + ks[j + 1]) / 2]);
+    }
+  }
+  let picked = breaches;
+  if (!picked) {
+    const n = 1 + (rng() < 0.6 ? 1 : 0) + (rng() < 0.3 ? 1 : 0);
+    const pool = cands.map((_, i) => i);
+    picked = [];
+    while (picked.length < n && pool.length) picked.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+  }
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length];
+    const ks = picked.filter((c) => cands[c][0] === i).map((c) => cands[c][1]).sort((p, q) => p - q);
+    let from = a;
+    for (const k of ks) {
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const h = CFG.breach / 2 / len;
+      segs.push([from, lerp(a, b, k - h)]);
+      openings.push(lerp(a, b, k));
+      from = lerp(a, b, k + h);
+    }
+    segs.push([from, b]);
+  }
+  const mid = (p, q) => (p + q) / 2;
+  const aftX = mid(-L / 2, bulk[0]);
+  const rooms = [[aftX, 0]];
+  for (const [x0, x1] of [[bulk[0], bulk[1]], [bulk[1], bulk[2]]]) {
+    const cx = mid(x0, x1);
+    const h = Math.min(-top(x0), -top(x1)) / 2;
+    rooms.push([cx, -h], [cx, h]);
+  }
+  rooms.push([mid(bulk[2], L / 2), 0]);
+  return buildRuin(world, x, y, angle, L, W, { hull, segs, openings, aft: [aftX, 0], rooms, breachCands: cands.length });
+}
+
+// Local layout → world: the walls, the hull outline the views fill, and the
+// openings, aft spot and room centres, all turned and placed.
+function buildRuin(world, x, y, angle, L, W, lay) {
+  const c = Math.cos(angle), sn = Math.sin(angle);
+  const toWorld = ([lx, ly]) => [x + lx * c - ly * sn, y + lx * sn + ly * c];
+  let reach = 0;
+  for (const [hx, hy] of lay.hull) reach = Math.max(reach, Math.hypot(hx, hy));
   const ruin = {
     x, y, angle, L, W,
-    R: Math.hypot(L / 2, W / 2) + CFG.wallHalf,
-    hull: hull.map(toWorld),
+    R: reach + CFG.wallHalf,
+    hull: lay.hull.map(toWorld),
     walls: [],
-    aft: toWorld([-L * 0.31, 0]), // mid aft compartment: the artifact's place
-    openings: openings.map(toWorld),
+    aft: toWorld(lay.aft), // mid aft compartment: the artifact's place
+    openings: lay.openings.map(toWorld),
+    rooms: lay.rooms.map(toWorld),
+    breachCands: lay.breachCands || 0,
   };
-  for (const [a, b] of segs) {
+  for (const [a, b] of lay.segs) {
     const [x0, y0] = toWorld(a);
     const [x1, y1] = toWorld(b);
     const w = { kind: "wall", x0, y0, x1, y1, t: CFG.wallHalf, ruin };
@@ -412,6 +532,8 @@ export function addRuin(world, x, y, angle, L, W, breaches = null) {
   world.keepClear.push({ x, y, r: ruin.R + 20 });
   return ruin;
 }
+
+const lerp = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
 
 // Segment a→b with a gap of `gap` centred at fraction k removed: two segments.
 function cut(a, b, gap, k = 0.5) {
@@ -489,15 +611,18 @@ export function makeEnemy(world, type, x, y) {
     heading: rng() * Math.PI * 2,
     orbitDir: rng() < 0.5 ? -1 : 1,
     age: 0, owner: null, mines: 0, fuse: 0,
+    home: null, // a crewman's room: idle, it stays near it
+    route: null, leg: 0, lost: 0, // a warden's patrol loop, and time out of sight
+    burstLeft: 0, burstT: 0,
   };
 }
 
-function pickType(rng) {
+function pickType(rng, mix = ENEMY_MIX) {
   let total = 0;
-  for (const [, w] of ENEMY_MIX) total += w;
+  for (const [, w] of mix) total += w;
   let k = rng() * total;
-  for (const [type, w] of ENEMY_MIX) if ((k -= w) < 0) return type;
-  return ENEMY_MIX[0][0];
+  for (const [type, w] of mix) if ((k -= w) < 0) return type;
+  return mix[0][0];
 }
 
 // A type at a point: a swarmer is a pack spread around it.
@@ -520,7 +645,7 @@ function freeSpot(world, x, y, r) {
   return true;
 }
 
-function placeEnemies(world, count) {
+function placeEnemies(world, count, elites) {
   const { rng, size } = world;
   // One gunner guards the hull that holds the artifact, just outside it.
   const host = world.artifact && world.artifact.ruin;
@@ -538,6 +663,47 @@ function placeEnemies(world, count) {
     spawnGroup(world, pickType(rng), x, y, false);
     placed++;
   }
+  placeCrews(world);
+  for (let i = 0; i < elites; i++) placeWarden(world);
+}
+
+// Each derelict's crew: a group in each of a few rooms, held there while idle.
+function placeCrews(world) {
+  const { rng } = world;
+  for (const r of world.ruins) {
+    if (!r.rooms) continue;
+    const rooms = r.rooms.slice();
+    const n = Math.min(rooms.length, CFG.crewMin + Math.floor(rng() * (CFG.crewMax - CFG.crewMin + 1)));
+    for (let i = 0; i < n; i++) {
+      const [x, y] = rooms.splice(Math.floor(rng() * rooms.length), 1)[0];
+      const from = world.enemies.length;
+      spawnGroup(world, pickType(rng, CREW_MIX), x, y, false);
+      for (let j = from; j < world.enemies.length; j++) world.enemies[j].home = { x, y };
+    }
+  }
+}
+
+// A warden and its loop: waypoints in open space away from the start, visited
+// in order round the map's centre so the loop does not cross itself.
+export function placeWarden(world) {
+  const { rng, size } = world;
+  const pts = [];
+  for (let tries = 0; pts.length < CFG.patrolPoints && tries < 400; tries++) {
+    const x = rand(rng, 300, size - 300);
+    const y = rand(rng, 300, size - 300);
+    if (Math.hypot(x - world.start.x, y - world.start.y) < CFG.patrolStartGap) continue;
+    if (!freeSpot(world, x, y, 80)) continue;
+    pts.push({ x, y });
+  }
+  if (pts.length < 2) return null;
+  const c = size / 2;
+  pts.sort((a, b) => Math.atan2(a.y - c, a.x - c) - Math.atan2(b.y - c, b.x - c));
+  const leg = Math.floor(rng() * pts.length);
+  const e = makeEnemy(world, "warden", pts[leg].x, pts[leg].y);
+  e.route = pts;
+  e.leg = (leg + 1) % pts.length;
+  world.enemies.push(e);
+  return e;
 }
 
 function squadCentre(world) {
@@ -655,22 +821,40 @@ function updateEnemies(world, dt) {
       e.senseT = CFG.senseEvery;
       e.target = nearestSoldier(world, e);
       e.los = !!e.target && hasLos(world, e.x, e.y, e.target.x, e.target.y);
-      if (!e.alert && e.target && e.los && Math.hypot(e.target.x - e.x, e.target.y - e.y) < CFG.alertRange) e.alert = true;
+      if (!e.alert && e.target && e.los && Math.hypot(e.target.x - e.x, e.target.y - e.y) < (T.sight || CFG.alertRange)) e.alert = true;
+    }
+    // A warden that has lost sight of everyone long enough goes back on patrol.
+    if (e.route && e.alert) {
+      e.lost = e.los ? 0 : e.lost + dt;
+      if (e.lost > T.giveUp) { e.alert = false; e.lost = 0; e.tele = 0; e.burstLeft = 0; }
     }
     const t = e.target && e.target.alive ? e.target : null;
     let dvx = 0, dvy = 0;
-    if (!e.alert || !t) {
-      // Idle: a slow drift on a wandering heading.
+    if ((!e.alert || !t) && e.route) {
+      // Patrol: fly the loop, waypoint to waypoint.
+      const p = e.route[e.leg];
+      const dx = p.x - e.x, dy = p.y - e.y;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d < CFG.patrolReach) e.leg = (e.leg + 1) % e.route.length;
+      dvx = (dx / d) * T.patrol;
+      dvy = (dy / d) * T.patrol;
+    } else if (!e.alert || !t) {
+      // Idle: a slow drift on a wandering heading — back toward its room, for a crewman.
       e.heading += (world.rng() - 0.5) * dt;
       dvx = Math.cos(e.heading) * 25;
       dvy = Math.sin(e.heading) * 25;
+      if (e.home) {
+        const hx = e.home.x - e.x, hy = e.home.y - e.y;
+        const hd = Math.hypot(hx, hy);
+        if (hd > CFG.crewLeash) { dvx = (hx / hd) * 40; dvy = (hy / hd) * 40; }
+      }
     } else {
       const dx = t.x - e.x, dy = t.y - e.y;
       const d = Math.hypot(dx, dy) || 1;
       const ux = dx / d, uy = dy / d;
       if (e.type === "charger") {
         dvx = ux * T.speed; dvy = uy * T.speed;
-      } else if (e.type === "gunner") {
+      } else if (e.type === "gunner" || e.type === "warden") {
         const radial = d < T.keepMin ? -1 : d > T.keepMax ? 1 : 0;
         dvx = (ux * radial + -uy * e.orbitDir * 0.4) * T.speed;
         dvy = (uy * radial + ux * e.orbitDir * 0.4) * T.speed;
@@ -716,16 +900,36 @@ function shoot(world, e, T, t, dt) {
     return;
   }
   if (!T.weapon) return;
+  if (e.burstLeft > 0) {
+    if ((e.burstT -= dt) <= 0) {
+      e.fireCd = 0;
+      fire(world, e, aimAt(e, T, t), 1);
+      e.burstT = T.burstGap;
+      if (--e.burstLeft === 0) e.cool = rand(world.rng, T.wait[0], T.wait[1]);
+    }
+    return;
+  }
   if (e.tele > 0) {
     e.tele -= dt;
     if (e.tele <= 0) {
       e.fireCd = 0;
-      fire(world, e, Math.atan2(t.y - e.y, t.x - e.x), 1);
+      fire(world, e, aimAt(e, T, t), 1);
       e.cool = rand(world.rng, T.wait[0], T.wait[1]);
+      if (T.burst > 1) { e.burstLeft = T.burst - 1; e.burstT = T.burstGap; }
     }
     return;
   }
   if (e.cool <= 0 && e.los) e.tele = T.tele;
+}
+
+// Straight at the target, or — a type with `lead` — where it will be when the
+// round gets there, if it holds its velocity (one refinement of the flight time).
+function aimAt(e, T, t) {
+  if (!T.lead) return Math.atan2(t.y - e.y, t.x - e.x);
+  const sp = T.weapon.projectile.speed;
+  let tt = Math.hypot(t.x - e.x, t.y - e.y) / sp;
+  tt = Math.hypot(t.x + t.vx * tt - e.x, t.y + t.vy * tt - e.y) / sp;
+  return Math.atan2(t.y + t.vy * tt - e.y, t.x + t.vx * tt - e.x);
 }
 
 function updateMine(world, m, T, dt) {

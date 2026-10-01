@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ctx2d } from "./harness.mjs";
-import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove } from "../src/space/sim.js";
+import { CFG, WEAPONS, createWorld, step, collide, makeAsteroid, makeRng, fire, startReload, applyEffects, aimAccuracy, addRuin, segWall, hurt, closestOnWall, makeEnemy, addDerelict, placeWarden, spawnWave, hasLos, ENEMY_TYPES, swapControl, soldierMaxHp, RECRUITS, upOf, feetOf, bootsState, shove } from "../src/space/sim.js";
 import { createView, draw, cameraFor, zoomBy, figurePose, toScreen, toWorld, updateRoll, ZOOM_MIN, ZOOM_MAX } from "../src/space/view.js";
 import { createAudio } from "../src/space/audio.js";
 
@@ -309,6 +309,70 @@ export default async function run_(t) {
     }
     t.ok(`every opening fits a soldier (${count} openings)`, ok);
   }
+
+  // ---- derelicts (P15) and big rocks ------------------------------------------
+  {
+    let maxR = 0, over = 0;
+    for (let seed = 1; seed <= 10; seed++) for (const a of createWorld(seed).asteroids) { maxR = Math.max(maxR, a.r); if (a.r > 160) over++; }
+    t.ok(`asteroids reach past the old 160px cap and never past ${CFG.asteroidMaxR} (largest ${maxR.toFixed(0)}, ${over} over 160)`, over > 0 && maxR <= CFG.asteroidMaxR);
+  }
+  {
+    // A soldier-sized body can get from outside the hull into every room:
+    // a flood fill over a 10px grid of the places it fits, from a corner of
+    // the box around the ruin.
+    const fill = (ruin) => {
+      const clear = CFG.soldierR + CFG.wallHalf + 0.5, cell = 10;
+      const x0 = ruin.x - ruin.R - 80, y0 = ruin.y - ruin.R - 80;
+      const n = Math.ceil((ruin.R * 2 + 160) / cell);
+      const free = (i, j) => {
+        const x = x0 + i * cell, y = y0 + j * cell;
+        for (const w of ruin.walls) { const [cx, cy] = closestOnWall(w, x, y); if (Math.hypot(x - cx, y - cy) < clear) return false; }
+        return true;
+      };
+      const seen = new Uint8Array(n * n);
+      const q = [0];
+      seen[0] = 1;
+      while (q.length) {
+        const k = q.pop(), i = k % n, j = (k - i) / n;
+        for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+          if (a < 0 || b < 0 || a >= n || b >= n || seen[b * n + a]) continue;
+          seen[b * n + a] = 2; // looked at
+          if (free(a, b)) { seen[b * n + a] = 1; q.push(b * n + a); }
+        }
+      }
+      // A point is reached if some free cell within one cell of it was.
+      return ([px, py]) => {
+        const i = Math.round((px - x0) / cell), j = Math.round((py - y0) / cell);
+        for (let a = i - 1; a <= i + 1; a++) for (let b = j - 1; b <= j + 1; b++) if (seen[b * n + a] === 1) return true;
+        return false;
+      };
+    };
+    let rooms = 0, unreached = 0, openOk = true, count = 0, sizes = true;
+    for (let seed = 1; seed <= 24; seed++) {
+      const w = empty();
+      w.rng = makeRng(seed);
+      const L = CFG.derelictL[0] + (seed % 5) / 4 * (CFG.derelictL[1] - CFG.derelictL[0]);
+      const W = CFG.derelictW[0] + (seed % 3) / 2 * (CFG.derelictW[1] - CFG.derelictW[0]);
+      const r = addDerelict(w, 3000, 3000, seed * 0.61, L, W);
+      const reached = fill(r);
+      for (const p of [...r.rooms, r.aft]) { rooms++; if (!reached(p)) unreached++; }
+      for (const [ox, oy] of r.openings) {
+        count++;
+        for (const wall of r.walls) {
+          const [cx, cy] = closestOnWall(wall, ox, oy);
+          if (Math.hypot(ox - cx, oy - cy) < CFG.soldierR + wall.t) openOk = false;
+        }
+      }
+    }
+    for (let seed = 1; seed <= 10; seed++) {
+      for (const r of createWorld(seed).ruins) {
+        if (!r.rooms || r.rooms.length !== 6 || r.L < CFG.derelictL[0] || r.L > CFG.derelictL[1]) sizes = false;
+      }
+    }
+    t.ok("every ruin in play is a six-room derelict of the configured size (10 seeds)", sizes);
+    t.eq(`derelicts: every room is reachable from outside (${rooms} rooms, 24 hulls)`, unreached, 0);
+    t.ok(`derelicts: every breach and door fits a soldier (${count} openings)`, openOk);
+  }
   {
     const w = empty();
     const s = w.soldiers[0];
@@ -494,6 +558,98 @@ export default async function run_(t) {
     const bad = [...w.soldiers, ...w.enemies, ...w.asteroids].filter((b) => !Number.isFinite(b.x + b.y + b.vx + b.vy));
     t.eq("two minutes of play: no NaN positions", bad.length, 0);
     t.ok("waves arrived", w.wave.n >= 3);
+  }
+
+  // ---- crews (P16) and the warden (P17) ------------------------------------------
+  {
+    // Every crewman starts inside its derelict's hull, and idle, stays by its room.
+    const inside = (poly, x, y) => {
+      let c = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, yi] = poly[i], [xj, yj] = poly[j];
+        if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+      }
+      return c;
+    };
+    let crew = 0, out = 0, hulls = 0, manned = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const w = createWorld(seed);
+      for (const r of w.ruins) {
+        hulls++;
+        const mine = w.enemies.filter((e) => e.home && r.rooms.some(([x, y]) => x === e.home.x && y === e.home.y));
+        if (mine.length) manned++;
+        for (const e of mine) { crew++; if (!inside(r.hull, e.x, e.y)) out++; }
+      }
+    }
+    t.eq(`every derelict has a crew (${hulls} hulls)`, manned, hulls);
+    t.eq(`every crewman starts inside its hull (${crew})`, out, 0);
+    const w = createWorld(5, { waveEvery: 1e9 });
+    for (const s of w.soldiers) Object.assign(s, { hp: 1e9 });
+    run(w, {}, 60 * 30);
+    const idle = w.enemies.filter((e) => e.home && e.alive && !e.alert);
+    const far = Math.max(...idle.map((e) => Math.hypot(e.x - e.home.x, e.y - e.home.y)));
+    t.ok(`idle crew stay by their rooms over 30s (${idle.length}, furthest ${far.toFixed(0)}px)`, idle.length > 0 && far < CFG.crewLeash + 30);
+  }
+  {
+    // Placed in play: away from the start, on a loop of waypoints it flies in order.
+    let n = 0, near0 = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const w = createWorld(seed);
+      for (const e of w.enemies) if (e.type === "warden") {
+        n++;
+        if (e.route.some((p) => Math.hypot(p.x - w.start.x, p.y - w.start.y) < CFG.patrolStartGap)) near0++;
+      }
+    }
+    t.eq("each field has its wardens (10 seeds)", n, CFG.eliteCount * 10);
+    t.eq("no patrol waypoint near the start", near0, 0);
+    const w = empty();
+    w.soldiers[0].x = 200; w.soldiers[0].y = 200;
+    const e = placeWarden(w);
+    const visits = [];
+    let last = e.leg;
+    for (let i = 0; i < 60 * 400 && visits.length < e.route.length + 1; i++) {
+      run(w, {}, 1);
+      if (e.leg !== last) { visits.push(last); last = e.leg; }
+    }
+    const inOrder = visits.every((v, i) => i === 0 || v === (visits[i - 1] + 1) % e.route.length);
+    t.ok(`a warden flies its whole loop in order (${visits.length} waypoints)`, visits.length > e.route.length && inOrder && !e.alert);
+  }
+  {
+    // On sight it fires bursts, led at a moving target; out of sight long
+    // enough, it goes back to its route.
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 2000, y: 2000, vx: 0, vy: 150, hp: 1e9 });
+    const T = ENEMY_TYPES.warden;
+    const e = makeEnemy(w, "warden", 2500, 2000);
+    e.route = [{ x: 2500, y: 2000 }, { x: 6000, y: 6000 }];
+    w.enemies.push(e);
+    let shots = [], firstAt = -1;
+    for (let i = 0; i < 240; i++) {
+      Object.assign(e, { x: 2500, y: 2000, vx: 0, vy: 0 });
+      Object.assign(s, { x: 2000, y: 2000 }); // pinned, but still "moving" at 150px/s down
+      run(w, {}, 1);
+      for (const p of w.projectiles) if (p.team === "enemy" && !p.counted) { p.counted = true; shots.push(i); if (firstAt < 0) firstAt = Math.atan2(p.vy, p.vx); }
+    }
+    t.ok("a warden in sight range alerts", e.alert);
+    const burst = shots.filter((i) => i - shots[0] < 30).length;
+    t.eq("it fires a burst", burst, T.burst);
+    // 500px at 760px/s is 0.66s, in which the target falls 99px: about 11° off the line.
+    const off = -wrap(firstAt - Math.PI);
+    t.ok(`it leads a moving target (${(off * 180 / Math.PI).toFixed(1)}° ahead of it)`, near(off, Math.atan2(99, 500), 0.02));
+    // Wall it off: a rock between them, too big to see round.
+    const rock = makeAsteroid(makeRng(3), 2250, 2000, 150);
+    rock.vx = rock.vy = 0; rock.m = 1e9;
+    w.asteroids.push(rock);
+    let dropped = -1;
+    for (let i = 0; i < 60 * 10 && dropped < 0; i++) {
+      Object.assign(e, { x: 2500, y: 2000, vx: 0, vy: 0 });
+      Object.assign(s, { x: 2000, y: 2000, vx: 0, vy: 0 });
+      Object.assign(rock, { x: 2250, y: 2000, vx: 0, vy: 0 });
+      run(w, {}, 1);
+      if (!e.alert) dropped = i / 60;
+    }
+    t.ok(`out of sight, it gives up after ~${T.giveUp}s (${dropped.toFixed(2)}s)`, dropped > T.giveUp - 0.1 && dropped < T.giveUp + 0.5);
   }
 
   // ---- S5: squad --------------------------------------------------------------------
@@ -871,6 +1027,17 @@ export default async function run_(t) {
       t.ok("two breaches: each piece is walked round back to its start", r1.closed && r2.closed && !r1.off && !r2.off);
       t.ok("two breaches: the pieces are different surfaces", ruin.walls.some((wl) => r1.faces.get(wl).size && !r2.faces.get(wl).size));
       t.eq("two breaches: between them, both faces of every plate", missed, 0);
+    }
+    // A derelict (P15): its bulkheads meet the hull at angles and the keel wall
+    // in a three-way joint. Outside and inside, the walk still closes.
+    for (const [seed, inside] of [[3, false], [8, true], [11, true]]) {
+      const w = empty();
+      w.rng = makeRng(seed);
+      const ruin = addDerelict(w, 3000, 3000, seed * 0.5, 1300, 560);
+      const s = overWall(w, ruin, ruin.walls.findIndex(long), 0.3, 5, inside);
+      const r = walkRound(w, ruin, s);
+      t.ok(`derelict ${seed}, ${inside ? "inside" : "outside"}: the walk comes back to its start (${r.path.toFixed(0)}px)`, r.closed && !r.off);
+      t.ok(`derelict ${seed}: never inside a plate, never more than a walk step at once`, r.closest > RW - 1e-6 && r.jump <= CFG.walkSpeed * CFG.step + 1e-6);
     }
     {
       // Inside a hull, a jump comes back down to the floor it left.

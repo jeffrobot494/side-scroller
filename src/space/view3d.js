@@ -342,6 +342,24 @@ function makeEnemy(e) {
       fin.position.x = -r * 0.5;
       break;
     }
+    case "warden": {
+      // Elite: a long armoured hull, two gun pods, a gold band and a lamp eye.
+      const hull = add(OCTA, std(col, { flatShading: true, metalness: 0.7, roughness: 0.3 }));
+      hull.scale.set(r * 1.6, r * 0.75, r * 0.6);
+      const band = add(new THREE.TorusGeometry(r * 0.78, 2.5, 6, 24), hot("#ffcf6a", 1.3));
+      band.rotation.y = Math.PI / 2;
+      for (const side of [-1, 1]) {
+        const pod = add(BOX, std("#3a3020", { metalness: 0.7 }));
+        pod.scale.set(r * 1.1, 7, 7);
+        pod.position.set(r * 0.5, side * r * 0.62, 0);
+      }
+      const eye = add(SPHERE, hot("#ff6a3a", 2.2));
+      eye.scale.setScalar(6);
+      eye.position.set(r * 0.9, 0, r * 0.4);
+      extra.jet = add(CONE, hot("#ffb347", 1.8));
+      extra.jet.rotation.z = Math.PI;
+      break;
+    }
     case "minelayer": {
       extra.bladder = add(SPHERE, std(col, { roughness: 0.35, metalness: 0.1 }));
       for (let i = 0; i < 3; i++) {
@@ -388,6 +406,13 @@ function poseEnemy(v, e, t) {
       break;
     }
     case "gunner": v.spin.rotation.z = -face; break;
+    case "warden": {
+      v.spin.rotation.z = -face;
+      const len = e.r * (0.5 + Math.min(1, Math.hypot(e.vx, e.vy) / 200) * 0.6 + Math.random() * 0.15);
+      v.extra.jet.scale.set(len, e.r * 0.25, e.r * 0.25);
+      v.extra.jet.position.x = -e.r * 1.6 - len / 2;
+      break;
+    }
     case "swarmer":
       v.spin.rotation.z = -vel;
       v.spin.rotation.x = Math.sin(t * 9 + e.heading) * 0.5; // a wobble
@@ -415,14 +440,16 @@ function poseEnemy(v, e, t) {
 // by a smooth function of direction, so the duplicated vertices of a flat-
 // shaded mesh move together and it stays closed.
 function makeAsteroid(a) {
-  const geo = new THREE.IcosahedronGeometry(1, 2);
+  const geo = new THREE.IcosahedronGeometry(1, a.r > 200 ? 3 : 2);
   const pos = geo.attributes.position;
   const n = a.verts.length;
   const waves = [];
   for (let i = 0; i < 5; i++) {
     waves.push([Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1, 2 + Math.random() * 3, Math.random() * 6.28]);
   }
-  const depth = 0.55 + Math.random() * 0.2; // shallow, so perspective barely widens it
+  // Shallow, so perspective barely widens it: at most 130px toward the camera,
+  // which a big rock's proportion alone would carry far past its outline.
+  const depth = Math.min(0.55 + Math.random() * 0.2, 130 / a.r);
   const v = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i).normalize();
