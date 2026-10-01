@@ -117,7 +117,7 @@ addEventListener("resize", resize);
 resize();
 
 const newSeed = () => (Math.random() * 2 ** 31) >>> 0;
-let world = createWorld(newSeed(), { squad: 1 });
+let world = createWorld(newSeed(), { squad: 3 });
 const hud = createHud();
 // For poking at it from the console: space.world().soldiers[0].hp = 999.
 // space.step(input, n) runs the sim without pointer lock (headless checks).
@@ -171,7 +171,7 @@ function frame(now) {
   while (acc >= CFG.step) {
     const input = sample(first);
     first = false;
-    if (input.restart && world.end) world = createWorld(newSeed(), { squad: 1 });
+    if (input.restart && world.end) world = createWorld(newSeed(), { squad: 3 });
     else step(world, input);
     acc -= CFG.step;
   }

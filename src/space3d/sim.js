@@ -11,7 +11,9 @@
 // = same world.
 // ---------------------------------------------------------------------------
 
-import { CFG as CFG2, makeRng, RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy, addDerelict, addRuin } from "../space/sim.js";
+import { CFG as CFG2, makeRng, RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy, addDerelict, addRuin, ENEMY_TYPES } from "../space/sim.js";
+const ENEMY_COLOR = Object.fromEntries(Object.entries(ENEMY_TYPES).map(([k, T]) => [k, T.color]));
+import { updateEnemies, updateSquad, spawnWave, placeEnemies, releaseMine } from "./ai.js";
 import { dot, cross, norm, len, qmul, qaxis, qrot, qnorm, qlook, qconj, qslerp, qangle, qlimit, qfromTo, QI, fwdOf, upOfQ, randomDir, perp } from "./vec.js";
 
 export { RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy };
@@ -27,7 +29,7 @@ export const CFG = {
   jetSide: 0.6, // S, A, D, Space and C push at this share of W's thrust
   pitchMax: 1.45, // standing, the head pitches this far from level
   viewEase: 0.07, // s: the eye's roll to a new up, the 2D ROLL_TAU
-  dummyCount3: 4, // F2: target drones round the start
+  dummyCount3: 0, // F2's target drones: a test fixture now, none in play
   gridCell: 700, // the rock grid lines of sight and rounds query
   // F4: a derelict is the 2D layout given a height, closed by a deck and a
   // ceiling. Doors and breaches keep the layout's width (CFG.breach).
@@ -74,12 +76,18 @@ export function createWorld(seed = 1, opts = {}) {
     const weapon = (opts.weapons && opts.weapons[i]) || LOADOUT[i % LOADOUT.length];
     const k = (i - (squad - 1) / 2) * 50;
     const s = makeSoldier(r, world.start.x + side[0] * k, world.start.y + side[1] * k, world.start.z + side[2] * k, weapon, q);
+    // A station beside whoever leads, rolled once (F10): a world-fixed 3D
+    // bearing and a distance within spread of the standoff.
+    s.station = { dir: randomDir(rng), d: CFG.standoff + (rng() * 2 - 1) * CFG.standoffSpread };
     world.soldiers.push(s);
   }
 
   if (opts.ruins !== 0) placeRuins(world, opts.ruins);
   if (opts.objective !== false) placeObjective(world);
   placeAsteroids(world, opts.asteroids ?? CFG.asteroidCount);
+
+  world.wave = { n: 0, t: opts.waveEvery ?? CFG.waveEvery };
+  if (opts.enemies !== 0) placeEnemies(world, opts.enemies ?? CFG.enemyCount, opts.elites ?? CFG.eliteCount);
 
   // F2: target drones round the start, so every effect can be seen before
   // there are enemies. A test fixture once enemies exist (F5).
@@ -229,6 +237,13 @@ export function step(world, input = {}) {
     if (want) fire(world, s, s.aim, aimAccuracy(s.stats.aim));
   }
   for (const o of world.soldiers) easeView(o, dt);
+  if (!world.end) updateSquad(world, dt);
+  updateEnemies(world, dt);
+  for (const e of world.enemies) if (isBody(e)) easeView(e, dt);
+  if (!world.end && (world.wave.t -= dt) <= 0) {
+    world.wave.t = CFG.waveEvery;
+    spawnWave(world);
+  }
   tickActors(world, dt);
   integrate(world, dt);
   settleBoots(world, dt);
@@ -360,8 +375,14 @@ function kill(world, t) {
   t.hp = 0;
   t.burn = t.slow = null;
   if (t.kind === "dummy") t.respawn = CFG.dummyRespawn;
-  world.events.push({ type: "death", x: t.x, y: t.y, z: t.z, r: t.r, kind: t.kind, enemy: t.type, color: t.color });
+  if (isBody(t)) bootsOff(t);
+  const color = t.color || (t.type && ENEMY_COLOR[t.type]);
+  world.events.push({ type: "death", x: t.x, y: t.y, z: t.z, r: t.r, kind: t.kind, enemy: t.type, color });
+  // The controlled soldier died: control passes on, as mission.js does.
   if (t.kind === "soldier" && world.soldiers[world.ctrl] === t) swapControl(world);
+  if (t.type === "mine") releaseMine(t);
+  // Prune long-dead enemies so the list does not grow for the whole mission.
+  if (t.kind === "enemy" && world.enemies.length > 80) world.enemies = world.enemies.filter((e) => e.alive || e === t);
 }
 
 // A body hitting something at `v` px/s, the 2D curve: nothing to crashSafe,
@@ -667,17 +688,22 @@ function placeObjective(world) {
 }
 
 // ---- motion + collision ----------------------------------------------------
-function movers(world) {
-  const list = world.asteroids.slice();
+// Rocks are slow: they move once a step and meet each other once a step.
+// Bodies are fast and few: they move in substeps, so none travels more than
+// half the smallest body radius per substep (the 2D rule: discrete sphere
+// tests cannot tunnel), each meeting only the rocks the grid puts near it.
+function integrate(world, dt) {
+  for (const a of world.asteroids) {
+    const f = a.slow && a.slow.time > 0 ? a.slow.factor : 1;
+    a.x += a.vx * dt * f; a.y += a.vy * dt * f; a.z += a.vz * dt * f;
+    spinBy(a, dt);
+  }
+  world.grid = null;
+  collideRocks(world);
+
+  const list = [];
   for (const s of world.soldiers) if (s.alive) list.push(s);
   for (const e of world.enemies) if (e.alive) list.push(e);
-  return list;
-}
-
-// Substep so nothing moves more than half the smallest radius per substep,
-// as 2D: the discrete sphere tests then cannot tunnel.
-function integrate(world, dt) {
-  const list = movers(world);
   let maxV = 0;
   let minR = Infinity;
   for (const b of list) {
@@ -687,16 +713,34 @@ function integrate(world, dt) {
   }
   const n = Math.max(1, Math.ceil((maxV * dt) / (minR * 0.5)));
   const h = dt / n;
+  const e = CFG.restitution;
   for (let k = 0; k < n; k++) {
     for (const b of list) {
       if (b.boots === "ground") continue;
+      // Slow scales the body's whole displacement (the game scales horizontal).
       const f = b.slow && b.slow.time > 0 ? b.slow.factor : 1;
       b.x += (b.vx + (b.sx || 0)) * h * f;
       b.y += (b.vy + (b.sy || 0)) * h * f;
       b.z += (b.vz + (b.sz || 0)) * h * f;
-      if (b.w) spinBy(b, h);
     }
-    collideAll(world, list);
+    for (const b of list) {
+      if (!b.alive) continue;
+      // Bodies pass through each other; only rocks and hulls bounce things (P7).
+      const pad = b.r;
+      for (const a of rocksNear(world, b.x - pad, b.y - pad, b.z - pad, b.x + pad, b.y + pad, b.z + pad)) {
+        if (b.boots) { bootContact(world, b, a); continue; }
+        const body = isBody(b);
+        const v = body ? closing(a, b) : 0;
+        if (collide(a, b, e) && body) crash(world, b, v);
+      }
+      for (const r of world.ruins) {
+        if (Math.hypot(b.x - r.x, b.y - r.y, b.z - r.z) > r.R + b.r) continue;
+        if (b.boots) { bootRuin(world, b, r); continue; }
+        const v = collideRuin(b, r, e);
+        if (v && isBody(b)) crash(world, b, v);
+      }
+      edge(b, world.size, e);
+    }
   }
 }
 
@@ -707,31 +751,23 @@ function spinBy(a, h) {
   a.q = qnorm(qmul(qaxis([a.w[0] / om, a.w[1] / om, a.w[2] / om], om * h), a.q));
 }
 
-// Sweep and prune along x: only pairs whose x extents overlap are tested.
-// Bodies pass through each other; only rocks bounce things (P7).
-function collideAll(world, list) {
+// Rock against rock (sweep and prune along x), against hulls, and the cube.
+function collideRocks(world) {
   const e = CFG.restitution;
-  list.sort((a, b) => a.x - a.r - (b.x - b.r));
+  const list = world.asteroids.slice().sort((a, b) => a.x - a.r - (b.x - b.r));
   for (let i = 0; i < list.length; i++) {
     const a = list[i];
     const hi = a.x + a.r;
     for (let j = i + 1; j < list.length; j++) {
       const b = list[j];
       if (b.x - b.r > hi) break;
-      if (a.kind !== "asteroid" && b.kind !== "asteroid") continue;
-      if (a.boots) { bootContact(world, a, b); continue; }
-      if (b.boots) { bootContact(world, b, a); continue; }
-      const s = isBody(a) ? a : isBody(b) ? b : null;
-      const v = s ? closing(a, b) : 0;
-      if (collide(a, b, e) && s) crash(world, s, v);
+      collide(a, b, e);
     }
   }
   for (const a of list) {
     for (const r of world.ruins) {
       if (Math.hypot(a.x - r.x, a.y - r.y, a.z - r.z) > r.R + a.r) continue;
-      if (a.boots) { bootRuin(world, a, r); continue; }
-      const v = collideRuin(a, r, e);
-      if (v && isBody(a)) crash(world, a, v);
+      collideRuin(a, r, e);
     }
     edge(a, world.size, e);
   }

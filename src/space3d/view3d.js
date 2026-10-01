@@ -17,7 +17,8 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { makeRng } from "../space/sim.js";
 import { eyeOf } from "./camera.js";
-import { controlled } from "./sim.js";
+import { controlled, CFG } from "./sim.js";
+import { ENEMY_TYPES } from "../space/sim.js";
 
 // ---- shared geometry and materials ---------------------------------------------
 const BOX = new THREE.BoxGeometry(1, 1, 1);
@@ -152,6 +153,228 @@ function flash(mats, on) {
       m.emissiveIntensity = m.userData.e0.k;
     }
   }
+}
+
+// ---- soldiers -----------------------------------------------------------------------------
+// The 2D page's figure (src/space/view3d.js LAYOUT): [part, x0, y0, x1, y1,
+// zCentre, depth], fractions of a 28 × 42 box facing +x, y down from its top.
+// Here the figure faces the body's forward (-Z), up is +Y, and the layout's
+// depth runs along +X.
+const FIGURE_W = 28;
+const FIGURE_H = 42;
+const LAYOUT = [
+  ["legFar", 0.2, 0.62, 0.42, 1.0, -4, 7],
+  ["legNear", 0.58, 0.62, 0.8, 1.0, 4, 7],
+  ["kneePad", 0.58, 0.72, 0.84, 0.8, 8, 2],
+  ["pack", -0.12, 0.26, 0.2, 0.64, -2, 14],
+  ["torso", 0.16, 0.28, 0.84, 0.68, 0, 14],
+  ["stripe", 0.47, 0.3, 0.53, 0.64, 7.3, 1],
+  ["pad", 0.14, 0.27, 0.42, 0.38, 7, 3],
+  ["helmet", 0.24, 0.05, 0.76, 0.31, 0, 16],
+];
+const TONE = { legFar: -30, legNear: -22, kneePad: 4, pack: -34, torso: 0, stripe: 20, pad: 8, helmet: -22 };
+const VISOR = { squad: ["#7ad7ff", "#3aa8e0"], hostile: ["#ff6a5a", "#e0302a"] };
+const shade = (css, d) => new THREE.Color(css).offsetHSL(0, 0, d / 100);
+
+function place(m, r) {
+  const [, x0, y0, x1, y1, z, d] = r;
+  m.scale.set(d, (y1 - y0) * FIGURE_H, (x1 - x0) * FIGURE_W);
+  m.position.set(z, (0.5 - (y0 + y1) / 2) * FIGURE_H, -((x0 + x1) / 2 - 0.5) * FIGURE_W);
+}
+
+export function makeFigure(s, visorKind = "squad") {
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body);
+  const mats = [];
+  const parts = {};
+  for (const r of LAYOUT) {
+    const mat = std(shade(s.color, TONE[r[0]]), { emissive: "#000000" });
+    mats.push(mat);
+    parts[r[0]] = mesh(BOX, mat, body);
+    place(parts[r[0]], r);
+  }
+  const [vc, ve] = VISOR[visorKind];
+  const visor = mesh(BOX, std(vc, { emissive: ve, emissiveIntensity: 1.4, roughness: 0.2, metalness: 0.6 }), body);
+  place(visor, ["visor", 0.48, 0.12, 0.8, 0.2, 0, 17]);
+  // Boot soles, lit while the boots are on.
+  const soles = [];
+  for (const k of ["legFar", "legNear"]) {
+    const r = LAYOUT.find((l) => l[0] === k);
+    const sole = mesh(BOX, hot("#78ffe6", 1.6), body);
+    sole.scale.set(r[6] + 1, 2.5, (r[3] - r[1]) * FIGURE_W + 1);
+    sole.position.set(r[5], -FIGURE_H / 2 + 1, -((r[1] + r[3]) / 2 - 0.5) * FIGURE_W);
+    sole.visible = false;
+    soles.push(sole);
+  }
+  // The jet: out of the pack, backward, while it thrusts.
+  const flame = mesh(CONE, hot("#ffab40", 2.2), body);
+  flame.rotation.y = -Math.PI / 2; // +x apex → +z (behind)
+  const flameGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: "#ff9a3a", transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  body.add(flameGlow);
+  // The gun, from the shoulder, along the aim.
+  const gun = new THREE.Group();
+  body.add(gun);
+  gun.position.set(8, 0.12 * FIGURE_H, -2);
+  const gunMat = std("#2a3040", { roughness: 0.4, metalness: 0.3 });
+  mesh(BOX, gunMat, gun).scale.set(18, 4, 4);
+  gun.children[0].position.x = 9;
+  const sight = mesh(BOX, hot(visorKind === "squad" ? "#7ad7ff" : "#ff6a5a", 1.2), gun);
+  sight.scale.set(4, 2, 3);
+  sight.position.set(8, 3, 0);
+  return { root, body, gun, flame, flameGlow, mats, soles, legs: [parts.legFar, parts.legNear, parts.kneePad] };
+}
+
+const _q = new THREE.Quaternion();
+export function poseFigure(v, s, t) {
+  v.root.position.set(s.x, s.y, s.z);
+  setQ(v.root, s.q);
+  const booted = !!s.boots;
+  // The sim's feet are r below the centre, the drawn ones half the figure:
+  // with the boots on, lift the figure so its soles meet the surface.
+  v.body.position.y = booted ? FIGURE_H / 2 - s.r : 0;
+  // Legs trail a little floating, stand straight on the boots, and stride walking.
+  const walking = s.boots === "ground" && Math.hypot(s.gv[0], s.gv[1]) > 20;
+  const stride = walking ? Math.sin(t * 16) * 0.35 : 0;
+  v.legs.forEach((leg, i) => { leg.rotation.x = booted ? (i === 0 ? stride : -stride) : -0.18; });
+  for (const sole of v.soles) sole.visible = booted;
+  v.flame.visible = v.flameGlow.visible = !!s.thrusting;
+  if (s.thrusting) {
+    const len = 14 + Math.random() * 10;
+    v.flame.scale.set(len, 4.5, 4.5);
+    v.flame.position.set(-2, -0.05 * FIGURE_H, 0.64 * FIGURE_W + 2 + len / 2);
+    v.flameGlow.position.set(0, -0.05 * FIGURE_H, 0.64 * FIGURE_W + 8);
+    v.flameGlow.scale.set(34, 34, 1);
+  }
+  // The gun along the aim, in the body's frame.
+  const a = s.aim || [0, 0, -1];
+  _v.set(a[0], a[1], a[2]).applyQuaternion(_q.set(s.q[0], s.q[1], s.q[2], s.q[3]).invert());
+  v.gun.quaternion.setFromUnitVectors(X, _v.normalize());
+  flash(v.mats, s.flash > 0);
+}
+
+// ---- enemies (the 2D page's models, facing +x) ---------------------------------------------
+function makeEnemyModel(e) {
+  if (e.type === "trooper") return makeFigure(e, "hostile");
+  const root = new THREE.Group();
+  const spin = new THREE.Group(); // turned to heading / aim
+  root.add(spin);
+  const inner = new THREE.Group(); // its own roll about +x
+  spin.add(inner);
+  const mats = [];
+  const add = (geo, mat) => {
+    if (mat.emissive) mats.push(mat);
+    return mesh(geo, mat, inner);
+  };
+  const T = ENEMY_TYPES[e.type];
+  const col = T.color;
+  const r = e.r;
+  const extra = {};
+  switch (e.type) {
+    case "charger": {
+      add(OCTA, std(col, { flatShading: true, metalness: 0.4 })).scale.set(r * 1.5, r * 0.8, r * 0.8);
+      const horn = add(CONE, std(shade(col, 20), { metalness: 0.5 }));
+      horn.scale.set(r * 0.8, r * 0.35, r * 0.35);
+      horn.position.x = r * 1.4;
+      extra.jet = add(CONE, hot("#ff7850", 2));
+      extra.jet.rotation.z = Math.PI;
+      break;
+    }
+    case "gunner": {
+      const hull = add(new THREE.CylinderGeometry(r, r, r * 1.1, 6), std(col, { flatShading: true, metalness: 0.35 }));
+      hull.rotation.x = Math.PI / 2;
+      const barrel = add(BOX, std("#3b1a45", { metalness: 0.6 }));
+      barrel.scale.set(r + 8, 8, 8);
+      barrel.position.set(r / 2 + 6, 0, 0);
+      const eye = add(SPHERE, hot("#8affc1", 2));
+      eye.scale.setScalar(5);
+      eye.position.set(r * 0.85, r * 0.35, 0);
+      break;
+    }
+    case "swarmer": {
+      add(CONE, std(col, { flatShading: true, metalness: 0.4 })).scale.set(r * 2.2, r * 0.9, r * 0.5);
+      const fin = add(BOX, std(shade(col, -15)));
+      fin.scale.set(r * 0.8, r * 2, 2);
+      fin.position.x = -r * 0.5;
+      break;
+    }
+    case "warden": {
+      add(OCTA, std(col, { flatShading: true, metalness: 0.5, roughness: 0.3 })).scale.set(r * 1.6, r * 0.75, r * 0.6);
+      const band = add(new THREE.TorusGeometry(r * 0.78, 2.5, 6, 24), hot("#ffcf6a", 1.3));
+      band.rotation.y = Math.PI / 2;
+      for (const side of [-1, 1]) {
+        const pod = add(BOX, std("#3a3020", { metalness: 0.5 }));
+        pod.scale.set(r * 1.1, 7, 7);
+        pod.position.set(r * 0.5, side * r * 0.62, 0);
+      }
+      const eye = add(SPHERE, hot("#ff6a3a", 2.2));
+      eye.scale.setScalar(6);
+      eye.position.set(r * 0.9, 0, r * 0.4);
+      extra.jet = add(CONE, hot("#ffb347", 1.8));
+      extra.jet.rotation.z = Math.PI;
+      break;
+    }
+    case "minelayer": {
+      extra.bladder = add(SPHERE, std(col, { roughness: 0.35, metalness: 0.1 }));
+      for (let i = 0; i < 3; i++) {
+        const pod = add(SPHERE, hot("#bff29a", 1.4));
+        pod.scale.setScalar(3);
+        pod.position.set(-6 + i * 6, -3, r * 0.75);
+      }
+      break;
+    }
+    case "mine": {
+      add(SPHERE, std("#3a4a2a", { metalness: 0.5 })).scale.setScalar(r * 0.8);
+      for (const d of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+        const spike = add(CONE, std(col, { metalness: 0.6 }));
+        spike.scale.set(7, 2, 2);
+        spike.position.set(d[0] * (r * 0.8 + 2), d[1] * (r * 0.8 + 2), d[2] * (r * 0.8 + 2));
+        spike.quaternion.setFromUnitVectors(X, new THREE.Vector3(...d));
+      }
+      extra.light = add(SPHERE, new THREE.MeshBasicMaterial({ color: "#6a7a4a", toneMapped: false }));
+      extra.light.scale.setScalar(4);
+      break;
+    }
+  }
+  return { root, spin, inner, mats, extra };
+}
+
+function poseEnemyModel(v, e, t) {
+  v.root.position.set(e.x, e.y, e.z);
+  const sp = Math.hypot(e.vx, e.vy, e.vz);
+  const tg = e.target && e.alert ? e.target : null;
+  const face = (e.type === "gunner" || e.type === "warden") && tg ? [tg.x - e.x, tg.y - e.y, tg.z - e.z] : sp > 1 ? [e.vx, e.vy, e.vz] : null;
+  if (face) aimX(v.spin, face[0], face[1], face[2]);
+  switch (e.type) {
+    case "charger": {
+      v.inner.rotation.x = t * 3; // barrel roll
+      const len = e.r * (0.8 + Math.random() * 0.6);
+      v.extra.jet.scale.set(len, e.r * 0.3, e.r * 0.3);
+      v.extra.jet.position.x = -e.r * 1.4 - len / 2;
+      break;
+    }
+    case "warden": {
+      const len = e.r * (0.5 + Math.min(1, sp / 200) * 0.6 + Math.random() * 0.15);
+      v.extra.jet.scale.set(len, e.r * 0.25, e.r * 0.25);
+      v.extra.jet.position.x = -e.r * 1.6 - len / 2;
+      break;
+    }
+    case "swarmer": v.inner.rotation.x = Math.sin(t * 9 + e.r) * 0.5; break;
+    case "minelayer": {
+      const pulse = 1 + Math.sin(t * 3 + e.r) * 0.06;
+      v.extra.bladder.scale.set(e.r * 1.2 * pulse, (e.r * 0.8) / pulse, e.r * 0.8);
+      break;
+    }
+    case "mine": {
+      const T = ENEMY_TYPES.mine;
+      const armed = e.age >= T.arm, fuse = e.fuse > 0;
+      const blink = fuse ? Math.sin(t * 60) > 0 : armed ? Math.sin(t * 6) > 0.6 : false;
+      v.inner.rotation.set(t * 1.1, t * 1.5, 0);
+      v.extra.light.material.color.set(fuse ? "#ff5040" : blink ? "#ffec80" : "#6a7a4a").multiplyScalar(fuse || blink ? 2.2 : 1);
+      break;
+    }
+  }
+  flash(v.mats, e.flash > 0);
 }
 
 // ---- the gun in your hands ------------------------------------------------------------
@@ -557,6 +780,8 @@ export function createView3D(canvas) {
   scene.add(actors);
   const rocks = new Models(actors, makeAsteroid);
   const drones = new Models(actors, makeDummy);
+  const figures = new Models(actors, (s) => makeFigure(s, s.kind === "soldier" ? "squad" : "hostile"));
+  const foes = new Models(actors, makeEnemyModel);
   const shots = {};
   const shotPool = (shape) => shots[shape] || (shots[shape] = new Pool(actors, () => makeShot(shape)));
   const sprite = () => {
@@ -697,14 +922,25 @@ export function createView3D(canvas) {
     }
     rocks.sweep();
 
+    const body0 = controlled(world);
     for (const e of world.enemies) {
-      if (!e.alive || e.kind !== "dummy") continue;
-      const v = drones.get(e);
-      v.root.position.set(e.x, e.y, e.z);
-      v.ring.rotation.z += dt * 0.8;
-      flash(v.mats, e.flash > 0);
+      if (!e.alive) continue;
+      if (e.kind === "dummy") {
+        const v = drones.get(e);
+        v.root.position.set(e.x, e.y, e.z);
+        v.ring.rotation.z += dt * 0.8;
+        flash(v.mats, e.flash > 0);
+      } else if (e.type === "trooper") poseFigure(figures.get(e), e, t);
+      else {
+        poseEnemyModel(foes.get(e), e, t);
+        if (e.tele > 0) halo([e.x, e.y, e.z], e.r * 3.2, "#ff5a4a", 0.6);
+      }
     }
+    // The squad, but not the soldier whose eyes these are.
+    for (const s of world.soldiers) if (s.alive && s !== body0) poseFigure(figures.get(s), s, t);
     drones.sweep();
+    figures.sweep();
+    foes.sweep();
 
     // Shots: along their velocity, a halo each. Your own start at the gun's
     // muzzle and slide onto their true line over their first 0.12s, so they

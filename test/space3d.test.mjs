@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled, fire, startReload, WEAPONS, hasLos, ruinToLocal, ruinToWorld, inPoly, hurt, bootsState, nearestSurface, shove, addRuin3 } from "../src/space3d/sim.js";
 import { makeRng, addDerelict } from "../src/space/sim.js";
+import { makeEnemy, spawnGroup, spawnWave, placeWarden, ENEMY_TYPES } from "../src/space3d/ai.js";
+import { swapControl } from "../src/space3d/sim.js";
 import { dot, len, norm, sub, qrot, qaxis, qmul, qconj, qlook, randomDir } from "../src/space3d/vec.js";
 const dot4 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
 import { eyeOf, project } from "../src/space3d/camera.js";
@@ -180,8 +182,9 @@ export default async function suite(t) {
     return { w, s, t, f };
   };
   {
-    const w = createWorld(3);
-    t.ok("F2: four target drones round the start", w.enemies.filter((e) => e.kind === "dummy").length === 4);
+    t.ok("F2: no target drones in play (a fixture since F5)", createWorld(3).enemies.every((e) => e.kind !== "dummy"));
+    const w = createWorld(3, { dummies: 4, enemies: 0 });
+    t.ok("F2: the fixture puts four round the start", w.enemies.filter((e) => e.kind === "dummy").length === 4);
   }
   {
     const { w, s, t: d } = range("carbine");
@@ -571,7 +574,144 @@ export default async function suite(t) {
     t.ok(`F4: walking a derelict never sinks into a slab (closest ${minGap.toFixed(3)})`, minGap > -0.01);
     t.ok(`F4: and carries over its edges onto other slabs (${[...kinds].join(", ")})`, kinds.size >= 2 && s.boots === "ground");
   }
+
+  // ---- F5: enemies, waves, squad -----------------------------------------------------
+  {
+    let groups = 0, wardens = 0, guard = true, crews = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const w = createWorld(seed, { squad: 3 });
+      wardens += w.enemies.filter((e) => e.type === "warden").length;
+      crews += w.enemies.filter((e) => e.home).length;
+      const host = w.artifact.ruin;
+      if (!w.enemies.some((e) => e.type === "gunner" && near(Math.hypot(e.x - host.x, e.y - host.y, e.z - host.z), host.R + 60, 1))) guard = false;
+      groups += w.enemies.length;
+      const st = w.start;
+      if (w.enemies.some((e) => !e.home && e.type !== "warden" && e !== w.enemies[0] && Math.hypot(e.x - st.x, e.y - st.y, e.z - st.z) < CFG.enemyStartGap - 60)) guard = false;
+    }
+    t.ok(`F5: two wardens per field (${wardens} over 10)`, wardens === 20);
+    t.ok("F5: a gunner guards the artifact's hull; nothing placed near the start", guard);
+    t.ok(`F5: derelicts are crewed (${crews} crew over 10 fields)`, crews > 30);
+  }
+  // One enemy of a type 300px ahead of a still soldier, alert.
+  const facing = (type, d = 300, opts = {}) => {
+    const w = empty(opts);
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 3000, y: 3000, z: 3000, vx: 0, vy: 0, vz: 0, hp: 1e4, maxHp: 1e4 });
+    const f = lookOf(s);
+    const [e] = spawnGroup(w, type, 3000 + f[0] * d, 3000 + f[1] * d, 3000 + f[2] * d, true);
+    return { w, s, e };
+  };
+  {
+    const { w, s, e } = facing("charger", 200);
+    let hits = 0;
+    for (let i = 0; i < 240; i++) { const hp = s.hp; step(w, {}); if (s.hp < hp) hits++; }
+    t.ok("F5: a charger closes and bites", hits >= 2);
+    t.ok("F5: at most once per 0.6s", hits <= Math.floor(4 / 0.6) + 1);
+  }
+  {
+    const { w, s, e } = facing("gunner", 340);
+    let shots = 0, inBand = 0;
+    for (let i = 0; i < 600; i++) {
+      step(w, {});
+      shots += w.events.filter((v) => v.type === "muzzle" && v.team === "enemy").length;
+      w.events.length = 0;
+      const d = Math.hypot(e.x - s.x, e.y - s.y, e.z - s.z);
+      if (d >= 230 && d <= 450) inBand++;
+    }
+    t.ok(`F5: a gunner fires on its cadence (${shots} in 10s)`, shots >= 4 && shots <= 9);
+    t.ok("F5: and holds its 260–420 band", inBand > 540);
+  }
+  {
+    const { w, s, e } = facing("swarmer", 240);
+    const ax = e.orbitAxis;
+    let off = 0;
+    run(w, {}, 120);
+    for (let i = 0; i < 240; i++) { step(w, {}); const r = norm([e.x - s.x, e.y - s.y, e.z - s.z]); off = Math.max(off, Math.abs(dot(r, ax))); }
+    t.ok("F5: a swarmer circles its target", Math.hypot(e.x - s.x, e.y - s.y, e.z - s.z) < 420);
+    t.ok(`F5: on its own orbit plane (F8; worst ${off.toFixed(2)} off it)`, off < 0.5);
+  }
+  {
+    const { w, s, e } = facing("minelayer", 500);
+    run(w, {}, 60 * 6);
+    const mines = w.enemies.filter((m) => m.type === "mine");
+    t.ok(`F5: a mine-layer lays mines (${mines.length})`, mines.length >= 2 && mines.length <= ENEMY_TYPES.minelayer.maxMines + 2);
+    const m = mines.find((o) => o.alive);
+    Object.assign(s, { x: m.x + 50, y: m.y, z: m.z, hp: 100, maxHp: 100 });
+    m.age = 5;
+    run(w, {}, 40);
+    t.ok("F5: a mine fuses on a soldier and blasts", !m.alive && s.hp < 100);
+  }
+  {
+    const w = empty();
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 5800, y: 5800, z: 5800 });
+    const e = placeWarden(w);
+    const route = e.route.map((p) => ({ ...p }));
+    let reached = 0, lastLeg = e.leg;
+    for (let i = 0; i < 60 * 90; i++) { step(w, {}); if (e.leg !== lastLeg) { reached++; lastLeg = e.leg; } }
+    t.ok(`F5: a warden flies its patrol loop (${reached} waypoints in 90s)`, reached >= 3 && !e.alert);
+  }
+  {
+    const w = empty({ squad: 3 });
+    const before = w.enemies.length;
+    w.wave.n = 0;
+    spawnWave(w);
+    const c = w.soldiers.reduce((a, s) => [a[0] + s.x / 3, a[1] + s.y / 3, a[2] + s.z / 3], [0, 0, 0]);
+    const added = w.enemies.slice(before);
+    const ds = added.map((e) => Math.hypot(e.x - c[0], e.y - c[1], e.z - c[2]));
+    t.ok(`F5: a wave arrives alert, ${CFG.waveDistMin * 0.85 | 0}–${CFG.waveDistMax + 60}px out`, added.length > 0 && added.every((e) => e.alert) && ds.every((d) => d > CFG.waveDistMin * 0.8 && d < CFG.waveDistMax + 80));
+  }
+  {
+    // Companions keep station off a leader drifting at 200px/s.
+    const w = empty({ squad: 3 });
+    const [lead, a, b] = w.soldiers;
+    for (const s of w.soldiers) Object.assign(s, { x: 1500, y: 1500, z: 1500, vx: 0, vy: 0, vz: 0 });
+    lead.vx = 200;
+    let worst = 0;
+    for (let i = 0; i < 60 * 15; i++) {
+      step(w, {});
+      if (i > 60 * 6) for (const c of [a, b]) {
+        const p = [lead.x + c.station.dir[0] * c.station.d, lead.y + c.station.dir[1] * c.station.d, lead.z + c.station.dir[2] * c.station.d];
+        worst = Math.max(worst, Math.hypot(c.x - p[0], c.y - p[1], c.z - p[2]));
+      }
+    }
+    t.ok(`F5: companions hold station behind a moving leader (worst ${worst.toFixed(0)}px off)`, worst < 80);
+  }
+  {
+    const w = empty({ squad: 3 });
+    const [lead, a] = w.soldiers;
+    const [e] = spawnGroup(w, "gunner", a.x + 300, a.y, a.z, false);
+    e.hp = e.maxHp = 1e4;
+    run(w, {}, 120);
+    t.ok("F5: a companion shoots a foe it can see", e.hp < 1e4);
+  }
+  {
+    const w = empty({ squad: 3 });
+    hurt(w, w.soldiers[1], 1e4, null);
+    swapControl(w);
+    t.ok("F5: swap skips the dead", w.ctrl === 2);
+    step(w, { swap: true });
+    t.ok("F5: Tab swaps", w.ctrl === 0);
+    hurt(w, w.soldiers[0], 1e4, null);
+    t.ok("F5: when the soldier you fly dies, control passes on", w.ctrl === 2);
+  }
+  {
+    // P9: the artifact drops where its carrier dies; anyone picks it up.
+    const w = createWorld(2, { asteroids: 0, enemies: 0, squad: 2, waveEvery: 1e9 });
+    const [s0, s1] = w.soldiers;
+    const a = w.artifact;
+    Object.assign(s0, { x: a.x, y: a.y, z: a.z });
+    Object.assign(s1, { x: 300, y: 300, z: 300 });
+    step(w, {});
+    hurt(w, s0, 1e4, null);
+    step(w, {});
+    t.ok("F5: the artifact drops when its carrier dies", a.carrier === null && !w.end);
+    Object.assign(s1, { x: a.x, y: a.y, z: a.z, vx: 0, vy: 0, vz: 0 });
+    step(w, {});
+    t.ok("F5: and the next soldier picks it up", a.carrier === s1);
+  }
 }
+
 
 // The gap from a local point to a slab's surface (as the sim measures it).
 function surfDistT(sd, l) {
