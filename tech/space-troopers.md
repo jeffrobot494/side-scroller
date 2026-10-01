@@ -22,6 +22,8 @@ The trooper is a hostile soldier in the space prototype (`tech/space-prototype.m
 | If you run away, they follow | brief |
 | Each carries one of the three soldier weapons (`LOADOUT`), picked at random | brief |
 | Spend extra thought on the AI | Bo's message; "The AI" section below |
+| 25% more troopers | Bo, 2026-10-01 (K1) |
+| Until they find the player, they patrol the area at random | Bo, 2026-10-01 |
 
 ## Slices
 
@@ -46,6 +48,12 @@ Each slice is one commit on branch `space-prototype`. The prototype is its own p
 - **Cover is judged against soldiers within 1100px** (planned 900). 1100 is past the squad's longest reach (the grenade launcher, 1050), so a trooper further than that really is safe.
 - **On a derelict the cover probe reaches 1200px** (planned 600 everywhere). The far face of a 1300px hull is usually further than 600px of walk, round the end.
 - **Measured.** A pair on a rock 450px from a still soldier, over 20s: each trooper out of sight 54–69% of the time, about 33–42 rounds a minute between them, and the two never peek at once. On eight derelicts, a trooper starting outside never went in (0 of 14,400 steps) and was out of sight 40–74% of the time, except where the hull had nowhere hidden within 1200px of walk. Cost: 0.74ms a step with four alert troopers dancing, against 0.53 without.
+
+**As built, patrol.**
+- **The leader is the pair's first living member**, and the leg is held on the wing, so the wingman knows when to leave its perch.
+- **An idle wingman picks its perch from around its leader**, not itself. Picking its own nearest perch left pairs resting 1000–1500px apart whenever the wingman lagged.
+- **A leader making no headway for 2s picks a new point.** Steering alone left one pinned against an obstacle, thrusting at 3px/s, for good.
+- **Measured** over 8 fields, 3 minutes each, with the squad not moving: about 14 legs per pair, resting 26% of the time, mean pair separation 260px (over 800px apart 6.6% of the time), and 8 of 32 troopers found the squad.
 
 ## Reuses
 
@@ -101,7 +109,7 @@ Each slice is one commit on branch `space-prototype`. The prototype is its own p
 
 | # | Question | Stand-in |
 |---|---|---|
-| K1 | How many, and where? | Mix weight 15 against 35/25/25/15 (about 2 pairs at the start of a field). Waves roll them too. Not in derelict crews |
+| K1 | How many, and where? | Mix weight 19.5 against 35/25/25/15 (was 15; Bo asked for 25% more): about 3.9 troopers at the start of a field, from 3.1. Waves roll them too. Not in derelict crews. The heavier weight takes about 4% of the rolls from basic enemies |
 | K2 | Stats | Rolled per trooper: Aim 3–6, Health 4–7, so 23–29 HP (the recruits: Aim 5–8, 23–29 HP) |
 | K3 | Damage | Each effect's amount × 0.5 (`trooperDamage`). A grenade splash does 20, not 40 |
 | K4 | Trigger | 0.35s telegraph, then a burst: automatic weapons 3–5 rounds, the grenade launcher 1. Cover waits 0.8–2.0s between peeks |
@@ -116,7 +124,7 @@ One brain per trooper, deciding on the enemy sensing cadence (0.2s) and acting e
 
 | Mode | What it is doing | Leaves when |
 |---|---|---|
-| idle | Not alert. Perched on a rock near where it spawned, its partner nearby, strolling now and then | Sees a soldier within the alert range with a line of sight, is hit, or its partner alerts. A pair alerts together |
+| idle | Not alert: **patrolling** (Bo, 2026-10-01). The pair's leader flies at 200px/s to a random point 1200–2200px away, perches near it and rests for 3–7s (strolling now and then), then picks the next point. The wingman keeps station 90px off the leader's side, and perches by it, within 600px | Sees a soldier within the alert range with a line of sight, is hit, or its partner alerts. A pair alerts together |
 | approach | Flying to a chosen perch | Lands (→ grounded), or the perch stops fitting (the target moved), or 8s pass without landing (→ float) |
 | grounded | Boots on a surface. Alert: the cover dance (T2), or stand and shoot (T1) | Relocation (→ approach), or knocked off (→ float, boots on, falls back) |
 | float | Alert with no perch that fits: holds 280–520px from the target like a gunner, and shoots | A perch fits (→ approach) — re-checked every second |

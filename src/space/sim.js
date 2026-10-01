@@ -80,7 +80,8 @@ export const CFG = {
   stationGain: 1.2, // px/s of closing speed per px off station
   stationClose: 420, // most closing speed a companion adds on top of the leader's velocity
 
-  enemyCount: 12, // placed in the field at start
+  enemyCount: 12, // groups rolled in the field at start
+  basicShare: 0.5, // of the basic groups rolled (field, crews, waves), the share placed (Bo: halved)
   crewMin: 2, // P16: groups placed inside each derelict, one per room
   crewMax: 4,
   crewLeash: 40, // an idle crewman drifts back to its room past this
@@ -191,6 +192,9 @@ export const ENEMY_TYPES = {
     approachMax: 8, skipFor: 5, repick: 1,
     keep: [280, 520], floatSpeed: 260, // floating combat, as a gunner holds range
     chaseV: 150, // a target moving faster than this is chased, not perched ahead of
+    // Patrol, until it finds you (Bo, 2026-10-01): the pair flies to a random
+    // point, perches near it for a rest, and goes again.
+    patrolV: 200, patrolLeg: [1200, 2200], patrolArrive: 250, rest: [3, 7], wingOff: 90,
     wait: [0.8, 2.0], burstAuto: [3, 5], // K4
     probeStep: 24, probeDist: 600, coverFrom: 1100, coverMargin: 2, // the cover dance (T2)
     peekMax: [2, 4], peekGiveUp: 3, noPeek: 1.5, linger: 0.2 }, // K6
@@ -200,7 +204,8 @@ export const ENEMY_TYPES = {
 };
 
 // Weighted mix for placement and waves (a swarmer entry is a pack).
-const ENEMY_MIX = [["charger", 35], ["gunner", 25], ["swarmer", 25], ["minelayer", 15], ["trooper", 15]]; // K1
+// K1: trooper 19.5 (was 15; Bo +25%) puts 25% more troopers in the field and waves.
+const ENEMY_MIX = [["charger", 35], ["gunner", 25], ["swarmer", 25], ["minelayer", 15], ["trooper", 19.5]];
 // Who crews a derelict (P16): no mine-layers, whose mines would fill a room.
 const CREW_MIX = [["gunner", 45], ["charger", 40], ["swarmer", 15]];
 
@@ -655,6 +660,7 @@ function trooperBody(world) {
     color: ENEMY_TYPES.trooper.color, foe: null,
     mode: null, perch: null, lastPerch: null, left: null, skip: null,
     approachT: 0, repickT: 0, strollT: 0, think: false, wing: null,
+    restOn: null, restT: 0, legSeen: 0, leg: null, legId: 0,
     dance: null, danceOn: null, danceT: 0, walkGoal: 0, peeks: 0, peekMax: 0, peekT: 0, noPeekT: 0,
     burstDone: false, hpAtPeek: 0, lingerT: null, mayShoot: true,
   };
@@ -688,6 +694,19 @@ function spawnGroup(world, type, x, y, alert) {
   }
 }
 
+// Basic enemies (not troopers, not wardens) are placed at basicShare of the
+// rate they are rolled: an accumulator, not a coin, so it is exactly that
+// share wherever they come from. It starts half full, so of any two in a row
+// one is kept — a derelict's crew is never empty.
+function keepBasic(world, type) {
+  const T = ENEMY_TYPES[type];
+  if (T.soldier || T.elite) return true;
+  world.basicAcc = (world.basicAcc ?? 0.5) + CFG.basicShare;
+  if (world.basicAcc < 1) return false;
+  world.basicAcc -= 1;
+  return true;
+}
+
 function freeSpot(world, x, y, r) {
   if (x < r || y < r || x > world.size - r || y > world.size - r) return false;
   if (world.asteroids.some((a) => Math.hypot(a.x - x, a.y - y) < a.r + r + 10)) return false;
@@ -710,7 +729,8 @@ function placeEnemies(world, count, elites) {
     const y = rand(rng, 80, size - 80);
     if (Math.hypot(x - world.start.x, y - world.start.y) < CFG.enemyStartGap) continue;
     if (!freeSpot(world, x, y, 60)) continue;
-    spawnGroup(world, pickType(rng), x, y, false);
+    const type = pickType(rng);
+    if (keepBasic(world, type)) spawnGroup(world, type, x, y, false);
     placed++;
   }
   placeCrews(world);
@@ -727,7 +747,8 @@ function placeCrews(world) {
     for (let i = 0; i < n; i++) {
       const [x, y] = rooms.splice(Math.floor(rng() * rooms.length), 1)[0];
       const from = world.enemies.length;
-      spawnGroup(world, pickType(rng, CREW_MIX), x, y, false);
+      const type = pickType(rng, CREW_MIX);
+      if (keepBasic(world, type)) spawnGroup(world, type, x, y, false);
       for (let j = from; j < world.enemies.length; j++) world.enemies[j].home = { x, y };
     }
   }
@@ -783,7 +804,8 @@ export function spawnWave(world) {
       const y = clamp(c.y + Math.sin(a) * d, 60, size - 60);
       if (Math.hypot(x - c.x, y - c.y) < CFG.waveDistMin * 0.85) continue;
       if (!freeSpot(world, x, y, 40)) continue;
-      spawnGroup(world, pickType(rng), x, y, true);
+      const type = pickType(rng);
+      if (keepBasic(world, type)) spawnGroup(world, type, x, y, true);
       break;
     }
   }
@@ -1059,6 +1081,10 @@ function pickPerch(world, e, t, exclude = null) {
   const mp = mate && (mate.perch || (mate.boots === "ground" ? perchOf(mate.ground) : null));
   const hi = bandMax(e);
   const mid = (T.band[0] + hi) / 2;
+  // Idle, a wingman perches by its leader, wherever it is itself: the search
+  // is centred on the leader and a perch must be within partnerGap of it.
+  const lead = leaderOf(e);
+  const anchor = !t && lead !== e ? lead : e;
   let best = null, bs = Infinity;
   const consider = (p) => {
     if (p === exclude || (e.skip && e.skip.p === p && world.t < e.skip.until)) return;
@@ -1068,7 +1094,11 @@ function pickPerch(world, e, t, exclude = null) {
     const lx = e.x - s.nx * flight, ly = e.y - s.ny * flight; // where it would land
     const fromMate = mate ? Math.hypot(lx - mate.x, ly - mate.y) : 0;
     let score;
-    if (!t) {
+    if (!t && anchor !== e) {
+      const g = Math.max(0, perchInfo(anchor, p).gap);
+      if (g > T.partnerGap) return;
+      score = g + 0.3 * flight;
+    } else if (!t) {
       if (flight > T.idleSearch) return;
       score = flight + 0.5 * fromMate;
     } else {
@@ -1081,9 +1111,9 @@ function pickPerch(world, e, t, exclude = null) {
   };
   const reach = t ? T.perchSearch : T.idleSearch;
   for (const a of world.asteroids) {
-    if (a.r >= T.perchMinR && Math.hypot(a.x - e.x, a.y - e.y) - a.r <= reach + e.r) consider(a);
+    if (a.r >= T.perchMinR && Math.hypot(a.x - anchor.x, a.y - anchor.y) - a.r <= reach + e.r) consider(a);
   }
-  for (const r of world.ruins) if (Math.hypot(r.x - e.x, r.y - e.y) - r.R <= reach) consider(r);
+  for (const r of world.ruins) if (Math.hypot(r.x - anchor.x, r.y - anchor.y) - r.R <= reach) consider(r);
   return best;
 }
 
@@ -1111,7 +1141,21 @@ function trooperGrounded(world, e, T, t, dt) {
   e.approachT = 0;
   e.lastPerch = here;
   if (!t) {
-    // Idle: stand, and now and then stroll a little.
+    // Idle: rest a while, then the pair moves on (patrol). A wingman goes when
+    // its leader picks the next point.
+    const W = e.wing || e;
+    if (e.restOn !== here) { e.restOn = here; e.restT = rand(world.rng, T.rest[0], T.rest[1]); e.legSeen = W.legId; }
+    const lead = leaderOf(e);
+    if (lead === e ? (e.restT -= dt) <= 0 : W.legId !== e.legSeen) {
+      if (lead === e) newLeg(world, e, T);
+      e.restOn = null;
+      e.left = here;
+      e.perch = null;
+      walk(e, 0);
+      bootsOff(e, world);
+      return;
+    }
+    // Resting: stand, and now and then stroll a little.
     if ((e.strollT -= dt) <= 0) {
       const moving = e.walkIn !== 0;
       e.strollT = moving ? rand(world.rng, 3, 6) : rand(world.rng, 0.5, 1.5);
@@ -1325,7 +1369,73 @@ function leavePerch(world, e, t, here, next = undefined) {
   bootsOff(e, world);
 }
 
+// The pair's leader: its first living member (or itself, alone).
+const leaderOf = (e) => (e.wing ? e.wing.members.find((o) => o.alive) || e : e);
+
+// A new patrol point for the pair: a random bearing, patrolLeg away, kept
+// inside the map. Shared on the wing so the wingman follows the same leg.
+function newLeg(world, e, T) {
+  const W = e.wing || e;
+  const a = world.rng() * Math.PI * 2;
+  const d = rand(world.rng, T.patrolLeg[0], T.patrolLeg[1]);
+  W.leg = { x: clamp(e.x + Math.cos(a) * d, 300, world.size - 300), y: clamp(e.y + Math.sin(a) * d, 300, world.size - 300) };
+  W.legId = (W.legId || 0) + 1;
+}
+
+// Idle and flying: the leader flies the leg and perches near its end; the
+// wingman keeps station off the leader's side, and perches beside it.
+function trooperPatrol(world, e, T, dt) {
+  const W = e.wing || e;
+  const lead = leaderOf(e);
+  if (e.perch) {
+    if (lead !== e && W.legId !== e.legSeen && !(lead.boots === "ground")) e.perch = null; // the leader moved on
+    else {
+      trooperApproach(world, e, T, dt);
+      if ((e.approachT += dt) > T.approachMax) { e.skip = { p: e.perch, until: world.t + T.skipFor }; e.perch = null; }
+      return;
+    }
+  }
+  let dvx = 0, dvy = 0;
+  if (lead === e) {
+    if (!W.leg) newLeg(world, e, T);
+    const dx = W.leg.x - e.x, dy = W.leg.y - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d < T.patrolArrive && e.think) {
+      e.perch = pickPerch(world, e, null);
+      e.approachT = 0;
+      if (!e.perch) newLeg(world, e, T); // nothing to rest on here: go on
+      return;
+    }
+    dvx = (dx / d) * T.patrolV;
+    dvy = (dy / d) * T.patrolV;
+    // Pinned against something steering cannot bend round: try another way.
+    e.stuckT = Math.hypot(e.vx, e.vy) < 40 ? (e.stuckT || 0) + dt : 0;
+    if (e.stuckT > 2) { e.stuckT = 0; newLeg(world, e, T); }
+  } else {
+    // The leader is landing or resting: perch beside it, once there is a
+    // perch near it. Until then, and while it flies, keep station off its
+    // side, across its heading.
+    if ((lead.boots === "ground" || lead.perch) && e.think) {
+      e.perch = pickPerch(world, e, null);
+      e.approachT = 0;
+      e.legSeen = W.legId;
+      if (e.perch) return;
+    }
+    const sp = Math.hypot(lead.vx, lead.vy) || 1;
+    const px = lead.x - (lead.vy / sp) * T.wingOff * e.orbitDir, py = lead.y + (lead.vx / sp) * T.wingOff * e.orbitDir;
+    const ex = px - e.x, ey = py - e.y;
+    const d = Math.hypot(ex, ey) || 1;
+    const close = Math.min(CFG.stationClose, d * CFG.stationGain);
+    dvx = lead.vx + (ex / d) * close;
+    dvy = lead.vy + (ey / d) * close;
+    e.legSeen = W.legId;
+  }
+  [dvx, dvy] = avoid(world, e, dvx, dvy);
+  pilotTo(e, dvx, dvy, dt);
+}
+
 function trooperFlying(world, e, T, t, dt) {
+  if (!t) return trooperPatrol(world, e, T, dt);
   // A target on the run is chased: a perch ahead of it is gone by the time
   // the trooper lands.
   const running = t && Math.hypot(t.vx, t.vy) > T.chaseV;

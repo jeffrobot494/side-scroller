@@ -1272,6 +1272,29 @@ export default async function run_(t) {
     t.ok("it chased without crashing", e.hp === e.maxHp);
   }
 
+  {
+    // Idle, a pair patrols: the leader flies random legs and rests on a perch
+    // near each end, the wingman with it. Over 90s in a real field.
+    const w = createWorld(3, { squad: 1, waveEvery: 1e9 });
+    const s = w.soldiers[0];
+    const leads = w.enemies.filter((e) => e.type === "trooper" && e.wing && e.wing.members[0] === e);
+    const lead = leads.sort((a, b) => Math.hypot(b.x - s.x, b.y - s.y) - Math.hypot(a.x - s.x, a.y - s.y))[0];
+    const mate = lead.wing.members[1];
+    const x0 = lead.x, y0 = lead.y;
+    let far = 0, n = 0, rested = 0, maxFrom = 0;
+    for (let i = 0; i < 90 * 60; i++) {
+      step(w, {});
+      n++;
+      if (Math.hypot(lead.x - mate.x, lead.y - mate.y) > 800) far++;
+      if (lead.boots === "ground") rested++;
+      maxFrom = Math.max(maxFrom, Math.hypot(lead.x - x0, lead.y - y0));
+    }
+    t.ok("(the patrolling pair was not found in 90s)", !lead.alert && !mate.alert);
+    t.ok(`an idle pair patrols: ${lead.wing.legId} legs, up to ${Math.round(maxFrom)}px from where it started`, lead.wing.legId >= 3 && maxFrom > 1500);
+    t.ok(`it rests on perches along the way (${Math.round((100 * rested) / n)}% of the time)`, rested / n > 0.08);
+    t.ok(`the wingman keeps with its leader (over 800px apart ${Math.round((100 * far) / n)}% of the time)`, far / n < 0.1);
+    t.ok("patrolling hurts neither", lead.hp === lead.maxHp && mate.hp === mate.maxHp);
+  }
   // ---- troopers T2: the cover dance ------------------------------------------
   // A pair on a rock of radius R, the soldier `d` px off its top.
   function pairOn(R, d) {
@@ -1341,7 +1364,7 @@ export default async function run_(t) {
     Object.assign(e, { strollT: 1e9, perch: r, repickT: 99 });
     w.enemies.push(e);
     w.soldiers[0].x = 200; w.soldiers[0].y = 200;
-    run(w, {}, 600);
+    for (let i = 0; i < 600 && e.boots !== "ground"; i++) step(w, {});
     t.ok("a trooper lands on a derelict's hull", e.boots === "ground" && e.ground.ruin === r);
     const runs = probeSurface(e, 24, 1200);
     const pts = runs.flat();
@@ -1363,7 +1386,7 @@ export default async function run_(t) {
       w.enemies.push(e);
       const s = w.soldiers[0];
       Object.assign(s, { x: best.qx + 500, y: best.qy - 250, hp: 1e9, maxHp: 1e9 });
-      run(w, {}, 300);
+      for (let i = 0; i < 600 && e.boots !== "ground"; i++) step(w, {});
       e.alert = true;
       for (let i = 0; i < 900; i++) { const a = e.ammo; step(w, {}); if (e.ammo < a) shots++; if (pointIn(r.hull, e.x, e.y)) inside++; }
     }
