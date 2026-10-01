@@ -5,7 +5,8 @@
 // ---------------------------------------------------------------------------
 
 import { controlled, bootsState } from "./sim.js";
-import { eyeOf, project } from "./camera.js";
+import { eyeOf, project, pxPer } from "./camera.js";
+import { ENEMY_TYPES } from "../space/sim.js";
 
 export function createHud() {
   return { hurtT: 0, hitT: 0, banner: null };
@@ -16,6 +17,7 @@ export function hudEvents(hud, world) {
   for (const ev of world.events) {
     if ((ev.type === "hurt" || ev.type === "crash") && ev.ctrl) hud.hurtT = 0.35;
     if (ev.type === "hit" && ev.own) { hud.hitT = 0.16; hud.kill = ev.kill; }
+    if (ev.type === "wave") hud.banner = { text: `WAVE ${ev.n} INBOUND`, t: 2.5 };
   }
 }
 
@@ -23,8 +25,11 @@ export function drawHud(ctx, hud, world, vw, vh, fov, dt) {
   ctx.clearRect(0, 0, vw, vh);
   const cam = eyeOf(world, fov, vw / vh);
   const s = controlled(world);
+  drawBars(ctx, world, cam, vw, vh);
   if (s) drawCrosshair(ctx, hud, vw, vh, dt);
   drawHurt(ctx, hud, vw, vh, dt);
+  drawSquad(ctx, world, vw);
+  drawBanner(ctx, hud, vw, vh, dt);
   drawReadout(ctx, world, cam, vw, vh);
   drawObjective(ctx, world, vw);
   drawMarkers(ctx, world, cam, vw, vh);
@@ -120,10 +125,11 @@ function drawReadout(ctx, world, cam, vw, vh) {
       ctx.fillText(`/ ${s.weapon.magazine}   spares ${s.magsLeft}${s.ammo === 0 && !s.magsLeft ? "  EMPTY" : ""}`, gx + 44, gy + 18);
     }
   }
-  ctx.fillStyle = "rgba(200,220,255,0.5)";
-  ctx.textAlign = "right";
-  ctx.fillText("mouse look and fire · W/S/A/D, Space/C jets · Q/E roll · Shift boots · R reload · wheel zoom · Enter restarts after the end", vw - 16, vh - 14);
-  ctx.textAlign = "left";
+  // The keys, top left, out of the way.
+  ctx.font = "11px ui-monospace, Menlo, Consolas, monospace";
+  ctx.fillStyle = "rgba(200,220,255,0.45)";
+  const keys = ["mouse: look, fire", "W/S/A/D, Space/C: jets", "Q/E: roll · wheel: zoom", "Shift: boots · Space: jump", "R: reload · Tab: swap", "Enter: new field, after the end"];
+  keys.forEach((k, i) => ctx.fillText(k, 14, 20 + i * 14));
 }
 
 function objectiveText(world) {
@@ -186,12 +192,114 @@ export function marker(ctx, cam, p, vw, vh, color, label, size = 9) {
 function drawMarkers(ctx, world, cam, vw, vh) {
   const art = world.artifact;
   const s = controlled(world);
+  // Hostiles off the view (F11): within 1600px, unalerted ones dimmed, mines
+  // within 500, wardens in gold from 2600.
+  if (s) {
+    for (const e of world.enemies) {
+      if (!e.alive || e.kind !== "enemy") continue;
+      const d = Math.hypot(e.x - s.x, e.y - s.y, e.z - s.z);
+      const T = ENEMY_TYPES[e.type];
+      const far = e.type === "mine" ? 500 : T.elite ? 2600 : 1600;
+      if (d > far) continue;
+      const pr = project(cam, [e.x, e.y, e.z], vw, vh);
+      if (pr.depth > 0 && pr.x > 0 && pr.x < vw && pr.y > 0 && pr.y < vh) continue;
+      const a = e.alert ? 0.9 : 0.35;
+      const col = T.elite ? `rgba(255,200,90,${a})` : `rgba(255,96,80,${a})`;
+      marker(ctx, cam, [e.x, e.y, e.z], vw, vh, col, null, T.elite ? 10 : 7);
+    }
+  }
   // Extraction, once the artifact is carried (P11: the artifact itself is never marked).
   if (s && art && art.carrier && world.extract) {
     const ex = world.extract;
     const d = Math.round(Math.hypot(ex.x - s.x, ex.y - s.y, ex.z - s.z));
     marker(ctx, cam, [ex.x, ex.y, ex.z], vw, vh, "#8affc1", `EXTRACT ${d}`);
   }
+}
+
+// Bars over what is in view: every squad soldier, and any hostile within
+// 1600px that is alerted or hurt. A shooter winding up gets a ring that
+// closes on it as the shot comes (the 2D telegraph tell).
+function drawBars(ctx, world, cam, vw, vh) {
+  const s = controlled(world);
+  const list = [];
+  for (const o of world.soldiers) if (o.alive && o !== s) list.push(o);
+  for (const e of world.enemies) {
+    if (!e.alive || (e.kind !== "enemy" && e.kind !== "dummy")) continue;
+    if (s && Math.hypot(e.x - s.x, e.y - s.y, e.z - s.z) > 1600) continue;
+    list.push(e);
+  }
+  for (const o of list) {
+    const pr = project(cam, [o.x, o.y, o.z], vw, vh);
+    if (pr.depth < 20 || pr.x < -40 || pr.x > vw + 40 || pr.y < -40 || pr.y > vh + 40) continue;
+    const k = pxPer(cam, pr.depth, vh);
+    const rr = Math.max(4, o.r * k);
+    const friend = o.kind === "soldier";
+    const T = o.type && ENEMY_TYPES[o.type];
+    if (o.tele > 0 && T && T.tele) {
+      const f = Math.max(0, o.tele / T.tele);
+      ctx.strokeStyle = `rgba(255,80,60,${0.5 + 0.5 * (1 - f)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pr.x, pr.y, rr + 6 + 28 * f, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (!friend && !o.alert && o.hp >= o.maxHp) continue;
+    const w = Math.max(22, Math.min(60, rr * 2.2));
+    const y = pr.y - rr - 10;
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(pr.x - w / 2 - 1, y - 1, w + 2, 6);
+    const hk = Math.max(0, o.hp / o.maxHp);
+    ctx.fillStyle = friend ? "#7cf29a" : T && T.elite ? "#ffcf6a" : "#ff6a5a";
+    ctx.fillRect(pr.x - w / 2, y, w * hk, 4);
+    if (friend) {
+      ctx.font = "11px ui-monospace, Menlo, Consolas, monospace";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(200,240,210,0.8)";
+      ctx.fillText(o.name.split(" ")[0], pr.x, y - 4);
+      ctx.textAlign = "left";
+    }
+  }
+}
+
+// The squad, top right: HP, rounds, ▶ for the one you fly, ◆ for the carrier, KIA.
+function drawSquad(ctx, world, vw) {
+  const x = vw - 250;
+  let y = 56;
+  ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.fillRect(x - 10, y - 16, 248, world.soldiers.length * 22 + 10);
+  const art = world.artifact;
+  world.soldiers.forEach((o, i) => {
+    const mark = i === world.ctrl && o.alive ? "▶" : " ";
+    const carry = art && art.carrier === o ? " ◆" : "";
+    ctx.fillStyle = o.alive ? (i === world.ctrl ? "#ffffff" : "#cfe3ff") : "rgba(200,200,200,0.4)";
+    ctx.fillText(`${mark} ${o.name.split(" ")[0]}${carry}`, x, y);
+    if (o.alive) {
+      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      ctx.fillRect(x + 104, y - 8, 70, 6);
+      const k = Math.max(0, o.hp / o.maxHp);
+      ctx.fillStyle = k > 0.5 ? "#7cf29a" : k > 0.25 ? "#ffd36a" : "#ff6a5a";
+      ctx.fillRect(x + 104, y - 8, 70 * k, 6);
+      ctx.fillStyle = "#cfe3ff";
+      ctx.fillText(o.reloading > 0 ? "rld" : `${o.ammo}`, x + 184, y);
+    } else {
+      ctx.fillStyle = "#ff6a5a";
+      ctx.fillText("KIA", x + 104, y);
+    }
+    y += 22;
+  });
+}
+
+function drawBanner(ctx, hud, vw, vh, dt) {
+  if (!hud.banner) return;
+  hud.banner.t -= dt;
+  if (hud.banner.t <= 0) { hud.banner = null; return; }
+  const a = Math.min(1, hud.banner.t);
+  ctx.textAlign = "center";
+  ctx.font = "bold 22px ui-monospace, Menlo, Consolas, monospace";
+  ctx.fillStyle = `rgba(255,120,90,${a})`;
+  ctx.fillText(hud.banner.text, vw / 2, vh * 0.28);
+  ctx.textAlign = "left";
 }
 
 function drawEnd(ctx, end, vw, vh) {

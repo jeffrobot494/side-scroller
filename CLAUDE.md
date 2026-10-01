@@ -493,7 +493,11 @@ section + the tests are the source of truth for what currently exists):
   team, in pairs, that perch on rocks and hulls with the boots, walk round them
   into cover and back out to shoot, and follow you; `isBody` in `sim.js` is
   what lets the boots and crash code run on them. Placeholders Bo
-  has not decided are listed at the end of the spec.
+  has not decided are listed at the end of the spec. **`space3d.html` is the
+  same mission in first person** (`tech/space-fps.md` F1–F7 — built), a cube
+  instead of a square: `src/space3d/` imports `src/space/sim.js` for tuning,
+  weapons, recruits, enemy types and the derelict layout, and
+  `src/space/audio.js` for sound, and copies the rules with a z.
 - **Pause menu (`tech/pause-menu.md` P0–P3 — built).** Escape (the `pause`
   action, rebindable, local-only on the wire) opens `src/hub/pause.js` over a
   mission: Options and Resume. Options is `src/hub/controls.js` (moved from

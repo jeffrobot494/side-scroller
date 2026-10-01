@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { ENEMY_TYPES, LOADOUT, WEAPONS, soldierMaxHp } from "../space/sim.js";
-import { CFG, clamp, controlled, hasLos, fire, hurt, explode, aimAccuracy, startReload, ruinSurface, ruinToLocal, inPoly, toggleBoots, bootsOff, bootsPull, turnUp, walkSolids, upOf } from "./sim.js";
+import { CFG, clamp, controlled, hasLos, fire, hurt, explode, aimAccuracy, startReload, ruinSurface, ruinToLocal, inPoly, rocksNear, toggleBoots, bootsOff, bootsPull, turnUp, walkSolids, upOf } from "./sim.js";
 import { dot, cross, norm, len, qmul, qaxis, qrot, qnorm, qfromTo, qlimit, qangle, fwdOf, randomDir, perp, QI } from "./vec.js";
 
 export { ENEMY_TYPES };
@@ -236,7 +236,10 @@ export function avoid(world, b, dv, look = 0.7, ignore = null) {
   const u = [dv[0] / sp, dv[1] / sp, dv[2] / sp];
   const reach = sp * look + b.r;
   let p = [0, 0, 0];
-  for (const a of world.asteroids) {
+  // Only rocks the grid puts near the look-ahead can bend it.
+  const end = [b.x + u[0] * reach, b.y + u[1] * reach, b.z + u[2] * reach];
+  const pad = CFG.asteroidMaxR + b.r + 16;
+  for (const a of rocksNear(world, Math.min(b.x, end[0]), Math.min(b.y, end[1]), Math.min(b.z, end[2]), Math.max(b.x, end[0]), Math.max(b.y, end[1]), Math.max(b.z, end[2]), pad)) {
     if (a === ignore) continue;
     const r = [a.x - b.x, a.y - b.y, a.z - b.z];
     const ahead = dot(r, u);
@@ -832,7 +835,7 @@ export function probeSurface(e, step, max, dirs = 8) {
       const c = { x: e.x, y: e.y, z: e.z, r: e.r, q, ground: g };
       for (let d = step; d <= max; d += step) {
         const fw = fwdOf(c.q);
-        walkSolids(c, [fw[0] * step, fw[1] * step, fw[2] * step], 6);
+        walkSolids(c, [fw[0] * step, fw[1] * step, fw[2] * step], 12);
         if (outside && insideHull(r, c)) break;
         pts.push({ x: c.x, y: c.y, z: c.z, d });
       }

@@ -689,59 +689,64 @@ function placeObjective(world) {
 
 // ---- motion + collision ----------------------------------------------------
 // Rocks are slow: they move once a step and meet each other once a step.
-// Bodies are fast and few: they move in substeps, so none travels more than
-// half the smallest body radius per substep (the 2D rule: discrete sphere
-// tests cannot tunnel), each meeting only the rocks the grid puts near it.
+// Bodies are fast and few: each moves in substeps of at most half its radius
+// (the 2D rule, per body: discrete sphere tests cannot tunnel), meeting only
+// the rocks the grid puts near it.
 function integrate(world, dt) {
+  let fast = 0;
   for (const a of world.asteroids) {
     const f = a.slow && a.slow.time > 0 ? a.slow.factor : 1;
     a.x += a.vx * dt * f; a.y += a.vy * dt * f; a.z += a.vz * dt * f;
     spinBy(a, dt);
+    fast = Math.max(fast, Math.hypot(a.vx, a.vy, a.vz));
   }
-  world.grid = null;
+  // The grid pads every rock by GRID_PAD, so it holds until a rock could have
+  // moved that far: rebuilt then, not every step.
+  const g = world.grid;
+  if (g) g.drift += fast * dt;
+  if (!g || g.drift > GRID_PAD - 20) world.grid = null;
   collideRocks(world);
 
+  // Bodies never meet each other, only rocks and hulls, so each substeps on
+  // its own speed: none moves more than half its radius per substep.
+  const e = CFG.restitution;
   const list = [];
   for (const s of world.soldiers) if (s.alive) list.push(s);
-  for (const e of world.enemies) if (e.alive) list.push(e);
-  let maxV = 0;
-  let minR = Infinity;
+  for (const x of world.enemies) if (x.alive) list.push(x);
   for (const b of list) {
-    minR = Math.min(minR, b.r);
-    if (b.boots === "ground") continue;
-    maxV = Math.max(maxV, Math.hypot(b.vx + (b.sx || 0), b.vy + (b.sy || 0), b.vz + (b.sz || 0)));
-  }
-  const n = Math.max(1, Math.ceil((maxV * dt) / (minR * 0.5)));
-  const h = dt / n;
-  const e = CFG.restitution;
-  for (let k = 0; k < n; k++) {
-    for (const b of list) {
-      if (b.boots === "ground") continue;
-      // Slow scales the body's whole displacement (the game scales horizontal).
-      const f = b.slow && b.slow.time > 0 ? b.slow.factor : 1;
-      b.x += (b.vx + (b.sx || 0)) * h * f;
-      b.y += (b.vy + (b.sy || 0)) * h * f;
-      b.z += (b.vz + (b.sz || 0)) * h * f;
-    }
-    for (const b of list) {
-      if (!b.alive) continue;
-      // Bodies pass through each other; only rocks and hulls bounce things (P7).
-      const pad = b.r;
-      for (const a of rocksNear(world, b.x - pad, b.y - pad, b.z - pad, b.x + pad, b.y + pad, b.z + pad)) {
-        if (b.boots) { bootContact(world, b, a); continue; }
-        const body = isBody(b);
-        const v = body ? closing(a, b) : 0;
-        if (collide(a, b, e) && body) crash(world, b, v);
+    const v = b.boots === "ground" ? 0 : Math.hypot(b.vx + (b.sx || 0), b.vy + (b.sy || 0), b.vz + (b.sz || 0));
+    const n = Math.max(1, Math.ceil((v * dt) / (b.r * 0.5)));
+    const h = dt / n;
+    for (let k = 0; k < n && b.alive; k++) {
+      if (b.boots !== "ground") {
+        // Slow scales the body's whole displacement (the game scales horizontal).
+        const f = b.slow && b.slow.time > 0 ? b.slow.factor : 1;
+        b.x += (b.vx + (b.sx || 0)) * h * f;
+        b.y += (b.vy + (b.sy || 0)) * h * f;
+        b.z += (b.vz + (b.sz || 0)) * h * f;
       }
-      for (const r of world.ruins) {
-        if (Math.hypot(b.x - r.x, b.y - r.y, b.z - r.z) > r.R + b.r) continue;
-        if (b.boots) { bootRuin(world, b, r); continue; }
-        const v = collideRuin(b, r, e);
-        if (v && isBody(b)) crash(world, b, v);
-      }
-      edge(b, world.size, e);
+      contacts(world, b, e);
     }
   }
+}
+
+// One body against the rocks the grid puts near it, the hulls, and the cube.
+// Bodies pass through each other; only rocks and hulls bounce things (P7).
+function contacts(world, b, e) {
+  const pad = b.r;
+  for (const a of rocksNear(world, b.x - pad, b.y - pad, b.z - pad, b.x + pad, b.y + pad, b.z + pad)) {
+    if (b.boots) { bootContact(world, b, a); continue; }
+    const body = isBody(b);
+    const v = body ? closing(a, b) : 0;
+    if (collide(a, b, e) && body) crash(world, b, v);
+  }
+  for (const r of world.ruins) {
+    if (Math.hypot(b.x - r.x, b.y - r.y, b.z - r.z) > r.R + b.r) continue;
+    if (b.boots) { bootRuin(world, b, r); continue; }
+    const v = collideRuin(b, r, e);
+    if (v && isBody(b)) crash(world, b, v);
+  }
+  edge(b, world.size, e);
 }
 
 // A rock turns by its angular velocity.
@@ -825,14 +830,15 @@ function edge(b, size, e) {
 // ---- the rock grid --------------------------------------------------------------
 // Rocks bucketed by cell, rebuilt each step, so a round or a line of sight
 // tests only the rocks near it. A rock is in every cell its sphere touches.
+const GRID_PAD = 60; // drift between rebuilds, and the widest round
 function rockGrid(world) {
-  if (world.grid && world.grid.t === world.t) return world.grid;
+  if (world.grid) return world.grid;
   const C = CFG.gridCell;
   const n = Math.ceil(world.size / C);
   const cells = new Map();
   const cl = (v) => clamp(Math.floor(v / C), 0, n - 1);
   for (const a of world.asteroids) {
-    const pad = a.r + 60; // drift between rebuilds, and the widest round
+    const pad = a.r + GRID_PAD;
     for (let i = cl(a.x - pad); i <= cl(a.x + pad); i++)
       for (let j = cl(a.y - pad); j <= cl(a.y + pad); j++)
         for (let k = cl(a.z - pad); k <= cl(a.z + pad); k++) {
@@ -842,7 +848,7 @@ function rockGrid(world) {
           c.push(a);
         }
   }
-  world.grid = { t: world.t, cells, n, C };
+  world.grid = { cells, n, C, drift: 0 };
   return world.grid;
 }
 

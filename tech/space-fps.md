@@ -1,7 +1,7 @@
 ---
 type: tech
 category: development-tools
-status: building
+status: built
 resolution: vague
 needs: [space-prototype, space-magboots, space-troopers]
 related: [space-prototype, space-magboots, space-troopers]
@@ -36,6 +36,32 @@ Each slice is one commit on branch `space-fps`. The page is its own, linked from
 | F6 | **Troopers.** Pairs with the soldier body and the boots, with the 2D trooper body: Aim and Health rolled (K2), a copy of a random squad gun with its effect amounts halved (K3), unlimited magazines. They patrol at random until they find you, perch on rocks and hulls with the landing approach, dance between cover and peeks on the surface (probe walks in 8 directions instead of 2), take turns, flinch, relocate and follow, all on the 2D rules (`tech/space-troopers.md`). Drawn as the squad figure in hostile colours | The full enemy roster |
 | F7 | **Readability.** Health bars over enemies in view and over every squad soldier, the telegraph tell (a ring that closes on a shooter winding up), the wave banner, a marker for each hostile off the view at the screen edge (unalerted ones dimmed, as the 2D arrows), an extraction marker with distance once the artifact is carried (the artifact itself is never marked), the squad list, boots state, the objective line, a red edge flash when you are hit, hit markers | Readable in play |
 
+**As built, F1.**
+- **The mission waits without the pointer.** Pointer lock is how the mouse looks, so the sim stops stepping while it is off (Esc), as a pause. The plan did not say.
+- **Rocks move once a step; bodies substep on their own speed.** The 2D sim substeps everything together at the fastest body's rate. With 300 rocks that cost 1.6ms a step, with spikes past 10ms whenever one soldier flew fast. Rocks are slow and bodies never meet each other, so rocks now move and collide once a step, and each body substeps at half its own radius against the rocks a grid puts near it. The grid is rebuilt only once some rock could have drifted past its padding. Measured over eight fuzzed four-minute missions: 0.3–0.5ms a step on average.
+
+**As built, F2.**
+- **Your own rounds leave the gun.** A round starts at the body's centre, below the eye, so it would appear from the middle of the screen. The view draws your own rounds starting at the gun's muzzle and sliding onto their true line over their first 0.12s. The sim is unchanged.
+
+**As built, F3.**
+- **A hole's slabs come from the 2D openings.** `addDerelict` cuts each gap out of a segment and records its centre. Each gap is found again as the opening whose wall ends 45px either side. A gap on the hull outline is a breach; any other is a door. Every one of 12 test fields keeps all six bulkhead doors and at least one breach.
+
+**As built, F4.**
+- **A landing keeps the look; only the eye's roll eases.** Up becomes the normal at once, and what was left of the look becomes the head's pitch. Landing face-first, the eye turns at most 0.35 rad a step and settles within a few tenths of a second.
+- **Measured.** Walking a full circumference of a rock returns within 12px of the start. Walking a derelict for 15s never sinks below its surface (closest 0.000px). Inside a room, walking straight on goes deck, hull wall, ceiling, bulkhead, deck.
+
+**As built, F6.**
+- **Measured.**
+  - **Rock.** On a rock 650px from a still soldier, each trooper was out of sight 70–82% of 30s, and the pair never peeked at once.
+  - **Derelict.** On three derelicts, a trooper starting outside never went in. Perched, it was hidden 71% of the time.
+  - **Chase.** Following a soldier at 250px/s, the pair was never more than 523px behind.
+  - **Patrol.** Idle, a pair flew 6 legs with 5 rests in 90s.
+  - **Landing.** Six landings onto rocks of r 80–400 were all unhurt. The fastest touchdown was 392px/s, which includes the boots' pull over the last 40px.
+- **The probe's copy walks in 12px steps** (the player's walk uses 2px). It still marks every 24px; the coarser step kept a trooper's think on a derelict under a few milliseconds.
+
+**As built, F7.**
+- **The key hint sits top left.** Bottom right, it ran under the gun panel.
+
 ## Reuses
 
 | What | Where | Used for |
@@ -59,7 +85,7 @@ Each slice is one commit on branch `space-fps`. The page is its own, linked from
 | `src/space3d/` (new) | The prototype's modules. They import each other and `src/space/sim.js` and `src/space/audio.js`, nothing else. Nothing outside imports them |
 | `src/space3d/vec.js` (new) | Vectors and quaternions |
 | `src/space3d/sim.js` (new) | World, bodies, flight, collisions, crashes, weapons, derelicts, boots, objective, step. **DOM-free** |
-| `src/space3d/ai.js` (new) | Enemies, waves, companions, troopers. DOM-free |
+| `src/space3d/ai.js` (new) | Enemies, waves, companions, troopers. DOM-free. It and `sim.js` import each other, at function level only |
 | `src/space3d/view3d.js` (new) | The first-person view in three.js. The only module that imports `three` |
 | `src/space3d/camera.js` (new) | The eye's pose and the projection to the screen, shared by both views |
 | `src/space3d/hud.js` (new) | The 2D overlay canvas: crosshair, bars, markers, HUD |

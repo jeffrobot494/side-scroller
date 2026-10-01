@@ -11,6 +11,8 @@ import { swapControl } from "../src/space3d/sim.js";
 import { dot, len, norm, sub, qrot, qaxis, qmul, qconj, qlook, randomDir } from "../src/space3d/vec.js";
 const dot4 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
 import { eyeOf, project } from "../src/space3d/camera.js";
+import { createHud, hudEvents, drawHud } from "../src/space3d/hud.js";
+import { ctx2d } from "./harness.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
@@ -849,6 +851,36 @@ export default async function suite(t) {
       was = r;
     }
     t.ok(`F6: an idle pair patrols, perching to rest on the way (${pair[0].wing.legId} legs, ${rests} rests in 90s)`, pair[0].wing.legId >= 3 && rests >= 2);
+  }
+
+  // ---- F7: readability ------------------------------------------------------------------
+  {
+    // The HUD draws a whole mission headlessly without throwing, events and all.
+    const w = createWorld(4, { squad: 3 });
+    const hud = createHud();
+    const ctx = ctx2d();
+    let threw = null;
+    try {
+      for (let i = 0; i < 60 * 20; i++) {
+        step(w, { look: [0.01, 0.003], jet: [0, 0, i % 120 < 30 ? 1 : 0], fire: true, firePress: i % 20 === 0 });
+        if (i === 300) spawnWave(w);
+        hudEvents(hud, w);
+        drawHud(ctx, hud, w, 1280, 720, 75, 1 / 60);
+        w.events.length = 0;
+      }
+      for (const s of w.soldiers) hurt(w, s, 1e5, null);
+      step(w, {});
+      drawHud(ctx, hud, w, 1280, 720, 75, 1 / 60);
+    } catch (e) { threw = e; }
+    t.ok(`F7: the HUD draws a mission, and its end, headlessly${threw ? ": " + threw.message : ""}`, !threw && w.end && !w.end.success);
+  }
+  {
+    // A point behind the eye projects with negative depth (an edge marker, not a dot).
+    const { w, s } = centred();
+    const cam = eyeOf(w, 75, 16 / 9);
+    const f = lookOf(s);
+    const p = project(cam, [cam.pos[0] - f[0] * 500, cam.pos[1] - f[1] * 500, cam.pos[2] - f[2] * 500], 1280, 720);
+    t.ok("F7: behind you projects behind", p.depth < 0);
   }
 }
 
