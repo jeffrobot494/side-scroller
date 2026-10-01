@@ -4,7 +4,7 @@
 // the events; writes nothing back.
 // ---------------------------------------------------------------------------
 
-import { controlled } from "./sim.js";
+import { controlled, bootsState } from "./sim.js";
 import { eyeOf, project } from "./camera.js";
 
 export function createHud() {
@@ -89,6 +89,15 @@ function drawReadout(ctx, world, cam, vw, vh) {
     const sp = Math.hypot(s.vx, s.vy, s.vz);
     ctx.fillText(`${Math.ceil(s.hp)}/${s.maxHp} HP   ${Math.round(sp)} px/s`, x, y + 24);
 
+    // Boots, under the crosshair: what Shift would do.
+    const bs = bootsState(world, s);
+    if (bs) {
+      ctx.textAlign = "center";
+      ctx.fillStyle = bs === "ready" ? "rgba(120,255,230,0.75)" : "#78ffe6";
+      ctx.fillText(bs === "ready" ? "BOOTS READY · Shift" : bs === "pull" ? "BOOTS · pulling" : "BOOTS ON · Space jumps · Shift lets go", vw / 2, vh / 2 + 46);
+      ctx.textAlign = "left";
+    }
+
     // The gun, bottom right of centre: name, rounds, spares, reload.
     const gx = vw - 260, gy = vh - 72;
     ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -113,7 +122,7 @@ function drawReadout(ctx, world, cam, vw, vh) {
   }
   ctx.fillStyle = "rgba(200,220,255,0.5)";
   ctx.textAlign = "right";
-  ctx.fillText("mouse look and fire · W/S/A/D, Space/C jets · Q/E roll · R reload · wheel zoom · Enter restarts after the end", vw - 16, vh - 14);
+  ctx.fillText("mouse look and fire · W/S/A/D, Space/C jets · Q/E roll · Shift boots · R reload · wheel zoom · Enter restarts after the end", vw - 16, vh - 14);
   ctx.textAlign = "left";
 }
 

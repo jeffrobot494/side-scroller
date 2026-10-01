@@ -4,9 +4,10 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled, fire, startReload, WEAPONS, hasLos, ruinToLocal, ruinToWorld, inPoly, hurt } from "../src/space3d/sim.js";
-import { makeRng } from "../src/space/sim.js";
-import { dot, len, norm, sub, qrot } from "../src/space3d/vec.js";
+import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled, fire, startReload, WEAPONS, hasLos, ruinToLocal, ruinToWorld, inPoly, hurt, bootsState, nearestSurface, shove, addRuin3 } from "../src/space3d/sim.js";
+import { makeRng, addDerelict } from "../src/space/sim.js";
+import { dot, len, norm, sub, qrot, qaxis, qmul, qconj, qlook, randomDir } from "../src/space3d/vec.js";
+const dot4 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
 import { eyeOf, project } from "../src/space3d/camera.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -423,4 +424,175 @@ export default async function suite(t) {
     step(w, {});
     t.ok("F3: extraction without the artifact is not a win", !w.end);
   }
+
+  // ---- F4: magnetic boots -------------------------------------------------------------
+  // A soldier `gap` px off a still rock of radius r at the centre, along dir.
+  const onRock = (r = 200, gap = 25, dir = [0, 1, 0], spin = [0, 0, 0]) => {
+    const w = empty();
+    const rock = makeAsteroid(makeRng(9), 3000, 3000, 3000, r);
+    Object.assign(rock, { vx: 0, vy: 0, vz: 0, w: spin });
+    w.asteroids.push(rock);
+    const s = w.soldiers[0];
+    const k = r + s.r + gap;
+    Object.assign(s, { x: 3000 + dir[0] * k, y: 3000 + dir[1] * k, z: 3000 + dir[2] * k, vx: 0, vy: 0, vz: 0 });
+    return { w, s, rock };
+  };
+  const landed = (w, s, n = 180) => { for (let i = 0; i < n && s.boots !== "ground"; i++) step(w, {}); return s.boots === "ground"; };
+  {
+    const { w, s } = onRock(200, 60);
+    t.ok("F4: 60px off a rock, Shift does nothing", (step(w, { boots: true }), !s.boots) && bootsState(w, s) === null);
+    const r2 = onRock(200, 25, [1, 0, 0]);
+    t.ok("F4: within 40px the boots are ready", bootsState(r2.w, r2.s) === "ready");
+    step(r2.w, { boots: true });
+    t.ok("F4: Shift clamps on, in any direction (F12)", r2.s.boots === "air");
+    t.ok("F4: the pull turns the feet to the rock and lands it", landed(r2.w, r2.s) && dot(upOf(r2.s), [1, 0, 0]) > 0.999);
+    t.ok("F4: landing that close is free", r2.s.hp === r2.s.maxHp);
+    t.ok("F4: standing, the body's centre sits a radius off the rock", near(Math.hypot(r2.s.x - 3000, r2.s.y - 3000, r2.s.z - 3000), 200 + r2.s.r, 1e-6));
+  }
+  {
+    // Landing never snaps the eye: up jumps to the normal, the eye eases there.
+    const { w, s } = onRock(200, 25, [0, 1, 0]);
+    s.q = qlook([0, -1, 0], [1, 0, 0]); // looking straight at the rock, feet sideways
+    step(w, { boots: true });
+    let worst = 0;
+    let cam = qmul(s.q, s.viewOff);
+    for (let i = 0; i < 120; i++) {
+      step(w, {});
+      const c = qmul(qmul(s.q, qaxis([1, 0, 0], s.pitch)), s.viewOff);
+      worst = Math.max(worst, 2 * Math.acos(Math.min(1, Math.abs(dot4(c, cam)))));
+      cam = c;
+    }
+    t.ok(`F4: landing face-first turns the eye smoothly (worst ${worst.toFixed(3)} rad a step)`, s.boots === "ground" && worst < 0.35);
+    t.ok("F4: and settles with up on the normal", dot(upOf(s), [0, 1, 0]) > 0.999 && Math.abs(s.viewOff[3]) > 0.9999);
+  }
+  {
+    // Walk all the way round a rock: back where it started.
+    const { w, s } = onRock(150, 25, [0, 1, 0]);
+    step(w, { boots: true });
+    landed(w, s);
+    const p0 = P(s);
+    const circ = 2 * Math.PI * (150 + s.r);
+    const n = Math.round(circ / (CFG.walkSpeed / 60));
+    let maxOff = 0;
+    for (let i = 0; i < n + 400; i++) {
+      step(w, { jet: [0, 0, 1] });
+      maxOff = Math.max(maxOff, Math.abs(Math.hypot(s.x - 3000, s.y - 3000, s.z - 3000) - 150 - s.r));
+    }
+    t.ok("F4: walking stays on the rock's surface", maxOff < 1e-6 && s.boots === "ground");
+    const w2 = onRock(150, 25, [0, 1, 0]);
+    step(w2.w, { boots: true });
+    landed(w2.w, w2.s);
+    const a0 = P(w2.s);
+    const fwd = lookOf(w2.s);
+    const tot = Math.round((2 * Math.PI * (150 + 18)) / (CFG.walkSpeed / 60));
+    // Walk at full speed (after the run-up) a whole circumference, then stop.
+    let walked = 0;
+    for (let i = 0; walked < 2 * Math.PI * 168 && i < 5000; i++) {
+      step(w2.w, { jet: [0, 0, 1] });
+      walked += Math.hypot(w2.s.gv[0], w2.s.gv[1]) / 60;
+    }
+    t.ok("F4: a full circumference walked comes back to the start", Math.hypot(w2.s.x - a0[0], w2.s.y - a0[1], w2.s.z - a0[2]) < 12);
+  }
+  {
+    // A spinning rock carries you round with it.
+    const { w, s, rock } = onRock(200, 25, [0, 1, 0], [0, 0, 0.15]);
+    step(w, { boots: true });
+    landed(w, s);
+    const l0 = qrot(qconj(rock.q), norm(sub(P(s), P(rock))));
+    run(w, {}, 300);
+    const l1 = qrot(qconj(rock.q), norm(sub(P(s), P(rock))));
+    t.ok("F4: standing, a spinning rock carries you (same spot in its frame)", dot(l0, l1) > 0.99999 && s.boots === "ground");
+  }
+  {
+    const { w, s } = onRock(200, 25, [0, 1, 0]);
+    step(w, { boots: true });
+    landed(w, s);
+    run(w, { jet: [0, 0, 1], up: true }, 30);
+    t.ok("F4: the jetpack does nothing with the boots on", s.boots === "ground" && !s.thrusting);
+    step(w, { upPress: true, up: true });
+    t.ok("F4: Space jumps off along up", s.boots === "air" && dot(V(s), upOf(s)) > CFG.jumpSpeed * 0.9);
+    let peak = 0;
+    for (let i = 0; i < 240 && s.boots !== "ground"; i++) { step(w, {}); peak = Math.max(peak, Math.hypot(s.x - 3000, s.y - 3000, s.z - 3000) - 218); }
+    t.ok(`F4: and the boots pull it back down (peak ${peak.toFixed(0)}px)`, s.boots === "ground" && peak > 60 && s.hp === s.maxHp);
+  }
+  {
+    const { w, s } = onRock(200, 25, [0, 1, 0]);
+    step(w, { boots: true });
+    landed(w, s);
+    shove(s, 0, 400, 0);
+    step(w, {});
+    t.ok("F4: a shove knocks a standing body off", s.boots === "air");
+    const r2 = onRock(200, 25, [0, 1, 0]);
+    step(r2.w, { boots: true });
+    landed(r2.w, r2.s);
+    step(r2.w, { upPress: true });
+    r2.s.vy = 1500;
+    run(r2.w, {}, 60);
+    t.ok("F4: past bootsHold the boots let go", r2.s.boots === null);
+  }
+  {
+    // 20px over a rock at 650px/s: the pull makes it about 708 at contact.
+    const dive = (up) => {
+      const { w, s } = onRock(200, 20, [0, 1, 0]);
+      s.q = qlook(up[1] ? [1, 0, 0] : [0, -1, 0], up);
+      s.vy = -650;
+      step(w, { boots: true });
+      landed(w, s, 30);
+      run(w, {}, 30);
+      return s;
+    };
+    const feet = dive([0, 1, 0]);
+    t.ok("F4: feet-first at about 700 lands safely (landSafe 750)", feet.boots === "ground" && feet.hp === feet.maxHp);
+    const side = dive([1, 0, 0]);
+    t.ok("F4: side-on at the same speed is a crash (crashSafe 500)", side.hp < side.maxHp);
+  }
+  {
+    // On a derelict: land on the hull, walk across it and over an edge; never inside a slab.
+    const w = empty();
+    const lay = addDerelict({ rng: makeRng(5), walls: [], ruins: [], keepClear: [] }, 0, 0, 0, 1200, 560);
+    const r = addRuin3(w, lay, 3000, 3000, 3000, qaxis(norm([0.3, 1, 0.2]), 0.7), 280);
+    const s = w.soldiers[0];
+    const top = ruinToWorld(r, [100, -60, 140 + 6 + 18 + 20]);
+    Object.assign(s, { x: top[0], y: top[1], z: top[2], vx: 0, vy: 0, vz: 0 });
+    step(w, { boots: true });
+    t.ok("F4: lands on a derelict's ceiling plate", landed(w, s) && s.ground.kind === "plate");
+    const up0 = upOf(s);
+    t.ok("F4: up is the plate's normal", dot(up0, qrot(r.q, [0, 0, 1])) > 0.999);
+    let inside = 0, kinds = new Set(), minGap = Infinity;
+    for (let i = 0; i < 900; i++) {
+      step(w, { jet: [0, 0, 1], look: [i % 300 === 0 ? 0.6 : 0, 0] });
+      const l = ruinToLocal(r, P(s));
+      for (const sd of r.solids) {
+        const d = surfDistT(sd, l);
+        minGap = Math.min(minGap, d - s.r);
+      }
+      kinds.add(s.ground.kind + (s.ground.hull ? "-hull" : ""));
+    }
+    t.ok(`F4: walking a derelict never sinks into a slab (closest ${minGap.toFixed(3)})`, minGap > -0.01);
+    t.ok(`F4: and carries over its edges onto other slabs (${[...kinds].join(", ")})`, kinds.size >= 2 && s.boots === "ground");
+  }
+}
+
+// The gap from a local point to a slab's surface (as the sim measures it).
+function surfDistT(sd, l) {
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  let c;
+  if (sd.kind === "wall") {
+    const ex = sd.b[0] - sd.a[0], ey = sd.b[1] - sd.a[1];
+    const k = clamp(((l[0] - sd.a[0]) * ex + (l[1] - sd.a[1]) * ey) / (ex * ex + ey * ey), 0, 1);
+    c = [sd.a[0] + ex * k, sd.a[1] + ey * k, clamp(l[2], sd.z0, sd.z1)];
+  } else {
+    if (inPoly(sd.poly, l[0], l[1])) c = [l[0], l[1], sd.zc];
+    else {
+      let bd = Infinity;
+      for (let i = 0; i < sd.poly.length; i++) {
+        const [ax, ay] = sd.poly[i], [bx, by] = sd.poly[(i + 1) % sd.poly.length];
+        const ex = bx - ax, ey = by - ay;
+        const k = clamp(((l[0] - ax) * ex + (l[1] - ay) * ey) / (ex * ex + ey * ey), 0, 1);
+        const d = (ax + ex * k - l[0]) ** 2 + (ay + ey * k - l[1]) ** 2;
+        if (d < bd) { bd = d; c = [ax + ex * k, ay + ey * k, sd.zc]; }
+      }
+    }
+  }
+  return Math.hypot(l[0] - c[0], l[1] - c[1], l[2] - c[2]) - sd.t;
 }

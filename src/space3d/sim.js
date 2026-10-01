@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { CFG as CFG2, makeRng, RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy, addDerelict, addRuin } from "../space/sim.js";
-import { dot, cross, norm, len, qmul, qaxis, qrot, qnorm, qlook, qconj, qslerp, qangle, QI, fwdOf, upOfQ, randomDir, perp } from "./vec.js";
+import { dot, cross, norm, len, qmul, qaxis, qrot, qnorm, qlook, qconj, qslerp, qangle, qlimit, qfromTo, QI, fwdOf, upOfQ, randomDir, perp } from "./vec.js";
 
 export { RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy };
 
@@ -127,8 +127,13 @@ export function makeSoldier(recruit, x, y, z, weaponId, q = QI()) {
     jet: [0, 0, 0], // the jets firing this step, local, for the flames
     thrusting: false,
     aim: fwdOf(q), // where the gun points
-    boots: null,
-    ground: null,
+    boots: null, // null (floating), "air" or "ground"
+    ground: null, // the rock or slab stood on
+    gn: null, gq: null, // on a rock: where, in its frame, and its turn when last settled
+    gv: [0, 0], // walk velocity in the body's frame: right, forward
+    walkIn: [0, 0],
+    pushed: 0,
+    stride: 0,
     hp: maxHp,
     maxHp,
     alive: true,
@@ -212,8 +217,12 @@ export function step(world, input = {}) {
 
   if (input.swap && !world.end) swapControl(world);
   const s = world.end ? null : controlled(world);
+  // Only the soldier you fly wears boots: swapping away switches them off.
+  for (const o of world.soldiers) if (o.boots && o !== s) bootsOff(o, world);
   if (s) {
-    drive(s, input, dt);
+    if (input.boots) toggleBoots(world, s);
+    if (s.boots === "ground" && input.upPress) jump(world, s);
+    drive(world, s, input, dt);
     if (input.reload) startReload(s, world);
     // Semi-auto takes the press, auto the hold, as the mission does.
     const want = s.weapon.auto ? input.fire : input.firePress;
@@ -222,24 +231,35 @@ export function step(world, input = {}) {
   for (const o of world.soldiers) easeView(o, dt);
   tickActors(world, dt);
   integrate(world, dt);
+  settleBoots(world, dt);
   updateProjectiles(world, dt);
   if (!world.end) tickObjective(world);
 }
 
 // The player's body: the mouse turns it, the jets push it. No drag, no cap.
-export function drive(s, input, dt) {
+export function drive(world, s, input, dt) {
   const [yaw, pitch] = input.look || [0, 0];
-  const roll = (input.roll || 0) * CFG.rollRate * dt;
-  let q = s.q;
-  if (yaw) q = qmul(q, qaxis([0, 1, 0], -yaw));
-  if (pitch) q = qmul(q, qaxis([1, 0, 0], pitch));
-  if (roll) q = qmul(q, qaxis([0, 0, 1], -roll));
-  s.q = qnorm(q);
-
   const [jx, jy, jz] = input.jet || [0, 0, 0];
+  if (s.boots === "ground") {
+    // Standing: the mouse yaws about the surface's normal and pitches the
+    // head; W/S/A/D walk.
+    if (yaw) s.q = qnorm(qmul(s.q, qaxis([0, 1, 0], -yaw)));
+    s.pitch = clamp(s.pitch + pitch, -CFG.pitchMax, CFG.pitchMax);
+    s.walkIn = [jx, jz];
+  } else {
+    const roll = (input.roll || 0) * CFG.rollRate * dt;
+    let q = s.q;
+    if (yaw) q = qmul(q, qaxis([0, 1, 0], -yaw));
+    if (pitch) q = qmul(q, qaxis([1, 0, 0], pitch));
+    if (roll) q = qmul(q, qaxis([0, 0, 1], -roll));
+    s.q = qnorm(q);
+  }
+
   const k = CFG.jetSide;
-  s.jet = [jx * k, jy * k, jz > 0 ? -jz : -jz * k];
-  s.thrusting = !!(jx || jy || jz);
+  // The jetpack does nothing with the boots on.
+  const on = !s.boots;
+  s.jet = on ? [jx * k, jy * k, jz > 0 ? -jz : -jz * k] : [0, 0, 0];
+  s.thrusting = on && !!(jx || jy || jz);
   if (s.thrusting) {
     const a = qrot(s.q, s.jet);
     s.vx += a[0] * CFG.thrust * dt;
@@ -247,6 +267,7 @@ export function drive(s, input, dt) {
     s.vz += a[2] * CFG.thrust * dt;
   }
   s.aim = lookOf(s);
+  bootsPull(world, s, dt);
 }
 
 // The eye catches up with the body after a snap to a new up.
@@ -698,6 +719,8 @@ function collideAll(world, list) {
       const b = list[j];
       if (b.x - b.r > hi) break;
       if (a.kind !== "asteroid" && b.kind !== "asteroid") continue;
+      if (a.boots) { bootContact(world, a, b); continue; }
+      if (b.boots) { bootContact(world, b, a); continue; }
       const s = isBody(a) ? a : isBody(b) ? b : null;
       const v = s ? closing(a, b) : 0;
       if (collide(a, b, e) && s) crash(world, s, v);
@@ -706,6 +729,7 @@ function collideAll(world, list) {
   for (const a of list) {
     for (const r of world.ruins) {
       if (Math.hypot(a.x - r.x, a.y - r.y, a.z - r.z) > r.R + a.r) continue;
+      if (a.boots) { bootRuin(world, a, r); continue; }
       const v = collideRuin(a, r, e);
       if (v && isBody(a)) crash(world, a, v);
     }
@@ -1037,5 +1061,320 @@ export function explode(world, fx, x, y, z, team, owner) {
     if (d >= reach) continue;
     const k = (CFG.blastPush * (1 - d / reach)) / a.m / d;
     a.vx += dx * k; a.vy += dy * k; a.vz += dz * k;
+  }
+}
+
+// ---- magnetic boots (F4; tech/space-magboots.md in 3D) ----------------------------
+// Shift clamps on within bootsReach of any surface (F12: in first person you
+// cannot see your feet). In the air with the boots on, gravity pulls toward
+// the nearest surface and the body turns its feet to it; with nothing within
+// bootsHold, they let go. Standing, up is the surface's normal: a rock carries
+// you as it drifts and spins, and on a derelict you walk over edges and up
+// inside corners onto the next slab.
+
+// The nearest surface to a body within `range` of its own skin:
+// { g (a rock or a slab), d, n (world, from the surface to the body) } or null.
+export function nearestSurface(world, s, range) {
+  let best = null;
+  const pad = range + s.r;
+  for (const a of rocksNear(world, s.x - pad, s.y - pad, s.z - pad, s.x + pad, s.y + pad, s.z + pad)) {
+    const dx = s.x - a.x, dy = s.y - a.y, dz = s.z - a.z;
+    const dc = Math.hypot(dx, dy, dz) || 1e-9;
+    const d = dc - a.r - s.r;
+    if (d <= range && (!best || d < best.d)) best = { g: a, d, n: [dx / dc, dy / dc, dz / dc] };
+  }
+  for (const r of world.ruins) {
+    if (Math.hypot(s.x - r.x, s.y - r.y, s.z - r.z) > r.R + pad) continue;
+    const hit = ruinSurface(r, [s.x, s.y, s.z], pad);
+    if (hit && hit.d - s.r <= range && (!best || hit.d - s.r < best.d)) best = { g: hit.sd, d: hit.d - s.r, n: hit.n };
+  }
+  return best;
+}
+
+// For the HUD: "on", "ready" (Shift would clamp) or null.
+export function bootsState(world, s) {
+  if (!s || !s.alive) return null;
+  if (s.boots) return s.boots === "ground" ? "on" : "pull";
+  return nearestSurface(world, s, CFG.bootsReach) ? "ready" : null;
+}
+
+export function toggleBoots(world, s) {
+  if (s.boots) bootsOff(s, world);
+  else if (nearestSurface(world, s, CFG.bootsReach)) {
+    s.boots = "air";
+    world.events.push({ type: "boots", on: true, x: s.x, y: s.y, z: s.z });
+  }
+}
+
+// The head's pitch goes back into the body as it leaves a surface, so the
+// look does not move.
+function takeOff(s) {
+  if (s.pitch) s.q = qnorm(qmul(s.q, qaxis([1, 0, 0], s.pitch)));
+  s.pitch = 0;
+  s.ground = null;
+  s.gv = [0, 0];
+  s.walkIn = [0, 0];
+}
+
+export function bootsOff(s, world = null) {
+  if (world && s.boots) world.events.push({ type: "boots", on: false, x: s.x, y: s.y, z: s.z });
+  s.boots = null;
+  takeOff(s);
+}
+
+export function jump(world, s) {
+  const u = upOf(s);
+  takeOff(s);
+  s.boots = "air";
+  s.vx += u[0] * CFG.jumpSpeed; s.vy += u[1] * CFG.jumpSpeed; s.vz += u[2] * CFG.jumpSpeed;
+  world.events.push({ type: "jump", x: s.x, y: s.y, z: s.z });
+}
+
+// In the air with the boots on: pulled toward the nearest surface, and the
+// feet turned to it at the body's turn rate.
+function bootsPull(world, s, dt) {
+  if (s.boots !== "air") return;
+  const hit = nearestSurface(world, s, CFG.bootsHold);
+  if (!hit) return;
+  const [nx, ny, nz] = hit.n;
+  s.vx -= nx * CFG.gravity * dt; s.vy -= ny * CFG.gravity * dt; s.vz -= nz * CFG.gravity * dt;
+  turnUp(s, hit.n, CFG.turnRate * dt);
+}
+
+// Turn a body so its up heads for n, at most `max` radians; the eye keeps
+// what it saw and eases after.
+export function turnUp(s, n, max = Math.PI) {
+  const r = qlimit(qfromTo(upOf(s), n), max);
+  if (qangle(r) < 1e-9) return;
+  const cam = qmul(lookQ(s), s.viewOff);
+  s.q = qnorm(qmul(r, s.q));
+  s.viewOff = qnorm(qmul(qconj(lookQ(s)), cam));
+}
+
+// Landing or standing: up becomes n exactly, the body faces the look's
+// direction along the surface, and the rest of the look becomes the head's
+// pitch — the look itself does not move; the eye rolls to the new up.
+function standAlign(s, n) {
+  const cam = qmul(lookQ(s), s.viewOff);
+  const look = lookOf(s);
+  let f = [look[0] - n[0] * dot(look, n), look[1] - n[1] * dot(look, n), look[2] - n[2] * dot(look, n)];
+  if (len(f) < 0.05) f = fwdOf(qmul(qfromTo(upOf(s), n), s.q));
+  f = norm([f[0] - n[0] * dot(f, n), f[1] - n[1] * dot(f, n), f[2] - n[2] * dot(f, n)]);
+  s.pitch = clamp(Math.asin(clamp(dot(look, n), -1, 1)), -CFG.pitchMax, CFG.pitchMax);
+  s.q = qlook(f, n);
+  s.viewOff = qnorm(qmul(qconj(lookQ(s)), cam));
+}
+
+function landOn(world, s, g, n, speed) {
+  s.boots = "ground";
+  s.ground = g;
+  s.gv = [0, 0];
+  s.walkIn = [0, 0];
+  s.pushed = 0;
+  s.stride = 0;
+  standAlign(s, n);
+  if (g.kind === "asteroid") {
+    s.gn = qrot(qconj(g.q), n); // where on the rock, in its own frame
+    s.gq = g.q.slice(); // the rock's turn when last settled
+    [s.vx, s.vy, s.vz] = surfaceVel(g, s);
+  } else s.vx = s.vy = s.vz = 0;
+  world.events.push({ type: "land", x: s.x, y: s.y, z: s.z, speed, ctrl: s === controlled(world) });
+}
+
+// A rock's surface velocity (drift + spin) at a body.
+function surfaceVel(a, p) {
+  const r = [p.x - a.x, p.y - a.y, p.z - a.z];
+  const w = cross(a.w, r);
+  return [a.vx + w[0], a.vy + w[1], a.vz + w[2]];
+}
+
+// A booted body against a rock: one-sided, never `collide`. It is pushed out
+// and loses what it had into the surface, no bounce, and the rock gets no
+// impulse (answer 4). Feet-first, within the wedge, it lands.
+function bootContact(world, s, a) {
+  if (s.ground === a || a.kind !== "asteroid") return;
+  const dx = s.x - a.x, dy = s.y - a.y, dz = s.z - a.z;
+  const min = s.r + a.r;
+  const d2 = dx * dx + dy * dy + dz * dz;
+  if (d2 >= min * min) return;
+  const d = Math.sqrt(d2) || 1e-4;
+  const n = [dx / d, dy / d, dz / d];
+  s.x += n[0] * (min - d); s.y += n[1] * (min - d); s.z += n[2] * (min - d);
+  boot(world, s, a, n, surfaceVel(a, s), min - d);
+}
+
+// The same against a derelict's slabs; a body standing on this ruin is
+// placed by walkSolids instead.
+function bootRuin(world, s, r) {
+  if (s.ground && s.ground.ruin === r) return;
+  for (let it = 0; it < 4; it++) {
+    const hit = ruinSurface(r, [s.x, s.y, s.z], s.r);
+    if (!hit || hit.d >= s.r) return;
+    const pen = s.r - hit.d;
+    s.x += hit.n[0] * pen; s.y += hit.n[1] * pen; s.z += hit.n[2] * pen;
+    boot(world, s, hit.sd, hit.n, [0, 0, 0], pen);
+    if (s.boots === "ground") return;
+  }
+}
+
+function boot(world, s, g, n, sv, pen) {
+  const vn = (s.vx - sv[0]) * n[0] + (s.vy - sv[1]) * n[1] + (s.vz - sv[2]) * n[2];
+  if (s.boots === "ground") {
+    // Standing, a rock that runs into you still hits you.
+    s.pushed += pen;
+    crash(world, s, -vn);
+    return;
+  }
+  foldShove(s);
+  const vn2 = (s.vx - sv[0]) * n[0] + (s.vy - sv[1]) * n[1] + (s.vz - sv[2]) * n[2];
+  const lands = dot(n, upOf(s)) >= Math.cos(CFG.bootsWedge);
+  crash(world, s, -vn2, lands ? CFG.landSafe : CFG.crashSafe);
+  if (vn2 < 0) { s.vx -= vn2 * n[0]; s.vy -= vn2 * n[1]; s.vz -= vn2 * n[2]; }
+  if (lands && s.alive) landOn(world, s, g, n, Math.max(0, -vn2));
+}
+
+// Walk a body standing on a derelict along world tangent d: in steps of at
+// most `stepLen`, each snapped onto the nearest slab, then out of any other it
+// lies in. The ground is then, of the slabs it touches, the one most against
+// the move — at an inside corner that is the next slab, which is how up turns
+// from one to the other. The body (and the walk direction) turn with the
+// normal, so a heading carries over an edge. Returns the final normal.
+export function walkSolids(b, d, stepLen = 2) {
+  const r = b.ground.ruin;
+  const R = b.r;
+  const dist = len(d);
+  const n = Math.max(1, Math.ceil(dist / stepLen));
+  let dir = dist ? [d[0] / dist, d[1] / dist, d[2] / dist] : null;
+  let l = ruinToLocal(r, [b.x, b.y, b.z]);
+  let nl = solidNormal(b.ground, l);
+  const iq = qconj(r.q);
+  let dirL = dir ? qrot(iq, dir) : null;
+  for (let k = 0; k <= n; k++) {
+    if (k > 0 && dirL) {
+      // Along the surface: the part of the heading in the tangent plane.
+      const dn = dot(dirL, nl);
+      const tl = norm([dirL[0] - nl[0] * dn, dirL[1] - nl[1] * dn, dirL[2] - nl[2] * dn]);
+      const step = dist / n;
+      l = [l[0] + tl[0] * step, l[1] + tl[1] * step, l[2] + tl[2] * step];
+    }
+    const near = solidsNear(r, l, R + stepLen + 4);
+    let g = b.ground, gd = surfDist(g, l);
+    for (const o of near) {
+      const od = surfDist(o, l);
+      if (od < gd - 1e-6) { gd = od; g = o; }
+    }
+    l = placeOff(g, l, R);
+    for (let it = 0; it < 16; it++) {
+      let hit = null;
+      for (const o of near) if (surfDist(o, l) < R - 1e-6) { hit = o; break; }
+      if (!hit) break;
+      l = placeOff(hit, l, R);
+    }
+    let pick = null, against = Infinity;
+    for (const o of near) {
+      if (surfDist(o, l) > R + 1e-3) continue;
+      const on = solidNormal(o, l);
+      const a = dirL ? dot(on, dirL) : 0;
+      if (a < against - 1e-9 || (a < against + 1e-9 && o === b.ground)) { against = a; pick = o; }
+    }
+    b.ground = pick || g;
+    const nn = solidNormal(b.ground, l);
+    const turn = qfromTo(nl, nn);
+    if (dirL) dirL = qrot(turn, dirL);
+    // The same turn, in the world, for the body.
+    const tw = qmul(qmul(r.q, turn), iq);
+    b.q = qnorm(qmul(tw, b.q));
+    nl = nn;
+  }
+  const p = ruinToWorld(r, l);
+  b.x = p[0]; b.y = p[1]; b.z = p[2];
+  return qrot(r.q, nl);
+}
+
+const surfDist = (sd, l) => {
+  const c = coreClosest(sd, l);
+  return Math.hypot(l[0] - c[0], l[1] - c[1], l[2] - c[2]) - sd.t;
+};
+function solidNormal(sd, l) {
+  const c = coreClosest(sd, l);
+  const v = [l[0] - c[0], l[1] - c[1], l[2] - c[2]];
+  const m = len(v);
+  return m > 1e-9 ? [v[0] / m, v[1] / m, v[2] / m] : [0, 0, 1];
+}
+// A local point put R off a slab's surface, straight out from where it is.
+function placeOff(sd, l, R) {
+  const c = coreClosest(sd, l);
+  const nl = solidNormal(sd, l);
+  const k = sd.t + R;
+  return [c[0] + nl[0] * k, c[1] + nl[1] * k, c[2] + nl[2] * k];
+}
+
+// After integrate: a standing body is carried by its rock, walks, and is
+// snapped onto the surface; one in the air must still have a surface within
+// the hold range.
+function settleBoots(world, dt) {
+  for (const s of [...world.soldiers, ...world.enemies]) {
+    if (!s.alive || !s.boots) continue;
+    if (s.boots === "air") {
+      if (!nearestSurface(world, s, CFG.bootsHold)) bootsOff(s, world);
+      continue;
+    }
+    // Knocked off: a shove, or a push past the snap tolerance. It keeps its
+    // world velocity and falls back under its own boots.
+    if (s.pushed > CFG.snapTol || s.sx || s.sy || s.sz) {
+      takeOff(s);
+      s.boots = "air";
+      s.pushed = 0;
+      continue;
+    }
+    s.pushed = 0;
+    // Walk: toward walkIn × walkSpeed in the body's own frame (right, forward).
+    const wi = s.walkIn || [0, 0];
+    const wl = Math.hypot(wi[0], wi[1]);
+    const target = wl ? [(wi[0] / Math.max(1, wl)) * CFG.walkSpeed, (wi[1] / Math.max(1, wl)) * CFG.walkSpeed] : [0, 0];
+    const ex = target[0] - s.gv[0], ey = target[1] - s.gv[1];
+    const e = Math.hypot(ex, ey);
+    const rate = (wl ? CFG.walkAccel : CFG.walkFriction) * dt;
+    if (e > 0) {
+      const k = Math.min(1, rate / e);
+      s.gv = [s.gv[0] + ex * k, s.gv[1] + ey * k];
+    }
+    const speed = Math.hypot(s.gv[0], s.gv[1]);
+    const before = Math.floor(s.stride / CFG.footstep);
+    s.stride += speed * dt;
+    if (Math.floor(s.stride / CFG.footstep) > before) world.events.push({ type: "step", x: s.x, y: s.y, z: s.z });
+    const rt = qrot(s.q, [1, 0, 0]), fw = qrot(s.q, [0, 0, -1]);
+    const d = [(rt[0] * s.gv[0] + fw[0] * s.gv[1]) * dt, (rt[1] * s.gv[0] + fw[1] * s.gv[1]) * dt, (rt[2] * s.gv[0] + fw[2] * s.gv[1]) * dt];
+    const cam = qmul(lookQ(s), s.viewOff);
+    const g = s.ground;
+    if (g.kind !== "asteroid") {
+      walkSolids(s, d);
+      s.vx = d[0] / dt; s.vy = d[1] / dt; s.vz = d[2] / dt;
+    } else {
+      // Carried: the rock's turn since last step turns the body with it.
+      const dq = qmul(g.q, qconj(s.gq));
+      s.gq = g.q.slice();
+      s.q = qnorm(qmul(dq, s.q));
+      let n = qrot(g.q, s.gn);
+      // Walking on a sphere is turning about its centre.
+      const R = g.r + s.r;
+      const m = len(d);
+      if (m > 1e-9) {
+        const turn = qaxis(norm(cross(n, d)), m / R);
+        n = norm(qrot(turn, n));
+        s.q = qnorm(qmul(turn, s.q));
+        s.gn = qrot(qconj(g.q), n);
+      }
+      s.x = g.x + n[0] * R; s.y = g.y + n[1] * R; s.z = g.z + n[2] * R;
+      const sv = surfaceVel(g, s);
+      s.vx = sv[0] + d[0] / dt; s.vy = sv[1] + d[1] / dt; s.vz = sv[2] + d[2] / dt;
+    }
+    // Up is the normal, exactly; the eye keeps what it saw and eases.
+    const n = g.kind === "asteroid" ? norm([s.x - g.x, s.y - g.y, s.z - g.z]) : null;
+    if (n) {
+      const r = qfromTo(upOf(s), n);
+      if (qangle(r) > 1e-9) s.q = qnorm(qmul(r, s.q));
+    }
+    s.viewOff = qnorm(qmul(qconj(lookQ(s)), cam));
   }
 }
