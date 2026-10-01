@@ -20,10 +20,10 @@
 // suite, which had a squadmate and no incoming fire.
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
-import { updateCompanionSpec } from "../src/mission/ai.js";
-import { nearestHostile } from "../src/mission/enemyspec/perception.js";
+import { updateCompanionSpec, markVerdictHit } from "../src/mission/ai.js";
+import { nearestHostile, exposureAt } from "../src/mission/enemyspec/perception.js";
 import { updateProjectiles } from "../src/mission/combat.js";
-import { Soldier, Projectile, STAND_H, stepActor } from "../src/mission/entities.js";
+import { Soldier, Projectile, STAND_H, stepActor, tickReload } from "../src/mission/entities.js";
 import { config } from "../src/game/config.js";
 import { makeRng } from "../src/game/gen/rng.js";
 
@@ -44,9 +44,12 @@ function scene(extra = {}) {
 }
 
 // A target that stays exactly where it is put: nothing in these tests ticks it,
-// so its own motion controller never runs.
+// so its own motion controller never runs. It carries a straight gun it never
+// fires, because exposure is "which hostile weapons can reach me"
+// (tech/squad-survival.md, V4) and an unarmed dummy reaches nobody.
+const GUN = { gun: { at: [0, 0], projectile: { speed: 700, life: 2, damage: 1 } } };
 function foeAt(x, y) {
-  const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" } } }), x, y);
+  const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" }, emitters: GUN } }), x, y);
   r.rng = () => 0.5;
   return r;
 }
@@ -162,6 +165,40 @@ function firefights(speed, opts = {}) {
   };
 }
 
+
+// ---- cover (tech/squad-survival.md, V3) -----------------------------------
+// A floor, a low wall a squadmate can hop and hide behind (it blocks a level
+// sight line), a target dummy on the far side, and the leader behind the wall.
+// `drive` is the mission's own per-soldier order for what the tests need:
+// the central fire-cooldown and reload ticks, the bridge, the integrator.
+const magRifle = { ...rifle, magazine: 3, reloadTime: 1.2 };
+function coverScene(foeX = 800) {
+  const cues = [];
+  const sc = scene({
+    platforms: [{ x: 0, y: 500, w: 2400, h: 40 }, { x: 330, y: 440, w: 24, h: 60 }],
+    specRoots: [foeAt(foeX, 460)],
+    sound: (cue) => cues.push(cue),
+  });
+  sc.world.width = 2400;
+  const leader = new Soldier(roster("L"), rifle, 150, 500 - STAND_H);
+  const comp = new Soldier(roster("C"), magRifle, 420, 500 - STAND_H);
+  sc.soldiers.push(leader, comp);
+  return { sc, leader, comp, cues };
+}
+function drive(comp, sc, leader, seconds, log = []) {
+  for (let i = 0; i < Math.round(seconds / STEP); i++) {
+    if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+    tickReload(comp, STEP, sc);
+    updateCompanionSpec(comp, STEP, sc, leader, noopCtx);
+    stepActor(comp, STEP, sc.world, sc.platforms);
+    const a = comp.agent;
+    const st = a.brainState.current;
+    const prev = log.length ? log[log.length - 1].state : null;
+    if (st !== prev) log.push({ state: st, x: comp.x + comp.w / 2, reloading: comp.reloading, far: a.sense.leaderFar, dist: a.sense.dist });
+  }
+  return log;
+}
+
 export default async function run(t) {
   // ---- a target ABOVE: the case the ±40px band made unplayable --------------
   {
@@ -184,14 +221,16 @@ export default async function run(t) {
   // ---- a target BELOW -------------------------------------------------------
   {
     const leader = new Soldier(roster("L"), rifle, 250, 300 - STAND_H);
-    const comp = new Soldier(roster("C"), rifle, 300, 300 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 425, 300 - STAND_H); // at the lip
     const sc = scene({
       soldiers: [leader, comp],
       // a ledge for the companion; the sight line down to the floor is clear
       platforms: [{ x: 0, y: 500, w: 1600, h: 40 }, { x: 240, y: 300, w: 220, h: 20 }],
       specRoots: [foeAt(700, 460)],
     });
-    const shots = play(comp, sc, leader, 240);
+    // Frozen on the ledge: the fighting range (420–600) would otherwise walk it
+    // off, and what is under test is the barrel, not where it stands.
+    const shots = play(comp, sc, leader, 240, false);
     t.ok(`below: engages and fires (${shots.length} shots)`, shots.length > 3);
     const down = shots.filter((s) => s.p.vy > 100).length;
     t.ok(`below: the rounds travel DOWNWARD (${down}/${shots.length} with vy > 100)`, down === shots.length);
@@ -235,14 +274,15 @@ export default async function run(t) {
 
   // ---- aim is a channel of its own, not a function of facing ----------------
   // The defect was that the shot WAS facing, which is horizontal by
-  // construction. Target dead overhead and inside the keepDistance band, so the
-  // body has no reason to move: facing stays ±1 (the locomotor is its only
+  // construction. Target dead overhead, body frozen: facing stays ±1 (the locomotor is its only
   // writer, locomotion.js) while the barrel points near-vertically.
   {
     const leader = new Soldier(roster("L"), rifle, 300, 500 - STAND_H);
     const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
     const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(comp.x - 8, 200)] });
-    play(comp, sc, leader, 60);
+    // Frozen: 280px overhead is inside the engage range but short of the
+    // fighting range, which would otherwise back the body away from under it.
+    play(comp, sc, leader, 60, false);
     t.ok(`aim: the barrel is near-vertical (aimVec.y ${comp.aimVec.y.toFixed(3)})`, comp.aimVec.y < -0.98);
     t.ok("aim: facing is still a horizontal ±1 the ground probe can use", Math.abs(comp.facing) === 1);
     t.ok("aim: and the shot does NOT follow facing", Math.abs(comp.fireDir().y) > 0.98);
@@ -402,5 +442,326 @@ export default async function run(t) {
     t.ok(`speed: and the gap is the latency curve, not noise (${got} frames, want ~${want})`, Math.abs(got - want) <= 2);
     t.ok(`speed: being late costs hit points even when the reaction lands (${Math.round(slow.dealt)} vs ${Math.round(fast.dealt)})`,
       slow.dealt > fast.dealt);
+  }
+
+  // ---- survival senses (tech/squad-survival.md, V1) -------------------------
+  // Seam only: nothing reads them yet. What is pinned is that they are TRUE to
+  // the body, and that the fight ending does not freeze them.
+  {
+    const magRifle = { ...rifle, magazine: 10, reloadTime: 1.5 };
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), magRifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(650, 500 - 40)] });
+    play(comp, sc, leader, 2, false);
+    const a = comp.agent;
+    t.ok("survival: the companion is opted in", !!a.survival);
+    t.eq("survival: its HP is the soldier's, not the agent's constant 1", a.maxHealth, comp.maxHealth);
+    t.ok("survival: healthy and unhurt is neither wounded nor under fire", a.sense.wounded === false && a.sense.underFire === false);
+    config.survivalWounded = 1;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: at the knob's top, even a squadmate at full health is wounded", a.sense.wounded === true);
+    config.survivalWounded = 0.5;
+    play(comp, sc, leader, 13, false);
+    t.eq("survival: one hostile in sight is exposure 1", a.sense.exposure, 1);
+    t.eq("survival: and until V4 a shot is exactly line of sight", a.sense.shot, a.sense.los);
+
+    comp.health = comp.maxHealth * 0.3;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: a health drop is being under fire", a.sense.underFire === true);
+    t.ok("survival: and below the knob is wounded", a.sense.wounded === true);
+    t.ok("survival: which is not calm", a.sense.calm === false);
+
+    comp.ammo = 0;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: an empty magazine with a spare reloads, which is needReload",
+      comp.reloading > 0 && a.sense.needReload === true && a.sense.outOfAmmo === false);
+    comp.reloading = 0;
+    comp.magsLeft = 0;
+    comp.ammo = 0;
+    play(comp, sc, leader, 13, false);
+    t.ok("survival: empty with no spare is outOfAmmo", a.sense.outOfAmmo === true && a.sense.needReload === false);
+
+    // The last hostile dies: calm has to arrive anyway, or cover never ends.
+    sc.specRoots[0].alive = false;
+    play(comp, sc, leader, Math.ceil((config.survivalCalmTime + 0.3) / STEP), false);
+    t.ok("survival: with nothing left alive, calm still arrives", a.sense.calm === true && a.sense.underFire === false);
+    t.ok("survival: and there is nothing to be exposed to or to shoot", a.sense.exposure === 0 && a.sense.shot === false);
+  }
+  {
+    // A wall between them: seen by nobody, a shot at nobody.
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(650, 500 - 40)] });
+    sc.platforms.push({ x: 480, y: 300, w: 30, h: 200 });
+    play(comp, sc, leader, 2, false);
+    t.ok("survival: behind a wall, exposure 0 and no shot", comp.agent.sense.exposure === 0 && comp.agent.sense.shot === false);
+  }
+  {
+    // An inbound rocket is fire. The explode rule belongs to the duck alone.
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(900, 500 - 40)] });
+    const spec = { w: 8, h: 8, color: "#f80", life: 3, gravity: 0 };
+    sc.projectiles.push(new Projectile(520, 500 - 30, -300, 0, spec, "enemy", [{ kind: "explode", radius: 60, amount: 10 }], null));
+    play(comp, sc, leader, 1, false);
+    t.ok("survival: an inbound explosive round sets underFire", comp.agent.sense.underFire === true);
+    t.ok("survival: and it is still not ducked", comp.crouched === false);
+  }
+  {
+    // The leash, with its hysteresis: out past it sets, back inside the margin
+    // clears, and in between keeps what it was.
+    const leader = new Soldier(roster("L"), rifle, 250, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp] });
+    const at = (d) => { leader.x = comp.x - d; play(comp, sc, leader, 13, false); return comp.agent.sense.leaderFar; };
+    t.ok("leash: near is not far", at(100) === false);
+    t.ok("leash: past the leash is far", at(config.survivalLeash + 20) === true);
+    t.ok("leash: just inside it is STILL far", at(config.survivalLeash - config.survivalLeashMargin / 2) === true);
+    t.ok("leash: inside the margin clears it", at(config.survivalLeash - config.survivalLeashMargin - 20) === false);
+  }
+  {
+    // Not opted in: an ordinary player-team agent (the Behavior Lab's) never
+    // publishes any of it.
+    const plain = instantiate(normalizeSpec({ id: "plain", root: { visual: { size: [30, 46] }, motion: { type: "static" } } }), 300, 454, "player");
+    const sc = scene({ specRoots: [foeAt(650, 500 - 40)] });
+    updateSpecEnemy(plain, STEP, sc, noopCtx);
+    t.ok("survival: an agent nobody opted in publishes none of it", !("underFire" in plain.sense) && !("exposure" in plain.sense));
+  }
+
+  // ---- cover transitions: the outcome table (V3) ----------------------------
+  {
+    // Reloading, nobody shooting: cover inside the reload, then combat ONCE.
+    // Then out of ammo with the fight in range and the leader near: cover, held.
+    const { sc, leader, comp, cues } = coverScene();
+    comp.magsLeft = 1;
+    const log = drive(comp, sc, leader, 6);
+    const states = log.map((e) => e.state);
+    t.eq("cover: combat, cover for the reload, combat, cover when empty", states, ["combat", "cover", "combat", "cover"]);
+    t.ok(`cover: the reload's cover is behind the wall (${Math.round(log[2].x)}px, wall at 330)`, log[2].x < 330);
+    t.ok("cover: one switch each way per reload — it came out only once the reload was done", log[2].reloading === 0);
+    t.ok("cover: empty, it stays in cover while the fight lasts", comp.agent.brainState.current === "cover" && comp.ammo === 0);
+    t.eq("cover: and never dry-clicks", cues.filter((c) => c === "weapon.empty").length, 0);
+
+    // Out of ammo, leader walks away: it follows, exposed.
+    // (Away from the fight: walking past the hostile would bring the leader
+    // back inside the leash with a fight in range, which is cover again.)
+    leader.x = 2300;
+    const away = drive(comp, sc, leader, 7);
+    t.eq("cover: the leader walks off — the empty squadmate escorts", away.map((e) => e.state), ["cover", "escort"]);
+    t.ok(`cover: and follows (${Math.round(comp.x)} toward ${leader.x})`, comp.x > 1800);
+    // ...and re-enters cover only when the leader is back inside the leash and
+    // a hostile is within engage range.
+    leader.x = 150;
+    const back = drive(comp, sc, leader, 8);
+    const entry = back.find((e) => e.state === "cover");
+    t.ok("cover: it comes back and takes cover again", !!entry);
+    t.ok(`cover: only once the leader is near and the fight in range (far ${entry && entry.far}, ${Math.round(entry ? entry.dist : 0)}px)`,
+      !!entry && entry.far === false && entry.dist < 520);
+    t.ok("cover: never combat while empty", ![...away, ...back].some((e) => e.state === "combat"));
+
+    // Out of ammo, fight over: escort, and it does not re-enter.
+    sc.specRoots[0].alive = false;
+    const over = drive(comp, sc, leader, 3);
+    t.eq("cover: the fight over, the empty squadmate escorts and stays escorting", over.map((e) => e.state), ["cover", "escort"]);
+  }
+  {
+    // Wounded and hit beyond engage range: cover from escort, back on calm.
+    const { sc, leader, comp } = coverScene(1300);
+    drive(comp, sc, leader, 0.5);
+    t.eq("cover: out of range it escorts", comp.agent.brainState.current, "escort");
+    comp.health = comp.maxHealth * 0.3;
+    const log = drive(comp, sc, leader, 0.5);
+    t.eq("cover: wounded and hit, it takes cover", log.map((e) => e.state), ["escort", "cover"]);
+    const calm = drive(comp, sc, leader, config.survivalCalmTime + 0.5);
+    t.eq("cover: and escorts again once it is calm", calm.map((e) => e.state), ["cover", "escort"]);
+  }
+  {
+    // In cover when the last hostile dies: escort within calm time plus a tick.
+    const { sc, leader, comp } = coverScene();
+    drive(comp, sc, leader, 0.5);
+    comp.health = comp.maxHealth * 0.3;
+    drive(comp, sc, leader, 0.3);
+    t.eq("cover: wounded and hit in a fight, it takes cover", comp.agent.brainState.current, "cover");
+    sc.specRoots[0].alive = false;
+    let frames = 0;
+    while (comp.agent.brainState.current === "cover" && frames < 600) { drive(comp, sc, leader, STEP); frames++; }
+    const limit = config.survivalCalmTime + 0.2;
+    t.ok(`cover: the last hostile dead, it escorts within calm time plus a sense tick (${(frames * STEP).toFixed(2)}s ≤ ${limit}s)`,
+      comp.agent.brainState.current === "escort" && frames * STEP <= limit + STEP);
+  }
+
+  // ---- seeing is not hitting (V4) -------------------------------------------
+  {
+    // In sight, out of range: a round that dies at 270px is no shot at 400.
+    const short = { ...rifle, projectile: { ...rifle.projectile, life: 0.3 } };
+    const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), short, 300, 500 - STAND_H);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(700, 500 - 40)] });
+    const shots = play(comp, sc, leader, 120, false);
+    t.ok("reach: the target is in plain sight", comp.agent.sense.los === true);
+    t.ok("reach: but the round cannot get there, so there is no shot", comp.agent.sense.shot === false);
+    t.eq("reach: and the squadmate holds its fire", shots.length, 0);
+  }
+  {
+    // Over a low wall: a straight gun cannot reach, a lobber can.
+    const wall = { x: 520, y: 440, w: 24, h: 60 };
+    const lobber = (x) => {
+      const r = instantiate(normalizeSpec({ id: "lob", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" },
+        emitters: { pod: { at: [0, -10], projectile: { speed: 520, life: 3, gravity: 0.4, damage: 1 } } } } }), x, 500 - 40);
+      r.rng = () => 0.5;
+      return r;
+    };
+    const sc = scene({ specRoots: [foeAt(700, 460)] });
+    sc.platforms.push(wall);
+    const me = { team: "player", w: 30, h: 46 };
+    const at = [400, 500 - STAND_H / 2];
+    t.eq("lob: behind the wall, a straight gun cannot reach", exposureAt(me, sc, ...at), 0);
+    sc.specRoots = [lobber(700)];
+    t.eq("lob: a lobber in the same place can", exposureAt(me, sc, ...at), 1);
+    t.eq("lob: but not past its range", exposureAt(me, sc, 1900, at[1]), 0);
+  }
+  {
+    // A charger has no gun: it reaches a radius around itself.
+    const sc = scene({ specRoots: [instantiate(normalizeSpec({ id: "charger", root: { health: { max: 50 }, visual: { size: [30, 40] },
+      motion: { type: "static" }, contact: { damage: 5 } } }), 700, 460)] });
+    const me = { team: "player", w: 30, h: 46 };
+    t.eq("melee: inside its reach is exposed", exposureAt(me, sc, 715 - config.survivalContactReach + 10, 477), 1);
+    t.eq("melee: outside it is not", exposureAt(me, sc, 715 - config.survivalContactReach - 40, 477), 0);
+  }
+  {
+    // A gravity weapon's barrel takes the arc that lands, and the rounds do land.
+    const lobGun = { id: "lob", name: "Lob", fireRate: 3, projectile: { speed: 750, w: 8, h: 8, color: "#fff", life: 3, gravity: 0.5 }, effects: [{ kind: "damage", amount: 1 }] };
+    const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+    const comp = new Soldier(roster("C"), lobGun, 300, 500 - STAND_H);
+    const foe = foeAt(700, 500 - 40);
+    const sc = scene({ soldiers: [leader, comp], specRoots: [foe], enemies: [foe] });
+    let hits = 0;
+    const hitCtx = { ...noopCtx, damage(tg) { if (tg === foe) hits++; } };
+    for (let i = 0; i < 180; i++) {
+      if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+      updateCompanionSpec(comp, STEP, sc, leader, hitCtx);
+      updateProjectiles(sc, STEP, hitCtx);
+    }
+    const flat = bearing(comp, foe);
+    t.ok(`arc: the barrel is raised above the straight bearing (${comp.aimVec.y.toFixed(2)} vs ${flat.y.toFixed(2)})`, comp.aimVec.y < flat.y - 0.05);
+    t.ok(`arc: and the lobbed rounds land on the target (${hits} hits)`, hits > 0);
+  }
+
+  // ---- dodging: a jump for what a knee cannot avoid (V6) ---------------------
+  // A round at shin height meets the crouched box as surely as the standing
+  // one, so the knee is no answer; a jump flown under zero input clears it.
+  {
+    const shin = (off, from = 640) => {
+      const saved = [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast, config.duckHoldTime];
+      config.duckChanceSlow = config.duckChanceFast = 1;
+      config.duckLatencySlow = config.duckLatencyFast = 0;
+      if (off) config.duckHoldTime = 0;
+      try {
+        const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+        const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+        comp.health = comp.maxHealth = 1e6;
+        const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(1500, 460)] });
+        const ctx = tally(comp);
+        sc.projectiles.push(new Projectile(from, 488, -900, 0, { w: 12, h: 4, color: "#fff", life: 2, gravity: 0 }, "enemy", [{ kind: "damage", amount: 5 }], null));
+        let rose = 0;
+        let first = -1;
+        let knelt = false;
+        let drift = 0;
+        const x0 = comp.x;
+        for (let i = 0; i < 90; i++) {
+          if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+          updateCompanionSpec(comp, STEP, sc, leader, ctx);
+          stepActor(comp, STEP, sc.world, sc.platforms);
+          updateProjectiles(sc, STEP, ctx);
+          if (!comp.onGround) { rose++; drift = Math.max(drift, Math.abs(comp.x - x0)); if (first < 0) first = i; }
+          if (comp.crouched) knelt = true;
+        }
+        return { rose, first, knelt, dealt: ctx.dealt, landed: comp.onGround, drift };
+      } finally {
+        [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast, config.duckHoldTime] = saved;
+      }
+    };
+    const on = shin(false);
+    t.ok(`jump: a round at shin height is jumped (${on.rose} frames in the air)`, on.rose > 0);
+    t.ok("jump: not knelt at — the knee does not clear it", on.knelt === false);
+    t.eq("jump: and it misses", on.dealt, 0);
+    t.ok("jump: the squadmate lands again", on.landed === true);
+    t.ok(`jump: flown under zero input, it comes down where it went up (${on.drift.toFixed(1)}px)`, on.drift < 4);
+    // A round ~0.7s out: a jump launched at once is coming back down through
+    // its line when it arrives, so the launch is TIMED to carry the body over it.
+    const late = shin(false, 1000);
+    t.ok(`timed: a round that arrives late is still jumped (${late.rose} frames up)`, late.rose > 0);
+    t.ok(`timed: the launch waits for it (first airborne frame ${late.first})`, late.first > 5);
+    t.eq("timed: and it misses", late.dealt, 0);
+    const off = shin(true);
+    t.ok(`jump: with the reflex off it takes the round (${off.dealt})`, off.rose === 0 && off.dealt > 0);
+  }
+  {
+    // Keep going: a round chasing a squadmate that walks away from it closes at
+    // 280px/s and does not reach it inside the lookahead, so it is neither knelt
+    // at nor jumped. Standing still, the same round is ducked.
+    const judged = (vx) => {
+      const saved = [config.duckChanceSlow, config.duckChanceFast];
+      config.duckChanceSlow = config.duckChanceFast = 1;
+      const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+      const comp = new Soldier(roster("C"), rifle, 700, 500 - STAND_H);
+      const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(1500, 460)] });
+      comp.vx = vx;
+      comp.onGround = true;
+      sc.projectiles.push(new Projectile(1300, 470, -600, 0, { w: 12, h: 4, color: "#fff", life: 3, gravity: 0 }, "enemy", [], null));
+      updateCompanionSpec(comp, STEP, sc, leader, noopCtx);
+      [config.duckChanceSlow, config.duckChanceFast] = saved;
+      return !!(comp.duck.pending || comp.duck.wait > 0 || comp.duck.hold > 0 || comp.agent.dodgeHold);
+    };
+    t.ok("keep going: standing still, the round is dodged", judged(0) === true);
+    t.ok("keep going: walking away from it, it is not", judged(-320) === false);
+  }
+
+  // ---- the verdict log (tech/squad-debug.md, D0) ----------------------------
+  // One round at a standing squadmate, the reflex's knobs pinned, and the ctx
+  // the Mission installs: its `hit` marks the struck soldier's verdict. The log
+  // is a record — these read it, nothing in the game does.
+  {
+    const verdicts = ({ y = 470, h = 4, from = 640, vx = -900, chance = 1, latency = 0, fx = [{ kind: "damage", amount: 5 }] } = {}) => {
+      const saved = [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast];
+      config.duckChanceSlow = config.duckChanceFast = chance;
+      config.duckLatencySlow = config.duckLatencyFast = latency;
+      try {
+        const leader = new Soldier(roster("L"), rifle, 100, 500 - STAND_H);
+        const comp = new Soldier(roster("C"), rifle, 300, 500 - STAND_H);
+        comp.health = comp.maxHealth = 1e6;
+        const sc = scene({ soldiers: [leader, comp], specRoots: [foeAt(1500, 460)] });
+        const ctx = tally(comp);
+        ctx.hit = (p, target) => { if (target.kind === "soldier") markVerdictHit(target, p); };
+        comp.onGround = true; // a fresh Soldier has not landed yet, and the reflex is grounded-only
+        const round = new Projectile(from, y, vx, 0, { w: 12, h, color: "#fff", life: 2, gravity: 0 }, "enemy", fx, null);
+        sc.projectiles.push(round);
+        for (let i = 0; i < 60; i++) {
+          if (comp.fireCooldown > 0) comp.fireCooldown -= STEP;
+          updateCompanionSpec(comp, STEP, sc, leader, ctx);
+          stepActor(comp, STEP, sc.world, sc.platforms);
+          updateProjectiles(sc, STEP, ctx);
+        }
+        return { log: comp.duck.log, round, dealt: ctx.dealt };
+      } finally {
+        [config.duckChanceSlow, config.duckChanceFast, config.duckLatencySlow, config.duckLatencyFast] = saved;
+      }
+    };
+    const one = (r) => (r.log.length === 1 ? r.log[0] : null);
+    const duck = verdicts();
+    t.ok("verdict: a chest-high round knelt under is DUCK, unhit", one(duck) && one(duck).verdict === "duck" && !one(duck).hit && one(duck).round === duck.round);
+    const jump = verdicts({ y: 488 });
+    t.ok("verdict: a shin-high round jumped is JUMP, unhit", one(jump) && one(jump).verdict === "jump" && !one(jump).hit);
+    // A round as tall as the body, arriving in two frames: no knee, no launch.
+    const cant = verdicts({ y: 454, h: 40, from: 340 });
+    t.ok("verdict: a round nothing clears is CAN'T, and it lands", one(cant) && one(cant).verdict === "cant" && one(cant).hit);
+    const missed = verdicts({ chance: 0 });
+    t.ok("verdict: a failed roll is MISSED, and it lands", one(missed) && one(missed).verdict === "missed" && one(missed).hit);
+    // Chosen, but the reaction is slower than the round.
+    const late = verdicts({ from: 420, latency: 0.5 });
+    t.ok(`verdict: a duck still waiting when the round lands is LATE (${one(late) && one(late).verdict})`, one(late) && one(late).verdict === "late" && one(late).hit);
+    t.eq("verdict: a round flying away is no threat and writes nothing", verdicts({ vx: 900 }).log.length, 0);
+    t.eq("verdict: an exploding round is never judged and writes nothing",
+      verdicts({ fx: [{ kind: "explode", radius: 40, damage: 5 }] }).log.length, 0);
   }
 }

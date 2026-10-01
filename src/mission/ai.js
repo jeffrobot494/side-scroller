@@ -8,12 +8,14 @@
 // archetypes were retired when EnemySpec was wired into missions.
 // ---------------------------------------------------------------------------
 
-import { Projectile, startReload } from "./entities.js";
-import { duckableShot } from "./combat.js";
+import { Projectile, startReload, stepActor, STAND_H, CROUCH_H, SOLDIER_TUNING } from "./entities.js";
+import { predictHit } from "./combat.js";
+import { navGraph, abortRoute } from "./navigation.js";
+import { actuate, nodeUnder } from "../game/nav.js";
 import { config } from "../game/config.js";
 import { weaponSound } from "../audio/cues.js";
 import { instantiate, updateSpecEnemy } from "./enemyspec/runtime.js";
-import { nearestHostile } from "./enemyspec/perception.js";
+import { nearestHostile, aimFrom, edgeExposure } from "./enemyspec/perception.js";
 import { DEFAULT_COMPANION_SPEC } from "../game/companionspecs.js";
 
 // Map a 1..10 Aim stat to a 0..1 accuracy (10 = perfectly tight, 1 = loosest).
@@ -185,6 +187,13 @@ function companionAgent(soldier, scene) {
   // stream has to come from the scene rather than from loadMission.
   const a = instantiate(DEFAULT_COMPANION_SPEC, soldier.x, soldier.y, "player", scene && scene.rng);
   a.soldier = soldier;
+  // Opted into the survival senses (tech/squad-survival.md) — the only agents
+  // that are. The two clocks are advanced by tickSurvival below; perception
+  // reads them on its own cadence.
+  a.survival = { sinceHurt: 99, sinceThreat: 99, hp: soldier.health, leaderFar: false, clock: (scene && scene.survivalClock) || 0 };
+  // Its routes pay for exposure (V5). Injected rather than imported by the
+  // router, which must not import perception.
+  a.edgeWeight = (sc, graph) => edgeExposure(a, sc, graph);
   // brain `fire` → the Soldier's EQUIPPED weapon, down the SAME barrel the
   // renderer draws: fireDir() reads the aimVec set in updateCompanionSpec below,
   // exactly as it does for the player. Through the shared fire() path, not the
@@ -196,41 +205,54 @@ function companionAgent(soldier, scene) {
     // still pull the trigger — and that round would leave down `facing`, into
     // empty air. The barrel is the authority on whether there is a shot.
     if (!soldier.aimVec) return;
+    // Nor on an empty magazine. The brain's gate reads sense.outOfAmmo, which
+    // is up to one sense tick stale, and the frame the last round leaves is the
+    // frame a stale gate would dry-click (tech/squad-survival.md, V3).
+    // autoReload has already started a reload if there is a spare.
+    if (soldier.ammo <= 0) return;
     fire(scene, soldier, soldier.fireDir(), "player", 0, aimAccuracy(soldier.data.stats.aim));
   };
   soldier.agent = a;
   return a;
 }
 
-// ---- the duck reflex (tech/soldier-ducking.md, D1) ------------------------
+// ---- the dodge reflex (tech/soldier-ducking.md D1, tech/squad-survival.md V6)
 // A reflex BELOW the brain, not a brain state: a state would be entered and left
 // on perception's 0.2s cadence — far too slow for a round in flight — and would
 // fight escort/combat the way the old vertical band did.
 //
-// It owns exactly two things: whether this squadmate is kneeling and for how
-// long, and the verdict attached to one round for one soldier. It writes the
-// stance nowhere itself — `agent.crouchIntent` is a deferred channel the soldier
-// locomotor actuates, the same shape as the pending jump beside it
-// (locomotion.js).
+// Three candidates per threatening round, taken in order, the first that
+// predictHit says clears it: KEEP GOING (the standing box carried on at its
+// current velocity — if that clears, the round is no threat), DUCK (the
+// crouched box), JUMP (a copy of the body flown on stepActor under zero input).
+// Exploding rounds are skipped: getting smaller does not help against a blast,
+// and neither does getting higher.
 //
-// Relaxing mission.js's unconditional stand-up means this function now OWNS
+// It owns whether this squadmate is kneeling and for how long, a jump it has
+// decided on and not launched yet, and the verdict attached to one round for
+// one soldier. It writes the stance and the jump nowhere itself — `crouchIntent`,
+// `pendingJump` and `dodgeHold` are deferred channels the soldier locomotor
+// actuates (locomotion.js).
+//
+// Relaxing mission.js's unconditional stand-up means this function also OWNS
 // standing a swapped-away soldier back up: with no hold running it asks for a
 // stand every frame, and the locomotor delivers it on the same tick.
 function tickDuck(soldier, agent, dt, scene, ctx) {
-  const d = soldier.duck || (soldier.duck = { hold: 0, wait: 0, judged: new WeakSet() });
+  const d = soldier.duck || (soldier.duck = { hold: 0, wait: 0, pending: null, judged: new WeakSet(), log: [] });
   if (d.hold > 0) d.hold = Math.max(0, d.hold - dt);
   else if (d.wait > 0) {
-    // A duck that has been decided but has not landed yet. The soldier stands
-    // through it — the stance is a two-state height swap with no in-between
+    // A dodge that has been decided but has not landed yet. The soldier carries
+    // on through it — the stance is a two-state height swap with no in-between
     // pose, so latency shows as a delayed snap, and a slow soldier gets clipped
     // in the gap. That is the half of Speed the player can actually watch.
     d.wait = Math.max(0, d.wait - dt);
-    if (d.wait === 0) d.hold = config.duckHoldTime;
+    if (d.wait === 0) act(d, soldier, agent, dt, scene, ctx);
   }
 
   // Grounded only: kneeling mid-jump changes the box without changing the
-  // trajectory, which reads as a glitch rather than a dodge.
-  if (d.hold <= 0 && d.wait <= 0 && soldier.onGround && config.duckHoldTime > 0) {
+  // trajectory, which reads as a glitch rather than a dodge, and a jump needs
+  // ground to leave from.
+  if (d.hold <= 0 && d.wait <= 0 && soldier.onGround && !agent.dodgeHold && config.duckHoldTime > 0) {
     for (const p of scene.projectiles) {
       // ONE verdict per round per soldier — a soldier who misses a round coming
       // does not get a second look at it. Re-judging across a round's flight
@@ -238,19 +260,156 @@ function tickDuck(soldier, agent, dt, scene, ctx) {
       // the round: one round can threaten more than one squadmate.
       if (d.judged.has(p)) continue;
       d.judged.add(p);
-      if (!duckableShot(scene, p, soldier, dt, ctx)) continue;
+      // The reaction delay is known before the verdict, because a jump is
+      // timed and cannot be timed to launch sooner than the soldier can move.
+      const t = speedT(soldier);
+      const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
+      const plan = dodgeFor(soldier, agent, p, dt, scene, ctx, Math.ceil(latency / dt - 1e-9));
+      if (!plan) continue;
+      if (plan.kind === "cant") { logVerdict(d, p, scene, "cant"); continue; }
       // Whether they react at all is the roll; a failed one is spent, not
       // retried, which is what makes a soldier who was not paying attention
       // indistinguishable from one who was too slow.
-      const t = speedT(soldier);
-      if (sceneRng(scene)() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) continue;
-      const latency = lerp(config.duckLatencySlow, config.duckLatencyFast, t);
-      if (latency > 0) d.wait = latency;
-      else d.hold = config.duckHoldTime;
+      if (sceneRng(scene)() >= lerp(config.duckChanceSlow, config.duckChanceFast, t)) { logVerdict(d, p, scene, "missed"); continue; }
+      logVerdict(d, p, scene, plan.kind);
+      d.pending = { kind: plan.kind, round: p };
+      const wait = plan.kind === "jump" ? plan.delay * dt : latency;
+      if (wait > 0) d.wait = wait;
+      else act(d, soldier, agent, dt, scene, ctx);
       break;
     }
   }
   agent.crouchIntent = d.hold > 0;
+}
+
+// Carry out the dodge decided on. A duck is a duck. A jump is re-planned from
+// the body as it is NOW, because the wait has moved it: launched now if now
+// still clears, re-timed if a later frame does, and if no launch clears any
+// more the reflex falls back to the knee, then to nothing.
+function act(d, soldier, agent, dt, scene, ctx) {
+  const pend = d.pending;
+  d.pending = null;
+  if (!pend) return;
+  if (pend.kind === "duck") { d.hold = config.duckHoldTime; return; }
+  if (!soldier.onGround) { abandonVerdict(d, pend.round); return; }
+  const steps = Math.ceil(config.duckLookahead / dt);
+  const delay = jumpDelay(soldier, agent, pend.round, dt, steps, scene, ctx, 0);
+  if (delay === 0) {
+    // Drop the route leg first, so a dodge is never booked as a failed nav jump,
+    // then hold zero input from launch to landing so it flies the predicted arc.
+    abortRoute(agent);
+    agent.pendingJump = true;
+    agent.dodgeHold = { airborne: false };
+  } else if (delay > 0) {
+    d.pending = pend;
+    d.wait = delay * dt;
+  } else if (crouchClears(soldier, pend.round, dt, steps, scene, ctx)) {
+    d.hold = config.duckHoldTime;
+  } else abandonVerdict(d, pend.round);
+}
+
+// THE VERDICT LOG (tech/squad-debug.md, D0). One entry per round judged a
+// threat — { round, t, verdict: duck | jump | cant | missed, abandoned, hit } —
+// for the squad debug view to read. A record only: nothing in the reflex or
+// the brain reads it back. `t` is on scene.survivalClock, the one clock here.
+const VERDICT_LOG = 8;
+
+function logVerdict(d, round, scene, verdict) {
+  d.log.push({ round, t: (scene && scene.survivalClock) || 0, verdict, abandoned: false, hit: false });
+  if (d.log.length > VERDICT_LOG) d.log.shift();
+}
+
+function abandonVerdict(d, round) {
+  const e = d.log.find((x) => x.round === round);
+  if (e) e.abandoned = true;
+}
+
+// Round `p` struck `soldier` (the Mission's ctx.hit). A dodge still waiting on
+// that round, or a jump given up with nothing in its place, was LATE.
+export function markVerdictHit(soldier, p) {
+  const d = soldier.duck;
+  const e = d && d.log.find((x) => x.round === p);
+  if (!e) return null;
+  e.hit = true;
+  if ((e.verdict === "duck" || e.verdict === "jump") && ((d.pending && d.pending.round === p) || e.abandoned)) e.verdict = "late";
+  return e;
+}
+
+// Which dodge answers round `p`, if any: { kind: "duck" }, { kind: "jump",
+// delay } with the launch `delay` in frames, { kind: "cant" } for a threat
+// nothing here can avoid, or null for a round that is no threat (an exploding
+// round is never judged, so it is null too). `minDelay` is the
+// soldier's reaction time in frames: no jump is planned to launch sooner.
+function dodgeFor(s, agent, p, dt, scene, ctx, minDelay = 0) {
+  if ((p.effects || []).some((e) => e.kind === "explode")) return null;
+  const steps = Math.ceil(config.duckLookahead / dt);
+  const feet = s.y + s.h;
+  const stand = { x: s.x, y: feet - STAND_H, w: s.w, h: STAND_H };
+  const moving = Math.abs(s.vx) > 1e-6;
+  const go = moving ? (i) => ({ x: s.x + s.vx * dt * (i + 1), y: stand.y, w: s.w, h: STAND_H }) : () => stand;
+  const k = predictHit(scene, p, s, go, dt, steps, ctx);
+  if (k < 0) return null;
+  // A body standing still is judged on the frame the round reaches it, exactly
+  // as duckableShot judges it; one that was moving stops to kneel, so the
+  // crouched box must clear the whole flight.
+  if (crouchClears(s, p, dt, moving ? steps : k + 1, scene, ctx)) return { kind: "duck" };
+  const delay = jumpDelay(s, agent, p, dt, steps, scene, ctx, minDelay);
+  return delay >= 0 ? { kind: "jump", delay } : { kind: "cant" };
+}
+
+function crouchClears(s, p, dt, steps, scene, ctx) {
+  const crouch = { x: s.x, y: s.y + s.h - CROUCH_H, w: s.w, h: CROUCH_H };
+  return predictHit(scene, p, s, () => crouch, dt, steps, ctx) < 0;
+}
+
+// WHEN does a jump clear `p`? (tech/squad-survival.md, V6, "timed jump".) A
+// jump lasts about 0.7s and comes back down through the line of fire, so one
+// launched the moment a round is seen is usually hit on the way down by a round
+// that takes about that long to arrive. The launch is timed instead: the first
+// frame, from `from` until the round would arrive, at which a jump carries the
+// body over it. Until then the body keeps going as it is.
+//
+// Each launch is flown on the mission's own integrator under zero input —
+// friction braking, as applyMovement applies it, mirrored by `actuate` — until
+// it lands. The landing must be somewhere the squadmate's graph says is
+// standable, and NO predicted round, `p` or any other, may meet the body before
+// or during the jump. Returns the delay in frames, or -1.
+function jumpDelay(s, agent, p, dt, steps, scene, ctx, from) {
+  const feet = s.y + s.h;
+  const go = (i) => ({ x: s.x + s.vx * dt * (i + 1), y: feet - STAND_H, w: s.w, h: STAND_H });
+  const k = predictHit(scene, p, s, go, dt, steps, ctx);
+  if (k < 0) return -1;
+  const graph = navGraph(agent, scene, config.runSpeed);
+  if (!graph) return -1;
+  for (let L = from; L <= k; L++) {
+    const x = L > 0 ? go(L - 1).x : s.x;
+    const f = jumpFlight({ x, y: s.y, w: s.w, h: s.h, vx: s.vx, slow: s.slow }, dt, scene, Math.max(steps, Math.ceil(2 / dt)));
+    if (!f || !nodeUnder(graph, f.x, f.feet)) continue;
+    const at = (i) => (i < L ? go(i) : f.boxes[Math.min(i - L, f.boxes.length - 1)]);
+    let clear = true;
+    for (const q of scene.projectiles) {
+      if (predictHit(scene, q, s, at, dt, steps, ctx) >= 0) { clear = false; break; }
+    }
+    if (clear) return L;
+  }
+  return -1;
+}
+
+function jumpFlight(s, dt, scene, frames) {
+  const prof = { accel: SOLDIER_TUNING.accel, friction: SOLDIER_TUNING.friction, runSpeed: config.runSpeed };
+  const b = {
+    x: s.x, y: s.y + s.h - STAND_H, w: s.w, h: STAND_H, vx: s.vx, vy: 0,
+    onGround: true, coyote: 0, slow: s.slow, shoveX: 0, shoveY: 0,
+  };
+  const boxes = [];
+  for (let i = 0; i < frames; i++) {
+    b.vx = actuate(prof, b.vx, 0, dt);
+    if (i === 0) b.vy = -config.jumpSpeed;
+    stepActor(b, dt, scene.world, scene.platforms);
+    boxes.push({ x: b.x, y: b.y, w: b.w, h: b.h });
+    if (i > 0 && b.onGround) return { boxes, x: b.x, feet: b.y + b.h };
+  }
+  return null; // never came down inside the window
 }
 
 // Where a soldier sits on the 1..10 Speed stat, as 0..1 — the same shape
@@ -277,10 +436,34 @@ export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
   // are (the locomotor drives the Soldier; the agent's own x/y is just a mirror).
   a.x = soldier.x; a.y = soldier.y; a.w = soldier.w; a.h = soldier.h;
   a.vx = soldier.vx; a.vy = soldier.vy; a.onGround = soldier.onGround; a.facing = soldier.facing;
+  a.leader = leader && leader !== soldier ? leader : null;
+  tickSurvival(soldier, a, dt, scene);
   a.anchor = leader ? { x: leader.x + leader.w / 2, y: leader.y + leader.h / 2 } : null;
-  aimAt(soldier, nearestHostile(a, scene));
+  aimAt(soldier, nearestHostile(a, scene), scene);
   // perception + brain + soldier locomotor (→ soldier.applyMovement / fire())
   updateSpecEnemy(a, dt, scene, ctx);
+}
+
+// The real health, mirrored so `self.hpPct` stops being the agent's constant 1,
+// and the two clocks perception's underFire/calm read. "Hurt" is a health drop
+// seen between ticks rather than a hook on ctx.damage, because burn skips
+// ctx.damage (combat.js updateStatuses) and burning is being hurt.
+//
+// It also advances `scene.survivalClock`, the time the shared exposure cache is
+// aged on. Every squadmate moves it to the last value IT saw plus its step, and
+// never backwards — so squadmates ticking in the same frame advance it once, one
+// that sat out a while as the leader cannot drag it back, and any one of them
+// alone keeps it running.
+function tickSurvival(soldier, a, dt, scene) {
+  const sv = a.survival;
+  scene.survivalClock = Math.max(scene.survivalClock || 0, sv.clock + dt);
+  sv.clock = scene.survivalClock;
+  a.health = soldier.health;
+  a.maxHealth = soldier.maxHealth;
+  sv.sinceHurt += dt;
+  sv.sinceThreat += dt;
+  if (soldier.health < sv.hp) sv.sinceHurt = 0;
+  sv.hp = soldier.health;
 }
 
 // Point a companion's gun at its target, in 2D. Set EVERY frame, not on
@@ -293,8 +476,18 @@ export function updateCompanionSpec(soldier, dt, scene, leader, ctx) {
 // (locomotion.js — move direction, else toward the target), and sense.groundAhead
 // probes off it. Aim is a separate channel: the barrel reads aimVec, so a
 // companion can shoot straight up without the body claiming to face upward.
-function aimAt(soldier, foe) {
+//
+// A gravity weapon's barrel follows the LOW arc that lands on the target
+// (tech/squad-survival.md, V4) — the same solve can-hit flies — and falls back to
+// pointing straight at it when no arc reaches, since that round lands nowhere.
+function aimAt(soldier, foe, scene) {
   if (!foe || !foe.alive) { soldier.aimVec = null; return; }
+  const p = soldier.weapon && soldier.weapon.projectile;
+  const g = p && p.gravity > 0 && scene ? p.gravity * scene.world.gravity : 0;
+  if (g) {
+    const arc = aimFrom(soldier, foe.x + foe.w / 2, foe.y + foe.h / 2, p.speed, g);
+    if (arc) { soldier.aimVec = arc; return; }
+  }
   const dx = foe.x + foe.w / 2 - (soldier.x + soldier.w / 2);
   const dy = foe.y + foe.h / 2 - (soldier.y + soldier.h * 0.42);
   const len = Math.hypot(dx, dy);

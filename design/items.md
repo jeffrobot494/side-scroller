@@ -12,30 +12,41 @@ What a soldier carries into a mission, where it comes from, and what it costs to
 
 ## Loadout
 
-Every soldier has five slots. The slot limit is the only limit — there is no weight.
+A soldier carries anything whose total **bulk** fits their **capacity**. There are no slots.
 
-| Slot | Holds | Count |
-|---|---|---|
-| Primary | Any weapon | 1 |
-| Secondary | Any weapon | 1 |
-| Utility | Grenades, stimpacks, health kits | 2 |
-| Rig | One jet pack **or** one drone | 1 |
+| Rule | |
+|---|---|
+| Capacity | 10 bulk per soldier |
+| Hard limit | A loadout over capacity cannot deploy. There is no over-encumbered state |
+| Weapons | Any number, within capacity. A switch-weapon button cycles through them |
+| Jet pack / drone | At most one of each. Carrying both is legal if the bulk fits |
+| Empty capacity | Deploys empty. Nothing is issued free beyond the recruit's starting weapons |
 
-- A soldier with an empty slot deploys with it empty. Nothing is issued for free beyond the recruit's starting weapons.
-- Loadouts are set per soldier on the deploy screen and persist between missions until changed.
+Loadouts are set per soldier on the deploy screen and persist between missions until changed.
 
-## Item kinds
+## Bulk by item
 
-| Kind | Slot | Lifetime | Built in |
-|---|---|---|---|
-| Weapon | Primary / Secondary | Permanent | Engineering |
-| Grenade | Utility | Consumable — charges | Engineering |
-| Stimpack | Utility | Consumable — charges | Engineering |
-| Health kit | Utility | Consumable — charges | Engineering |
-| Jet pack | Rig | Permanent, destructible | Robotics |
-| Drone | Rig | Permanent, destructible | Robotics |
+| Item | Bulk | Lifetime | Built in |
+|---|---:|---|---|
+| Heavy weapon (launcher, rail gun) | 5 | Permanent | Engineering |
+| Rifle-class weapon | 4 | Permanent | Engineering |
+| Sidearm | 2 | Permanent | Engineering |
+| Grenade | 1 per charge | Consumable | Engineering |
+| Stimpack | 1 per charge | Consumable | Engineering |
+| Health kit | 1 per charge | Consumable | Engineering |
+| Jet pack | 4 | Permanent, destructible | Robotics |
+| Drone | 3 | Permanent, destructible | Robotics |
 
-**Consumables** are carried as a stack in one utility slot (e.g. 3 frag grenades). Charges used in a mission are gone. Unused charges return to base stock on extraction.
+Example loadouts at capacity 10:
+
+| Loadout | Bulk |
+|---|---:|
+| Rifle + sidearm + jet pack | 10 |
+| Two rifles + 2 grenades | 10 |
+| Rifle + drone + 3 health kits | 10 |
+| Launcher + 5 grenades | 10 |
+
+**Consumables** are carried as charges. Charges used in a mission are gone. Unused charges return to base stock on extraction.
 
 **Permanent items** stay with the base until destroyed or lost with a soldier.
 
@@ -105,8 +116,8 @@ Permadeath extends to what the soldier carried.
 | Event | What happens to the items |
 |---|---|
 | Soldier dies | Everything they carried drops at the body |
-| A squadmate reaches the body | They pick up the lot, overflow ignored — it fills their empty slots first, then is carried as salvage |
-| Squad extracts | Salvage returns to base stock; anything left on the map is lost |
+| A squadmate reaches the body | They pick up whatever fits their remaining capacity, and choose what |
+| Squad extracts | Picked-up items return to base stock; anything left on the map is lost |
 | Squad wiped | Everything deployed is lost |
 
 ## Where items come from
@@ -136,6 +147,8 @@ AI-controlled soldiers use their own items.
 
 | Action | Default |
 |---|---|
-| Utility 1 | Q |
-| Utility 2 | E |
-| Rig ability | Jump in the air (jet pack) / F (drone command, if the drone has one) |
+| Switch weapon | X — cycles carried weapons (separate from swap soldier) |
+| Use utility | Q — uses the selected consumable |
+| Next utility | E — cycles carried consumable types |
+| Jet pack | Hold jump in the air |
+| Drone command | F, if the drone has one |

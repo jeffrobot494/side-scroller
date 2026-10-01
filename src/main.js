@@ -128,12 +128,16 @@ mission.onRendererToggle = () => syncRenderer();
 // room the menu opens while the mission runs on, and shows only what is this
 // page's to change (`mission.remote`).
 let pauseMenu = null;
-mission.onPauseChange = (open) => {
+mission.onPauseChange = (open, screen) => {
   if (pauseMenu) pauseMenu.dispose();
   pauseMenu = null;
   if (!open) return;
   pauseMenu = createPauseMenu(document.body, {
     room: mission.remote,
+    // The Debug screen (tech/squad-debug.md) writes the mission's own flags,
+    // and there is none in a room.
+    screen,
+    debug: mission.remote ? null : mission.debug,
     resume: () => mission.setPaused(false),
     // The 2D/3D switch is the same act from the menu as from the toggle key.
     onChange: (key) => { if (key === "missionRenderer") syncRenderer(); },

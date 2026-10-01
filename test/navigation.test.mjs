@@ -14,7 +14,8 @@
 
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { instantiate, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
-import { Soldier, stepActor, STAND_H, SOLDIER_TUNING } from "../src/mission/entities.js";
+import { Soldier, stepActor, STAND_H, SOLDIER_TUNING, loadMission } from "../src/mission/entities.js";
+import { exposureAt, flightTests, edgeExposure } from "../src/mission/enemyspec/perception.js";
 import { updateCompanionSpec } from "../src/mission/ai.js";
 import { WEAPONS } from "../src/game/content.js";
 import { profileFor, graphFor, routeRequest, invalidateNavGraphs, navState, abortRoute } from "../src/mission/navigation.js";
@@ -1027,6 +1028,88 @@ export default async function run(t) {
       }
     }
     t.ok(`S4: ${failed} of ${legs} route legs fail in the air (11.9% before S4)`, legs > 200 && failed <= 6);
+  }
+
+  // ---- squad survival: the exposure cost ceiling (V4) -----------------------
+  // Exposure is candidates × hostiles × emitters, and gravity emitters are
+  // flown. What bounds it is the cost rules (one segment per straight round, a
+  // coarse chord-tested arc over only the platforms in its bounding box, a range
+  // reject) and the shared cache. The measure is the WORST cold scan — every
+  // node's two ends and middle, against the level's full roster — counted in
+  // segment and box tests, so it holds on any machine. Frozen as a ceiling.
+  {
+    let worst = 0;
+    let worstEdges = 0;
+    const EDGE_CEILING = 90000;
+    const data = { id: "s", name: "S", stats: { aim: 5, health: 5, speed: 5, nerve: 5 }, wounds: 0 };
+    const me = { team: "player", w: 30, h: 46 };
+    for (let seed = 1; seed <= 60; seed++) {
+      const { level } = generateLevel({ seed, difficulty: "high", length: "long" });
+      const m = loadMission(level, [{ data, weapon: WEAPONS[0] }], seed);
+      const sc = { ...scene(level.platforms), world: { ...level.world, gravity: config.gravity }, soldiers: m.soldiers, specRoots: m.specRoots };
+      const g = graphFor(sc, profileFor(soldierAgent(level.playerSpawn.x, level.platforms[0].y), sc, config.runSpeed));
+      flightTests.n = 0;
+      for (const n of g.nodes) for (const left of [n.a, (n.a + n.b) / 2, n.b]) exposureAt(me, sc, left + me.w / 2, n.y - STAND_H / 2);
+      worst = Math.max(worst, flightTests.n);
+      // V5: every edge priced, its two ends through the shared cache — so what
+      // is counted is the ends no node probe already paid for.
+      sc.survivalClock = 0;
+      sc.exposureCache = null;
+      flightTests.n = 0;
+      const price = edgeExposure({ ...me, x: 0, y: 0 }, sc, g);
+      for (let i = 0; i < g.nodes.length; i++) for (const e of g.edges[i]) price(i, e);
+      worstEdges = Math.max(worstEdges, flightTests.n);
+    }
+    t.ok(`survival: the worst cold exposure scan over 60 levels is ${worst} tests (ceiling 60000)`, worst > 0 && worst <= 60000);
+    t.ok(`survival: and pricing every edge of the worst graph is ${worstEdges} (ceiling ${EDGE_CEILING})`, worstEdges > 0 && worstEdges <= EDGE_CEILING);
+  }
+
+  // ---- squad survival: dangerous routes (V5) --------------------------------
+  // Two ways across a pit: over a raised slab (cheaper by 0.02s) or through a
+  // sunken one. A gunner firing low from the far side sees the raised slab's
+  // far end and not the sunken slab, whose lines run into the far slab's face.
+  {
+    const DIAMOND = [
+      { x: 0, y: 500, w: 200, h: 40 },
+      { x: 370, y: 430, w: 200, h: 20 },
+      { x: 370, y: 560, w: 200, h: 40 },
+      { x: 740, y: 500, w: 200, h: 40 },
+    ];
+    const gunner = instantiate(normalizeSpec({ id: "g", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" },
+      emitters: { gun: { at: [0, 12], projectile: { speed: 700, life: 2, damage: 1 } } } } }), 870, 460);
+    const run = (optIn) => {
+      const sc = { ...scene(DIAMOND), specRoots: [gunner] };
+      const a = soldierAgent(80, 500);
+      if (optIn) {
+        a.survival = { sinceHurt: 99, sinceThreat: 99 };
+        a.edgeWeight = (s2, g) => edgeExposure(a, s2, g);
+      }
+      a.x = a.soldier.x; a.y = a.soldier.y; a.onGround = true;
+      const g = graphFor(sc, profileFor(a, sc, config.runSpeed));
+      routeRequest(a, { x: 850, y: 477 }, config.runSpeed, sc, STEP);
+      return a.nav.path.map((id) => g.nodes[id].y);
+    };
+    t.eq("routes: a plain agent takes the quicker, exposed way over", run(false), [500, 430, 500]);
+    t.eq("routes: a squadmate takes the longer covered way under", run(true), [500, 560, 500]);
+  }
+  {
+    // Route hysteresis: a destination sliding along the same goal node keeps a
+    // squadmate's held path (the escort's station moves with a walking leader);
+    // a plain agent discards it whenever the point moves past the arrive radius.
+    const held = (optIn) => {
+      const sc = scene([{ x: 0, y: 500, w: 200, h: 40 }, { x: 370, y: 500, w: 400, h: 40 }]);
+      const a = soldierAgent(80, 500);
+      if (optIn) a.survival = { sinceHurt: 99, sinceThreat: 99 };
+      a.x = a.soldier.x; a.y = a.soldier.y; a.onGround = true;
+      const paths = new Set();
+      for (let i = 0; i < 10; i++) {
+        routeRequest(a, { x: 500 + i * 20, y: 477 }, config.runSpeed, sc, STEP);
+        paths.add(a.nav.path);
+      }
+      return paths.size;
+    };
+    t.eq("hysteresis: a squadmate keeps one path while its goal slides along one surface", held(true), 1);
+    t.ok("hysteresis: a plain agent rebuilds it every time the point moves", held(false) >= 9);
   }
 
   // ---- S5: off the graph, never hop blind -----------------------------------

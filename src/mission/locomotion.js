@@ -136,7 +136,20 @@ const SOLDIER = {
     let move = 0;
     let jump = !!ent.pendingJump; // a brain `jump` step queued this (SOLDIER.jump)
     ent.pendingJump = false;
-    switch (req.kind) {
+    // The dodge jump's ZERO-INPUT intent (tech/squad-survival.md, V6): from the
+    // frame the dodge launches until it lands the body takes no drive at all,
+    // because the arc the reflex predicted was flown under zero input and any
+    // steering would fly a different one. The third deferred channel beside
+    // the jump and the crouch; the reflex sets it, this clears it on landing.
+    const hold = ent.dodgeHold;
+    if (hold) {
+      hold.frames = (hold.frames || 0) + 1;
+      if (!s.onGround) hold.airborne = true;
+      // Landed — or never left: a jump that could not fire (knocked off the
+      // ground on the frame) must not leave the body holding still forever.
+      else if (hold.airborne || hold.frames > 2) ent.dodgeHold = null;
+    }
+    switch (ent.dodgeHold ? "dodge" : req.kind) {
       case "driveX":
         move = Math.sign(req.v);
         // the router's explicit takeoff, or the old target-is-above reflex

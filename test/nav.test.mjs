@@ -266,6 +266,26 @@ export default async function run(t) {
     t.ok("route: a node routes to itself at zero cost", route(g, 1, 1).cost === 0);
   }
   {
+    // Two ways across a gap: over a raised slab (cheaper) or through a sunken
+    // one. A per-caller weight on the raised slab's edges (tech/squad-survival.md,
+    // V5) sends the route the other way; no weight is exactly no change.
+    const g = buildGraph([
+      { x: 0, y: 500, w: 200, h: 40 },
+      { x: 370, y: 430, w: 200, h: 20 },
+      { x: 370, y: 560, w: 200, h: 40 },
+      { x: 740, y: 500, w: 200, h: 40 },
+    ], SOLDIER);
+    const id = (x, y) => g.nodes.find((n) => n.y === y && n.a <= x && x <= n.b).id;
+    const [from, up, down, to] = [id(50, 500), id(400, 430), id(400, 560), id(800, 500)];
+    t.eq("weight: unweighted, the raised slab is the way", route(g, from, to).path, [from, up, to]);
+    t.eq("weight: an absent weight is identical, cost and all", route(g, from, to, null, undefined), route(g, from, to));
+    t.eq("weight: ...and so are the distances", costsFrom(g, from, null, undefined).dist, costsFrom(g, from).dist);
+    const danger = (f, e) => (f === up || e.to === up ? 1 : 0);
+    const r = route(g, from, to, null, danger);
+    t.eq("weight: pricing the raised slab takes the sunken way", r.path, [from, down, to]);
+    t.eq("weight: and the weight is never written into the shared graph", route(g, from, to).path, [from, up, to]);
+  }
+  {
     // an island past flatReach in both directions
     const g = buildGraph([
       { x: 0, y: 500, w: 200, h: 40 },

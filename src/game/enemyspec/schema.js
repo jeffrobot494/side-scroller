@@ -55,6 +55,11 @@ export const MOTIONS = {
   // followed is `leader`, not `target`, because `setMotion` reserves `target`
   // for the entity it acts on and would eat it (runtime.js).
   follow:       { params: { leader: "anchor", standoff: 90, spread: 0, speed: 120 } },
+  // Break contact: go to the least exposed spot within reach and inside the
+  // leader's leash, and stand there (tech/squad-survival.md, V3). It reads the
+  // survival senses, which only a squadmate publishes, so it is left out of the
+  // vocabulary the LLM is shown (`squadOnly`).
+  cover:        { params: { speed: 320 }, squadOnly: true },
   home:         { params: { speed: 180, turnRate: 3 } }, // rad/s steering toward player
   orbit:        { params: { around: "parent", radius: 90, degPerSec: 90 } },
   // bob + slow drift toward the player's x, holding `altitude` px between the
@@ -266,7 +271,7 @@ export function vocabularyDoc() {
     `  body: { w, h, gravity (0=flies, 1=falls), jump (upward px/s when it jumps; default 665), ghost (true = passes through platforms; default false) } — size defaults to visual size. Platforms block everyone else; flying entities with contact.destroySelf (missiles) are destroyed on terrain.`,
     `  body.jump is how HIGH this body can get, so it decides which ledges it can traverse: 665 clears a ~110px perch, 520 only ~68px. Raise it for something that should chase onto rooftops, lower it for something heavy. Omit it unless the design calls for it. Meaningless on a flying body (gravity 0).`,
     `  health: { max } — omit for indestructible decoration; root MUST have health`,
-    `  motion: one of ${Object.keys(MOTIONS).join(", ")} with params, e.g. ${JSON.stringify({ type: "keepDistance", ...MOTIONS.keepDistance.params })}`,
+    `  motion: one of ${Object.keys(MOTIONS).filter((k) => !MOTIONS[k].squadOnly).join(", ")} with params, e.g. ${JSON.stringify({ type: "keepDistance", ...MOTIONS.keepDistance.params })}`,
     `  contact: { damage, destroySelf?, knockback? } — touch damage to the player; knockback is 0-1 (0 = none, 1 = hurled a screen), NOT a velocity in pixels`,
     `  emitters: { <name>: { at:[dx,dy], ref:"<defId>" | projectile:{ speed,w,h,color,life,damage,effects? }, sound?: "<cueId>"|{cue,gain} } }`,
     `  children: [entities], at: [dx,dy] offset from parent`,

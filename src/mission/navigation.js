@@ -243,9 +243,17 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // the agent happens to be going; clearing it on every destination change means
   // a chaser following a moving target never accumulates three strikes and
   // throws itself at the same pillar forever (tech/agent-navigation.md N4).
+  //
+  // Except for a squadmate (tech/squad-survival.md, V5): its routes weigh
+  // exposure, so a fresh route can be a different way round, and a station that
+  // slides along with a walking leader would swap it every frame. A destination
+  // that moved but still resolves to the SAME goal node keeps the held path;
+  // the timed repath below decides whether a cheaper one replaces it.
   if (!nav.dest || dist2(destX, destY, nav.dest.x, nav.dest.y) > config.navArriveRadius ** 2) {
+    const keep = ent.survival && nav.path && nav.goal !== undefined
+      && (nearestNode(graph, destX, destY) || {}).id === nav.goal;
     nav.dest = { x: destX, y: destY };
-    nav.path = null;
+    if (!keep) nav.path = null;
   }
 
   // ---- airborne: no repathing, only air control ---------------------------
@@ -317,16 +325,23 @@ export function routeRequest(ent, dest, speed, scene, dt) {
   // ---- repath if the path is stale ----------------------------------------
   nav.repathIn -= dt;
   if (!nav.path || nav.path[0] !== here.id || nav.repathIn <= 0) {
+    // A timed repath of a path still in force, for a squadmate: only a route
+    // cheaper by the margin replaces it (V5).
+    const held = ent.survival && nav.path && nav.path[0] === here.id ? nav.path : null;
     nav.repathIn = config.navRepathInterval;
+    const weight = edgeWeightFor(ent, scene, graph);
     const goal = nearestNode(graph, destX, destY);
-    let r = goal ? route(graph, here.id, goal.id, nav.banned) : null;
+    let r = goal ? route(graph, here.id, goal.id, nav.banned, weight) : null;
     nav.reachable = !!r;
+    nav.goal = goal ? goal.id : undefined;
     if (!r) {
       // Unreachable — or reachable only over an edge this body has proven it
       // cannot fly. Either way: go as close as the graph allows and stop.
-      const partial = bestPartial(graph, here.id, destX, destY, nav.banned);
-      r = partial ? route(graph, here.id, partial.id, nav.banned) : null;
+      const partial = bestPartial(graph, here.id, destX, destY, nav.banned, weight);
+      r = partial ? route(graph, here.id, partial.id, nav.banned, weight) : null;
     }
+    if (held && r && held[held.length - 1] === r.path[r.path.length - 1]
+      && !(r.cost < pathCost(graph, held, weight) - config.survivalRouteMargin)) r = { path: held };
     nav.path = r ? r.path : null;
     // "Nowhere left to go": no route, and the best we can do is where we are.
     nav.blocked = !nav.reachable && (!nav.path || nav.path.length === 1);
@@ -519,7 +534,29 @@ export function abortRoute(ent) {
 // module for navSense, so the sight test arrives from the call site that owns
 // both. Returns a world point in CENTRE space — what routeRequest consumes —
 // or null, which means "nothing better exists; hold distance where you are".
-export function holdPoint(ent, scene, speed, tp, min, max, see) {
+//
+// `score`, when a caller passes one, replaces the tiebreak with a RANKING
+// (tech/squad-survival.md, V2) and drops sight as a filter — see scoredPoint.
+// Absent, this is the rule above exactly, which is what every enemy gets.
+// The per-caller edge weight a body routes with: a squadmate's exposure price
+// (injected by the companion bridge as `ent.edgeWeight`), else none at all.
+function edgeWeightFor(ent, scene, graph) {
+  return ent.edgeWeight ? ent.edgeWeight(scene, graph) || undefined : undefined;
+}
+
+// What a held path costs now, under the same weight a fresh route would pay.
+// Infinity when an edge on it no longer exists.
+function pathCost(graph, path, weight) {
+  let c = 0;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const e = graph.edges[path[i]].find((x) => x.to === path[i + 1]);
+    if (!e) return Infinity;
+    c += e.cost + (weight ? weight(path[i], e) : 0);
+  }
+  return c;
+}
+
+export function holdPoint(ent, scene, speed, tp, min, max, see, score) {
   if (!config.navReposition) return null;
   if (!ent.onGround) return null; // "where I could stand" needs a node to stand on
   const graph = navGraph(ent, scene, speed);
@@ -533,7 +570,8 @@ export function holdPoint(ent, scene, speed, tp, min, max, see) {
   // over from another graph names an edge id that now means something else, and
   // would silently remove a perfectly good candidate.
   const nav = navState(ent, scene, graph);
-  const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null);
+  const { dist } = costsFrom(graph, here.id, nav ? nav.banned : null, score ? edgeWeightFor(ent, scene, graph) : undefined);
+  if (score) return scoredPoint(graph, dist, here, ent, tp, min, max, see, score);
 
   let best = null;
   let bestCost = Infinity;
@@ -550,6 +588,82 @@ export function holdPoint(ent, scene, speed, tp, min, max, see) {
   return best;
 }
 
+// The ranked form of the search, for a caller that passes a scorer. Every
+// reachable node offers ALL of its in-band probes whether or not they see the
+// target — whether one has a shot is the scorer's question — and the lowest
+// score wins. All of them, not the first that sees: on one long floor the nearest
+// probe is usually where the body already stands, and the covered end of the
+// band is another probe.
+//
+//   score.of(p, travel, bound)  the cost of standing at p = { x, y }, `travel`
+//                        seconds away. Lower is better. It may stop scoring and
+//                        answer anything >= `bound` once it cannot beat it.
+//   score.floor          the most the non-travel terms can SUBTRACT, so a node
+//                        whose travel alone cannot beat the best is skipped
+//                        before its probes are paid for, as the plain rule does
+//   score.stay           a centre point; staying there is a candidate too
+//   score.margin         how much a spot must beat staying by to be worth it
+//
+// Null when nothing beats staying by the margin. Staying's travel is the graph's
+// cost to the node under it — 0 where the body stands, the remaining walk for a
+// spot it is already committed to.
+function scoredPoint(graph, dist, here, ent, tp, min, max, see, score) {
+  const st = score.stay;
+  const under = nodeUnder(graph, st.x - ent.w / 2, st.y + ent.h / 2);
+  const stayTravel = under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0;
+  const stay = score.of({ x: st.x, y: st.y }, stayTravel, Infinity);
+
+  let best = null;
+  let bestScore = stay - score.margin;
+  for (const n of graph.nodes) {
+    const c = dist[n.id];
+    if (!Number.isFinite(c) || c - score.floor >= bestScore) continue;
+    for (const p of bandProbes(n, ent, tp, min, max)) {
+      const v = score.of(p, c, bestScore);
+      if (v < bestScore) { best = p; bestScore = v; }
+    }
+  }
+  return best;
+}
+
+// WHERE TO TAKE COVER (tech/squad-survival.md, V3). There is no band, so every
+// node reachable within `horizon` seconds offers three probes: the standable
+// point nearest the body and both ends of its span. `near`, when given, is a
+// circle { x, y, r } (the leader's leash) a probe must stand inside. Ranked by
+// the same scorer contract as scoredPoint, staying put included; null when
+// nowhere beats staying by the margin, which means "take cover right here".
+export function coverPoint(ent, scene, speed, score, horizon, near) {
+  if (!ent.onGround) return null;
+  const graph = navGraph(ent, scene, speed);
+  if (!graph) return null;
+  const here = nodeUnder(graph, ent.x, ent.y + ent.h);
+  if (!here) return null;
+  const nav = navState(ent, scene, graph);
+  const banned = nav ? nav.banned : null;
+  // Two walks of the graph: the horizon is TIME, whatever the route's danger
+  // (a reload lasts as long as it lasts); the score pays the danger too.
+  const weight = edgeWeightFor(ent, scene, graph);
+  const time = costsFrom(graph, here.id, banned).dist;
+  const dist = weight ? costsFrom(graph, here.id, banned, weight).dist : time;
+
+  const st = score.stay;
+  const under = nodeUnder(graph, st.x - ent.w / 2, st.y + ent.h / 2);
+  let best = null;
+  let bestScore = score.of(st, under && Number.isFinite(dist[under.id]) ? dist[under.id] : 0, Infinity) - score.margin;
+  for (const n of graph.nodes) {
+    const c = dist[n.id];
+    if (!Number.isFinite(c) || time[n.id] > horizon || c - score.floor >= bestScore) continue;
+    const y = n.y - ent.h / 2;
+    for (const left of [clamp(ent.x, n.a, n.b), n.a, n.b]) {
+      const p = { x: left + ent.w / 2, y };
+      if (near && dist2(p.x, p.y, near.x, near.y) > near.r * near.r) continue;
+      const v = score.of(p, c, bestScore);
+      if (v < bestScore) { best = p; bestScore = v; }
+    }
+  }
+  return best;
+}
+
 // Where on one node a body could stand to hold the band, or null.
 //
 // `holdRange` measures centre-to-centre in TWO dimensions, so a node's height
@@ -559,10 +673,17 @@ export function holdPoint(ent, scene, speed, tp, min, max, see) {
 // horizontal half of that gives two intervals — one either side of the target —
 // which are then clipped to the span the body actually fits on.
 function standPoint(n, ent, tp, min, max, see) {
+  for (const p of bandProbes(n, ent, tp, min, max)) if (see(p.x, p.y)) return p;
+  return null;
+}
+
+// The probes themselves, in the order standPoint tries them.
+function bandProbes(n, ent, tp, min, max) {
+  const out = [];
   const cyN = n.y - ent.h / 2; // a body standing here has its CENTRE at this y
   const dy = cyN - tp.y;
   const far = max * max - dy * dy;
-  if (far <= 0) return null; // too far above/below to be in band at any x
+  if (far <= 0) return out; // too far above/below to be in band at any x
   const hi = Math.sqrt(far);
   const lo = Math.sqrt(Math.max(0, min * min - dy * dy));
   // node spans are body-LEFT-EDGE; the band and the sight test are both centre
@@ -584,11 +705,9 @@ function standPoint(n, ent, tp, min, max, see) {
     // agent would arrive with the least walking, then each end of the band —
     // hugging `min` and hugging `max` see past different corners. Three probes,
     // not a tunable sample count: they are the positions that mean something.
-    for (const x of [clamp(cxE, a, b), a, b]) {
-      if (see(x, cyN)) return { x, y: cyN };
-    }
+    for (const x of [clamp(cxE, a, b), a, b]) out.push({ x, y: cyN });
   }
-  return null;
+  return out;
 }
 
 // ---- observability ---------------------------------------------------------

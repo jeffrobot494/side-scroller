@@ -20,6 +20,12 @@
 
 import { normalizeSpec } from "./enemyspec/normalize.js";
 
+// Shoot on a loop; the weapon's own fire rate throttles it.
+const FIGHT = { id: "fight", loop: true, steps: [
+  { if: { when: "sense.shot && !sense.outOfAmmo", then: [{ fire: { emitter: "weapon" } }] } },
+  { wait: 0.18 },
+] };
+
 const DEFAULT_COMPANION = {
   v: 1, id: "default_companion", name: "Squadmate", threat: 1, role: "support", tier: 1, intelligence: 3,
   root: {
@@ -54,9 +60,19 @@ const DEFAULT_COMPANION = {
       // keepDistance, and keepDistance is what lets it reposition to FIND a
       // sight line (tech/ranged-repositioning.md). Requiring the sight line to
       // engage would mean cover permanently pins a companion in escort.
+      //
+      // COVER (tech/squad-survival.md, V3) is wired by one table, checked every
+      // frame, so every exit is guarded by the negation of the entry it could
+      // bounce off and range uses 520 engage / 640 disengage as hysteresis.
+      // leaderFar has its own (the leash and its margin). An empty squadmate
+      // never enters combat, and only takes cover with a fight in range, which
+      // is what stops it flipping between cover and escort.
       escort: {
         enter: [{ setMotion: { type: "follow", leader: "anchor", standoff: 90, spread: 40, speed: 320 } }],
-        transitions: [{ when: "sense.dist < 520", to: "combat" }],
+        transitions: [
+          { when: "!sense.leaderFar && ((sense.underFire && sense.wounded) || ((sense.needReload || sense.outOfAmmo) && sense.dist < 520))", to: "cover" },
+          { when: "sense.dist < 520 && !sense.outOfAmmo", to: "combat" },
+        ],
       },
       // Hold a firing standoff from the nearest enemy (keepDistance) and shoot on
       // a loop; the weapon's own fire rate throttles it. Only shoot at something
@@ -64,13 +80,28 @@ const DEFAULT_COMPANION = {
       // ledge would otherwise empty a magazine into its underside. Break off on
       // distance alone: an enemy that is close but unseeable is a repositioning
       // problem, not a reason to go re-form on the leader.
+      //
+      // The trigger is gated on a usable shot and on having rounds, so an empty
+      // squadmate does not dry-click (sense.shot is line of sight until V4).
       combat: {
-        enter: [{ setMotion: { type: "keepDistance", min: 220, max: 340, speed: 320 } }],
-        tracks: [{ id: "fight", loop: true, steps: [
-          { if: { when: "sense.los", then: [{ fire: { emitter: "weapon" } }] } },
-          { wait: 0.18 },
-        ] }],
-        transitions: [{ when: "sense.dist > 640", to: "escort" }],
+        enter: [{ setMotion: { type: "keepDistance", min: 420, max: 600, speed: 320 } }],
+        tracks: [FIGHT],
+        transitions: [
+          { when: "!sense.leaderFar && ((sense.underFire && sense.wounded) || sense.needReload || sense.outOfAmmo)", to: "cover" },
+          // Out of ammo reaches this row only while the leader is far.
+          { when: "sense.dist > 640 || sense.outOfAmmo", to: "escort" },
+        ],
+      },
+      // Break contact while wounded and hit, reloading, or empty; come back out
+      // when it is calm. It still returns fire from cover if it has the shot.
+      cover: {
+        enter: [{ setMotion: { type: "cover", speed: 320 } }],
+        tracks: [FIGHT],
+        transitions: [
+          { when: "sense.leaderFar", to: "escort" },
+          { when: "sense.calm && sense.dist > 640", to: "escort" },
+          { when: "sense.calm && !sense.needReload && !sense.outOfAmmo && sense.dist <= 640", to: "combat" },
+        ],
       },
     },
   },

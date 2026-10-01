@@ -549,8 +549,15 @@ export default async function run(t) {
     t.ok("live: a next-deploy item's row does not", !/Live\./.test(rowOf("soldierMagazines")));
 
     const keys = (s) => s.flatMap((g) => g.items.map((it) => it.key));
-    const VIEWPORT = ["missionZoom", "missionRenderer", "scanlines", "scanlineSpacing", "showFps", "debugOverlays"];
+    const VIEWPORT = ["missionZoom", "missionRenderer", "scanlines", "scanlineSpacing", "showFps", "debugOverlays", "debugPauseOnDeath"];
     const SOUND = ["masterVolume", "sfxVolume", "uiVolume", "musicVolume", "muteOnBlur", "audioPan", "audioFalloff", "audioMaxVoices"];
+    // The Squad survival group (tech/squad-survival.md): every one is live, so
+    // the design's rule puts all of them on the menu.
+    const SURVIVAL = ["survivalWounded", "survivalHurtWindow", "survivalLookahead", "survivalCalmTime", "survivalLeash", "survivalLeashMargin",
+      "survivalExposureTrigger", "survivalExposureWeight", "survivalShotBonus", "survivalCrowdWeight", "survivalClaimRadius", "survivalSpotMargin",
+      "survivalCoverHorizon", "survivalCoverExposureWeight",
+      "survivalLobFan", "survivalLobCount", "survivalContactReach", "survivalFlightStep",
+      "survivalRouteExposureWeight", "survivalRouteMargin"];
     // The design's table (design/pause-menu.md), pinned by name.
     const SOLO = [
       ...VIEWPORT, ...SOUND,
@@ -560,10 +567,11 @@ export default async function run(t) {
       "duckChanceSlow", "duckChanceFast", "duckLatencySlow", "duckLatencyFast",
       "navArriveRadius", "navTakeoffWindow", "navRepathInterval", "navJumpAttempts", "navReposition",
       "navRepositionHold", "navStallTime",
+      ...SURVIVAL,
     ];
     const solo = pauseSchema({ room: false });
-    t.eq("pauseSchema: single-player shows the design's 39 settings", keys(solo).sort(), [...SOLO].sort());
-    t.eq("pauseSchema: 39 of them", keys(solo).length, 39);
+    t.eq("pauseSchema: single-player shows the design's settings", keys(solo).sort(), [...SOLO].sort());
+    t.eq("pauseSchema: 40 of them, plus squad survival's", keys(solo).length, 40 + SURVIVAL.length);
     const room = pauseSchema({ room: true });
     t.eq("pauseSchema: a room shows Viewport, Sound, aimMode and padDeadzone",
       keys(room).sort(), [...VIEWPORT, ...SOUND, "aimMode", "padDeadzone"].sort());

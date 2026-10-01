@@ -46,7 +46,7 @@ import { fileURLToPath } from "node:url";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { createRooms } from "../src/net/rooms.js";
-import { config, exportConfig } from "../src/game/config.js";
+import { config, exportConfig, SCHEMA } from "../src/game/config.js";
 import {
   packInput, createWireInput, projectScene, applySnapshot, WIRE_ACTIONS,
 } from "../src/net/mission-wire.js";
@@ -54,7 +54,11 @@ import { ACTIONS } from "../src/game/controlmap.js";
 
 // The exception, restated here on purpose: a test that imported the production
 // list would agree with it by construction and assert nothing.
-const LOCAL = ["debugGraph", "debugPath", "toggleRenderer", "pause"];
+const LOCAL = ["debugMenu", "toggleRenderer", "pause"];
+
+// The Squad survival group (tech/squad-survival.md) is all server-scoped and
+// grows a slice at a time, so it is counted rather than restated.
+const SURVIVAL_KNOBS = SCHEMA.find((g) => g.title === "Squad survival").items.length;
 
 const SERVER = fileURLToPath(new URL("../server.mjs", import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -87,8 +91,8 @@ export default async function run(t) {
     const dev = stubInput({ down: { right: true, fire: true }, pressed: { swap: true } });
     const pkt = packInput(dev, 1, "gamepad", null);
 
-    t.eq("input: the eight gameplay actions cross and the two debug ones do not",
-      WIRE_ACTIONS.includes("debugGraph"), false);
+    t.eq("input: the eight gameplay actions cross and the debug key does not",
+      WIRE_ACTIONS.includes("debugMenu"), false);
     // EVERY action is classified — this is what a new one trips. WIRE_ACTIONS is
     // derived from ACTIONS minus a named local-only list, so adding "grenade" to
     // the control map puts it on the wire by default; the failure this guards is
@@ -803,7 +807,7 @@ async function configRoutes(t) {
     const keys = new Set(items.map((it) => it.key));
 
     t.ok("config: GET answers groups and values", Array.isArray(payload.groups) && !!payload.values);
-    t.eq("config: six groups hold a server knob", payload.groups.length, 6);
+    t.eq("config: seven groups hold a server knob", payload.groups.length, 7);
     t.ok("config: and none of them is empty", payload.groups.every((g) => g.items.length > 0));
     t.eq("config: every entry it serves is scoped", items.filter((it) => it.scope !== "server").length, 0);
     t.ok("config: a value comes with every entry", items.every((it) => payload.values[it.key] !== undefined));
@@ -853,11 +857,13 @@ async function configRoutes(t) {
       else if (r.status === 403) refused++;
       else broke++;
     }
-    // 52 since progression P2 added the four server-scoped xpReward* knobs;
-    // 27 local: missionRenderer (mission-3d R1), then scanlines + scanlineSpacing,
-    // which only the 3D view in a page reads.
-    t.eq("config: a whole exported config applies its 52 server keys", applied, 52);
-    t.eq("config: ...drops the other 27", refused, 27);
+    // 52 since progression P2 added the four server-scoped xpReward* knobs, plus
+    // squad survival's group (tech/squad-survival.md), all server-scoped;
+    // 28 local: missionRenderer (mission-3d R1), then scanlines + scanlineSpacing,
+    // which only the 3D view in a page reads, then debugPauseOnDeath
+    // (tech/squad-debug.md D4), which only a page's own mission reads.
+    t.eq("config: a whole exported config applies its server keys", applied, 52 + SURVIVAL_KNOBS);
+    t.eq("config: ...drops the other 28", refused, 28);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");
     t.eq("config: the server-scoped key it carried landed", after.values.healPerDay, 3);

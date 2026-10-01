@@ -232,6 +232,11 @@ export default async function run(t) {
       return sample(m);
     };
 
+    // atRate loops until a step count is reached, and would never exit behind
+    // a death freeze (tech/squad-debug.md, D4). No soldier dies in this trace
+    // today; this is a guard, not a fix.
+    const podWas = config.debugPauseOnDeath;
+    config.debugPauseOnDeath = false;
     const STEPS = 240; // 4s of mission: past the first contact, well into the fight
     const base = direct(STEPS);
     t.ok("frame rate: the bare step loop reached the fight", base.proj[0] > 0 || base.roots.some((r) => r[4] === 0));
@@ -241,6 +246,7 @@ export default async function run(t) {
       const exact = JSON.stringify(base) === JSON.stringify(run);
       t.ok(`frame rate: ${fps}fps plays the same mission as a bare step loop${d ? ` — ${d}` : ""}`, exact && !d);
     }
+    config.debugPauseOnDeath = podWas;
   }
 
   // (5) the mission runs without a browser (tech/multiplayer-missions.md, J6)

@@ -123,7 +123,7 @@ export class MissionInput {
 
   // A menu is open over the mission (tech/pause-menu.md). On entry every held
   // action is released, so a soldier does not run on under the menu. While
-  // suspended, every key but `pause` is left alone — no action, and no
+  // suspended, every key but `pause` and `debugMenu` is left alone — no action, and no
   // preventDefault, so arrows, Space and Tab reach the menu's own controls —
   // and the mouse buttons and the pad drive nothing. Cleared by reset() and
   // disable(), so it cannot outlive the mission it was entered in.
@@ -142,7 +142,7 @@ export class MissionInput {
   _set(e, down) {
     const action = keyBindings[e.code];
     if (!action) return;
-    if (this._suspended && action !== "pause") return;
+    if (this._suspended && action !== "pause" && action !== "debugMenu") return;
     e.preventDefault();
     if (down && !this.actions[action]) this.pressed[action] = true;
     this.actions[action] = down;
@@ -262,8 +262,9 @@ export class MissionInput {
   }
 
   // ---- outside the sample ----------------------------------------------------
-  // For the one action read per RENDERED FRAME instead of per step: `pause`
-  // (tech/pause-menu.md), which must be readable while no steps run. Keyboard
+  // For the actions read per RENDERED FRAME instead of per step: `pause`
+  // (tech/pause-menu.md) and `debugMenu` (tech/squad-debug.md), which must be
+  // readable while no steps run. Keyboard
   // only — the pause menu is not driven from a gamepad.
 
   // Take a pending device press of `action`, so no sample sees it afterwards.

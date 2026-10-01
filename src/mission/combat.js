@@ -11,6 +11,8 @@
 //   ctx.damage(t,a,o)  apply `a` damage to `t` from owner `o` (does hit flash + kill)
 //   ctx.kill(t,o)      kill `t` crediting `o` (used by burn ticks)
 //   ctx.spark(x,y,color,n,spd) / ctx.burst(x,y,color,n,spd)   cosmetics (optional)
+//   ctx.hit(p,t)       round `p` struck `t`, before its effects (optional; a record
+//                      for the squad debug view, never a rule)
 //
 // Sound is the one presentation hook that hangs off the SCENE rather than ctx
 // (`scene.sound(cueId, { x, y })`), because ai.js `fire()` — the most important
@@ -148,61 +150,78 @@ export function stepProjectile(p, from, dt, world) {
   return { x: from.x + from.vx * dt, y: from.y + vy * dt, vx: from.vx, vy };
 }
 
-// ---- duck prediction (tech/soldier-ducking.md, D1) ------------------------
+// ---- hit prediction (tech/squad-survival.md, V1) --------------------------
 
-// Would kneeling save THIS soldier from THIS round? Read-only: neither the
-// round nor the soldier is touched.
+// Would round `p` hit body `s`, and on which frame? Read-only: neither the round
+// nor the body is touched. Returns the 0-based frame of the first overlap, or
+// -1 for a miss. `boxAt(i)` is where the body is on frame i — a fixed box for a
+// body standing still, a moving one for a body about to do something (the V6
+// dodge). `s` is only the body's IDENTITY, for the owner and team rules.
 //
 // The walk reproduces updateProjectiles' own order — advance, expire, terrain —
 // so a predicted hit and an actual hit cannot disagree on the last frame of a
-// round's life, which is the frame that matters most. It answers on the first
-// frame the round reaches the soldier: true when the round lands on the standing
-// box and misses the crouched one.
+// round's life, which is the frame that matters most.
 //
 // Bodies are NOT blockers, friendly or hostile: anything in the line of fire can
 // move, duck, or die before the round arrives, so a soldier behind one stays
-// ready. It will sometimes kneel for a round something else absorbs; being
+// ready. It will sometimes react to a round something else absorbs; being
 // caught standing because someone else was expected to take it is worse.
-export function duckableShot(scene, p, s, dt, ctx = {}) {
-  if (p.dead || !s.alive || p.owner === s) return false;
+//
+// It does NOT apply the explode rule. Whether a blast "counts" is the caller's
+// question: a duck ignores one (getting smaller does not help), while a soldier
+// with a rocket inbound is still under fire.
+export function predictHit(scene, p, s, boxAt, dt, steps, ctx = {}) {
+  if (p.dead || !s.alive || p.owner === s) return -1;
   // Who a round may hit is updateProjectiles' rule, not geometry — without it a
-  // squadmate ducks its own side's fire and the leader's.
-  if (p.team === "player" && !ctx.friendlyFire) return false;
+  // squadmate reacts to its own side's fire and the leader's.
+  if (p.team === "player" && !ctx.friendlyFire) return -1;
+  const box = { x: p.x, y: p.y, w: p.w, h: p.h };
+  let at = { x: p.x, y: p.y, vx: p.vx, vy: p.vy };
+  let life = p.life;
+  for (let i = 0; i < steps; i++) {
+    at = stepProjectile(p, at, dt, scene.world);
+    life -= dt;
+    if (life <= 0) return -1; // died of old age before it arrived
+    box.x = at.x;
+    box.y = at.y;
+    // Terrain is a stopping condition on the same walk, not a separate pass: a
+    // straight line-of-sight test would report an arcing pod blocked when it
+    // clears the wall, and clear when it arcs into it.
+    for (const plat of scene.platforms) if (overlaps(box, plat)) return -1;
+    if (overlaps(box, boxAt(i))) return i;
+  }
+  return -1;
+}
+
+// ---- duck prediction (tech/soldier-ducking.md, D1) ------------------------
+
+// Would kneeling save THIS soldier from THIS round? `predictHit` on the standing
+// box, and not on the crouched one by that frame. Both boxes hang off the feet line, the way
+// setCrouch preserves it — so this answers the same question whichever stance
+// the soldier is in right now.
+export function duckableShot(scene, p, s, dt, ctx = {}) {
   // "Anything where getting smaller does not help" (design/soldier-behavior.md).
   // A blast resolves by CENTRE DISTANCE from the impact point across every
   // opposing actor, so a crouched box the round missed is caught anyway by a
   // detonation on the soldier behind. A purely geometric predicate gets this
   // wrong, so it is a rule rather than an approximation.
   if ((p.effects || []).some((e) => e.kind === "explode")) return false;
-
-  // Both boxes hang off the feet line, the way setCrouch preserves it — so this
-  // answers the same question whichever stance the soldier is in right now.
   const feet = s.y + s.h;
   const stand = { x: s.x, y: feet - STAND_H, w: s.w, h: STAND_H };
   const crouch = { x: s.x, y: feet - CROUCH_H, w: s.w, h: CROUCH_H };
-
-  const box = { x: p.x, y: p.y, w: p.w, h: p.h };
-  let at = { x: p.x, y: p.y, vx: p.vx, vy: p.vy };
-  let life = p.life;
   const steps = Math.ceil(config.duckLookahead / dt);
-  for (let i = 0; i < steps; i++) {
-    at = stepProjectile(p, at, dt, scene.world);
-    life -= dt;
-    if (life <= 0) return false; // died of old age before it arrived
-    box.x = at.x;
-    box.y = at.y;
-    // Terrain is a stopping condition on the same walk, not a separate pass: a
-    // straight line-of-sight test would report an arcing pod blocked when it
-    // clears the wall, and clear when it arcs into it.
-    for (const plat of scene.platforms) if (overlaps(box, plat)) return false;
-    if (overlaps(box, stand)) return !overlaps(box, crouch);
-  }
-  return false;
+  const k = predictHit(scene, p, s, () => stand, dt, steps, ctx);
+  if (k < 0) return false;
+  // Judged on the frame the round reaches the standing box, not over the rest
+  // of its flight: a descending pod that clears a knee on arrival and would
+  // drop onto it a frame later is still ducked, as it was before the lift.
+  return predictHit(scene, p, s, () => crouch, dt, k + 1, ctx) < 0;
 }
 
 // ---- effect resolution ----------------------------------------------------
 
 export function resolveHit(scene, p, target, ctx) {
+  if (ctx.hit) ctx.hit(p, target);
   applyEffects(scene, target, p.effects, p.owner, ctx, { x: p.x + p.w / 2, y: p.y + p.h / 2, vx: p.vx, team: p.team });
 }
 

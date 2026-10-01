@@ -13,6 +13,13 @@ const FRAME = 1000 / 60;
 const key = (m, code, down) => m.input._set({ code, preventDefault() {} }, down);
 const tap = (m, code) => { key(m, code, true); key(m, code, false); };
 
+// Pause on squadmate death (tech/squad-debug.md, D4) is a second freeze, and
+// these cases are about the first: it is pinned off everywhere but its own case.
+function quiet() {
+  resetConfig();
+  setConfig("debugPauseOnDeath", false);
+}
+
 function build() {
   const g = generateLevel({ seed: SEED, difficulty: "high" });
   const m = new Mission(makeEl("canvas"), () => {});
@@ -24,7 +31,7 @@ function build() {
 }
 
 export default async function run(t) {
-  resetConfig();
+  quiet();
 
   // ---- P2: Escape freezes a single-player mission -------------------------
   {
@@ -56,7 +63,7 @@ export default async function run(t) {
     setConfig("missionZoom", 0.5);
     m.tick();
     t.ok("pause: a zoom change re-solves the camera while paused", m.camera.x !== cam.x || m.camera.y !== cam.y);
-    resetConfig();
+    quiet();
     m.tick();
 
     // No shake offset on a frozen frame; the view is handed the offset.
@@ -79,7 +86,7 @@ export default async function run(t) {
     m.render();
     t.ok("pause: an unfrozen frame shakes again", off[0] !== 0 || off[1] !== 0);
     m.setView(null);
-    resetConfig();
+    quiet();
 
     // The Resume path: setPaused from outside, then stop() and start().
     m.setPaused(true);
@@ -126,6 +133,204 @@ export default async function run(t) {
     m.stop();
   }
 
+  // ---- D1 (tech/squad-debug.md): the debug key opens the Debug screen -------
+  {
+    const m = build();
+    const seen = [];
+    m.onPauseChange = (p, screen) => seen.push([p, screen]);
+    m.tick(5);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: ` pauses", m.paused === true);
+    t.eq("debug key: ...asking the host for the Debug screen", seen, [[true, "debug"]]);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: ` closes it again (it passes through the suspended input)", m.paused === false);
+    tap(m, "Backquote");
+    m.tick();
+    tap(m, "Escape");
+    m.tick();
+    t.ok("debug key: the pause key closes the Debug screen too", m.paused === false);
+    tap(m, "Escape");
+    m.tick();
+    t.eq("debug key: Escape still opens on the menu", seen.at(-1), [true, "menu"]);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: ` closes the menu from any screen", m.paused === false);
+
+    setConfig("debugOverlays", false);
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: with debug overlays off it does nothing", m.paused === false);
+    quiet();
+
+    // A room's mission has no Debug screen: the key neither opens nor closes.
+    m.remote = true;
+    m.update = () => {};
+    tap(m, "Backquote");
+    m.tick();
+    t.ok("debug key: in a room it does nothing", m.paused === false);
+    m.stop();
+
+    // The layers are per deploy.
+    m.remote = false;
+    m.debug.graph = true;
+    const g = generateLevel({ seed: SEED + 1, difficulty: "low" });
+    m.start(g.mission, g.level, SQUAD);
+    t.ok("debug: a new deploy starts with every layer off", !Object.values(m.debug).some((v) => v === true));
+    m.stop();
+  }
+
+  // ---- D2: the three layers draw, and change nothing ------------------------
+  // Nothing asserts on pixels; what is pinned is that every layer draws over
+  // the harness's context without a throw, who it annotates, and that drawing
+  // leaves the scene and the shared exposure cache exactly as they were.
+  {
+    const m = build();
+    m.tick(240);
+    const mates = m._debugMates();
+    t.ok(`layers: the AI squadmates are annotated, the driven soldier is not (${mates.length})`,
+      mates.length > 0 && !mates.includes(m.currentSoldier()) && mates.every((s) => s.agent && s.alive));
+    // A pass and a verdict, as D0 would have written them, so every branch draws.
+    const s = mates[0];
+    s.agent.spotPass = { kind: "fight", t: 0, chosen: { x: 10, y: 20 }, probes: [
+      { x: 0, y: 20, travel: 0, crowd: 0, shot: 0, exposure: 1, total: 1, cut: false },
+      { x: 10, y: 20, travel: 0.4, crowd: 0, shot: -0.5, exposure: 0, total: -0.1, cut: false },
+      { x: 30, y: 20, travel: 2, crowd: 0, shot: null, exposure: null, total: 2, cut: true },
+    ] };
+    s.duck = s.duck || { hold: 0, wait: 0, pending: null, judged: new WeakSet(), log: [] };
+    s.duck.log.push({ round: {}, t: m.scene.survivalClock, verdict: "late", abandoned: false, hit: true });
+    Object.assign(m.debug, { graph: true, path: true, threats: true, spots: true, dodges: true });
+    const before = sampleScene(m.scene);
+    const cache = m.scene.exposureCache;
+    let threw = null;
+    try { m.render(); m.render(); } catch (e) { threw = e; }
+    t.eq("layers: every layer draws without a throw", threw && String(threw), null);
+    t.ok("layers: drawing changes nothing in the scene", firstSampleDiff(before, sampleScene(m.scene)) === null);
+    t.ok("layers: ...and never touches the shared exposure cache", m.scene.exposureCache === cache);
+    t.ok("layers: the threat set is held per squadmate", mates.every((x) => Array.isArray(m._debugView.threats.get(x))));
+    const held = m._debugView.threats;
+    m.render();
+    t.ok("layers: ...and not recomputed inside one sense interval", m._debugView.threats === held);
+    m.remote = true;
+    const drawn = m._debugView.threatT;
+    m.time += 1;
+    m.render();
+    t.eq("layers: a room viewer draws none of them", m._debugView.threatT, drawn);
+    m.remote = false;
+    m.stop();
+  }
+
+  // ---- D3: slow motion -------------------------------------------------------
+  // Same steps, same order, further apart: half speed takes twice the frames to
+  // reach a step, and the scene at that step is the full-speed scene.
+  {
+    const full = build();
+    full.tick(90);
+    const half = build();
+    half.debug.speed = 0.5;
+    half.tick(90);
+    t.ok(`slow: half speed runs half the steps (${half.input.frame} vs ${full.input.frame})`,
+      Math.abs(half.input.frame * 2 - full.input.frame) <= 2);
+    const want = full.input.frame;
+    while (half.input.frame < want) half.tick();
+    t.eq("slow: ...and reaches the same state at the same step", half.input.frame, want);
+    t.ok("slow: the scene at that step is the full-speed scene",
+      firstSampleDiff(sampleScene(full.scene), sampleScene(half.scene)) === null);
+    setConfig("debugOverlays", false);
+    const off = build();
+    off.debug.speed = 0.25;
+    off.tick(60);
+    t.ok(`slow: with debug overlays off the speed is ignored (${off.input.frame} steps)`, off.input.frame >= 59);
+    quiet();
+    for (const m of [full, half, off]) m.stop();
+  }
+
+  // ---- D4: pause on squadmate death ----------------------------------------
+  // The kill is dealt INSIDE a step, after the soldiers' pass, which is where a
+  // round or a burn tick lands in a real one.
+  {
+    resetConfig(); // the knob's default: on
+    const killIn = (m, victims, by) => {
+      const upd = m.update.bind(m);
+      m.update = (dt) => {
+        upd(dt);
+        m.update = upd;
+        for (const v of victims) m._ctx.damage(v, 1e9, by);
+      };
+    };
+    const m = build();
+    const seen = [];
+    m.onPauseChange = (p, screen) => seen.push([p, screen]);
+    m.tick(120);
+    const [mate] = m._debugMates();
+    const foe = m.scene.specRoots.find((r) => r.alive);
+    const hp = mate.health;
+    killIn(m, [mate], foe);
+    m.tick();
+    const card = m.deathCard;
+    t.ok("death: an AI squadmate's death puts up a card", !!card && card.rows.length === 1);
+    const row = card.rows[0];
+    t.eq("death: ...naming who died", row.who, mate.data.callsign);
+    t.eq("death: ...and the enemy that killed it", row.killer, foe.spec.name || foe.spec.id);
+    t.eq("death: ...its health at the start of the step", row.hp, Math.round(hp));
+    t.ok(`death: ...what it was doing and for how long (${row.state} ${row.stateTime})`,
+      typeof row.state === "string" && row.stateTime >= 0);
+    t.ok("death: ...how many could hit it", Number.isInteger(row.exposure));
+    t.eq("death: ...and no tag, since no round struck it", row.tag, "no tag");
+    t.eq("death: the pause menu does not open", seen, []);
+    t.ok("death: the dead squadmate is still annotated on its own card", m._debugMates().includes(mate));
+    const steps = m.input.frame;
+    let threw = null;
+    try { m.tick(30); } catch (e) { threw = e; }
+    t.eq("death: the card draws", threw && String(threw), null);
+    t.eq("death: the mission is frozen under it", m.input.frame, steps);
+
+    tap(m, "Backquote");
+    m.tick();
+    t.eq("death: the debug key opens the Debug screen over the card", seen, [[true, "debug"]]);
+    tap(m, "Backquote");
+    m.tick(5);
+    t.ok("death: closing it returns to the card", m.paused === false && m.deathCard === card && m.input.frame === steps);
+    tap(m, "Escape");
+    m.tick();
+    t.ok("death: the pause key dismisses the card", m.deathCard === null);
+    t.ok("death: ...without opening the menu", seen.length === 2 && m.paused === false);
+    m.tick(10);
+    t.ok(`death: ...and the mission carries on (${m.input.frame - steps} steps)`, m.input.frame - steps >= 9);
+
+    // The driven soldier is never the subject.
+    killIn(m, [m.currentSoldier()], foe);
+    m.tick();
+    t.eq("death: the driven soldier's death puts up no card", m.deathCard, null);
+    m.stop();
+
+    // Two in one step share a card; a squadmate with no agent (the legacy
+    // brain) gets one with – for what it has no record of.
+    const two = build();
+    two.tick(120);
+    const [a, b] = two._debugMates();
+    const upd = two.update.bind(two);
+    two.update = (dt) => { upd(dt); two.update = upd; b.agent = null; two._ctx.damage(a, 1e9, foe); two._ctx.damage(b, 1e9, a); };
+    two.tick();
+    t.eq("death: two deaths in one step share one card", two.deathCard && two.deathCard.rows.length, 2);
+    const legacy = two.deathCard.rows[1];
+    t.ok("death: a legacy squadmate's card has no state, exposure or tag",
+      legacy.state === null && legacy.exposure === null && legacy.tag === null);
+    t.eq("death: friendly fire names the soldier", legacy.killer, a.data.callsign);
+    two.stop();
+    t.eq("death: stop() clears the card", two.deathCard, null);
+
+    setConfig("debugPauseOnDeath", false);
+    const off = build();
+    off.tick(120);
+    killIn(off, [off._debugMates()[0]], foe);
+    off.tick();
+    t.eq("death: with the setting off there is no card", off.deathCard, null);
+    off.stop();
+    quiet();
+  }
+
   // ---- P3: the overlay, mounted headlessly --------------------------------
   // The harness DOM dispatches no events, so the overlay's root records its
   // listeners here and the test fires them with targets that answer closest().
@@ -155,10 +360,10 @@ export default async function run(t) {
       n.closest = (sel) => (sel.split(",").some((s) => MATCH[s] && MATCH[s](n)) ? n : null);
       return n;
     };
-    const rows = (html) => [...html.matchAll(/data-row="(\w+)"/g)].map((r) => r[1]);
+    const rows = (html) => [...html.matchAll(/data-row="([\w.]+)"/g)].map((r) => r[1]);
     const shown = (s) => s.flatMap((g) => g.items.map((it) => it.key));
 
-    resetConfig();
+    quiet();
     let resumed = 0;
     const changes = [];
     const pm = createPauseMenu(container, { room: false, resume: () => resumed++, onChange: (k, v) => changes.push([k, v]) });
@@ -189,6 +394,52 @@ export default async function run(t) {
     pm.dispose();
     t.ok("overlay: dispose removes it", !container.kids.includes(el));
 
+    // D1: the Debug screen (tech/squad-debug.md), with the mission's handle.
+    const items = (e) => [...e.innerHTML.matchAll(/data-pm="(\w+)"/g)].map((r) => r[1]);
+    const debug = { graph: false, path: false };
+    const dm = createPauseMenu(container, { room: false, screen: "debug", debug });
+    const del = made.at(-1);
+    t.eq("debug screen: the debug key's request opens it", dm.screen(), "debug");
+    t.eq("debug screen: the five layers, the speed, and Pause on squadmate death", rows(del.innerHTML),
+      ["debug.graph", "debug.path", "debug.threats", "debug.spots", "debug.dodges", "debug.speed", "debugPauseOnDeath"]);
+    t.ok("debug screen: ...with a Back button", /data-pm="back"/.test(del.innerHTML));
+    fire(del, "click", node({ key: "debug.graph", type: "bool" }, { toggle: true }));
+    t.ok("debug screen: a toggle writes the mission's flag", debug.graph === true && debug.path === false);
+    t.ok("debug screen: ...and never the config", !("debug.graph" in config) && isDefault("debugOverlays"));
+    const pod = node({ key: "debugPauseOnDeath", type: "bool" }, { toggle: true });
+    pod.classList.on = config.debugPauseOnDeath;
+    fire(del, "click", pod);
+    t.ok("debug screen: Pause on squadmate death is the setting, kept like any other",
+      config.debugPauseOnDeath === pod.classList.on && isDefault("debugPauseOnDeath") === pod.classList.on); // default: on
+    quiet();
+    fire(del, "change", node({ key: "debug.speed", type: "enum" }, { value: "quarter" }));
+    t.eq("debug screen: Speed writes the mission's time scale", debug.speed, 0.25);
+    fire(del, "click", node({ pm: "back" }));
+    t.eq("debug screen: Back returns to the menu", dm.screen(), "menu");
+    t.eq("debug screen: the menu is Options, Debug, Resume", items(del), ["options", "debug", "resume"]);
+    // The knob is live on Options: turning it off there hides Debug on Back.
+    // (A stub switch starts off, so the one that turns it off starts on.)
+    fire(del, "click", node({ pm: "options" }));
+    const lit = node({ key: "debugOverlays", type: "bool" }, { toggle: true });
+    lit.classList.on = true;
+    fire(del, "click", lit);
+    fire(del, "click", node({ pm: "back" }));
+    t.eq("debug screen: overlays turned off in Options hide it on Back", items(del), ["options", "resume"]);
+    fire(del, "click", node({ pm: "options" }));
+    fire(del, "click", node({ key: "debugOverlays", type: "bool" }, { toggle: true }));
+    fire(del, "click", node({ pm: "back" }));
+    t.eq("debug screen: ...and turned back on show it", items(del), ["options", "debug", "resume"]);
+    dm.dispose();
+    setConfig("debugOverlays", false);
+    const off = createPauseMenu(container, { screen: "debug", debug });
+    t.eq("debug screen: with overlays off a Debug request opens the menu", off.screen(), "menu");
+    t.eq("debug screen: ...which has no Debug item", items(made.at(-1)), ["options", "resume"]);
+    off.dispose();
+    quiet();
+    const nohandle = createPauseMenu(container, { screen: "debug", debug: null });
+    t.eq("debug screen: with no handle (a room) there is none", items(made.at(-1)), ["options", "resume"]);
+    nohandle.dispose();
+
     const roomMenu = createPauseMenu(container, { room: true });
     const rel = made.at(-1);
     fire(rel, "click", node({ pm: "options" }));
@@ -198,7 +449,7 @@ export default async function run(t) {
     roomMenu.dispose();
 
     document.createElement = createElement;
-    resetConfig();
+    quiet();
   }
 
   // ---- the one rule: paused is not gameplay state -------------------------

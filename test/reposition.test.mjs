@@ -244,16 +244,19 @@ export default async function run(t) {
     // case that collides with the companion's own brain — `combat` exits the
     // moment its target stops being level, so it will not settle up there. The
     // assertion is therefore that it gets the shot at all, not that it stays.
+    // Sized to the companion's fighting range (420–600px): from the ground on
+    // either side the target is hidden or too close, and the top of the block
+    // is the only place in range with a sight line.
     const COVER = [
       { x: 0, y: 500, w: 1400, h: 40 },
-      { x: 600, y: 420, w: 200, h: 80 },
+      { x: 600, y: 420, w: 80, h: 80 },
     ];
     const runCover = () => {
       const leader = new Soldier(rosterSoldier("L"), rifle, 500, 500 - STAND_H);
-      const comp = new Soldier(rosterSoldier("C"), rifle, 520, 500 - STAND_H);
+      const comp = new Soldier(rosterSoldier("C"), rifle, 565, 500 - STAND_H); // inside engage range
       const foe = instantiate(normalizeSpec({
         id: "dummy", root: { health: { max: 1e6 }, visual: { size: [30, 46] }, motion: { type: "static" } },
-      }), 1000, 454);
+      }), 1080, 454);
       foe.rng = () => 0.5;
       const sc = scene(COVER, [leader, comp]);
       sc.specRoots = [foe];
@@ -351,9 +354,12 @@ export default async function run(t) {
     // and the agent is asked to re-decide from mid-air, where there is no node
     // under it to decide anything from — so it silently hands back to holdRange
     // with a jump still in the books.
+    // Sized to the companion's fighting range (420–600px): from the ground on
+    // either side the target is hidden or too close, and the top of the block
+    // is the only place in range with a sight line.
     const COVER = [
       { x: 0, y: 500, w: 1400, h: 40 },
-      { x: 600, y: 420, w: 200, h: 80 },
+      { x: 600, y: 420, w: 80, h: 80 },
     ];
     const sc = scene(COVER, [soldierAt(1000, 454)]);
     const g = gunner(200, 474, { min: 220, max: 420 });
@@ -530,9 +536,9 @@ export default async function run(t) {
 
     // One escort run, from a fixed seed so the gunner's shot jitter is the same
     // in both. Returns how far left the companion got, and whether it kneeled.
-    const escortRun = (seconds, fire) => {
+    const escortRun = (seconds, fire, seed = 20260816) => {
       const real = Math.random;
-      Math.random = makeRng(20260816);
+      Math.random = makeRng(seed);
       try {
         const leader = new Soldier(rosterSoldier("L"), rifle, 150, 500 - STAND_H);
         const comp = new Soldier(rosterSoldier("C"), rifle, 800, 500 - STAND_H);
@@ -559,15 +565,28 @@ export default async function run(t) {
       }
     };
 
-    const under = escortRun(4, true);
+    // Summed over three seeds, and read at 1.5s while the squadmate is still
+    // walking. Since the dodge's KEEP-GOING candidate (tech/squad-survival.md,
+    // V6) a walking squadmate only kneels for a round that would actually meet
+    // it, so it kneels less, gets there in about 2s rather than 4, and one
+    // seed's chance rolls can all fail.
+    const runs = (fire) => {
+      const all = [2, 3, 20260816].map((seed) => escortRun(1.5, fire, seed));
+      return {
+        kneeled: all.reduce((a, r) => a + r.kneeled, 0),
+        gap: all.reduce((a, r) => a + r.gap, 0) / all.length,
+        states: new Set(all.flatMap((r) => [...r.states])),
+      };
+    };
+    const under = runs(true);
     t.ok(`escort: it kneels while escorting (${under.kneeled} frames down)`, under.kneeled > 0);
     t.ok("escort: and never breaks off to fight the distant gunner", !under.states.has("combat"));
 
-    // The price, stated as a comparison rather than assumed: the same four
-    // seconds of the same fire, with the reflex switched off, covers more ground.
+    // The price, stated as a comparison rather than assumed: the same seconds
+    // of the same fire, with the reflex switched off, covers more ground.
     const hold = config.duckHoldTime;
     config.duckHoldTime = 0;
-    const standing = escortRun(4, true);
+    const standing = runs(true);
     config.duckHoldTime = hold;
     t.eq("escort: with the hold at 0 it never kneels", standing.kneeled, 0);
     t.ok(`escort: ducking costs real progress (${Math.round(under.gap)}px short vs ${Math.round(standing.gap)}px)`,
@@ -583,8 +602,127 @@ export default async function run(t) {
     const station = escortRun(6, false).gap;
     const late = escortRun(20, true).gap;
     t.ok(`escort: unshot at it settles on a station (${Math.round(station)}px off the offset)`, station < under.gap);
-    t.ok(`escort: under fire it still gets there, later (${Math.round(under.gap)}px short at 4s → ${Math.round(late)}px)`,
+    t.ok(`escort: under fire it still gets there, later (${Math.round(under.gap)}px short at 1.5s → ${Math.round(late)}px)`,
       late <= station + 20);
+  }
+
+  // ---- scored spots (tech/squad-survival.md, V2) ----------------------------
+  // Squadmates only: the scorer is behind the opt-in the companion bridge sets.
+  // The scene is one floor, a target gunner F1 on it, and a second F2 on a high
+  // perch to the right. A low shelf hides the left end of the firing band from
+  // F2 but not from F1, so under it a squadmate keeps its shot and is exposed to
+  // one hostile instead of two — and the shelf is one body wide.
+  {
+    const dummy = (x, y) => {
+      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" }, emitters: { gun: { at: [0, 0], projectile: { speed: 700, life: 2, damage: 1 } } } } }), x, y);
+      r.rng = () => 0.5;
+      return r;
+    };
+    const shelfScene = () => {
+      const sc = scene([{ x: 0, y: 500, w: 1600, h: 40 }, { x: 540, y: 440, w: 160, h: 10 }, { x: 1290, y: 150, w: 120, h: 20 }]);
+      sc.world.width = 1600;
+      sc.specRoots = [dummy(900, 460), dummy(1300, 110)];
+      return sc;
+    };
+    const squad = (sc, xs) => {
+      const leader = new Soldier(rosterSoldier("L"), rifle, 150, 500 - STAND_H);
+      const mates = xs.map((x, i) => new Soldier(rosterSoldier(`M${i}`), rifle, x, 500 - STAND_H));
+      sc.soldiers.push(leader, ...mates);
+      return { leader, mates };
+    };
+    const tick = (sc, leader, mates) => {
+      for (const c of mates) {
+        if (c.fireCooldown > 0) c.fireCooldown -= STEP;
+        updateCompanionSpec(c, STEP, sc, leader, ctx);
+        stepActor(c, STEP, sc.world, sc.platforms);
+      }
+    };
+    const stack = (crowd) => {
+      const hold = config.survivalCrowdWeight;
+      config.survivalCrowdWeight = crowd;
+      const sc = shelfScene();
+      const { leader, mates } = squad(sc, [665, 685]);
+      for (let i = 0; i < 300; i++) tick(sc, leader, mates);
+      config.survivalCrowdWeight = hold;
+      return { gap: Math.abs(mates[0].x - mates[1].x), exp: mates.map((m) => m.agent.sense.exposure) };
+    };
+
+    const claimed = stack(config.survivalCrowdWeight);
+    t.ok(`spots: two squadmates and one good spot end on two spots (${Math.round(claimed.gap)}px apart)`,
+      claimed.gap > config.survivalClaimRadius * 30);
+    t.ok(`spots: and both leave the open, where two hostiles could hit them (${claimed.exp})`, claimed.exp.every((e) => e < 2));
+    const piled = stack(0);
+    t.ok(`spots: with the claim price at 0 they stack on it (${Math.round(piled.gap)}px apart)`,
+      piled.gap < config.survivalClaimRadius * 30);
+
+    // The pass the pick came from is kept for the squad debug view
+    // (tech/squad-debug.md, D0): a record only, so it must agree with the pick.
+    {
+      const sc = shelfScene();
+      const { leader, mates: [m] } = squad(sc, [685]);
+      let pass = null;
+      let dest = null;
+      for (let i = 0; i < 120 && !pass; i++) {
+        tick(sc, leader, [m]);
+        if (m.agent.repo && m.agent.repo.hold > 0) { pass = m.agent.spotPass; dest = m.agent.repo.dest; }
+      }
+      const stay = pass && pass.probes[0];
+      const rest = pass ? pass.probes.slice(1) : [];
+      const chosen = rest.find((p) => dest && p.x === dest.x && p.y === dest.y);
+      t.ok(`record: the fight pick left a pass (${pass ? pass.probes.length : 0} probes)`, !!pass && pass.kind === "fight" && rest.length > 0);
+      t.ok("record: its first entry is staying put, scored in full", !!stay && Math.abs(stay.x - (685 + 15)) < 2 && !stay.cut && stay.exposure !== null);
+      t.ok("record: the chosen point is the spot committed to", !!chosen && pass.chosen.x === dest.x && pass.chosen.y === dest.y);
+      t.ok("record: and it has the lowest total of every probe", !!chosen && rest.every((p) => p.total >= chosen.total));
+      t.ok("record: and beats staying by the margin", !!chosen && chosen.total < stay.total - config.survivalSpotMargin);
+      t.ok("record: a cut-off probe skipped the flight term", rest.filter((p) => p.cut).every((p) => p.exposure === null));
+      // A search that never scores is not a pick and must not replace the last
+      // one. Held mid-air but told it is grounded, the body has no node under
+      // it, so holdPoint returns before any probe; the trigger at 0 makes the
+      // frame want a new spot.
+      const hold = config.survivalExposureTrigger;
+      config.survivalExposureTrigger = 0;
+      Object.assign(m.agent.repo, { hold: 0, retry: 0 });
+      m.y = 200;
+      m.onGround = true;
+      updateCompanionSpec(m, STEP, sc, leader, ctx);
+      config.survivalExposureTrigger = hold;
+      t.ok("record: a search that scored nothing keeps the last pass", m.agent.spotPass === pass);
+    }
+  }
+  {
+    // A held spot that goes bad on the way: a third hostile appears that can
+    // hit it. The repath tick is shortened so the walk is still under way when
+    // it re-checks, which is the case the re-check exists for.
+    const dummy = (x, y) => {
+      const r = instantiate(normalizeSpec({ id: "dummy", root: { health: { max: 50 }, visual: { size: [30, 40] }, motion: { type: "static" }, emitters: { gun: { at: [0, 0], projectile: { speed: 700, life: 2, damage: 1 } } } } }), x, y);
+      r.rng = () => 0.5;
+      return r;
+    };
+    config.navRepathInterval = 0.1;
+    const sc = scene([{ x: 0, y: 500, w: 1600, h: 40 }, { x: 540, y: 440, w: 160, h: 10 }, { x: 1290, y: 150, w: 120, h: 20 }]);
+    sc.world.width = 1600;
+    sc.specRoots = [dummy(900, 460), dummy(1300, 110)];
+    const leader = new Soldier(rosterSoldier("L"), rifle, 150, 500 - STAND_H);
+    const m = new Soldier(rosterSoldier("M"), rifle, 685, 500 - STAND_H);
+    sc.soldiers.push(leader, m);
+    let first = null;
+    let firstAt = -1;
+    let gaveUp = -1;
+    for (let i = 0; i < 120; i++) {
+      updateCompanionSpec(m, STEP, sc, leader, ctx);
+      stepActor(m, STEP, sc.world, sc.platforms);
+      const r = m.agent.repo;
+      if (!first && r && r.hold > 0) {
+        first = r.dest;
+        firstAt = m.x;
+        sc.platforms.push({ x: 60, y: 440, w: 100, h: 20 });
+        sc.specRoots.push(dummy(100, 400));
+      } else if (first && gaveUp < 0 && r.dest !== first) { gaveUp = i; firstAt = m.x + m.w / 2; }
+    }
+    config.navRepathInterval = 0.5;
+    t.ok("recheck: the squadmate commits to the covered end first", !!first && first.x < 600);
+    t.ok(`recheck: and gives it up once a third hostile can hit it (frame ${gaveUp})`, gaveUp > 0);
+    t.ok(`recheck: while still walking to it (${Math.round(firstAt - first.x)}px short)`, firstAt - first.x > config.navArriveRadius);
   }
 
   resetConfig();

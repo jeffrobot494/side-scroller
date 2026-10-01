@@ -168,6 +168,42 @@ export default async function run(t) {
     t.eq("crouch: mirror follows back up", agent.h, STAND_H);
   }
 
+  // ---- V6: the dodge's zero-input intent (tech/squad-survival.md) ----------
+  // From launch to landing a dodging body takes no drive, whatever the request,
+  // so it flies the arc the reflex predicted. It clears itself on landing — and
+  // if the jump never fired, rather than holding the body still forever.
+  {
+    const sc = scene();
+    const comp = new Soldier(rosterSoldier("C"), rifle, 300, 500 - STAND_H);
+    comp.onGround = true;
+    const agent = instantiate(DEFAULT_COMPANION_SPEC, comp.x, comp.y, "player");
+    agent.soldier = comp;
+    const drive = { kind: "driveX", v: config.runSpeed, target: null };
+    agent.pendingJump = true;
+    agent.dodgeHold = { airborne: false };
+    let driven = 0;
+    let frames = 0;
+    do {
+      locomotorFor(agent).apply(agent, drive, STEP, sc);
+      // The landing frame takes the request again — that is the intent ending.
+      if (agent.dodgeHold && comp.vx !== 0) driven++;
+      stepActor(comp, STEP, sc.world, sc.platforms);
+      frames++;
+    } while (agent.dodgeHold && frames < 120);
+    t.ok(`dodge: the body left the ground and came back (${frames} frames)`, frames > 10 && comp.onGround);
+    t.eq("dodge: and took no drive in the air, though every request said run", driven, 0);
+    t.ok("dodge: the intent is gone once it has landed", !agent.dodgeHold);
+    locomotorFor(agent).apply(agent, drive, STEP, sc);
+    t.ok("dodge: the next request drives again", comp.vx > 0);
+
+    // The jump that never fires: nothing queued it, so the body stays planted.
+    comp.vx = 0;
+    agent.dodgeHold = { airborne: false };
+    agent.pendingJump = false;
+    for (let i = 0; i < 4; i++) locomotorFor(agent).apply(agent, drive, STEP, sc);
+    t.ok("dodge: a jump that never fired does not hold the body forever", !agent.dodgeHold);
+  }
+
   // ---- N2: one jump per body, and a window to spend it in --------------------
   // locomotion.golden.json pins whole trajectories, so it catches the impulse
   // CHANGING. It cannot say where the impulse comes from, and it exercises

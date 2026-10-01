@@ -423,7 +423,10 @@ export function driveV(dx, speed, dt) {
 // of the arc. A soldier that takes off at 270px/s needs six frames to stop
 // moving that way, and where a legged body would have held its column beside a
 // ledge it drifts 13px into the ledge's underside instead.
-function actuate(profile, vx, want, dt) {
+//
+// Exported for the squad's dodge jump (tech/squad-survival.md, V6), which flies
+// a soldier copy under zero input and must brake the way the body will.
+export function actuate(profile, vx, want, dt) {
   if (!profile.accel) return want; // legged: the request is the velocity
   const move = Math.sign(want);
   if (move !== 0) return clamp(vx + move * profile.accel * dt, -profile.runSpeed, profile.runSpeed);
@@ -754,8 +757,8 @@ export function nodeUnder(graph, x, feetY, tol = 2) {
 // Closest-in-space, not cheapest: the agent is being asked to approach something
 // it cannot get to, and the honest reading of that is proximity. Least-time
 // would pick whatever is quick to reach, which can be behind it.
-export function bestPartial(graph, fromId, x, y, skip) {
-  const { dist } = costsFrom(graph, fromId, skip);
+export function bestPartial(graph, fromId, x, y, skip, weight) {
+  const { dist } = costsFrom(graph, fromId, skip, weight);
   let best = null;
   let bestD = Infinity;
   for (const n of graph.nodes) {
@@ -778,8 +781,13 @@ export function bestPartial(graph, fromId, x, y, skip) {
 // agent's missing edge. Nothing generation-side passes it — `auditGeometry` uses
 // reachableFrom, not this — so the audit cannot be affected by an agent's
 // experience.
-export function route(graph, fromId, toId, skip) {
-  const { dist, prev } = costsFrom(graph, fromId, skip);
+//
+// `weight(fromId, edge)` is an optional per-caller EXTRA cost on an edge, on the
+// same rule as `skip`: a view of the shared graph, never written into it. A
+// squadmate prices an edge's exposure with it (tech/squad-survival.md, V5).
+// Absent, every number is exactly what it was.
+export function route(graph, fromId, toId, skip, weight) {
+  const { dist, prev } = costsFrom(graph, fromId, skip, weight);
   if (!Number.isFinite(dist[toId])) return null;
   const path = [];
   for (let at = toId; at !== -1; at = prev[at]) path.push(at);
@@ -789,7 +797,7 @@ export function route(graph, fromId, toId, skip) {
 
 // Shortest-time distance to every node, plus the tree that produced it. N3's
 // partial-path fallback ("get as close as you can") reads these directly.
-export function costsFrom(graph, fromId, skip) {
+export function costsFrom(graph, fromId, skip, weight) {
   const n = graph.nodes.length;
   const dist = new Array(n).fill(Infinity);
   const prev = new Array(n).fill(-1);
@@ -804,7 +812,7 @@ export function costsFrom(graph, fromId, skip) {
     done[cur] = true;
     for (const e of graph.edges[cur]) {
       if (skip && skip.has(edgeKey(cur, e.to))) continue; // N4: banned for this caller
-      const alt = dist[cur] + e.cost;
+      const alt = dist[cur] + e.cost + (weight ? weight(cur, e) : 0);
       if (alt < dist[e.to]) { dist[e.to] = alt; prev[e.to] = cur; }
     }
   }

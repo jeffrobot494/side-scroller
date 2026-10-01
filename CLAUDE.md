@@ -352,6 +352,47 @@ section + the tests are the source of truth for what currently exists):
   where the squadmate stops at the near end of the floor that IS there and
   settles, which is `design/agent-navigation.md`'s "get as close as you can, then
   stop". The rest of `tech/nav-audit.md` is untouched.
+- **Squadmates survive (`tech/squad-survival.md` V1–V6 — built).** Only agents
+  the companion bridge opts in (`agent.survival`, set in `companionAgent`) get
+  any of it; enemies and the Behavior Lab's agent take every old rule unchanged.
+  **Senses** (`publishSurvival` in `src/mission/enemyspec/perception.js`, ahead
+  of the no-hostile return so `calm` still arrives after the last kill):
+  `underFire`, `wounded` (the Soldier's real HP is mirrored onto the agent),
+  `calm`, `exposure`, `shot`, `needReload`, `outOfAmmo`, `leaderFar`.
+  **Can-hit is the round's flight, both ways** (`theyCanHit`/`myShot`): every
+  projectile emitter of a hostile (straight = one segment; gravity = a fan of
+  arcs, each coarse step's chord segment-tested), contact-only hostiles by a
+  radius, and the squadmate's own round from `fire()`'s muzzle — a gravity
+  weapon's barrel takes the low arc. An UNARMED hostile exposes nothing.
+  **One shared exposure cache per scene**, aged on `scene.survivalClock` (the
+  bridge advances it), serves spot scores and V5's edge prices. `predictHit`
+  (`combat.js`) is the one round-vs-body predictor; `duckableShot` is a caller.
+  **Spots:** `holdPoint` takes an optional scorer and then ranks every probe of
+  every reachable node on travel + exposure − shot + ally claims, against
+  staying put by a margin; a held spot is re-checked on the repath tick.
+  **Cover** is a motion controller (`cover`, `squadOnly` in `MOTIONS`, so the
+  LLM is not shown it) and a companion state wired by a transition table
+  (`src/game/companionspecs.js`) whose rows guard each other against
+  per-frame flipping. **Routes** pay per edge for exposure through an optional
+  `costsFrom` weight (`agent.edgeWeight`, injected), with held-path
+  hysteresis. **Dodge:** `tickDuck` tries keep going, duck, then a zero-input
+  jump (`agent.dodgeHold`, actuated by the SOLDIER locomotor). ~20 knobs in the
+  config's "Squad survival" group, all on the pause menu. Cost is frozen as a
+  COUNT of segment/box tests over 60 levels in `test/navigation.test.mjs`.
+- **Squad debug view (`tech/squad-debug.md` D0–D4 — built).** `` ` `` (the
+  `debugMenu` action, local-only; G/H and their actions are gone) opens the
+  pause menu on a **Debug screen**, only while `config.debugOverlays` is on and
+  never in a room: Nav graph, Squad routes, Threats, Spot choice, Dodges, Speed
+  (full/½/¼) and the `debugPauseOnDeath` setting. The layers read RECORDS that
+  change nothing (the golden is untouched): `soldier.duck.log` (one verdict per
+  judged round, marked hit/`late` through an optional `ctx.hit` in
+  `resolveHit`) and `agent.spotPass` (every probe `spotScorer` scored, with its
+  terms). `src/mission/debugview.js` draws them, DOM-free; threat lines are
+  recomputed there on their own clock, never through the exposure cache. Slow
+  motion scales `_frame`'s frame time only. A squadmate death freezes the
+  mission under a card (`mission.deathCard`, a second reason in `_frozen()`);
+  the pause key dismisses it without opening the menu. Suites that drive
+  `_frame` pin `debugPauseOnDeath` off.
 - **Enemy creation system (EnemySpec):** a full entity-composition enemy format
   + runtime (`src/game/enemyspec/` = schema/expr/validate/normalize/templates/
   dryrun/generate; `src/mission/enemyspec/` = runtime/brain/perception/render):
