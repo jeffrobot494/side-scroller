@@ -11,6 +11,9 @@
 
 import { CFG, createWorld, step } from "./sim.js";
 import { createHud, hudEvents, drawHud } from "./hud.js";
+import { createAudio } from "../space/audio.js";
+import { eyeOf } from "./camera.js";
+import { qrot, qlook } from "./vec.js";
 
 const SENS = 0.0022; // F2: rad per pixel of mouse
 const FOV = { now: 75, min: 30, max: 90 }; // F5
@@ -33,6 +36,35 @@ const KEYS = {
   Tab: "swap", KeyK: "swap",
   Enter: "restart",
 };
+
+// The 2D page's sound, unchanged: it pans by an event's x offset from the
+// listener and fades by distance, so each event is handed over in the eye's
+// frame — x to the right, and the rest of the distance along y.
+const audio = createAudio();
+addEventListener("keydown", audio.unlock);
+addEventListener("mousedown", audio.unlock);
+function hear(world) {
+  const cam = eyeOf(world, FOV.now, 1);
+  const r = qrot(cam.q, [1, 0, 0]);
+  const evs = [];
+  for (const ev of world.events) {
+    if (!Number.isFinite(ev.z)) { evs.push(ev); continue; }
+    const d = [ev.x - cam.pos[0], ev.y - cam.pos[1], ev.z - cam.pos[2]];
+    const x = d[0] * r[0] + d[1] * r[1] + d[2] * r[2];
+    const rest = Math.sqrt(Math.max(0, d[0] * d[0] + d[1] * d[1] + d[2] * d[2] - x * x));
+    evs.push({ ...ev, x, y: rest });
+  }
+  try {
+    audio.handle(evs, 0, 0, 0);
+    const s = world.soldiers[world.ctrl];
+    audio.setThrust(!!(s && s.alive && s.thrusting && !world.end && locked()));
+    if (world.end && !ended) audio.end(world.end.success);
+  } catch (e) {
+    console.error(e);
+  }
+  ended = !!world.end;
+}
+let ended = false;
 
 const held = new Set();
 const pressed = new Set();
@@ -89,7 +121,18 @@ let world = createWorld(newSeed(), { squad: 1 });
 const hud = createHud();
 // For poking at it from the console: space.world().soldiers[0].hp = 999.
 // space.step(input, n) runs the sim without pointer lock (headless checks).
-window.space = { world: () => world, step: (input = {}, n = 1) => { for (let i = 0; i < n; i++) step(world, input); } };
+// space.face(x, y, z) turns the soldier you fly to look at a point.
+window.space = {
+  world: () => world,
+  step: (input = {}, n = 1) => { for (let i = 0; i < n; i++) step(world, input); },
+  face: (x, y, z) => {
+    const s = world.soldiers[world.ctrl];
+    const f = [x - s.x, y - s.y, z - s.z];
+    const l = Math.hypot(...f);
+    s.q = qlook([f[0] / l, f[1] / l, f[2] / l], qrot(s.q, [0, 1, 0]));
+    s.aim = [f[0] / l, f[1] / l, f[2] / l];
+  },
+};
 
 const axis = (p, n) => (held.has(p) ? 1 : 0) - (held.has(n) ? 1 : 0);
 
@@ -133,9 +176,11 @@ function frame(now) {
     acc -= CFG.step;
   }
   hudEvents(hud, world);
+  hear(world);
   if (view3d) {
     try {
-      view3d.draw(world, vw, vh, FOV.now);
+      view3d.events(world);
+      view3d.draw(world, vw, vh, FOV.now, dt);
     } catch (e) {
       console.error("space3d: 3D view failed —", e);
       failed = String(e);

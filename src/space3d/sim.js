@@ -27,6 +27,8 @@ export const CFG = {
   jetSide: 0.6, // S, A, D, Space and C push at this share of W's thrust
   pitchMax: 1.45, // standing, the head pitches this far from level
   viewEase: 0.07, // s: the eye's roll to a new up, the 2D ROLL_TAU
+  dummyCount3: 4, // F2: target drones round the start
+  gridCell: 700, // the rock grid lines of sight and rounds query
 };
 
 const rand = (rng, lo, hi) => lo + rng() * (hi - lo);
@@ -71,7 +73,32 @@ export function createWorld(seed = 1, opts = {}) {
   }
 
   placeAsteroids(world, opts.asteroids ?? CFG.asteroidCount);
+
+  // F2: target drones round the start, so every effect can be seen before
+  // there are enemies. A test fixture once enemies exist (F5).
+  const dummies = opts.dummies ?? CFG.dummyCount3;
+  for (let i = 0; i < dummies; i++) {
+    const d = randomDir(rng);
+    const k = rand(rng, 260, 420);
+    world.enemies.push(makeDummy(world.start.x + d[0] * k, world.start.y + d[1] * k, world.start.z + d[2] * k));
+  }
   return world;
+}
+
+function makeDummy(x, y, z) {
+  return {
+    kind: "dummy",
+    team: "enemy",
+    x, y, z, vx: 0, vy: 0, vz: 0, sx: 0, sy: 0, sz: 0,
+    home: [x, y, z],
+    r: CFG.dummyR,
+    m: (CFG.dummyR / CFG.soldierR) ** 2,
+    hp: CFG.dummyHp,
+    maxHp: CFG.dummyHp,
+    alive: true,
+    respawn: 0,
+    burn: null, slow: null, flash: 0,
+  };
 }
 
 export function makeSoldier(recruit, x, y, z, weaponId, q = QI()) {
@@ -178,10 +205,17 @@ export function step(world, input = {}) {
 
   if (input.swap && !world.end) swapControl(world);
   const s = world.end ? null : controlled(world);
-  if (s) drive(s, input, dt);
+  if (s) {
+    drive(s, input, dt);
+    if (input.reload) startReload(s, world);
+    // Semi-auto takes the press, auto the hold, as the mission does.
+    const want = s.weapon.auto ? input.fire : input.firePress;
+    if (want) fire(world, s, s.aim, aimAccuracy(s.stats.aim));
+  }
   for (const o of world.soldiers) easeView(o, dt);
   tickActors(world, dt);
   integrate(world, dt);
+  updateProjectiles(world, dt);
   if (!world.end) tickObjective(world);
 }
 
@@ -217,12 +251,57 @@ function easeView(s, dt) {
 // ---- per-actor ticks ---------------------------------------------------------
 function tickActors(world, dt) {
   for (const a of [...world.soldiers, ...world.enemies]) {
-    if (!a.alive) continue;
+    if (!a.alive) {
+      if (a.kind === "dummy" && (a.respawn -= dt) <= 0) Object.assign(a, makeDummy(...a.home));
+      continue;
+    }
     if (a.fireCd > 0) a.fireCd -= dt;
     if (a.flash > 0) a.flash -= dt;
     if (a.muzzle > 0) a.muzzle -= dt;
+    tickReload(a, dt, world);
+    // Status ticks, src/mission/combat.js: burn damages, slow expires.
+    if (a.burn) {
+      const burn = a.burn;
+      hurt(world, a, burn.dps * dt, a.burnOwner, true);
+      burn.time -= dt;
+      if (burn.time <= 0 && a.burn === burn) a.burn = null;
+    }
+    if (a.slow) {
+      a.slow.time -= dt;
+      if (a.slow.time <= 0) a.slow = null;
+    }
     decayShove(a, dt);
   }
+}
+
+// startReload / tickReload, src/mission/entities.js.
+export function startReload(a, world) {
+  const w = a.weapon;
+  if (!w || !w.magazine) return false;
+  if (a.reloading > 0 || a.ammo >= w.magazine) return false;
+  if (a.magsLeft !== undefined && a.magsLeft <= 0) return false;
+  a.reloading = w.reloadTime || 1.5;
+  if (world) world.events.push({ type: "reload", x: a.x, y: a.y, z: a.z });
+  return true;
+}
+
+function tickReload(a, dt, world) {
+  if (!(a.reloading > 0)) return;
+  a.reloading -= dt;
+  if (a.reloading <= 0) {
+    a.reloading = 0;
+    world.events.push({ type: "reloaded", x: a.x, y: a.y, z: a.z });
+    a.ammo = a.weapon.magazine;
+    if (a.magsLeft !== undefined && a.magsLeft !== Infinity) a.magsLeft -= 1;
+  }
+}
+
+// Knockback: shoveActor, src/mission/entities.js, with the lift dropped.
+export function shove(t, vx, vy, vz) {
+  const m = Math.sqrt(Math.max(0.05, t.m));
+  t.sx = (t.sx || 0) + vx / m;
+  t.sy = (t.sy || 0) + vy / m;
+  t.sz = (t.sz || 0) + vz / m;
 }
 
 function decayShove(a, dt) {
@@ -252,6 +331,7 @@ function kill(world, t) {
   t.alive = false;
   t.hp = 0;
   t.burn = t.slow = null;
+  if (t.kind === "dummy") t.respawn = CFG.dummyRespawn;
   world.events.push({ type: "death", x: t.x, y: t.y, z: t.z, r: t.r, kind: t.kind, enemy: t.type, color: t.color });
   if (t.kind === "soldier" && world.soldiers[world.ctrl] === t) swapControl(world);
 }
@@ -377,5 +457,278 @@ function edge(b, size, e) {
   for (const [p, v] of [["x", "vx"], ["y", "vy"], ["z", "vz"]]) {
     if (b[p] < b.r) { foldShove(b); b[p] = b.r; b[v] = Math.abs(b[v]) * e; }
     else if (b[p] > size - b.r) { foldShove(b); b[p] = size - b.r; b[v] = -Math.abs(b[v]) * e; }
+  }
+}
+
+// ---- the rock grid --------------------------------------------------------------
+// Rocks bucketed by cell, rebuilt each step, so a round or a line of sight
+// tests only the rocks near it. A rock is in every cell its sphere touches.
+function rockGrid(world) {
+  if (world.grid && world.grid.t === world.t) return world.grid;
+  const C = CFG.gridCell;
+  const n = Math.ceil(world.size / C);
+  const cells = new Map();
+  const cl = (v) => clamp(Math.floor(v / C), 0, n - 1);
+  for (const a of world.asteroids) {
+    const pad = a.r + 60; // drift between rebuilds, and the widest round
+    for (let i = cl(a.x - pad); i <= cl(a.x + pad); i++)
+      for (let j = cl(a.y - pad); j <= cl(a.y + pad); j++)
+        for (let k = cl(a.z - pad); k <= cl(a.z + pad); k++) {
+          const key = (i * n + j) * n + k;
+          let c = cells.get(key);
+          if (!c) cells.set(key, (c = []));
+          c.push(a);
+        }
+  }
+  world.grid = { t: world.t, cells, n, C };
+  return world.grid;
+}
+
+// Rocks whose cells a segment's box touches, each once. The once is a stamp
+// on the rock, from one counter for the whole module: a per-grid counter
+// restarts and meets stamps an older grid left behind.
+let stamp = 0;
+export function rocksNear(world, x0, y0, z0, x1, y1, z1, pad = 0) {
+  const g = rockGrid(world);
+  const cl = (v) => clamp(Math.floor(v / g.C), 0, g.n - 1);
+  const out = [];
+  const st = ++stamp;
+  for (let i = cl(Math.min(x0, x1) - pad); i <= cl(Math.max(x0, x1) + pad); i++)
+    for (let j = cl(Math.min(y0, y1) - pad); j <= cl(Math.max(y0, y1) + pad); j++)
+      for (let k = cl(Math.min(z0, z1) - pad); k <= cl(Math.max(z0, z1) + pad); k++) {
+        const c = g.cells.get((i * g.n + j) * g.n + k);
+        if (!c) continue;
+        for (const a of c) if (a._st !== st) { a._st = st; out.push(a); }
+      }
+  return out;
+}
+
+// First t in [0,1] where segment p0→p1 comes within R of c, or null.
+export function segSphere(x0, y0, z0, x1, y1, z1, cx, cy, cz, R) {
+  const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+  const fx = x0 - cx, fy = y0 - cy, fz = z0 - cz;
+  const c = fx * fx + fy * fy + fz * fz - R * R;
+  if (c <= 0) return 0;
+  const a = dx * dx + dy * dy + dz * dz;
+  if (a === 0) return null;
+  const b = 2 * (fx * dx + fy * dy + fz * dz);
+  const disc = b * b - 4 * a * c;
+  if (disc < 0) return null;
+  const t = (-b - Math.sqrt(disc)) / (2 * a);
+  return t >= 0 && t <= 1 ? t : null;
+}
+
+export function hasLos(world, a, b) {
+  for (const r of rocksNear(world, a.x, a.y, a.z, b.x, b.y, b.z)) {
+    if (segSphere(a.x, a.y, a.z, b.x, b.y, b.z, r.x, r.y, r.z, r.r) !== null) return false;
+  }
+  return true;
+}
+
+// ---- firing (fire(), src/mission/ai.js) ------------------------------------
+const opponentsOf = (world, team) => (team === "player" ? world.enemies : world.soldiers);
+
+// A direction within `spread` of d (unit), evenly over the cone's disc (F7).
+function inCone(rng, d, spread) {
+  if (!spread) return d;
+  const a = spread * Math.sqrt(rng());
+  const ph = rng() * Math.PI * 2;
+  const p1 = perp(d), p2 = cross(d, p1);
+  const s = Math.sin(a), c = Math.cos(a);
+  return norm([
+    d[0] * c + (p1[0] * Math.cos(ph) + p2[0] * Math.sin(ph)) * s,
+    d[1] * c + (p1[1] * Math.cos(ph) + p2[1] * Math.sin(ph)) * s,
+    d[2] * c + (p1[2] * Math.cos(ph) + p2[2] * Math.sin(ph)) * s,
+  ]);
+}
+
+export function fire(world, shooter, dir, accuracy = 1) {
+  if (shooter.fireCd > 0) return false;
+  if (shooter.reloading > 0) return false;
+  if (shooter.ammo !== undefined && shooter.ammo <= 0) {
+    world.events.push({ type: "dry", x: shooter.x, y: shooter.y, z: shooter.z });
+    return false;
+  }
+  const w = shooter.weapon;
+  shooter.fireCd = 1 / w.fireRate;
+  if (w.magazine && shooter.ammo !== Infinity) shooter.ammo -= 1;
+
+  const pellets = w.effects.find((e) => e.kind === "pellets");
+  const count = pellets ? Math.max(1, pellets.count || 1) : 1;
+  const arc = pellets ? pellets.spread ?? 0.12 : 0;
+  const spread = (w.spread || 0) + (1 - accuracy) * CFG.aimSpread + arc;
+  const spec = w.projectile;
+  const pierce = w.effects.find((e) => e.kind === "pierce");
+  const own = shooter === controlled(world);
+  for (let i = 0; i < count; i++) {
+    const d = inCone(world.rng, dir, spread);
+    world.projectiles.push({
+      x: shooter.x + d[0] * (shooter.r + 6),
+      y: shooter.y + d[1] * (shooter.r + 6),
+      z: shooter.z + d[2] * (shooter.r + 6),
+      vx: d[0] * spec.speed, vy: d[1] * spec.speed, vz: d[2] * spec.speed,
+      r: Math.max(2, Math.min(spec.w, spec.h) / 2),
+      w: spec.w, h: spec.h,
+      color: spec.color,
+      shape: spec.shape,
+      life: spec.life,
+      age: 0,
+      team: shooter.team,
+      owner: shooter,
+      own,
+      effects: w.effects,
+      pierceLeft: pierce ? pierce.count || 0 : 0,
+      hit: null,
+      dead: false,
+    });
+  }
+  shooter.muzzle = 0.055;
+  const k = shooter.r + 14;
+  world.events.push({ type: "muzzle", x: shooter.x + dir[0] * k, y: shooter.y + dir[1] * k, z: shooter.z + dir[2] * k, color: spec.color, shape: spec.shape, team: shooter.team, pellets: count > 1, own });
+  return true;
+}
+
+// ---- projectiles (updateProjectiles, src/mission/combat.js) ----------------
+// Swept: each step a round is a segment, and the EARLIEST thing along it wins.
+function updateProjectiles(world, dt) {
+  for (const p of world.projectiles) {
+    if (p.dead) continue;
+    steerHoming(world, p, dt);
+    const x0 = p.x, y0 = p.y, z0 = p.z;
+    const x1 = x0 + p.vx * dt, y1 = y0 + p.vy * dt, z1 = z0 + p.vz * dt;
+    p.life -= dt;
+    p.age += dt;
+    if (p.life <= 0) { p.dead = true; continue; }
+
+    let best = null;
+    let bt = Infinity;
+    for (const a of rocksNear(world, x0, y0, z0, x1, y1, z1, p.r)) {
+      const t = segSphere(x0, y0, z0, x1, y1, z1, a.x, a.y, a.z, a.r + p.r);
+      if (t !== null && t < bt) { bt = t; best = a; }
+    }
+    for (const o of opponentsOf(world, p.team)) {
+      if (!o.alive || o === p.owner || (p.hit && p.hit.has(o))) continue;
+      const t = segSphere(x0, y0, z0, x1, y1, z1, o.x, o.y, o.z, o.r + p.r);
+      if (t !== null && t < bt) { bt = t; best = o; }
+    }
+
+    if (!best) { p.x = x1; p.y = y1; p.z = z1; continue; }
+    const hx = x0 + (x1 - x0) * bt, hy = y0 + (y1 - y0) * bt, hz = z0 + (z1 - z0) * bt;
+    if (best.kind === "asteroid") {
+      p.dead = true;
+      p.x = hx; p.y = hy; p.z = hz;
+      const sp = Math.hypot(p.vx, p.vy, p.vz) || 1;
+      const k = CFG.bulletPush / best.m / sp;
+      best.vx += p.vx * k; best.vy += p.vy * k; best.vz += p.vz * k;
+      world.events.push({ type: "spark", x: hx, y: hy, z: hz, color: p.color });
+      // The 2D deviation: an explosive round detonates on terrain.
+      for (const fx of p.effects) if (fx.kind === "explode") explode(world, fx, hx, hy, hz, p.team, p.owner);
+      continue;
+    }
+    applyEffects(world, best, p.effects, p.owner, { x: hx, y: hy, z: hz, vx: p.vx, vy: p.vy, vz: p.vz, team: p.team });
+    world.events.push({ type: "hit", x: hx, y: hy, z: hz, color: p.color, own: p.own, kill: !best.alive });
+    if (p.pierceLeft > 0) {
+      p.pierceLeft--;
+      (p.hit || (p.hit = new Set())).add(best);
+      p.x = x1; p.y = y1; p.z = z1;
+    } else {
+      p.dead = true;
+      p.x = hx; p.y = hy; p.z = hz;
+    }
+  }
+  world.projectiles = world.projectiles.filter((p) => !p.dead);
+}
+
+function nearestOpponent(world, p) {
+  let best = null, bd = Infinity;
+  for (const o of opponentsOf(world, p.team)) {
+    if (!o.alive || o === p.owner) continue;
+    const d = Math.hypot(o.x - p.x, o.y - p.y, o.z - p.z);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+
+// Homing turns the round's velocity toward the nearest opponent, at most
+// homing.turn rad/s.
+function steerHoming(world, p, dt) {
+  const homing = p.effects.find((e) => e.kind === "homing");
+  if (!homing) return;
+  const target = nearestOpponent(world, p);
+  if (!target) return;
+  const sp = Math.hypot(p.vx, p.vy, p.vz) || 1;
+  const cur = [p.vx / sp, p.vy / sp, p.vz / sp];
+  const want = norm([target.x - p.x, target.y - p.y, target.z - p.z]);
+  const ang = Math.acos(clamp(dot(cur, want), -1, 1));
+  if (!ang) return;
+  const turn = Math.min(ang, (homing.turn || 3) * dt);
+  const axis = norm(cross(cur, want));
+  const d = len(axis) ? qrot(qaxis(axis, turn), cur) : cur;
+  p.vx = d[0] * sp; p.vy = d[1] * sp; p.vz = d[2] * sp;
+}
+
+// applyEffects, src/mission/combat.js: in the order the weapon authors them.
+export function applyEffects(world, target, effects, owner, at) {
+  const mult = owner && owner.kind === "soldier" ? CFG.playerDamageMult : 1;
+  for (const fx of effects) {
+    switch (fx.kind) {
+      case "damage":
+        hurt(world, target, (fx.amount || 0) * mult, owner);
+        break;
+      case "burn":
+        target.burn = { dps: (fx.dps || 0) * mult, time: fx.duration };
+        target.burnOwner = owner;
+        break;
+      case "slow":
+        target.slow = { factor: clamp(fx.factor ?? 1, 0, 1), time: fx.duration };
+        break;
+      case "knockback": {
+        const v = clamp(fx.force || 0, 0, 1) * CFG.knockbackMaxV;
+        const sp = Math.hypot(at.vx, at.vy, at.vz) || 1;
+        shove(target, (at.vx / sp) * v, (at.vy / sp) * v, (at.vz / sp) * v);
+        break;
+      }
+      case "explode":
+        explode(world, fx, at.x, at.y, at.z, at.team, owner);
+        break;
+      case "chain": {
+        const pool = opponentsOf(world, at.team).filter((o) => o.alive && o !== target);
+        const done = new Set([target]);
+        let from = target;
+        for (let j = 0; j < (fx.jumps || 0); j++) {
+          let next = null, bd = Infinity;
+          for (const o of pool) {
+            if (done.has(o)) continue;
+            const d = Math.hypot(o.x - from.x, o.y - from.y, o.z - from.z);
+            if (d <= (fx.range || 0) && d < bd) { bd = d; next = o; }
+          }
+          if (!next) break;
+          world.events.push({ type: "chain", x: next.x, y: next.y, z: next.z, from: [from.x, from.y, from.z], to: [next.x, next.y, next.z] });
+          hurt(world, next, (fx.amount || 0) * mult, owner);
+          done.add(next);
+          from = next;
+        }
+        break;
+      }
+    }
+  }
+}
+
+// Damages opponents in the radius (the direct target again, as the game does)
+// and pushes rocks (answer 4). Bodies are not pushed (P8).
+export function explode(world, fx, x, y, z, team, owner) {
+  const mult = owner && owner.kind === "soldier" ? CFG.playerDamageMult : 1;
+  const R = fx.radius || 0;
+  world.events.push({ type: "explode", x, y, z, r: R });
+  for (const o of opponentsOf(world, team)) {
+    if (o.alive && Math.hypot(o.x - x, o.y - y, o.z - z) <= R) hurt(world, o, (fx.amount || 0) * mult, owner);
+  }
+  for (const a of world.asteroids) {
+    const dx = a.x - x, dy = a.y - y, dz = a.z - z;
+    const d = Math.hypot(dx, dy, dz) || 1;
+    const reach = R + a.r;
+    if (d >= reach) continue;
+    const k = (CFG.blastPush * (1 - d / reach)) / a.m / d;
+    a.vx += dx * k; a.vy += dy * k; a.vz += dz * k;
   }
 }

@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled } from "../src/space3d/sim.js";
+import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled, fire, startReload, WEAPONS, hasLos } from "../src/space3d/sim.js";
 import { makeRng } from "../src/space/sim.js";
 import { dot, len, norm, sub, qrot } from "../src/space3d/vec.js";
 import { eyeOf, project } from "../src/space3d/camera.js";
@@ -164,5 +164,162 @@ export default async function suite(t) {
     const q = project(cam, [cam.pos[0] + f[0] * 500 + u[0] * 100, cam.pos[1] + f[1] * 500 + u[1] * 100, cam.pos[2] + f[2] * 500 + u[2] * 100], 1280, 720);
     t.ok("F1: up is up the screen", q.y < 360 && near(q.x, 640, 1e-6));
     t.ok("F1: the controlled soldier is the eye", eyeOf(w, 75, 1).body === controlled(w));
+  }
+
+  // ---- F2: guns -------------------------------------------------------------------
+  // A drone `d` px straight ahead of a still soldier at the centre, with HP to spare.
+  const range = (weapon, d = 300) => {
+    const w = empty({ weapons: [weapon], dummies: 1 });
+    const s = w.soldiers[0];
+    Object.assign(s, { x: 3000, y: 3000, z: 3000, vx: 0, vy: 0, vz: 0 });
+    const f = lookOf(s);
+    const t = w.enemies[0];
+    Object.assign(t, { x: 3000 + f[0] * d, y: 3000 + f[1] * d, z: 3000 + f[2] * d, hp: 1000, maxHp: 1000 });
+    t.home = [t.x, t.y, t.z];
+    return { w, s, t, f };
+  };
+  {
+    const w = createWorld(3);
+    t.ok("F2: four target drones round the start", w.enemies.filter((e) => e.kind === "dummy").length === 4);
+  }
+  {
+    const { w, s, t: d } = range("carbine");
+    step(w, { firePress: true, fire: true });
+    const p = w.projectiles[0];
+    t.ok("F2: a carbine round leaves along the look", w.projectiles.length === 1 && dot(norm(V(p)), lookOf(s)) > Math.cos(WEAPONS.carbine.spread + (1 - (8 - 1) / 9) * CFG.aimSpread + 1e-9));
+    t.ok("F2: and uses a round", s.ammo === WEAPONS.carbine.magazine - 1);
+    run(w, {}, 40);
+    t.ok("F2: it hits the drone for 14 × playerDamageMult", near(d.maxHp - d.hp, 14 * CFG.playerDamageMult, 1e-9));
+  }
+  {
+    // Spread is a cone: over many rounds no direction leaves it, and they fill it.
+    const { w, s } = range("carbine");
+    s.stats.aim = 1;
+    const f = lookOf(s);
+    let worst = 0, sum = 0;
+    for (let i = 0; i < 400; i++) {
+      s.fireCd = 0; s.ammo = 10;
+      fire(w, s, f, 0);
+      const p = w.projectiles.pop();
+      const a = Math.acos(Math.min(1, dot(norm(V(p)), f)));
+      worst = Math.max(worst, a);
+      sum += a;
+    }
+    const cone = WEAPONS.carbine.spread + CFG.aimSpread;
+    t.ok(`F2: spread stays inside its ${cone.toFixed(2)} rad cone`, worst <= cone + 1e-9);
+    t.ok("F2: and an even disc fills it (mean ⅔ of the half-angle)", near(sum / 400 / cone, 2 / 3, 0.05));
+  }
+  {
+    const { w, s } = range("carbine");
+    s.ammo = 0;
+    step(w, { firePress: true, fire: true });
+    t.ok("F2: an empty magazine fires nothing", w.projectiles.length === 0 && w.events.some((e) => e.type === "dry"));
+    step(w, { reload: true });
+    run(w, {}, Math.ceil(WEAPONS.carbine.reloadTime * 60) + 1);
+    t.ok("F2: reload fills it from a spare", s.ammo === WEAPONS.carbine.magazine && s.magsLeft === CFG.soldierMagazines - 2);
+    s.ammo = 3; s.magsLeft = 0;
+    t.ok("F2: with no spares, reload does nothing", !startReload(s, w) && s.reloading === 0);
+  }
+  {
+    // Semi-auto takes the press; auto takes the hold.
+    const { w, s } = range("grenade_launcher", 2000);
+    run(w, { fire: true }, 60);
+    t.ok("F2: holding a semi-auto trigger fires nothing", w.projectiles.length === 0);
+    const r2 = range("carbine", 2000);
+    run(r2.w, { fire: true }, 60);
+    t.ok("F2: holding an automatic fires at its rate", near(WEAPONS.carbine.magazine - r2.s.ammo, WEAPONS.carbine.fireRate, 1));
+  }
+  {
+    const { w, t: d } = range("ember_jet", 200);
+    step(w, { firePress: true, fire: true });
+    run(w, {}, 20);
+    const hp = d.hp;
+    t.ok("F2: ember jet sets the drone burning", !!d.burn);
+    run(w, {}, 30);
+    t.ok("F2: and the burn hurts over time", d.hp < hp);
+  }
+  {
+    const { w, t: d } = range("stun_pistol", 200);
+    step(w, { firePress: true });
+    run(w, {}, 20);
+    t.ok("F2: stun pistol slows by half", d.slow && d.slow.factor === 0.5);
+  }
+  {
+    const { w, t: d, f } = range("bulldog", 200);
+    step(w, { firePress: true });
+    run(w, {}, 15);
+    const sh = [d.sx, d.sy, d.sz];
+    t.ok("F2: bulldog knocks the drone along the round's line", len(sh) > 100 && dot(norm(sh), f) > 0.98);
+    run(w, {}, 120);
+    t.ok("F2: and the shove decays to nothing", d.sx === 0 && d.sy === 0 && d.sz === 0);
+  }
+  {
+    // Chain: two more drones near the first.
+    const { w, t: d, f } = range("arc_tazer", 200);
+    const extra = w.enemies.length;
+    const c = createWorld(7, { asteroids: 0, dummies: 2 }).enemies;
+    for (const [i, o] of c.entries()) {
+      Object.assign(o, { x: d.x + (i + 1) * 150, y: d.y, z: d.z, hp: 1000, maxHp: 1000 });
+      w.enemies.push(o);
+    }
+    step(w, { firePress: true, fire: true });
+    run(w, {}, 20);
+    const hit = w.enemies.slice(extra).filter((o) => o.hp < 1000).length;
+    t.ok("F2: arc tazer chains to two more drones", hit === 2);
+  }
+  {
+    const { w, s } = range("grenade_launcher", 2000);
+    const rock = makeAsteroid(makeRng(4), 0, 0, 0, 100);
+    const f = lookOf(s);
+    Object.assign(rock, { x: 3000 + f[0] * 400, y: 3000 + f[1] * 400, z: 3000 + f[2] * 400, vx: 0, vy: 0, vz: 0, w: [0, 0, 0] });
+    w.asteroids.push(rock);
+    step(w, { firePress: true });
+    run(w, {}, 40);
+    t.ok("F2: a grenade stops at a rock and detonates there", w.projectiles.length === 0 && w.events.some((e) => e.type === "explode"));
+    t.ok("F2: and the blast pushes the rock away", dot(V(rock), f) > 0);
+    t.ok("F2: a rock blocks the line of sight", !hasLos(w, s, w.enemies[0]));
+  }
+  {
+    const { w, s } = range("carbine", 2000);
+    const rock = makeAsteroid(makeRng(4), 0, 0, 0, 40);
+    const f = lookOf(s);
+    Object.assign(rock, { x: 3000 + f[0] * 300, y: 3000 + f[1] * 300, z: 3000 + f[2] * 300, vx: 0, vy: 0, vz: 0, w: [0, 0, 0] });
+    w.asteroids.push(rock);
+    step(w, { firePress: true, fire: true });
+    run(w, {}, 30);
+    t.ok("F2: a round pushes a rock slightly (bulletPush / mass)", near(len(V(rock)), CFG.bulletPush / rock.m, 1e-6) && dot(norm(V(rock)), f) > 0.95);
+  }
+  {
+    const { w, t: d } = range("ripper", 200);
+    const back = createWorld(7, { asteroids: 0, dummies: 1 }).enemies[0];
+    const f = lookOf(w.soldiers[0]);
+    Object.assign(back, { x: d.x + f[0] * 100, y: d.y + f[1] * 100, z: d.z + f[2] * 100, hp: 1000, maxHp: 1000 });
+    w.enemies.push(back);
+    step(w, { firePress: true, fire: true });
+    run(w, {}, 30);
+    t.ok("F2: a ripper round pierces one drone into the next", d.hp < 1000 && back.hp < 1000);
+  }
+  {
+    const { w, t: d } = range("scattergun", 200);
+    step(w, { firePress: true });
+    t.ok("F2: a scattergun fires five pellets", w.projectiles.length === 5);
+  }
+  {
+    // Homing: a seeker fired 90° off still finds the drone.
+    const { w, s, t: d } = range("seeker", 500);
+    const side = qrot(s.q, [1, 0, 0]);
+    s.fireCd = 0;
+    fire(w, s, side, 1);
+    run(w, {}, 150);
+    t.ok("F2: a seeker turns onto its target", d.hp < 1000);
+  }
+  {
+    const { w, t: d } = range("carbine", 200);
+    d.hp = 5;
+    step(w, { firePress: true, fire: true });
+    run(w, {}, 20);
+    t.ok("F2: a killed drone comes back after its respawn", !d.alive);
+    run(w, {}, Math.ceil(CFG.dummyRespawn * 60) + 2);
+    t.ok("F2: …at full HP", d.alive && d.hp === CFG.dummyHp);
   }
 }
