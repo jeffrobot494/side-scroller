@@ -1177,11 +1177,99 @@ export default async function run_(t) {
     t.ok("a trooper slammed into a rock takes crash damage (the companions' share)", near(e.maxHp - e.hp, ((900 - CFG.crashSafe) / (CFG.crashLethal - CFG.crashSafe)) * CFG.companionCrash * e.maxHp, e.maxHp * 0.05));
   }
 
+  // ---- troopers T1: in the field --------------------------------------------
+  {
+    let pairs = 0, bad = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      const tr = createWorld(seed).enemies.filter((e) => e.type === "trooper");
+      for (const e of tr) if (!e.wing || e.wing.members.length !== 2 || !e.wing.members.includes(e)) bad++;
+      pairs += tr.length / 2;
+    }
+    t.ok(`troopers are placed in pairs that share a wing (${pairs} pairs over 10 fields)`, pairs >= 10 && bad === 0);
+  }
+  {
+    // The landing approach, flown by the real pilot: from 300–1400px out, any
+    // facing, still or drifting across, onto a small, a mid and a big drifting,
+    // spinning rock. It must reach the coast gap slow enough to turn feet-first
+    // and land, unhurt.
+    const T = ENEMY_TYPES.trooper;
+    let worst = 0, fails = [];
+    for (const D of [300, 800, 1400]) for (const a0 of [0, 3]) for (const R of [60, 450]) for (const v0 of [0, 300]) {
+      const { w, e, rock } = trooperOver(R, D);
+      Object.assign(rock, { vx: 20, vy: -10, spin: 0.2 });
+      Object.assign(e, { angle: a0, vx: v0, perch: rock, repickT: 99 });
+      let coast = null, steps = 0;
+      for (; steps < 720 && e.boots !== "ground"; steps++) {
+        step(w, {});
+        const d = Math.hypot(e.x - rock.x, e.y - rock.y);
+        if (coast === null && d - R - e.r <= T.coastGap) coast = -((e.vx - rock.vx) * (e.x - rock.x) + (e.vy - rock.vy) * (e.y - rock.y)) / d;
+      }
+      worst = Math.max(worst, coast ?? Infinity);
+      if (e.boots !== "ground" || e.hp < e.maxHp) fails.push(`${D}/${a0}/${R}/${v0}`);
+    }
+    t.ok(`a trooper reaches the coast gap closing at <= 160px/s (worst ${Math.round(worst)})`, worst <= 160);
+    t.ok(`and lands on the rock unhurt every time${fails.length ? ": failed " + fails.join(", ") : ""}`, !fails.length);
+  }
+  // An alert trooper standing on a rock, the soldier at (sx, sy).
+  function standing(sx, sy, R = 100) {
+    const { w, e, rock } = trooperOver(R, 0);
+    e.boots = "air";
+    e.strollT = 1e9; // no idle stroll before it is alerted
+    run(w, {}, 30);
+    const s = w.soldiers[0];
+    Object.assign(s, { x: sx, y: sy, vx: 0, vy: 0, hp: 1e9, maxHp: 1e9 });
+    e.alert = true;
+    return { w, e, s, rock };
+  }
+  {
+    const { w, e } = trooperOver();
+    const mate = makeEnemy(w, "trooper", e.x + 40, e.y);
+    e.wing = mate.wing = { members: [e, mate], peeker: null };
+    w.enemies.push(mate);
+    hurt(w, e, 1, null);
+    run(w, {}, 2);
+    t.ok("hit, a trooper alerts, and its partner with it", e.alert && mate.alert);
+  }
+  {
+    // On top of the rock, the soldier 400px above it: in sight and in range.
+    const { w, e, s } = standing(2000, 2000 - 100 - 18 - 400);
+    e.weapon = { ...WEAPONS.carbine }; e.ammo = 24;
+    const times = [];
+    for (let i = 0; i < 360; i++) { const a = e.ammo; step(w, {}); if (e.ammo < a) times.push(i); }
+    const gaps = times.slice(1).map((v, i) => v - times[i]);
+    t.ok(`in sight and in range, a standing trooper fires (${times.length} rounds in 6s)`, times.length >= 6 && e.boots === "ground");
+    t.ok("the rounds of a burst come at the gun's fire rate, no faster", gaps.every((g) => g >= Math.floor(60 / e.weapon.fireRate)));
+    t.ok("bursts are separated by a wait", gaps.some((g) => g >= 0.8 * 60));
+    // Behind the rock (and still in range, so it does not relocate): no line, no rounds.
+    Object.assign(s, { x: 2000, y: 2000 + 100 + 300 });
+    run(w, {}, 30);
+    let shots = 0;
+    for (let i = 0; i < 240; i++) { const a = e.ammo; step(w, {}); if (e.ammo < a) shots++; }
+    t.ok(`with the rock between them, it does not fire (${shots} rounds, boots ${e.boots})`, shots === 0 && e.boots === "ground");
+  }
+  {
+    // The soldier leaves at 250px/s: the trooper lets go of its rock and follows.
+    const { w, e, s } = standing(2000, 2000 - 100 - 18 - 400);
+    let left = false, maxGap = 0;
+    for (let i = 0; i < 20 * 60; i++) {
+      Object.assign(s, { vx: 250, vy: 0 });
+      step(w, {});
+      if (!e.boots) left = true;
+      if (i > 10 * 60) maxGap = Math.max(maxGap, Math.hypot(s.x - e.x, s.y - e.y));
+    }
+    t.ok("a soldier running off pulls a trooper off its rock", left);
+    t.ok(`and it keeps up: within 900px for the last 10s (most ${Math.round(maxGap)})`, maxGap < 900);
+    t.ok("it chased without crashing", e.hp === e.maxHp);
+  }
+
   // ---- view smoke ----------------------------------------------------------
   {
     const w = createWorld(5, { squad: 3 });
     run(w, { thrust: true, turn: 1 }, 30);
     w.soldiers[w.ctrl].boots = "air"; // the HUD's boot line
+    const tr = makeEnemy(w, "trooper", w.soldiers[0].x + 100, w.soldiers[0].y);
+    tr.hp = 3; tr.tele = 0.2; tr.boots = "ground";
+    w.enemies.push(tr);
     let threw = null;
     try { draw(ctx2d(), createView(), w, 960, 540, 1 / 60); } catch (e) { threw = e; }
     t.ok(`view draws a world${threw ? ": " + threw.message : ""}`, !threw);

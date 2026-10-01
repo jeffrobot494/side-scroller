@@ -164,7 +164,10 @@ function place(m, r) {
   m.position.set(((x0 + x1) / 2 - 0.5) * FIGURE_W, (0.5 - (y0 + y1) / 2) * FIGURE_H, z);
 }
 
-function makeSoldier(s) {
+// A trooper (tech/space-troopers.md) is this figure in its own colour, with a red visor.
+const VISOR = { squad: ["#7ad7ff", "#3aa8e0"], hostile: ["#ff6a5a", "#e0302a"] };
+
+function makeSoldier(s, visorKind = "squad") {
   const root = new THREE.Group(); // at the soldier, turned to its facing
   const body = new THREE.Group(); // mirrored when the sim says dir -1
   root.add(body);
@@ -194,7 +197,8 @@ function makeSoldier(s) {
     sole.visible = false;
     soles[k] = sole;
   }
-  const visor = mesh(BOX, std("#7ad7ff", { emissive: "#3aa8e0", emissiveIntensity: 1.4, roughness: 0.2, metalness: 0.6 }), body);
+  const [vc, ve] = VISOR[visorKind];
+  const visor = mesh(BOX, std(vc, { emissive: ve, emissiveIntensity: 1.4, roughness: 0.2, metalness: 0.6 }), body);
   mats.push(visor.material);
   place(visor, ["visor", 0.48, 0.12, 0.8, 0.2, 4, 9]);
   // Jet nozzle under the pack, and its flame pointing out behind.
@@ -299,6 +303,7 @@ function flash(mats, on) {
 
 // ---- enemies ----------------------------------------------------------------------------
 function makeEnemy(e) {
+  if (e.type === "trooper") return makeSoldier(e, "hostile");
   const root = new THREE.Group();
   const spin = new THREE.Group(); // turned to heading / aim
   spin.rotation.order = "ZYX"; // a roll (x) is about the body's own axis
@@ -784,7 +789,10 @@ export function createView3D(canvas) {
 
     for (const e of world.enemies) {
       if (!e.alive) continue;
-      poseEnemy(enemies.get(e), e, t);
+      if (e.type === "trooper") {
+        poseSoldier(enemies.get(e), e, t, dt, false);
+        if (e.muzzle > 0) halo(e.x + Math.cos(e.aim) * (e.r + 12), e.y + Math.sin(e.aim) * (e.r + 12), 26, "#ffd0c0", 1, 14);
+      } else poseEnemy(enemies.get(e), e, t);
       status(e);
     }
     enemies.sweep();

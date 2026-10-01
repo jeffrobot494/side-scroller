@@ -183,14 +183,22 @@ export const ENEMY_TYPES = {
     weapon: enemyGun({ speed: 760, w: 14, h: 5, color: "#ffb347", life: 1.6, shape: "bolt" }, 7), color: "#d9a441" },
   // A soldier body on the enemy team (tech/space-troopers.md): stats, HP and
   // gun are rolled per trooper by makeEnemy, so this holds only what a type can.
-  trooper: { name: "Trooper", r: 18, soldier: true, pack: 2, tele: 0.35, color: "#d8524a" },
+  trooper: { name: "Trooper", r: 18, soldier: true, pack: 2, tele: 0.35, color: "#d8524a",
+    vMax: 380, // K5: under crashSafe, so its own flying never hurts it
+    perchMinR: 45, perchSearch: 1400, idleSearch: 900, shareR: 150, partnerGap: 600,
+    band: [220, 650], relocate: 1.1, // K6: peek from here, leave past band × relocate
+    coastGap: 150, vLand: 120, brake: 200, lookAhead: 0.8, stall: 30, // the landing approach
+    approachMax: 8, skipFor: 5, repick: 1,
+    keep: [280, 520], floatSpeed: 260, // floating combat, as a gunner holds range
+    chaseV: 150, // a target moving faster than this is chased, not perched ahead of
+    wait: [0.8, 2.0], burstAuto: [3, 5] }, // K4
   // A mine: shootable (HP 4, like the boss's seeker), arms, then fuses on proximity.
   mine: { name: "Mine", r: 9, hp: 4, arm: 0.8, trigger: 70, fuse: 0.35, life: 25,
     blast: { kind: "explode", amount: 12, radius: 80 }, color: "#bff29a" },
 };
 
 // Weighted mix for placement and waves (a swarmer entry is a pack).
-const ENEMY_MIX = [["charger", 35], ["gunner", 25], ["swarmer", 25], ["minelayer", 15]];
+const ENEMY_MIX = [["charger", 35], ["gunner", 25], ["swarmer", 25], ["minelayer", 15], ["trooper", 15]]; // K1
 // Who crews a derelict (P16): no mine-layers, whose mines would fill a room.
 const CREW_MIX = [["gunner", 45], ["charger", 40], ["swarmer", 15]];
 
@@ -642,7 +650,9 @@ function trooperBody(world) {
     ammo: weapon.magazine, magsLeft: Infinity, reloading: 0,
     angle: -Math.PI / 2, dir: 1, aim: -Math.PI / 2, thrusting: false,
     boots: null, ground: null, gphi: 0, gv: 0, walkIn: 0, pushed: 0, stride: 0,
-    foe: null,
+    color: ENEMY_TYPES.trooper.color, foe: null,
+    mode: null, perch: null, lastPerch: null, left: null, skip: null,
+    approachT: 0, repickT: 0, strollT: 0, think: false, wing: null,
   };
 }
 
@@ -660,13 +670,16 @@ function pickType(rng, mix = ENEMY_MIX) {
 
 // A type at a point: a swarmer is a pack spread around it.
 function spawnGroup(world, type, x, y, alert) {
-  const n = ENEMY_TYPES[type].pack || 1;
+  const T = ENEMY_TYPES[type];
+  const n = T.pack || 1;
   const dir = world.rng() < 0.5 ? -1 : 1;
+  const wing = T.soldier && n > 1 ? { members: [], peeker: null } : null; // a trooper pair
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2;
     const e = makeEnemy(world, type, x + (n > 1 ? Math.cos(a) * 40 : 0), y + (n > 1 ? Math.sin(a) * 40 : 0));
     e.alert = alert;
     if (n > 1) e.orbitDir = dir; // a pack circles one way
+    if (wing) { e.wing = wing; wing.members.push(e); }
     world.enemies.push(e);
   }
 }
@@ -792,13 +805,14 @@ function nearestSoldier(world, e) {
 
 // Obstacle avoidance: bend a desired velocity away from the rock or hull plate
 // the body would reach within `look` seconds. Shared by enemies and the squad.
-export function avoid(world, b, dvx, dvy, look = 0.7) {
+export function avoid(world, b, dvx, dvy, look = 0.7, ignore = null) {
   const sp = Math.hypot(dvx, dvy);
   if (!sp) return [dvx, dvy];
   const ux = dvx / sp, uy = dvy / sp;
   const reach = sp * look + b.r;
   let px = 0, py = 0;
   for (const a of world.asteroids) {
+    if (a === ignore) continue;
     const rx = a.x - b.x, ry = a.y - b.y;
     const ahead = rx * ux + ry * uy;
     if (ahead <= 0 || ahead > reach + a.r) continue;
@@ -811,7 +825,7 @@ export function avoid(world, b, dvx, dvy, look = 0.7) {
     py += ux * side * k;
   }
   for (const r of world.ruins) {
-    if (Math.hypot(r.x - b.x, r.y - b.y) > r.R + reach) continue;
+    if (r === ignore || Math.hypot(r.x - b.x, r.y - b.y) > r.R + reach) continue;
     const fx = b.x + ux * Math.min(reach, sp * look * 0.5 + b.r);
     const fy = b.y + uy * Math.min(reach, sp * look * 0.5 + b.r);
     for (const w of r.walls) {
@@ -849,7 +863,7 @@ function updateEnemies(world, dt) {
     if (e.cool > 0) e.cool -= dt;
 
     if (e.type === "mine") { updateMine(world, e, T, dt); continue; }
-    if (T.soldier) { bootsPull(e, dt); continue; } // a trooper's brain: T1
+    if (T.soldier) { updateTrooper(world, e, T, dt); continue; }
 
     if ((e.senseT -= dt) <= 0) {
       e.senseT = CFG.senseEvery;
@@ -964,6 +978,240 @@ function aimAt(e, T, t) {
   let tt = Math.hypot(t.x - e.x, t.y - e.y) / sp;
   tt = Math.hypot(t.x + t.vx * tt - e.x, t.y + t.vy * tt - e.y) / sp;
   return Math.atan2(t.y + t.vy * tt - e.y, t.x + t.vx * tt - e.x);
+}
+
+// ---- troopers (tech/space-troopers.md) ---------------------------------------------
+// A soldier body's brain: decides on the sensing cadence, acts every step, and
+// only through what a player has — pilot (boots off), a turn, walk, the boots,
+// reload and the trigger. It never sets its own position or velocity.
+function updateTrooper(world, e, T, dt) {
+  e.think = false;
+  if ((e.senseT -= dt) <= 0) {
+    e.senseT = CFG.senseEvery;
+    e.think = true;
+    e.target = nearestSoldier(world, e);
+    e.los = !!e.target && hasLos(world, e.x, e.y, e.target.x, e.target.y);
+    if (!e.alert && e.target && e.los && Math.hypot(e.target.x - e.x, e.target.y - e.y) < CFG.alertRange) e.alert = true;
+  }
+  const mate = partnerOf(e);
+  if (e.alert && mate && !mate.alert) mate.alert = true; // a pair alerts together
+  const t = e.alert && e.target && e.target.alive ? e.target : null;
+  e.foe = t;
+  e.mayShoot = true;
+
+  if (e.boots === "ground") trooperGrounded(world, e, T, t, dt);
+  else if (e.boots === "air") {
+    // The boots have it: no jetpack, feet to the surface, and the pull lands it.
+    const p = e.perch || e.lastPerch;
+    if (p) {
+      const s = perchInfo(e, p);
+      turnTo(e, feetAngle(e, -s.nx, -s.ny), dt);
+    } else e.thrusting = false;
+  } else trooperFlying(world, e, T, t, dt);
+
+  if (t) trooperTrigger(world, e, T, t, dt);
+  else { e.tele = 0; e.burstLeft = 0; }
+  bootsPull(e, dt);
+}
+
+const partnerOf = (e) => (e.wing ? e.wing.members.find((o) => o !== e && o.alive) || null : null);
+const perchOf = (g) => (g.kind === "wall" ? g.ruin : g);
+// A gun's reach: how far its round flies.
+const reachOf = (e) => e.weapon.projectile.speed * e.weapon.projectile.life;
+// The far end of the range band it wants to peek from (K6).
+const bandMax = (e) => Math.min(ENEMY_TYPES.trooper.band[1], reachOf(e) * 0.85);
+
+// Where a perch (a rock, or a ruin) is from a body: the gap from its surface
+// to the body's edge, the outward normal there, and the surface's velocity.
+function perchInfo(e, p) {
+  if (p.kind === "asteroid") {
+    const dx = e.x - p.x, dy = e.y - p.y;
+    const d = Math.hypot(dx, dy) || 1;
+    return { gap: d - p.r - e.r, nx: dx / d, ny: dy / d, vx: p.vx, vy: p.vy };
+  }
+  let bd = Infinity, nx = 0, ny = -1;
+  for (const w of p.walls) {
+    const [cx, cy] = closestOnWall(w, e.x, e.y);
+    const d = Math.hypot(e.x - cx, e.y - cy);
+    if (d < bd) { bd = d; nx = (e.x - cx) / (d || 1); ny = (e.y - cy) / (d || 1); }
+  }
+  return { gap: bd - CFG.wallHalf - e.r, nx, ny, vx: 0, vy: 0 };
+}
+
+// How far a target is from the nearest place on a perch (its near side).
+function peekDist(p, t) {
+  if (p.kind === "asteroid") return Math.hypot(t.x - p.x, t.y - p.y) - p.r;
+  let bd = Infinity;
+  for (const w of p.walls) bd = Math.min(bd, wallDist(w, t.x, t.y));
+  return bd;
+}
+
+// A perch to fly to, or null. Idle: the nearest within idleSearch, near the
+// partner. Alert: one whose near side is in the range band of the target,
+// close to fly to, near the partner, and not the surface it just left.
+function pickPerch(world, e, t) {
+  const T = ENEMY_TYPES.trooper;
+  const mate = partnerOf(e);
+  const mp = mate && (mate.perch || (mate.boots === "ground" ? perchOf(mate.ground) : null));
+  const hi = bandMax(e);
+  const mid = (T.band[0] + hi) / 2;
+  let best = null, bs = Infinity;
+  const consider = (p) => {
+    if (e.skip && e.skip.p === p && world.t < e.skip.until) return;
+    if (mp === p && p.kind === "asteroid" && p.r < T.shareR) return; // the partner's alone
+    const s = perchInfo(e, p);
+    const flight = Math.max(0, s.gap);
+    const lx = e.x - s.nx * flight, ly = e.y - s.ny * flight; // where it would land
+    const fromMate = mate ? Math.hypot(lx - mate.x, ly - mate.y) : 0;
+    let score;
+    if (!t) {
+      if (flight > T.idleSearch) return;
+      score = flight + 0.5 * fromMate;
+    } else {
+      if (flight > T.perchSearch) return;
+      const pd = peekDist(p, t);
+      if (pd > hi) return;
+      score = flight + 1.5 * Math.abs(pd - mid) + (fromMate > T.partnerGap ? 400 : 0) + (p === e.left ? 600 : 0);
+    }
+    if (score < bs) { bs = score; best = p; }
+  };
+  const reach = t ? T.perchSearch : T.idleSearch;
+  for (const a of world.asteroids) {
+    if (a.r >= T.perchMinR && Math.hypot(a.x - e.x, a.y - e.y) - a.r <= reach + e.r) consider(a);
+  }
+  for (const r of world.ruins) if (Math.hypot(r.x - e.x, r.y - e.y) - r.R <= reach) consider(r);
+  return best;
+}
+
+// The facing that puts the feet along (fx, fy): see upOf.
+const feetAngle = (s, fx, fy) => Math.atan2(fy, fx) - (s.dir * Math.PI) / 2;
+
+// Turn without thrust, at the body's rate: A/D.
+function turnTo(s, a, dt) {
+  s.thrusting = false;
+  const turn = CFG.turnRate * dt;
+  s.angle += clamp(wrapAngle(a - s.angle), -turn, turn);
+}
+
+// pilot, with the wanted velocity capped at vMax (K5).
+function pilotTo(e, dvx, dvy, dt) {
+  const sp = Math.hypot(dvx, dvy);
+  const cap = ENEMY_TYPES.trooper.vMax;
+  if (sp > cap) { dvx *= cap / sp; dvy *= cap / sp; }
+  pilot(e, dvx, dvy, dt);
+}
+
+function trooperGrounded(world, e, T, t, dt) {
+  const here = perchOf(e.ground);
+  e.perch = null;
+  e.approachT = 0;
+  e.lastPerch = here;
+  if (!t) {
+    // Idle: stand, and now and then stroll a little.
+    if ((e.strollT -= dt) <= 0) {
+      const moving = e.walkIn !== 0;
+      e.strollT = moving ? rand(world.rng, 3, 6) : rand(world.rng, 0.5, 1.5);
+      walk(e, moving ? 0 : world.rng() < 0.5 ? -1 : 1);
+    }
+    return;
+  }
+  walk(e, 0);
+  // The target is out of range: go after it (K6).
+  if (e.think && Math.hypot(t.x - e.x, t.y - e.y) > bandMax(e) * T.relocate) leavePerch(world, e, t, here);
+}
+
+// Boots off and away, to a new perch if one fits — else it floats and chases.
+function leavePerch(world, e, t, here) {
+  e.left = here;
+  e.perch = pickPerch(world, e, t);
+  e.approachT = 0;
+  e.repickT = ENEMY_TYPES.trooper.repick;
+  e.tele = 0;
+  e.burstLeft = 0;
+  walk(e, 0);
+  bootsOff(e, world);
+}
+
+function trooperFlying(world, e, T, t, dt) {
+  // A target on the run is chased: a perch ahead of it is gone by the time
+  // the trooper lands.
+  const running = t && Math.hypot(t.vx, t.vy) > T.chaseV;
+  if (e.think) {
+    if (e.perch && t && (running || peekDist(e.perch, t) > bandMax(e) * T.relocate)) e.perch = null; // the target moved on
+    if (!e.perch && !running && (e.repickT -= CFG.senseEvery) <= 0) {
+      e.repickT = T.repick;
+      e.perch = pickPerch(world, e, t);
+      e.approachT = 0;
+    }
+  }
+  if (e.perch) {
+    trooperApproach(world, e, T, dt);
+    if ((e.approachT += dt) > T.approachMax) {
+      e.skip = { p: e.perch, until: world.t + T.skipFor };
+      e.perch = null;
+    }
+    return;
+  }
+  // No perch: hold the band round the target as a gunner does, or hang still.
+  let dvx = 0, dvy = 0;
+  if (t) {
+    const dx = t.x - e.x, dy = t.y - e.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const ux = dx / d, uy = dy / d;
+    const radial = d < T.keep[0] ? -1 : d > T.keep[1] ? 1 : 0;
+    dvx = (ux * radial - uy * e.orbitDir * 0.4) * T.floatSpeed;
+    dvy = (uy * radial + ux * e.orbitDir * 0.4) * T.floatSpeed;
+    if (d > T.keep[1] * 2) { dvx = ux * T.vMax; dvy = uy * T.vMax; } // run after it
+    dvx += t.vx; dvy += t.vy;
+  }
+  [dvx, dvy] = avoid(world, e, dvx, dvy);
+  pilotTo(e, dvx, dvy, dt);
+}
+
+// Fly in, turn feet-first, coast, clamp on. The body pushes only along its
+// facing and its feet are a quarter turn from it, so the closing speed has to
+// be low before it turns: the profile brakes against a gap looked ahead by
+// lookAhead seconds of closing, which pays for turning round to brake.
+function trooperApproach(world, e, T, dt) {
+  const s = perchInfo(e, e.perch);
+  const closing = -((e.vx - s.vx) * s.nx + (e.vy - s.vy) * s.ny);
+  if (s.gap <= T.coastGap && (closing >= T.stall || s.gap <= CFG.bootsReach)) {
+    turnTo(e, feetAngle(e, -s.nx, -s.ny), dt);
+    if (s.gap <= CFG.bootsReach && surfaceInWedge(world, e, CFG.bootsReach)) toggleBoots(world, e);
+    return;
+  }
+  const look = s.gap - Math.max(0, closing) * T.lookAhead;
+  const vc = clamp(T.vLand + Math.sqrt(2 * T.brake * Math.max(0, look - T.coastGap)), T.vLand, T.vMax);
+  let dvx = s.vx - s.nx * vc, dvy = s.vy - s.ny * vc;
+  [dvx, dvy] = avoid(world, e, dvx, dvy, 0.7, e.perch);
+  pilotTo(e, dvx, dvy, dt);
+}
+
+// Telegraph, then a burst at the gun's own fire rate, led, with the trooper's
+// Aim. Only with a line of sight and in reach.
+function trooperTrigger(world, e, T, t, dt) {
+  const sp = e.weapon.projectile.speed;
+  let tt = Math.hypot(t.x - e.x, t.y - e.y) / sp;
+  tt = Math.hypot(t.x + t.vx * tt - e.x, t.y + t.vy * tt - e.y) / sp;
+  e.aim = Math.atan2(t.y + t.vy * tt - e.y, t.x + t.vx * tt - e.x);
+  if (e.reloading > 0) return;
+  if (e.ammo <= 0) { startReload(e, world); e.tele = 0; e.burstLeft = 0; return; }
+  const wait = () => rand(world.rng, T.wait[0], T.wait[1]);
+  if (e.burstLeft > 0) {
+    if (e.fireCd > 0) return;
+    if (!hasLos(world, e.x, e.y, t.x, t.y)) { e.burstLeft = 0; e.cool = wait(); return; }
+    if (fire(world, e, e.aim, aimAccuracy(e.stats.aim)) && --e.burstLeft === 0) e.cool = wait();
+    return;
+  }
+  if (e.tele > 0) {
+    if ((e.tele -= dt) <= 0) {
+      e.tele = 0;
+      const [lo, hi] = T.burstAuto;
+      e.burstLeft = e.weapon.auto ? lo + Math.floor(world.rng() * (hi - lo + 1)) : 1;
+    }
+    return;
+  }
+  if (e.cool <= 0 && e.mayShoot && e.los && Math.hypot(t.x - e.x, t.y - e.y) <= reachOf(e) * 0.95) e.tele = T.tele;
 }
 
 function updateMine(world, m, T, dt) {

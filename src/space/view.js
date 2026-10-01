@@ -246,6 +246,7 @@ function drawEnemy(ctx, e, t) {
 }
 
 function drawAlien(ctx, e, t) {
+  if (e.type === "trooper") return drawSoldier(ctx, e, false);
   const T = ENEMY_TYPES[e.type];
   const col = e.flash > 0 ? "#ffffff" : T.color;
   statusTint(ctx, e);
@@ -844,7 +845,7 @@ function drawBars(ctx, world, cam) {
   for (const s of world.soldiers) if (s.alive) bar(s, 24);
   for (const e of world.enemies) {
     if (!e.alive || e.type === "mine") continue;
-    if (e.kind === "dummy" || e.hp < e.maxHp) bar(e, e.r + 4);
+    if (e.kind === "dummy" || e.hp < e.maxHp) bar(e, e.type === "trooper" ? 24 : e.r + 4);
   }
   if (world.extract) {
     const [x, y] = at(world.extract.x, world.extract.y);
