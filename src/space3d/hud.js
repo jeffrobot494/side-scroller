@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { controlled } from "./sim.js";
-import { eyeOf } from "./camera.js";
+import { eyeOf, project } from "./camera.js";
 
 export function createHud() {
   return { hurtT: 0, hitT: 0, banner: null };
@@ -26,6 +26,8 @@ export function drawHud(ctx, hud, world, vw, vh, fov, dt) {
   if (s) drawCrosshair(ctx, hud, vw, vh, dt);
   drawHurt(ctx, hud, vw, vh, dt);
   drawReadout(ctx, world, cam, vw, vh);
+  drawObjective(ctx, world, vw);
+  drawMarkers(ctx, world, cam, vw, vh);
   if (world.end) drawEnd(ctx, world.end, vw, vh);
 }
 
@@ -113,6 +115,74 @@ function drawReadout(ctx, world, cam, vw, vh) {
   ctx.textAlign = "right";
   ctx.fillText("mouse look and fire · W/S/A/D, Space/C jets · Q/E roll · R reload · wheel zoom · Enter restarts after the end", vw - 16, vh - 14);
   ctx.textAlign = "left";
+}
+
+function objectiveText(world) {
+  const art = world.artifact;
+  if (!art) return "";
+  if (!art.carrier) return "Find the artifact — it is aboard one of the derelicts";
+  const s = controlled(world);
+  const ex = world.extract;
+  const d = s ? Math.round(Math.hypot(ex.x - s.x, ex.y - s.y, ex.z - s.z)) : 0;
+  return `${art.carrier.name} has the artifact — reach extraction · ${d} px`;
+}
+
+function drawObjective(ctx, world, vw) {
+  const text = objectiveText(world);
+  if (!text) return;
+  ctx.font = "14px ui-monospace, Menlo, Consolas, monospace";
+  ctx.textAlign = "center";
+  const w = ctx.measureText(text).width;
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(vw / 2 - w / 2 - 12, 12, w + 24, 26);
+  ctx.fillStyle = world.artifact.carrier ? "#8affc1" : "#ff9ef4";
+  ctx.fillText(text, vw / 2, 30);
+  ctx.textAlign = "left";
+}
+
+// A marker on a world point: on it when it is in view, else pinned to the
+// screen's edge in its direction (behind you included).
+export function marker(ctx, cam, p, vw, vh, color, label, size = 9) {
+  const pr = project(cam, p, vw, vh);
+  const pad = 36;
+  const inView = pr.depth > 0 && pr.x >= pad && pr.x <= vw - pad && pr.y >= pad && pr.y <= vh - pad;
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.font = "12px ui-monospace, Menlo, Consolas, monospace";
+  ctx.textAlign = "center";
+  if (inView) {
+    ctx.beginPath();
+    ctx.moveTo(pr.x, pr.y - size); ctx.lineTo(pr.x + size, pr.y); ctx.lineTo(pr.x, pr.y + size); ctx.lineTo(pr.x - size, pr.y); ctx.closePath();
+    ctx.stroke();
+    if (label) ctx.fillText(label, pr.x, pr.y - size - 6);
+  } else {
+    // Direction on the screen plane; behind you, the point's own offset still says which way to turn.
+    let dx = pr.lx, dy = -pr.ly;
+    if (!dx && !dy) dy = 1;
+    const k = Math.min((vw / 2 - pad) / Math.abs(dx || 1e-9), (vh / 2 - pad) / Math.abs(dy || 1e-9));
+    const x = vw / 2 + dx * k, y = vh / 2 + dy * k;
+    const a = Math.atan2(dy, dx);
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(a) * size * 1.4, y + Math.sin(a) * size * 1.4);
+    ctx.lineTo(x + Math.cos(a + 2.4) * size, y + Math.sin(a + 2.4) * size);
+    ctx.lineTo(x + Math.cos(a - 2.4) * size, y + Math.sin(a - 2.4) * size);
+    ctx.closePath();
+    ctx.fill();
+    if (label) ctx.fillText(label, x - Math.cos(a) * 22, y - Math.sin(a) * 22 + 4);
+  }
+  ctx.textAlign = "left";
+}
+
+function drawMarkers(ctx, world, cam, vw, vh) {
+  const art = world.artifact;
+  const s = controlled(world);
+  // Extraction, once the artifact is carried (P11: the artifact itself is never marked).
+  if (s && art && art.carrier && world.extract) {
+    const ex = world.extract;
+    const d = Math.round(Math.hypot(ex.x - s.x, ex.y - s.y, ex.z - s.z));
+    marker(ctx, cam, [ex.x, ex.y, ex.z], vw, vh, "#8affc1", `EXTRACT ${d}`);
+  }
 }
 
 function drawEnd(ctx, end, vw, vh) {

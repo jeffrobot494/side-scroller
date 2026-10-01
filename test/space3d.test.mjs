@@ -4,7 +4,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled, fire, startReload, WEAPONS, hasLos } from "../src/space3d/sim.js";
+import { CFG, createWorld, step, collide, makeAsteroid, lookOf, upOf, controlled, fire, startReload, WEAPONS, hasLos, ruinToLocal, ruinToWorld, inPoly, hurt } from "../src/space3d/sim.js";
 import { makeRng } from "../src/space/sim.js";
 import { dot, len, norm, sub, qrot } from "../src/space3d/vec.js";
 import { eyeOf, project } from "../src/space3d/camera.js";
@@ -321,5 +321,106 @@ export default async function suite(t) {
     t.ok("F2: a killed drone comes back after its respawn", !d.alive);
     run(w, {}, Math.ceil(CFG.dummyRespawn * 60) + 2);
     t.ok("F2: …at full HP", d.alive && d.hp === CFG.dummyHp);
+  }
+
+  // ---- F3: derelicts, artifact, extraction ---------------------------------------------
+  {
+    let ruins = 0, holesOk = true, breached = true, artOk = true, exOk = true;
+    for (let seed = 1; seed <= 12; seed++) {
+      const w = createWorld(seed);
+      ruins += w.ruins.length;
+      for (const r of w.ruins) {
+        // Every 2D opening (doors + breaches) became a hole.
+        const doors = r.holes.filter((h) => !h.breach).length;
+        if (doors < 6) holesOk = false;
+        if (!r.holes.some((h) => h.breach)) breached = false;
+      }
+      const a = w.artifact, r = a.ruin;
+      const l = ruinToLocal(r, [a.x, a.y, a.z]);
+      if (!inPoly(r.hull, l[0], l[1]) || Math.abs(l[2]) > r.H / 2 - 20) artOk = false;
+      const st = w.start, ex = w.extract;
+      if (Math.hypot(ex.x - st.x, ex.y - st.y, ex.z - st.z) < CFG.extractMinDist) exOk = false;
+      if (w.asteroids.some((o) => w.ruins.some((q) => Math.hypot(o.x - q.x, o.y - q.y, o.z - q.z) < q.R + o.r))) exOk = false;
+    }
+    t.ok(`F3: 3–5 derelicts per field (${ruins} over 12)`, ruins >= 36 && ruins <= 60);
+    t.ok("F3: every bulkhead door became a hole", holesOk);
+    t.ok("F3: every derelict has a breach", breached);
+    t.ok("F3: the artifact floats inside its derelict", artOk);
+    t.ok("F3: extraction is at least half the cube from the start, and no rock sits in a hull", exOk);
+  }
+  // A soldier `back` px outside a derelict's breach, still, facing it.
+  const atBreach = (seed = 1, back = 300) => {
+    const w = createWorld(seed, { asteroids: 0, enemies: 0, dummies: 0, waveEvery: 1e9 });
+    const r = w.ruins[0];
+    const h = r.holes.find((o) => o.breach);
+    const out = norm(qrot(r.q, [h.at[0], h.at[1], 0]));
+    // The hull normal at the breach: straight out of the wall.
+    const sd = r.solids.find((o) => o.kind === "wall" && Math.hypot((o.a[0] + o.b[0]) / 2 - h.at[0], (o.a[1] + o.b[1]) / 2 - h.at[1]) < 1);
+    let n = [-(sd.b[1] - sd.a[1]), sd.b[0] - sd.a[0], 0];
+    if (n[0] * h.at[0] + n[1] * h.at[1] < 0) n = [-n[0], -n[1], 0];
+    const nw = norm(qrot(r.q, n));
+    const at = ruinToWorld(r, h.at);
+    const s = w.soldiers[0];
+    Object.assign(s, { x: at[0] + nw[0] * back, y: at[1] + nw[1] * back, z: at[2] + nw[2] * back, vx: 0, vy: 0, vz: 0 });
+    return { w, r, s, at, nw, out };
+  };
+  {
+    const { w, r, s, nw } = atBreach();
+    s.vx = -nw[0] * 300; s.vy = -nw[1] * 300; s.vz = -nw[2] * 300;
+    run(w, {}, 120);
+    const l = ruinToLocal(r, [s.x, s.y, s.z]);
+    t.ok("F3: a soldier flies in through a breach", inPoly(r.hull, l[0], l[1]) && Math.abs(l[2]) < r.H / 2 && s.hp === s.maxHp);
+  }
+  {
+    // The same run 120px along the hull from the breach meets plate.
+    for (const v of [300, 2400]) {
+      const { w, r, s, nw } = atBreach();
+      const along = norm(qrot(r.q, [0, 0, 1]));
+      s.x += along[0] * 120; s.y += along[1] * 120; s.z += along[2] * 120;
+      s.vx = -nw[0] * v; s.vy = -nw[1] * v; s.vz = -nw[2] * v;
+      s.hp = s.maxHp = 1e6;
+      run(w, {}, 90);
+      const l = ruinToLocal(r, [s.x, s.y, s.z]);
+      t.ok(`F3: at ${v}px/s, the hull above the breach stops a soldier`, !(inPoly(r.hull, l[0], l[1]) && Math.abs(l[2]) < r.H / 2));
+    }
+    const { w, s, nw } = atBreach();
+    const along = norm(qrot(w.ruins[0].q, [0, 0, 1]));
+    s.x += along[0] * 120; s.y += along[1] * 120; s.z += along[2] * 120;
+    s.vx = -nw[0] * 800; s.vy = -nw[1] * 800; s.vz = -nw[2] * 800;
+    run(w, {}, 90);
+    t.ok("F3: hull plate counts as a crash", s.hp < s.maxHp);
+  }
+  {
+    // Rounds and sight: through the breach yes, through the plate no.
+    const { w, s, at, nw, r } = atBreach();
+    const inside = { x: at[0] - nw[0] * 120, y: at[1] - nw[1] * 120, z: at[2] - nw[2] * 120 };
+    t.ok("F3: a line of sight passes a breach", hasLos(w, s, inside));
+    const along = norm(qrot(r.q, [0, 0, 1]));
+    const blocked = { x: inside.x + along[0] * 120, y: inside.y + along[1] * 120, z: inside.z + along[2] * 120 };
+    const from = { x: s.x + along[0] * 120, y: s.y + along[1] * 120, z: s.z + along[2] * 120 };
+    t.ok("F3: hull plate blocks it", !hasLos(w, from, blocked));
+    const f = norm([blocked.x - from.x, blocked.y - from.y, blocked.z - from.z]);
+    Object.assign(s, from);
+    s.fireCd = 0;
+    fire(w, s, f, 1);
+    run(w, {}, 40);
+    t.ok("F3: and stops a round", w.projectiles.length === 0 && w.events.some((e) => e.type === "spark"));
+  }
+  {
+    const w = createWorld(2, { asteroids: 0, enemies: 0, dummies: 0, waveEvery: 1e9, squad: 1 });
+    const s = w.soldiers[0], a = w.artifact;
+    Object.assign(s, { x: a.x, y: a.y, z: a.z });
+    step(w, {});
+    t.ok("F3: touching the artifact picks it up", a.carrier === s && w.events.some((e) => e.type === "pickup"));
+    Object.assign(s, { x: w.extract.x, y: w.extract.y, z: w.extract.z });
+    step(w, {});
+    t.ok("F3: holding it in the extraction zone wins", w.end && w.end.success === true);
+  }
+  {
+    const w = createWorld(2, { asteroids: 0, enemies: 0, dummies: 0, waveEvery: 1e9, squad: 1 });
+    const s = w.soldiers[0], a = w.artifact;
+    Object.assign(s, { x: w.extract.x, y: w.extract.y, z: w.extract.z });
+    step(w, {});
+    t.ok("F3: extraction without the artifact is not a win", !w.end);
   }
 }

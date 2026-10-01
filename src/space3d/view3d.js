@@ -275,6 +275,134 @@ function makeAsteroid(a) {
   return { root };
 }
 
+// ---- derelicts (static per world) ----------------------------------------------------
+function deckTexture() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = "#8390a4";
+  g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = "rgba(0,0,0,0.35)";
+  g.lineWidth = 2;
+  for (let i = 0; i <= 128; i += 32) {
+    g.beginPath(); g.moveTo(0, i); g.lineTo(128, i); g.stroke();
+  }
+  g.strokeStyle = "rgba(170,190,220,0.12)";
+  g.lineWidth = 1;
+  for (let i = 1; i <= 128; i += 32) {
+    g.beginPath(); g.moveTo(0, i); g.lineTo(128, i); g.stroke();
+  }
+  g.fillStyle = "rgba(0,0,0,0.3)";
+  for (let x = 8; x < 128; x += 32) for (let y = 8; y < 128; y += 32) g.fillRect(x, y, 3, 3);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function buildRuins(world) {
+  const group = new THREE.Group();
+  const deckTex = deckTexture();
+  const deckMat = std("#ffffff", { map: deckTex, roughness: 0.75, metalness: 0.2, emissive: "#0c1018" });
+  const wallMat = std("#c4ccd8", { roughness: 0.6, metalness: 0.2, map: deckTex, emissive: "#0c1018" });
+  const doorLamp = hot("#ffcf8a", 1.8);
+  const breachLamp = hot("#ff6a4a", 2);
+  const panel = hot("#cfe6ff", 1.3);
+  const trim = hot("#ffb45a", 0.9);
+  for (const r of world.ruins) {
+    const g = new THREE.Group();
+    g.position.set(r.x, r.y, r.z);
+    setQ(g, r.q);
+    for (const sd of r.solids) {
+      if (sd.kind === "wall") {
+        const ex = sd.b[0] - sd.a[0], ey = sd.b[1] - sd.a[1];
+        const l = Math.hypot(ex, ey);
+        const geo = new THREE.BoxGeometry(l + sd.t, sd.t * 2, sd.z1 - sd.z0 + sd.t);
+        const uv = geo.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * l / 128, uv.getY(i) * (sd.z1 - sd.z0) / 128);
+        const m = mesh(geo, wallMat, g);
+        m.position.set(sd.c[0], sd.c[1], sd.c[2]);
+        m.rotation.z = Math.atan2(ey, ex);
+        // Hull plates carry a lit stripe along the outside, so the ship's
+        // outline reads against the dark.
+        if (sd.hull) {
+          let nx = -ey / l, ny = ex / l;
+          if (nx * sd.c[0] + ny * sd.c[1] < 0) { nx = -nx; ny = -ny; }
+          for (const z of [sd.z0 + 22, sd.z1 - 22]) {
+            if (z < sd.z0 || z > sd.z1) continue;
+            const st = mesh(BOX, trim, g);
+            st.scale.set(l, 1, 3);
+            st.position.set(sd.c[0] + nx * (sd.t + 0.6), sd.c[1] + ny * (sd.t + 0.6), z);
+            st.rotation.z = Math.atan2(ey, ex);
+          }
+        }
+      } else {
+        const shape = new THREE.Shape(sd.poly.map(([x, y]) => new THREE.Vector2(x, y)));
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: sd.t * 2, bevelEnabled: false });
+        const pos = geo.attributes.position, uv = geo.attributes.uv;
+        for (let i = 0; i < pos.count; i++) uv.setXY(i, pos.getX(i) / 128, pos.getY(i) / 128);
+        const m = mesh(geo, deckMat, g);
+        m.position.z = sd.zc - sd.t;
+      }
+    }
+    // A lamp at each corner of every hole, so a door or a breach reads as a gap.
+    for (const h of r.holes) {
+      const sd = r.solids.find((o) => o.kind === "wall" && Math.hypot((o.a[0] + o.b[0]) / 2 - h.at[0], (o.a[1] + o.b[1]) / 2 - h.at[1]) < 1);
+      if (!sd) continue;
+      const ex = sd.b[0] - sd.a[0], ey = sd.b[1] - sd.a[1];
+      const l = Math.hypot(ex, ey);
+      const nx = -ey / l, ny = ex / l, o = sd.t + 3;
+      for (const end of [sd.a, sd.b]) {
+        for (const dz of [-75, 75]) {
+          for (const side of [-1, 1]) {
+            const lamp = mesh(SPHERE, h.breach ? breachLamp : doorLamp, g);
+            lamp.scale.setScalar(4);
+            lamp.position.set(end[0] + nx * o * side, end[1] + ny * o * side, h.at[2] + dz);
+          }
+        }
+      }
+    }
+    // Light panels under the ceiling of every room.
+    for (const room of r.rooms) {
+      const l = new THREE.Vector3(room[0] - r.x, room[1] - r.y, room[2] - r.z).applyQuaternion(new THREE.Quaternion(r.q[0], r.q[1], r.q[2], r.q[3]).invert());
+      const m = mesh(BOX, panel, g);
+      m.scale.set(90, 10, 2);
+      m.position.set(l.x, l.y, r.H / 2 - CFG_T - 2);
+    }
+    group.add(g);
+  }
+  return group;
+}
+const CFG_T = 6; // a plate's half-thickness (CFG.wallHalf), for placing lamps on it
+
+// The artifact and extraction.
+function makeArtifact() {
+  const root = new THREE.Group();
+  const core = mesh(OCTA, hot("#ff7af0", 2.2), root);
+  core.scale.setScalar(12);
+  const cage = mesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color("#ffb8f8").multiplyScalar(1.6), wireframe: true, toneMapped: false }), root);
+  cage.scale.setScalar(20);
+  return { root, core, cage };
+}
+
+function makeExtract(ex) {
+  const root = new THREE.Group();
+  root.position.set(ex.x, ex.y, ex.z);
+  const glow = new THREE.Color("#8affc1");
+  const shell = mesh(new THREE.SphereGeometry(1, 32, 20), new THREE.MeshBasicMaterial({ color: glow, transparent: true, opacity: 0.07, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }), root);
+  shell.scale.setScalar(ex.r);
+  const rings = [];
+  for (let i = 0; i < 3; i++) {
+    const ring = mesh(new THREE.TorusGeometry(ex.r, 1.6, 6, 64), new THREE.MeshBasicMaterial({ color: glow.clone().multiplyScalar(1.8), toneMapped: false }), root);
+    ring.rotation.set(i === 1 ? Math.PI / 2 : 0, i === 2 ? Math.PI / 2 : 0, 0);
+    rings.push(ring);
+  }
+  const beacon = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: glow, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+  beacon.scale.setScalar(ex.r * 1.4);
+  root.add(beacon);
+  return { root, rings };
+}
+
 // ---- the backdrop -----------------------------------------------------------------------
 // Stars and nebulae on a sphere that travels with the eye, so they never come
 // closer; untouched by the fog.
@@ -516,6 +644,10 @@ export function createView3D(canvas) {
 
   let current = null;
   let bounds = null;
+  let ruins = null;
+  let extract = null;
+  const artifact = makeArtifact();
+  scene.add(artifact.root);
   let w = 0, h = 0;
 
   function draw(world, vw, vh, fov, dt = 1 / 60) {
@@ -530,10 +662,26 @@ export function createView3D(canvas) {
     }
     if (current !== world) {
       current = world;
-      if (bounds) { scene.remove(bounds); disposeTree(bounds); }
+      for (const o of [bounds, ruins, extract && extract.root]) if (o) { scene.remove(o); disposeTree(o); }
       bounds = buildBounds(world.size);
       scene.add(bounds);
+      ruins = buildRuins(world);
+      scene.add(ruins);
+      extract = world.extract ? makeExtract(world.extract) : null;
+      if (extract) scene.add(extract.root);
+      particles = [];
     }
+    const t = world.t;
+    if (extract) extract.rings.forEach((r, i) => { r.rotation.y += dt * 0.3 * (i + 1); });
+    const art = world.artifact;
+    artifact.root.visible = !!art && !(art.carrier && art.carrier === controlled(world));
+    if (art) {
+      artifact.root.position.set(art.x, art.y, art.z);
+      artifact.core.rotation.set(t * 1.3, t * 0.9, 0);
+      artifact.cage.rotation.set(-t * 0.4, t * 0.7, 0);
+      if (artifact.root.visible) halo([art.x, art.y, art.z], 90 + Math.sin(t * 4) * 12, "#ff7af0", 0.8);
+    }
+    halos.begin();
     const eye = eyeOf(world, fov, vw / vh);
     camera.fov = fov;
     camera.updateProjectionMatrix();
@@ -562,7 +710,6 @@ export function createView3D(canvas) {
     // muzzle and slide onto their true line over their first 0.12s, so they
     // leave the gun rather than the middle of the screen.
     for (const k in shots) shots[k].begin();
-    halos.begin();
     const muzzleW = gun ? camera.localToWorld(new THREE.Vector3(5.5 + gun.tip * 0.45 * 0.07, -5, gun.tip * 0.45 - 15)) : null;
     const body = controlled(world);
     for (const p of world.projectiles) {

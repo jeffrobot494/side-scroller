@@ -11,7 +11,7 @@
 // = same world.
 // ---------------------------------------------------------------------------
 
-import { CFG as CFG2, makeRng, RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy } from "../space/sim.js";
+import { CFG as CFG2, makeRng, RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy, addDerelict, addRuin } from "../space/sim.js";
 import { dot, cross, norm, len, qmul, qaxis, qrot, qnorm, qlook, qconj, qslerp, qangle, QI, fwdOf, upOfQ, randomDir, perp } from "./vec.js";
 
 export { RECRUITS, LOADOUT, WEAPONS, soldierMaxHp, aimAccuracy };
@@ -29,6 +29,11 @@ export const CFG = {
   viewEase: 0.07, // s: the eye's roll to a new up, the 2D ROLL_TAU
   dummyCount3: 4, // F2: target drones round the start
   gridCell: 700, // the rock grid lines of sight and rounds query
+  // F4: a derelict is the 2D layout given a height, closed by a deck and a
+  // ceiling. Doors and breaches keep the layout's width (CFG.breach).
+  derelictH: [260, 320],
+  doorH: 150, // from the deck
+  breachH: 150, // centred on the wall's height
 };
 
 const rand = (rng, lo, hi) => lo + rng() * (hi - lo);
@@ -72,6 +77,8 @@ export function createWorld(seed = 1, opts = {}) {
     world.soldiers.push(s);
   }
 
+  if (opts.ruins !== 0) placeRuins(world, opts.ruins);
+  if (opts.objective !== false) placeObjective(world);
   placeAsteroids(world, opts.asteroids ?? CFG.asteroidCount);
 
   // F2: target drones round the start, so every effect can be seen before
@@ -346,8 +353,296 @@ export function crash(world, s, v, safe = CFG.crashSafe) {
   hurt(world, s, k * share * s.maxHp, null);
 }
 
+// The 2D rules: any soldier picks the artifact up by touching it, it drops
+// where its carrier dies (P9), and a living soldier in the extraction zone
+// while the squad holds it wins. Every soldier dead loses.
 function tickObjective(world) {
-  if (!world.soldiers.some((s) => s.alive)) world.end = { success: false };
+  const art = world.artifact;
+  if (art) {
+    if (art.carrier && !art.carrier.alive) art.carrier = null;
+    if (art.carrier) {
+      art.x = art.carrier.x; art.y = art.carrier.y; art.z = art.carrier.z;
+    } else {
+      for (const s of world.soldiers) {
+        if (s.alive && Math.hypot(s.x - art.x, s.y - art.y, s.z - art.z) < s.r + art.r) {
+          art.carrier = s;
+          world.events.push({ type: "pickup", x: art.x, y: art.y, z: art.z });
+          break;
+        }
+      }
+    }
+  }
+  const living = world.soldiers.filter((s) => s.alive);
+  if (!living.length) {
+    world.end = { success: false };
+    return;
+  }
+  const held = !art || (art.carrier && art.carrier.alive);
+  const ex = world.extract;
+  if (held && ex && living.some((s) => Math.hypot(s.x - ex.x, s.y - ex.y, s.z - ex.z) < ex.r)) world.end = { success: true };
+}
+
+// ---- derelicts (F3) ------------------------------------------------------------
+// The 2D layout (addDerelict, run on a scratch world at the origin) given a
+// height H: every wall a slab from deck to ceiling, a deck and a ceiling plate
+// over the hull outline, and every gap in a wall turned into a hole — a door
+// from the deck up, a breach centred on the wall — by the slabs above and
+// below it. All of a ruin's solids are in its own frame: x along its length,
+// y across, z up; `q` turns that frame into the world's.
+function placeRuins(world, want) {
+  const { rng, size } = world;
+  const count = want ?? CFG.ruinsMin + Math.floor(rng() * (CFG.ruinsMax - CFG.ruinsMin + 1));
+  let tries = 0;
+  while (world.ruins.length < count && tries++ < 400) {
+    const L = rand(rng, CFG.derelictL[0], CFG.derelictL[1]);
+    const W = rand(rng, CFG.derelictW[0], CFG.derelictW[1]);
+    const H = rand(rng, CFG.derelictH[0], CFG.derelictH[1]);
+    const R = Math.hypot(L / 2, W / 2, H / 2) + CFG.wallHalf;
+    const x = rand(rng, R + 60, size - R - 60), y = rand(rng, R + 60, size - R - 60), z = rand(rng, R + 60, size - R - 60);
+    const st = world.start;
+    if (Math.hypot(x - st.x, y - st.y, z - st.z) < CFG.ruinStartGap + R) continue;
+    if (world.ruins.some((o) => Math.hypot(o.x - x, o.y - y, o.z - z) < CFG.ruinGap)) continue;
+    const q = qaxis(randomDir(rng), rng() * Math.PI * 2);
+    const scratch = { rng, walls: [], ruins: [], keepClear: [] };
+    addRuin3(world, addDerelict(scratch, 0, 0, 0, L, W), x, y, z, q, H);
+  }
+}
+
+// A 2D layout (from addDerelict or addRuin at the origin) → a ruin in 3D.
+export function addRuin3(world, lay, x, y, z, q, H) {
+  const t = CFG.wallHalf;
+  const solids = [];
+  const wall = (a, b, z0, z1) => solids.push({ kind: "wall", a, b, z0, z1, t });
+  for (const w of lay.walls) {
+    wall([w.x0, w.y0], [w.x1, w.y1], -H / 2, H / 2);
+    solids[solids.length - 1].hull = onHull(lay.hull, (w.x0 + w.x1) / 2, (w.y0 + w.y1) / 2);
+  }
+  // Each opening: the gap it sits in runs along the wall that ends beside it.
+  const holes = [];
+  for (const [ox, oy] of lay.openings) {
+    let dir = null;
+    for (const w of lay.walls) {
+      for (const [ex, ey] of [[w.x0, w.y0], [w.x1, w.y1]]) {
+        if (Math.abs(Math.hypot(ex - ox, ey - oy) - CFG.breach / 2) < 0.5) {
+          const l = Math.hypot(w.x1 - w.x0, w.y1 - w.y0);
+          dir = [(w.x1 - w.x0) / l, (w.y1 - w.y0) / l];
+        }
+      }
+    }
+    if (!dir) continue;
+    const h = CFG.breach / 2;
+    const a = [ox - dir[0] * h, oy - dir[1] * h], b = [ox + dir[0] * h, oy + dir[1] * h];
+    const breach = onHull(lay.hull, ox, oy);
+    if (breach) {
+      wall(a, b, CFG.breachH / 2, H / 2);
+      wall(a, b, -H / 2, -CFG.breachH / 2);
+    } else wall(a, b, -H / 2 + CFG.doorH, H / 2);
+    holes.push({ at: [ox, oy, breach ? 0 : -H / 2 + CFG.doorH / 2], breach });
+  }
+  solids.push({ kind: "plate", poly: lay.hull, zc: -H / 2, t });
+  solids.push({ kind: "plate", poly: lay.hull, zc: H / 2, t });
+  let reach = 0;
+  for (const [hx, hy] of lay.hull) reach = Math.max(reach, Math.hypot(hx, hy));
+  for (const sd of solids) {
+    if (sd.kind === "wall") {
+      const l = Math.hypot(sd.b[0] - sd.a[0], sd.b[1] - sd.a[1]);
+      sd.c = [(sd.a[0] + sd.b[0]) / 2, (sd.a[1] + sd.b[1]) / 2, (sd.z0 + sd.z1) / 2];
+      sd.R = Math.hypot(l / 2, (sd.z1 - sd.z0) / 2) + t;
+    } else {
+      sd.c = [0, 0, sd.zc];
+      sd.R = reach + t;
+    }
+  }
+  const ruin = {
+    kind: "ruin",
+    x, y, z, q, H,
+    L: lay.L, W: lay.W,
+    R: Math.hypot(reach, H / 2) + t,
+    hull: lay.hull,
+    solids,
+    holes,
+    aft: ruinToWorld({ x, y, z, q }, [lay.aft[0], lay.aft[1], 0]),
+    rooms: lay.rooms.map(([rx, ry]) => ruinToWorld({ x, y, z, q }, [rx, ry, 0])),
+  };
+  for (const sd of solids) sd.ruin = ruin;
+  world.ruins.push(ruin);
+  world.keepClear.push({ x, y, z, r: ruin.R + 20 });
+  return ruin;
+}
+
+function onHull(hull, x, y) {
+  for (let i = 0; i < hull.length; i++) {
+    const [ax, ay] = hull[i], [bx, by] = hull[(i + 1) % hull.length];
+    const ex = bx - ax, ey = by - ay;
+    const k = clamp(((x - ax) * ex + (y - ay) * ey) / (ex * ex + ey * ey), 0, 1);
+    if (Math.hypot(ax + ex * k - x, ay + ey * k - y) < 1) return true;
+  }
+  return false;
+}
+
+export const ruinToLocal = (r, p) => qrot(qconj(r.q), [p[0] - r.x, p[1] - r.y, p[2] - r.z]);
+export const ruinToWorld = (r, l) => { const p = qrot(r.q, l); return [p[0] + r.x, p[1] + r.y, p[2] + r.z]; };
+
+export function inPoly(poly, x, y) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// The nearest point of a solid's core to a local point: a wall's core is its
+// segment swept over its height, a plate's its outline at its height. The
+// solid is the core grown by t, so its edges are rounded.
+export function coreClosest(sd, l) {
+  if (sd.kind === "wall") {
+    const ex = sd.b[0] - sd.a[0], ey = sd.b[1] - sd.a[1];
+    const k = clamp(((l[0] - sd.a[0]) * ex + (l[1] - sd.a[1]) * ey) / (ex * ex + ey * ey || 1), 0, 1);
+    return [sd.a[0] + ex * k, sd.a[1] + ey * k, clamp(l[2], sd.z0, sd.z1)];
+  }
+  if (inPoly(sd.poly, l[0], l[1])) return [l[0], l[1], sd.zc];
+  let best = null, bd = Infinity;
+  const P = sd.poly;
+  for (let i = 0; i < P.length; i++) {
+    const [ax, ay] = P[i], [bx, by] = P[(i + 1) % P.length];
+    const ex = bx - ax, ey = by - ay;
+    const k = clamp(((l[0] - ax) * ex + (l[1] - ay) * ey) / (ex * ex + ey * ey), 0, 1);
+    const cx = ax + ex * k, cy = ay + ey * k;
+    const d = (cx - l[0]) ** 2 + (cy - l[1]) ** 2;
+    if (d < bd) { bd = d; best = [cx, cy, sd.zc]; }
+  }
+  return best;
+}
+
+// The solids of a ruin within `pad` of a local point, by bounding sphere.
+function solidsNear(r, l, pad) {
+  const out = [];
+  for (const sd of r.solids) {
+    const dx = l[0] - sd.c[0], dy = l[1] - sd.c[1], dz = l[2] - sd.c[2];
+    const m = sd.R + pad;
+    if (dx * dx + dy * dy + dz * dz <= m * m) out.push(sd);
+  }
+  return out;
+}
+
+// The nearest solid surface of a ruin to a world point within `range`:
+// { sd, d (from the surface), n (world normal, outward), p (local) } or null.
+export function ruinSurface(r, p, range, l = ruinToLocal(r, p)) {
+  let best = null;
+  for (const sd of solidsNear(r, l, range)) {
+    const c = coreClosest(sd, l);
+    const dx = l[0] - c[0], dy = l[1] - c[1], dz = l[2] - c[2];
+    const dc = Math.hypot(dx, dy, dz);
+    const d = dc - sd.t;
+    if (d > range || (best && d >= best.d)) continue;
+    const nl = dc > 1e-9 ? [dx / dc, dy / dc, dz / dc] : [0, 0, 1];
+    best = { sd, d, nl };
+  }
+  if (best) best.n = qrot(r.q, best.nl);
+  return best;
+}
+
+// First t in [0,1] where a round of radius pr on local p0→p1 meets a solid,
+// tested as a box (a wall) or a band through the outline (a plate).
+function segSolid(sd, p0, p1, pr) {
+  const d = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+  if (sd.kind === "wall") {
+    const ex = sd.b[0] - sd.a[0], ey = sd.b[1] - sd.a[1];
+    const L = Math.hypot(ex, ey) || 1;
+    const axes = [[ex / L, ey / L, 0], [-ey / L, ex / L, 0], [0, 0, 1]];
+    const half = [L / 2 + sd.t + pr, sd.t + pr, (sd.z1 - sd.z0) / 2 + sd.t + pr];
+    let t0 = 0, t1 = 1;
+    for (let i = 0; i < 3; i++) {
+      const a = axes[i];
+      const o = (p0[0] - sd.c[0]) * a[0] + (p0[1] - sd.c[1]) * a[1] + (p0[2] - sd.c[2]) * a[2];
+      const v = d[0] * a[0] + d[1] * a[1] + d[2] * a[2];
+      if (Math.abs(v) < 1e-12) {
+        if (Math.abs(o) > half[i]) return null;
+        continue;
+      }
+      let ta = (-half[i] - o) / v, tb = (half[i] - o) / v;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 > t1) return null;
+    }
+    return t0;
+  }
+  const band = sd.t + pr;
+  const o = p0[2] - sd.zc;
+  let ta, tb;
+  if (Math.abs(d[2]) < 1e-12) {
+    if (Math.abs(o) > band) return null;
+    ta = 0; tb = 1;
+  } else {
+    ta = (-band - o) / d[2]; tb = (band - o) / d[2];
+    if (ta > tb) [ta, tb] = [tb, ta];
+    ta = Math.max(0, ta); tb = Math.min(1, tb);
+    if (ta > tb) return null;
+  }
+  for (const k of [ta, tb]) {
+    if (inPoly(sd.poly, p0[0] + d[0] * k, p0[1] + d[1] * k)) return ta;
+  }
+  return null;
+}
+
+// First t along world segment a→b (radius pr) that meets any ruin, or null.
+export function segRuins(world, x0, y0, z0, x1, y1, z1, pr) {
+  let bt = null;
+  for (const r of world.ruins) {
+    if (segSphere(x0, y0, z0, x1, y1, z1, r.x, r.y, r.z, r.R + pr) === null) continue;
+    const p0 = ruinToLocal(r, [x0, y0, z0]), p1 = ruinToLocal(r, [x1, y1, z1]);
+    for (const sd of r.solids) {
+      const t = segSolid(sd, p0, p1, pr);
+      if (t !== null && (bt === null || t < bt)) bt = t;
+    }
+  }
+  return bt;
+}
+
+// A body (or a rock) against a ruin: pushed out of each solid it overlaps
+// along that solid's normal, and what was moving into it reflected. The
+// closing speed, for crash.
+function collideRuin(b, r, e) {
+  let worst = 0;
+  for (let it = 0; it < 4; it++) {
+    const hit = ruinSurface(r, [b.x, b.y, b.z], b.r);
+    if (!hit || hit.d >= b.r) break;
+    const [nx, ny, nz] = hit.n;
+    const push = b.r - hit.d;
+    b.x += nx * push; b.y += ny * push; b.z += nz * push;
+    foldShove(b);
+    const vn = b.vx * nx + b.vy * ny + b.vz * nz;
+    if (vn < 0) {
+      b.vx -= (1 + e) * vn * nx; b.vy -= (1 + e) * vn * ny; b.vz -= (1 + e) * vn * nz;
+      worst = Math.max(worst, -vn);
+    }
+  }
+  return worst;
+}
+
+// ---- artifact and extraction --------------------------------------------------
+function placeObjective(world) {
+  const { rng, size } = world;
+  if (world.ruins.length) {
+    const host = world.ruins[Math.floor(rng() * world.ruins.length)];
+    world.artifact = { x: host.aft[0], y: host.aft[1], z: host.aft[2], r: CFG.artifactR, carrier: null, ruin: host };
+  } else {
+    world.artifact = { x: size / 2, y: size / 2, z: size / 2, r: CFG.artifactR, carrier: null, ruin: null };
+  }
+  const r = CFG.extractR;
+  const st = world.start;
+  for (let tries = 0; tries < 400; tries++) {
+    const x = rand(rng, r + 40, size - r - 40), y = rand(rng, r + 40, size - r - 40), z = rand(rng, r + 40, size - r - 40);
+    if (Math.hypot(x - st.x, y - st.y, z - st.z) < CFG.extractMinDist) continue;
+    if (world.ruins.some((o) => Math.hypot(o.x - x, o.y - y, o.z - z) < o.R + r + 40)) continue;
+    world.extract = { x, y, z, r };
+    break;
+  }
+  // Fallback: the far corner, which always clears the distance.
+  if (!world.extract) world.extract = { x: size - st.x, y: size - st.y, z: size - st.z, r };
+  world.keepClear.push({ x: world.extract.x, y: world.extract.y, z: world.extract.z, r });
 }
 
 // ---- motion + collision ----------------------------------------------------
@@ -408,7 +703,14 @@ function collideAll(world, list) {
       if (collide(a, b, e) && s) crash(world, s, v);
     }
   }
-  for (const a of list) edge(a, world.size, e);
+  for (const a of list) {
+    for (const r of world.ruins) {
+      if (Math.hypot(a.x - r.x, a.y - r.y, a.z - r.z) > r.R + a.r) continue;
+      const v = collideRuin(a, r, e);
+      if (v && isBody(a)) crash(world, a, v);
+    }
+    edge(a, world.size, e);
+  }
 }
 
 function foldShove(b) {
@@ -522,7 +824,7 @@ export function hasLos(world, a, b) {
   for (const r of rocksNear(world, a.x, a.y, a.z, b.x, b.y, b.z)) {
     if (segSphere(a.x, a.y, a.z, b.x, b.y, b.z, r.x, r.y, r.z, r.r) !== null) return false;
   }
-  return true;
+  return segRuins(world, a.x, a.y, a.z, b.x, b.y, b.z, 0) === null;
 }
 
 // ---- firing (fire(), src/mission/ai.js) ------------------------------------
@@ -589,6 +891,7 @@ export function fire(world, shooter, dir, accuracy = 1) {
 }
 
 // ---- projectiles (updateProjectiles, src/mission/combat.js) ----------------
+const WALL = { kind: "wall" }; // what a round stopped on, when it was a ruin
 // Swept: each step a round is a segment, and the EARLIEST thing along it wins.
 function updateProjectiles(world, dt) {
   for (const p of world.projectiles) {
@@ -606,6 +909,8 @@ function updateProjectiles(world, dt) {
       const t = segSphere(x0, y0, z0, x1, y1, z1, a.x, a.y, a.z, a.r + p.r);
       if (t !== null && t < bt) { bt = t; best = a; }
     }
+    const tw = segRuins(world, x0, y0, z0, x1, y1, z1, p.r);
+    if (tw !== null && tw < bt) { bt = tw; best = WALL; }
     for (const o of opponentsOf(world, p.team)) {
       if (!o.alive || o === p.owner || (p.hit && p.hit.has(o))) continue;
       const t = segSphere(x0, y0, z0, x1, y1, z1, o.x, o.y, o.z, o.r + p.r);
@@ -614,12 +919,14 @@ function updateProjectiles(world, dt) {
 
     if (!best) { p.x = x1; p.y = y1; p.z = z1; continue; }
     const hx = x0 + (x1 - x0) * bt, hy = y0 + (y1 - y0) * bt, hz = z0 + (z1 - z0) * bt;
-    if (best.kind === "asteroid") {
+    if (best.kind === "asteroid" || best === WALL) {
       p.dead = true;
       p.x = hx; p.y = hy; p.z = hz;
-      const sp = Math.hypot(p.vx, p.vy, p.vz) || 1;
-      const k = CFG.bulletPush / best.m / sp;
-      best.vx += p.vx * k; best.vy += p.vy * k; best.vz += p.vz * k;
+      if (best.kind === "asteroid") {
+        const sp = Math.hypot(p.vx, p.vy, p.vz) || 1;
+        const k = CFG.bulletPush / best.m / sp;
+        best.vx += p.vx * k; best.vy += p.vy * k; best.vz += p.vz * k;
+      }
       world.events.push({ type: "spark", x: hx, y: hy, z: hz, color: p.color });
       // The 2D deviation: an explosive round detonates on terrain.
       for (const fx of p.effects) if (fx.kind === "explode") explode(world, fx, hx, hy, hz, p.team, p.owner);
