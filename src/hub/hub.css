@@ -1329,6 +1329,9 @@ select:disabled { color: var(--dim); opacity: 0.6; cursor: not-allowed; }
 /* The mission's 3D view (tech/mission-3d.md): #game3d sits under #game by page
    order, and #game drops its opaque fill so the world shows through. */
 #game.over3d { background: transparent; box-shadow: none; }
+/* No cursor while a mission is being played (main.js syncCursor); the pause
+   menu brings it back. */
+body.mission-play, body.mission-play * { cursor: none; }
 .view-notice {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
   z-index: 103; pointer-events: none;

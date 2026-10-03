@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { entry } from "../enemyspec/perception.js";
 import { FramePool, viewY } from "./util.js";
 
-const RANGE = 175; // px, when nothing is hit
+const RANGE = 87.5; // px, when nothing is hit
 const RED = "#ff2a1a";
 const UNDER = 2.5; // px below the barrel's axis
 const MIN_HIT = 0.5; // px: a box entered closer than this is one the barrel is inside
