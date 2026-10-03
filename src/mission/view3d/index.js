@@ -29,6 +29,7 @@ import { createSoldiers } from "./soldier.js";
 import { createEnemies } from "./enemy.js";
 import { createEffects } from "./effects.js";
 import { createLasers } from "./laser.js";
+import { buildMist } from "./mist.js";
 import { haloPool, disposeTree } from "./util.js";
 
 export function createView3D(canvas) {
@@ -118,6 +119,8 @@ export function createView3D(canvas) {
     scene.fog.near = c.position.z + 50;
     scene.fog.far = c.position.z + 2000;
     level.background.update(m, c);
+    level.mist.group.visible = !!config.groundMist3d;
+    if (level.mist.group.visible) level.mist.update(m);
 
     halos.begin();
     level.soldiers.sync(m, halos);
@@ -144,6 +147,8 @@ export function createView3D(canvas) {
       const background = buildBackground(m.scene.world);
       scene.add(background.group);
       scene.background = background.sky;
+      const mist = buildMist(m.scene.world, m.scene.platforms);
+      scene.add(mist.group);
       level = {
         terrain,
         background,
@@ -151,6 +156,7 @@ export function createView3D(canvas) {
         enemies: createEnemies(scene),
         effects: createEffects(scene),
         lasers: createLasers(scene),
+        mist,
       };
     },
     draw,
@@ -165,6 +171,8 @@ export function createView3D(canvas) {
       level.enemies.dispose();
       level.effects.dispose();
       level.lasers.dispose();
+      scene.remove(level.mist.group);
+      level.mist.dispose();
       level = null;
     },
   };

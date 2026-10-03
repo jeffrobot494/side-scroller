@@ -89,9 +89,10 @@ Nothing new crosses the wire. Every look derives from fields a room viewer alrea
 | `test/mission-golden.test.mjs` | Identical simulation; `mission.js` still bare-node importable |
 | `test/mission-divergence.test.mjs` | Rendering stays invisible to the simulation |
 | `test/enemyspec-targeting.test.mjs`, `test/companion-aim.test.mjs`, `test/navigation.test.mjs` | `perception.js` unchanged in behaviour after the `entry` export |
+| `test/tools.test.mjs`, `test/mission-net.test.mjs` | The pause menu's settings, pinned by name, and the count of local knobs a room refuses. Each new knob is added to both and to the Viewport row of `design/pause-menu.md`, whose rule (every live setting is on the menu) puts it there |
 | `test/docs.test.mjs` | This spec's citations |
 
-Nothing pins the three new knobs; the pause menu renders whatever `pauseSchema()` lists. Everything else is checked by eye. Each slice gets two kinds of headless screenshot: the graphics tester (default state, plus side view standing and crouched, at the game's crouch height from L0), and a 3D mission frame from a generated level with three soldiers, crouched and standing.
+ Everything else is checked by eye. Each slice gets two kinds of headless screenshot: the graphics tester (default state, plus side view standing and crouched, at the game's crouch height from L0), and a 3D mission frame from a generated level with three soldiers, crouched and standing.
 
 ## Approximations
 

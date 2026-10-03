@@ -374,6 +374,14 @@ export const SCHEMA = [
         help: "A red laser from under every soldier's barrel in the 3D mission view, stopping at the first platform or enemy it meets. Cosmetic only: aim and spread are unchanged. The 2D view has none.",
       },
       {
+        key: "groundMist3d",
+        label: "Ground mist (3D)",
+        type: "bool",
+        live: true,
+        default: true,
+        help: "Drifting bands of mist along the ground in the 3D mission view, behind the play plane and faintly in front of it. Off saves six large transparent layers on a slow device. The 2D view has none.",
+      },
+      {
         key: "showFps",
         label: "Show FPS",
         type: "bool",

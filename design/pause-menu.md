@@ -35,7 +35,7 @@ categories the editor's Settings tab uses.
 
 | Category | Settings |
 |---|---|
-| Viewport | Camera zoom · Mission view · Scanlines (3D) · Scanline spacing · Laser sights (3D) · Show FPS · Debug overlays in missions · Pause on squadmate death |
+| Viewport | Camera zoom · Mission view · Scanlines (3D) · Scanline spacing · Laser sights (3D) · Ground mist (3D) · Show FPS · Debug overlays in missions · Pause on squadmate death |
 | Sound | Master volume · Effects volume · Interface volume · Music volume · Mute when unfocused · Stereo width · Audible range · Max simultaneous sounds |
 | Controls / aim | Aim mode · Gamepad deadzone · Aim spread · Reload move speed × |
 | Combat | Friendly fire · Squad damage × |
