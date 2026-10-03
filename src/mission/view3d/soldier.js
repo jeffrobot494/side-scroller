@@ -24,6 +24,8 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { ModelMap, applyFlash, burnHalo, muzzleHalo } from "./actors.js";
 import { loadArmour, makeArmour, fitArmour } from "./armour.js";
+import { makeCape } from "./cape.js";
+import { config } from "../../game/config.js";
 import { setColor, shade, viewY } from "./util.js";
 
 const ROUND = new RoundedBoxGeometry(1, 1, 1, 2, 0.18);
@@ -180,7 +182,7 @@ function make(s) {
   shadow.renderOrder = 1;
   root.add(shadow);
 
-  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, shoulders, arms, mats, armour: null, gait: 0, phase: 0, t: null };
+  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, shoulders, arms, mats, armour: null, cape: null, gait: 0, phase: 0, t: null };
 }
 
 // Place a part from its fractional rect, in the body group's space (origin at
@@ -353,7 +355,10 @@ function arms(v, s, gunLen) {
   });
 }
 
-export function createSoldiers(parent) {
+// `wind(s)` is the air's velocity along x, px/s, at soldier `s`. A mission's
+// air is still; a host whose soldier runs on the spot (the graphics tester's
+// treadmill) passes the run the body is not really making.
+export function createSoldiers(parent, { wind = null } = {}) {
   loadArmour();
   const models = new ModelMap(parent, make);
   return {
@@ -364,6 +369,10 @@ export function createSoldiers(parent) {
         if (!s.alive) continue;
         const v = models.get(s);
         pose(v, s, m.time);
+        if (config.cape3d) {
+          v.cape ??= makeCape(v.root, v.upper, v.parts.pack);
+          v.cape.update(s, m.time, wind ? wind(s) : 0);
+        } else if (v.cape) v.cape.hide();
         applyFlash(v.mats, s.hitFlash > 0, false, m.time);
         if (s.muzzleFlash > 0) {
           const cx = s.x + s.w / 2;

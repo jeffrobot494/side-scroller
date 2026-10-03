@@ -382,6 +382,14 @@ export const SCHEMA = [
         help: "Drifting bands of mist along the ground in the 3D mission view, behind the play plane and faintly in front of it. Off saves six large transparent layers on a slow device. The 2D view has none.",
       },
       {
+        key: "cape3d",
+        label: "Capes (3D)",
+        type: "bool",
+        live: true,
+        default: true,
+        help: "A cloth cape on every soldier in the 3D mission view, simulated per soldier at 60Hz. Off hides it and stops the simulation, which is the most expensive look on a slow device. The 2D view has none.",
+      },
+      {
         key: "showFps",
         label: "Show FPS",
         type: "bool",

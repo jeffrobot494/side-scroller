@@ -1,7 +1,7 @@
 ---
 type: tech
 category: scenes
-status: building
+status: built
 resolution: sharp
 needs: [mission-3d]
 related: [mission-3d, art-direction]
