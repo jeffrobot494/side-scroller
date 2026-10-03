@@ -75,6 +75,28 @@ const SHOULDER = {
   color: "#1b202b",
 };
 
+// Arms: upper arm + forearm + glove each, solved by two-bone IK every frame.
+// Shoulders ride the upper body (lean, bob, crouch), hands ride the gun (aim,
+// mirror). The near (camera-side) hand holds the grip, the far one reaches
+// round the front of the chest to support the barrel. Each elbow bends toward
+// its own pole, in upper-body space (x forward, y up, z toward the camera):
+// the near one down and back, the far one forward and out, so that arm
+// crosses the FRONT of the chest under the gun rather than hiding behind it.
+// `chestIn` is taken off the torso's front edge to make room.
+const ARMS = {
+  upper: 10, fore: 10,    // px, bone lengths
+  thick: 4.6,             // px, sleeve cross-section
+  chestIn: 0.1,           // fraction of w taken off the chest's front
+  // [shoulder [x frac of w, z px], hand in gun space (x as a fraction of the
+  //  barrel), elbow pole, tone]
+  sides: [
+    [[-0.05, 8.5], [0.22, -3.5, 2.6], [-0.4, -1, 0.7], -8],  // near
+    [[0.05, -6.5], [0.66, -2.4, 1.2], [0.8, -0.8, 0.7], -26], // far
+  ],
+  gloveTone: -46,
+  glove: [4, 4.4, 4],     // px
+};
+
 // The standing leg rig, as fractions of w / h: hip height, hip x standing
 // (the 2D figure's two legs) and running (closer, as seen side-on), leg
 // width, and where the thigh ends.
@@ -115,6 +137,13 @@ function make(s) {
   parts.visor = new THREE.Mesh(BOX, mat("#7ad7ff", { emissive: "#3aa8e0", roughness: 0.2, metalness: 0.6 }));
   parts.visor.name = "visor";
   upper.add(parts.visor);
+  const glove = mat(shade(s.color, ARMS.gloveTone));
+  const arms = ARMS.sides.map(([, , , tone]) => {
+    const m = mat(shade(s.color, tone));
+    const up = new THREE.Mesh(BOX, m), fore = new THREE.Mesh(BOX, m), hand = new THREE.Mesh(BOX, glove);
+    root.add(up, fore, hand);
+    return { up, fore, hand };
+  });
   const shoulderMat = mat(SHOULDER.color, { roughness: 0.5, metalness: 0.4 });
   const shoulders = SHOULDER.z.map(() => {
     const m = new THREE.Mesh(BOX, shoulderMat);
@@ -151,7 +180,7 @@ function make(s) {
   shadow.renderOrder = 1;
   root.add(shadow);
 
-  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, shoulders, mats, armour: null, gait: 0, phase: 0, t: null };
+  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, shoulders, arms, mats, armour: null, gait: 0, phase: 0, t: null };
 }
 
 // Place a part from its fractional rect, in the body group's space (origin at
@@ -226,6 +255,10 @@ function pose(v, s, time) {
   v.upper.position.set(0, hipY, 0);
   v.upper.rotation.z = -lean;
   for (const r of layout(s)) put(v.parts[r[0]], s, r, h / 2 - HIP_Y * h);
+  // Room for the arms: the chest's front pulled back, before the armour is
+  // fitted to it.
+  v.parts.torso.scale.x -= ARMS.chestIn * w;
+  v.parts.torso.position.x -= ARMS.chestIn * w / 2;
   armour(v, s);
   shoulders(v);
 
@@ -274,6 +307,50 @@ function pose(v, s, time) {
 
   v.shadow.position.set(0, -h / 2 + 0.6, 0);
   v.shadow.scale.set(w * 1.5, 22, 1);
+  arms(v, s, gunLen);
+}
+
+// Two-bone IK for each arm, between a shoulder in upper-body space and a hand
+// in gun space. Solved in world space off this frame's matrices; the meshes
+// hang under the root, which only translates.
+const _S = new THREE.Vector3(), _H = new THREE.Vector3(), _E = new THREE.Vector3();
+const _d = new THREE.Vector3(), _pole = new THREE.Vector3(), _seg = new THREE.Vector3();
+const _o = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0), _q = new THREE.Quaternion();
+// A box from p to q (root space), `thick` across.
+function bone(mesh, p, q, thick) {
+  _seg.subVectors(q, p);
+  const len = _seg.length();
+  mesh.scale.set(thick, len + thick * 0.5, thick);
+  mesh.position.addVectors(p, q).multiplyScalar(0.5);
+  mesh.quaternion.setFromUnitVectors(_Y, _seg.normalize());
+}
+function arms(v, s, gunLen) {
+  v.root.updateWorldMatrix(true, true);
+  const w = s.w, h = s.h, a = ARMS.upper, b = ARMS.fore, o = v.root.position;
+  // Shoulder height in upper-body space (origin at the hip, y up).
+  const shoulderY = (0.62 - (s.crouched ? 0.24 : 0.33)) * h;
+  v.upper.localToWorld(_o.set(0, 0, 0));
+  ARMS.sides.forEach(([[sx, sz], hand, [px, py, pz]], i) => {
+    const L = v.arms[i];
+    v.upper.localToWorld(_S.set(sx * w, shoulderY, sz));
+    v.gun.localToWorld(_H.set(hand[0] * gunLen, hand[1], hand[2]));
+    _d.subVectors(_H, _S);
+    let dist = _d.length();
+    _d.normalize();
+    if (dist > a + b - 0.01) { _H.copy(_S).addScaledVector(_d, a + b - 0.01); dist = a + b - 0.01; }
+    const along = (a * a - b * b + dist * dist) / (2 * dist);
+    const rise = Math.sqrt(Math.max(0, a * a - along * along));
+    // The pole, from upper-body space to a world direction, square to the reach.
+    v.upper.localToWorld(_pole.set(px, py, pz)).sub(_o);
+    _pole.addScaledVector(_d, -_pole.dot(_d)).normalize();
+    _E.copy(_S).addScaledVector(_d, along).addScaledVector(_pole, rise);
+    _S.sub(o); _E.sub(o); _H.sub(o);
+    bone(L.up, _S, _E, ARMS.thick);
+    bone(L.fore, _E, _H, ARMS.thick * 0.9);
+    L.hand.position.copy(_H);
+    L.hand.quaternion.copy(v.gun.getWorldQuaternion(_q));
+    L.hand.scale.set(...ARMS.glove);
+  });
 }
 
 export function createSoldiers(parent) {
