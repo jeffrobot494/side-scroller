@@ -12,6 +12,12 @@
 //
 // Layout is in box-local space FACING RIGHT (x from the box's left edge, y
 // down from its top); a soldier facing left is the same model mirrored.
+//
+// Standing, the legs are a rig rather than rects: hip → thigh → knee → shin →
+// boot. Running swings them from the hip and folds the knee through the
+// swing; the pelvis drops until the lower foot is on the ground (which is the
+// bob), and the upper body leans into the run. Both blend in and out from the
+// standing pose, so starting and stopping does not pop.
 // ---------------------------------------------------------------------------
 
 import * as THREE from "three";
@@ -43,9 +49,6 @@ function layout(s) {
     ];
   }
   return [
-    ["legFar", 0.2, 0.62, 0.42, 1.0, -4, 7],
-    ["legNear", 0.58, 0.62, 0.8, 1.0, 4, 7],
-    ["kneePad", 0.58, 0.72, 0.84, 0.8, 8, 2],
     ["pack", -0.07, 0.3, 0.2, 0.6, -2, 12],
     ["torso", 0.16, 0.28, 0.84, 0.68, 0, 14],
     ["stripe", 0.47, 0.3, 0.53, 0.64, 7.3, 1],
@@ -57,14 +60,31 @@ function layout(s) {
 
 // Which colour each part takes, as the 2D figure's shading of the soldier's.
 const TONE = {
-  shin: -22, knee: -22, legFar: -30, legNear: -22, pack: -34, helmet: -22,
+  shin: -22, knee: -22, pack: -34, helmet: -22,
   torso: 0, stripe: 20, pad: 8, kneePad: 4,
 };
+
+// The standing leg rig, as fractions of w / h: hip height, hip x standing
+// (the 2D figure's two legs) and running (closer, as seen side-on), leg
+// width, and where the thigh ends.
+const HIP_Y = 0.62, KNEE_Y = 0.81;
+const LEGS = [
+  // [name, tone, hipX standing, hipX running, z, depth, kneePad]
+  ["far", -30, 0.31, 0.45, -4, 7, false],
+  ["near", -22, 0.69, 0.55, 4, 7, true],
+];
+const LEG_W = 0.22;
+const BOOT_TONE = -44;
+// Gait at full run speed (px/s): cadence in rad per px travelled, hip swing
+// and knee fold in rad, forward lean of the upper body in rad.
+const RUN_SPEED = 260, CADENCE = 0.052, SWING = 0.55, KNEE_BASE = 0.15, KNEE_FOLD = 1.05, LEAN = 0.12;
 
 function make(s) {
   const root = new THREE.Group();
   const body = new THREE.Group(); // mirrored for facing
   root.add(body);
+  const upper = new THREE.Group(); // pivots at the hip, for the lean
+  body.add(upper);
   const mats = [];
   const parts = {};
   const mat = (color, opts = {}) => {
@@ -77,14 +97,29 @@ function make(s) {
   for (const name of Object.keys(TONE)) {
     const geo = name === "torso" || name === "helmet" || name === "pack" ? ROUND : BOX;
     const mesh = new THREE.Mesh(geo, mat(shade(s.color, TONE[name])));
-    body.add(mesh);
+    upper.add(mesh);
     parts[name] = mesh;
   }
   parts.visor = new THREE.Mesh(BOX, mat("#7ad7ff", { emissive: "#3aa8e0", roughness: 0.2, metalness: 0.6 }));
-  body.add(parts.visor);
+  upper.add(parts.visor);
+
+  // Legs: hip group → thigh + knee group → shin + boot.
+  const bootMat = mat(shade(s.color, BOOT_TONE));
+  const legs = LEGS.map(([, tone, , , , , hasPad]) => {
+    const m = mat(shade(s.color, tone));
+    const hip = new THREE.Group(), knee = new THREE.Group();
+    const thigh = new THREE.Mesh(BOX, m), shin = new THREE.Mesh(BOX, m), boot = new THREE.Mesh(BOX, bootMat);
+    const pad = hasPad ? new THREE.Mesh(BOX, mat(shade(s.color, TONE.kneePad))) : null;
+    hip.add(thigh, knee);
+    knee.add(shin, boot);
+    if (pad) hip.add(pad);
+    body.add(hip);
+    return { hip, knee, thigh, shin, boot, pad };
+  });
 
   // The gun: a pivot at the shoulder, the barrel along +x from it.
   const gun = new THREE.Group();
+  gun.name = "gun"; // found by name from graphics-tester/experiments.js
   const gunMat = mat("#161c28", { roughness: 0.4, metalness: 0.7 });
   const barrel = new THREE.Mesh(BOX, gunMat);
   const grip = new THREE.Mesh(BOX, gunMat);
@@ -97,34 +132,80 @@ function make(s) {
   shadow.renderOrder = 1;
   root.add(shadow);
 
-  return { root, body, parts, gun, barrel, grip, sight, shadow, mats };
+  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, mats, gait: 0, phase: 0, t: null };
 }
 
 // Place a part from its fractional rect, in the body group's space (origin at
-// the box centre, y up).
-function put(mesh, s, r, dx = 0) {
+// the box centre, y up), less `oy` for a part parented below a pivot.
+function put(mesh, s, r, oy = 0) {
   const [, x0, y0, x1, y1, z, d] = r;
   const w = s.w, h = s.h;
   mesh.visible = true;
   mesh.scale.set(Math.max(0.5, (x1 - x0) * w), Math.max(0.5, (y1 - y0) * h), d);
-  mesh.position.set((x0 + x1) / 2 * w - w / 2 + dx, h / 2 - (y0 + y1) / 2 * h, z);
+  mesh.position.set((x0 + x1) / 2 * w - w / 2, h / 2 - (y0 + y1) / 2 * h - oy, z);
 }
+
+// How far below the hip a leg's foot is, at hip angle `a` and knee fold `k`.
+const reach = (a, k, thighLen, shinLen) => thighLen * Math.cos(a) + shinLen * Math.cos(a - k);
 
 function pose(v, s, time) {
   const w = s.w, h = s.h, dir = s.facing >= 0 ? 1 : -1;
   v.root.position.set(s.x + w / 2, viewY(s.y + h / 2), 0);
   v.body.scale.x = dir;
 
-  // A stride while running on the ground; still otherwise.
-  const moving = s.onGround && Math.abs(s.vx || 0) > 20 && !s.crouched;
-  const stride = moving ? Math.sin(time * 16) * w * 0.12 : 0;
+  // Gait: phase advances with distance covered, and the whole cycle fades in
+  // and out with `gait` (0 standing … 1 full run) so starts and stops blend.
+  const dt = v.t === null ? 0 : Math.max(0, Math.min(0.1, time - v.t));
+  v.t = time;
+  const speed = Math.abs(s.vx || 0);
+  const moving = s.onGround && speed > 20 && !s.crouched;
+  const effort = moving ? Math.min(1, speed / RUN_SPEED) : 0;
+  v.gait += (effort - v.gait) * Math.min(1, dt * 10);
+  if (s.crouched) v.gait = 0;
+  v.phase = (v.phase + dt * Math.max(speed, moving ? 0 : 120 * v.gait) * CADENCE) % (Math.PI * 2);
+  const g = v.gait;
+
+  const thighLen = (KNEE_Y - HIP_Y) * h, shinLen = (1 - KNEE_Y) * h;
+  const legLen = thighLen + shinLen;
+  const pose2 = LEGS.map((L, i) => {
+    const ph = v.phase + i * Math.PI;
+    const a = g * SWING * Math.sin(ph);
+    const k = g * (KNEE_BASE + KNEE_FOLD * Math.max(0, Math.cos(ph)));
+    return { a, k };
+  });
+  // The pelvis drops until the lower foot touches the ground.
+  const drop = legLen - Math.max(...pose2.map((p) => reach(p.a, p.k, thighLen, shinLen)));
+  const lean = g * LEAN;
+  const hipY = h / 2 - HIP_Y * h - drop;
 
   for (const k in v.parts) v.parts[k].visible = false;
-  for (const r of layout(s)) {
-    const mesh = v.parts[r[0]];
-    const dx = r[0] === "legNear" || r[0] === "kneePad" ? stride : r[0] === "legFar" ? -stride : 0;
-    put(mesh, s, r, dx);
-  }
+  v.upper.position.set(0, hipY, 0);
+  v.upper.rotation.z = -lean;
+  for (const r of layout(s)) put(v.parts[r[0]], s, r, h / 2 - HIP_Y * h);
+
+  const legW = LEG_W * w;
+  v.legs.forEach((leg, i) => {
+    leg.hip.visible = !s.crouched;
+    if (s.crouched) return;
+    const [, , hx0, hx1, z, d] = LEGS[i];
+    const { a, k } = pose2[i];
+    leg.hip.position.set((hx0 + (hx1 - hx0) * g) * w - w / 2, hipY, z);
+    leg.hip.rotation.z = a;
+    leg.thigh.scale.set(legW, thighLen + 0.6, d);
+    leg.thigh.position.set(0, -thighLen / 2, 0);
+    leg.knee.position.set(0, -thighLen, 0);
+    leg.knee.rotation.z = -k;
+    leg.shin.scale.set(legW, shinLen, d);
+    leg.shin.position.set(0, -shinLen / 2, 0);
+    // The boot: the shin's bottom 3px, reaching forward past the toe.
+    const bootLen = legW + w * 0.1;
+    leg.boot.scale.set(bootLen, 3, d + 1);
+    leg.boot.position.set((bootLen - legW) / 2, -shinLen + 1.5, 0);
+    if (leg.pad) {
+      leg.pad.scale.set(0.26 * w, 0.08 * h, 2);
+      leg.pad.position.set(0.02 * w, -thighLen + 0.05 * h, d / 2 + 1);
+    }
+  });
 
   // Gun, in root space (not mirrored), so the angle is the world's.
   const gunLen = w * 0.62;
@@ -132,7 +213,9 @@ function pose(v, s, time) {
   if (s.aimVec) ang = Math.atan2(-s.aimVec.y, s.aimVec.x);
   else if (s.aimUp) ang = Math.PI / 2;
   else ang = dir > 0 ? 0 : Math.PI;
-  v.gun.position.set(0, h / 2 - h * 0.42, 9);
+  // Carried by the upper body: down with the pelvis, forward with the lean.
+  const shoulder = (HIP_Y - 0.42) * h;
+  v.gun.position.set(dir * shoulder * Math.sin(lean), h / 2 - h * 0.42 - drop, 9);
   v.gun.rotation.z = ang;
   v.barrel.scale.set(gunLen, 4, 4);
   v.barrel.position.set(gunLen / 2, 0, 0);
