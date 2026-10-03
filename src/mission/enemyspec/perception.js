@@ -420,8 +420,9 @@ function arcReaches(scene, x0, y0, vx, vy, g, life, target, boxes) {
 }
 
 // Where along (x0, y0)→(x1, y1) the segment first enters box `p`, as 0..1, or
-// Infinity for a miss. The slab method `blocked` uses, returning the entry.
-function entry(x0, y0, x1, y1, p) {
+// Infinity for a miss (0 when it starts inside). The slab method `blocked`
+// uses, returning the entry. Exported for the 3D view's laser sight.
+export function entry(x0, y0, x1, y1, p) {
   let tmin = 0;
   let tmax = 1;
   const dx = x1 - x0;

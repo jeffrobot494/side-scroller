@@ -28,6 +28,7 @@ import { buildTerrain } from "./terrain.js";
 import { createSoldiers } from "./soldier.js";
 import { createEnemies } from "./enemy.js";
 import { createEffects } from "./effects.js";
+import { createLasers } from "./laser.js";
 import { haloPool, disposeTree } from "./util.js";
 
 export function createView3D(canvas) {
@@ -123,6 +124,9 @@ export function createView3D(canvas) {
     level.enemies.sync(m, halos);
     level.effects.sync(m, halos);
     halos.end();
+    // After the soldiers: the beams read the guns as posed this frame.
+    if (config.laserSight3d) level.lasers.sync(m, level.soldiers.gunOf);
+    else level.lasers.hide();
 
     const k = +config.scanlines || 0;
     scanlines.enabled = k > 0;
@@ -146,6 +150,7 @@ export function createView3D(canvas) {
         soldiers: createSoldiers(scene),
         enemies: createEnemies(scene),
         effects: createEffects(scene),
+        lasers: createLasers(scene),
       };
     },
     draw,
@@ -159,6 +164,7 @@ export function createView3D(canvas) {
       level.soldiers.dispose();
       level.enemies.dispose();
       level.effects.dispose();
+      level.lasers.dispose();
       level = null;
     },
   };

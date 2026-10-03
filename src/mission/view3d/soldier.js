@@ -97,10 +97,12 @@ function make(s) {
   for (const name of Object.keys(TONE)) {
     const geo = name === "torso" || name === "helmet" || name === "pack" ? ROUND : BOX;
     const mesh = new THREE.Mesh(geo, mat(shade(s.color, TONE[name])));
+    mesh.name = name; // found by name from graphics-tester/experiments.js
     upper.add(mesh);
     parts[name] = mesh;
   }
   parts.visor = new THREE.Mesh(BOX, mat("#7ad7ff", { emissive: "#3aa8e0", roughness: 0.2, metalness: 0.6 }));
+  parts.visor.name = "visor";
   upper.add(parts.visor);
 
   // Legs: hip group → thigh + knee group → shin + boot.
@@ -248,6 +250,12 @@ export function createSoldiers(parent) {
         if (s.burn) burnHalo(halos, s.x, s.y, s.w, m.time);
       }
       models.end((s) => scene.soldiers.includes(s));
+    },
+    // The soldier's gun group as posed this frame, or null if it has no
+    // model (the laser sight reads it).
+    gunOf(s) {
+      const v = models.map.get(s);
+      return v && v.root.visible ? v.gun : null;
     },
     dispose() {
       models.dispose();

@@ -366,6 +366,14 @@ export const SCHEMA = [
         help: "Mission-canvas pixels from one dark line to the next. The canvas is scaled to fit the window, so the on-screen pitch follows the Mission canvas setting.",
       },
       {
+        key: "laserSight3d",
+        label: "Laser sights (3D)",
+        type: "bool",
+        live: true,
+        default: true,
+        help: "A red laser from under every soldier's barrel in the 3D mission view, stopping at the first platform or enemy it meets. Cosmetic only: aim and spread are unchanged. The 2D view has none.",
+      },
+      {
         key: "showFps",
         label: "Show FPS",
         type: "bool",
