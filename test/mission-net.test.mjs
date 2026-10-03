@@ -859,11 +859,13 @@ async function configRoutes(t) {
     }
     // 52 since progression P2 added the four server-scoped xpReward* knobs, plus
     // squad survival's group (tech/squad-survival.md), all server-scoped;
-    // 28 local: missionRenderer (mission-3d R1), then scanlines + scanlineSpacing,
+    // 31 local: missionRenderer (mission-3d R1), then scanlines + scanlineSpacing,
     // which only the 3D view in a page reads, then debugPauseOnDeath
-    // (tech/squad-debug.md D4), which only a page's own mission reads.
+    // (tech/squad-debug.md D4), which only a page's own mission reads, then
+    // laserSight3d, groundMist3d and cape3d (tech/mission-3d-looks.md), the
+    // 3D view's again.
     t.eq("config: a whole exported config applies its server keys", applied, 52 + SURVIVAL_KNOBS);
-    t.eq("config: ...drops the other 28", refused, 28);
+    t.eq("config: ...drops the other 31", refused, 31);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");
     t.eq("config: the server-scoped key it carried landed", after.values.healPerDay, 3);

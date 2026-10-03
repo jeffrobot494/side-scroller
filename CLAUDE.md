@@ -500,7 +500,12 @@ section + the tests are the source of truth for what currently exists):
   included), enemies detail the four shapes, shots are all six
   `PROJECTILE_SHAPES`; skyline at real depth with fog anchored behind the play
   plane. Verified in headless Chromium (SwiftShader), never on a GPU — no
-  performance number exists yet.
+  performance number exists yet. **The graphics tester's approved looks are in
+  it** (`tech/mission-3d-looks.md` L1–L6): laser sights (`laser.js`), ground
+  mist (`mist.js`), the Blender helmet and chest (`armour.js`, GLBs in
+  `view3d/models/`, built by `graphics-tester/models/*.py`), shoulder squares
+  and IK arms (in `soldier.js`), and a verlet cape per soldier (`cape.js`).
+  `laserSight3d`, `groundMist3d` and `cape3d` switch the costly ones off.
 - **Player2 Lab (`tech/player2-lab.md` L0–L4 — built):** `player2-lab.html` at
   the repo root, linked from nothing in the game or the editor, runs every
   Player2 generation modality — chat (multi-turn, streamed or whole), embeddings,

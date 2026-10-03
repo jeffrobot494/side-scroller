@@ -129,6 +129,7 @@ mission.onRendererToggle = () => syncRenderer();
 // page's to change (`mission.remote`).
 let pauseMenu = null;
 mission.onPauseChange = (open, screen) => {
+  syncCursor();
   if (pauseMenu) pauseMenu.dispose();
   pauseMenu = null;
   if (!open) return;
@@ -472,6 +473,13 @@ function showScene(name) {
   // re-point it under a result that has not landed yet. Absent in a room, where
   // there is nothing to swap to.
   if (hotSeat) hotSeat.setSceneVisible(!inMission);
+  syncCursor();
+}
+
+// No mouse cursor over a mission being played: it is back for the pause menu
+// and everywhere off the mission.
+function syncCursor() {
+  document.body.classList.toggle("mission-play", inMission && !mission.paused);
 }
 
 // The wait before the first snapshot is a visible state — a page with nothing on
