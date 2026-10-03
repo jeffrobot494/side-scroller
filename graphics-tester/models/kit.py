@@ -18,6 +18,8 @@ from mathutils import Vector, Matrix
 MODELS = r"C:\Users\jeffr\OneDrive\Documents\my-games\side-scroller\graphics-tester\models"
 # The .glb is what the game loads (src/mission/view3d/armour.js); the .blend
 # and this script stay here with the tester.
+# Models the game loads; anything else (tester-only subjects) exports here.
+GAME_STEMS = {"helmet", "chest"}
 GAME_MODELS = r"C:\Users\jeffr\OneDrive\Documents\my-games\side-scroller\src\mission\view3d\models"
 
 # name -> (base sRGB, emissive sRGB); emissive is pre-tuned for the game's
@@ -28,6 +30,9 @@ PALETTE = {
     "glow":  ((1.00, 0.63, 0.42), (0.95, 0.56, 0.33)),
     "suit":  ((0.18, 0.20, 0.24), (0, 0, 0)),
     "metal": ((0.62, 0.65, 0.70), (0, 0, 0)),
+    "bone":  ((0.86, 0.80, 0.66), (0, 0, 0)),
+    "flesh": ((0.42, 0.08, 0.09), (0.06, 0.0, 0.0)),
+    "maw":   ((1.00, 0.45, 0.16), (0.90, 0.32, 0.08)),
 }
 SLOTS = list(PALETTE)
 PW = 8  # palette width in pixels
@@ -90,6 +95,10 @@ class Builder:
         self.shell, self.detail = materials()
         self.parts = []
 
+    def begin(self):
+        """Start the next object of a multi-object model."""
+        self.parts = []
+
     def add(self, name, bm, slot="shell", smooth=True):
         """slot = "shell" or a PALETTE key."""
         me = bpy.data.meshes.new(name)
@@ -126,12 +135,27 @@ class Builder:
         bpy.ops.object.select_all(action="DESELECT")
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
-        bpy.ops.export_scene.gltf(filepath=os.path.join(GAME_MODELS, stem + ".glb"),
+        bpy.ops.export_scene.gltf(filepath=os.path.join(GAME_MODELS if stem in GAME_STEMS else MODELS, stem + ".glb"),
                                   use_selection=True, export_format="GLB", export_apply=True)
         bpy.ops.wm.save_as_mainfile(filepath=os.path.join(MODELS, stem + ".blend"))
         obj.data.calc_loop_triangles()
         return {"tris": len(obj.data.loop_triangles), "dims": [round(d, 3) for d in obj.dimensions],
                 "mats": [m.name for m in obj.data.materials]}
+
+
+def export_many(objs, stem):
+    """Several finished objects into one .glb (each stays its own node)."""
+    bpy.ops.object.select_all(action="DESELECT")
+    for o in objs: o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    bpy.ops.export_scene.gltf(filepath=os.path.join(GAME_MODELS if stem in GAME_STEMS else MODELS, stem + ".glb"),
+                              use_selection=True, export_format="GLB", export_apply=True)
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(MODELS, stem + ".blend"))
+    out = {}
+    for o in objs:
+        o.data.calc_loop_triangles()
+        out[o.name] = {"tris": len(o.data.loop_triangles), "dims": [round(d, 3) for d in o.dimensions]}
+    return out
 
 
 def rot(deg, axis):

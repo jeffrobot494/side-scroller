@@ -19,6 +19,8 @@ import { createLasers } from "../src/mission/view3d/laser.js";
 import { buildMist } from "../src/mission/view3d/mist.js";
 import { haloPool } from "../src/mission/view3d/util.js";
 import { EXPERIMENTS } from "./experiments.js";
+import { createWorm, WORM_ANIMS } from "./worm.js";
+import { createTrooper, TROOPER_ANIMS } from "./trooper.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -45,6 +47,10 @@ const centre = () => new THREE.Vector3(soldier.x + soldier.w / 2, -(soldier.y + 
 // --- menus -----------------------------------------------------------------
 const SUBJECTS = [
   { id: "soldier", label: "Soldier" },
+  // Not the game's soldier: an adult, XCOM: Enemy Unknown-style trooper.
+  { id: "trooper", label: "XCOM trooper" },
+  // Not a game enemy (yet): a look, built here. The soldier stays as its target.
+  { id: "worm", label: "Sand worm" },
   { id: "husk", label: "Husk charger", later: true },
   { id: "drone", label: "Drone", later: true },
   { id: "boss", label: "Boss", later: true },
@@ -60,6 +66,9 @@ function sweep(t) {
   const a = Math.sin(t * 1.2) * 1.1; // ±63° off horizontal
   return { x: Math.cos(a), y: -Math.sin(a) };
 }
+// Subjects with their own animation tables; the fake soldier idles under them.
+const ANIMS_OWN = { worm: true, trooper: true };
+const MODEL_OF = { worm: "graphics-tester/worm.js", trooper: "graphics-tester/trooper.js" };
 const SCENES = { mission: "Mission backdrop", studio: "Studio grey", black: "Black" };
 const CAMS = { side: "Game view (side-on)", orbit: "Free orbit" };
 
@@ -84,6 +93,7 @@ renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 renderer.info.autoReset = false; // the composer renders several passes a frame
+renderer.localClippingEnabled = true; // the worm is cut off at the ground
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(30, 16 / 9, 1, 20000);
@@ -115,6 +125,8 @@ const halos = haloPool(scene);
 // A treadmill: the soldier runs on the spot, so the air streams past instead.
 const soldiers = createSoldiers(scene, { wind: (s) => -(s.vx || 0) });
 const lasers = createLasers(scene);
+const worm = createWorm(scene, { ground: -GROUND.y, soldier });
+const trooper = createTrooper(scene, { ground: -GROUND.y, x: soldier.x + soldier.w / 2, color: soldier.color });
 const mist = buildMist(WORLD, [GROUND]);
 scene.add(mist.group);
 
@@ -125,10 +137,13 @@ function setScene(id) {
   else scene.background = new THREE.Color("#000000");
 }
 
-// Side-on: the game's camera shape — looking down -z, framing ~300px of height.
+// Side-on: the game's camera shape — looking down -z, framing ~300px of height
+// (the worm, rearing 250px over the soldier, gets ~640).
 function setCam(id) {
-  const c = centre();
-  const dist = 150 / Math.tan(THREE.MathUtils.degToRad(15));
+  const big = ui.subject === "worm";
+  const c = big ? centre().add(new THREE.Vector3(60, 140, 0))
+    : ui.subject === "trooper" ? trooper.centre() : centre();
+  const dist = (big ? 320 : 150) / Math.tan(THREE.MathUtils.degToRad(15));
   controls.target.copy(c);
   if (id === "side") {
     camera.position.set(c.x, c.y, dist);
@@ -167,9 +182,46 @@ function buildExperiments() {
   }
 }
 
+// --- subjects --------------------------------------------------------------
+// Each subject brings its own animation list. The soldier's poses the fake
+// entity; the worm's are the worm's, with the soldier standing as its target.
+const animsOf = (id) => (id === "worm" ? WORM_ANIMS : id === "trooper" ? TROOPER_ANIMS : ANIMS);
+function pickAnim(id) {
+  ui.anim = id;
+  if (ui.subject === "worm") { worm.setMode(id); $("time").max = worm.duration(); }
+  if (ui.subject === "trooper") trooper.setMode(id);
+  list($("anims"), Object.entries(animsOf(ui.subject)), "anim", pickAnim);
+}
+function pickSubject(id) {
+  ui.subject = id;
+  list($("subjects"), SUBJECTS.map((s) => [s.id, s]), "subject", pickSubject);
+  worm.setVisible(id === "worm");
+  trooper.setVisible(id === "trooper");
+  soldier.alive = id !== "trooper"; // the trooper stands where the game's soldier does
+  $("scrub").style.display = id === "worm" ? "flex" : "none";
+  pickAnim(Object.keys(animsOf(id))[id === "worm" ? 0 : 1]);
+  setCam(ui.cam);
+}
+// The worm's timeline: paused, it holds the pose (and can be orbited);
+// dragging the bar seeks, and pauses.
+let paused = false, scrubbing = false;
+function setPaused(on) {
+  paused = on;
+  $("play").textContent = on ? "▶" : "❚❚";
+}
+$("play").onclick = () => setPaused(!paused);
+$("time").addEventListener("pointerdown", () => { scrubbing = true; });
+addEventListener("pointerup", () => { scrubbing = false; });
+$("time").oninput = (e) => { setPaused(true); worm.seek(+e.target.value); };
+
+window.gt = { pickSubject, pickAnim, worm, trooper, mission, setPaused }; // for headless screenshots
+
 // --- wiring ----------------------------------------------------------------
-list($("subjects"), SUBJECTS.map((s) => [s.id, s]), "subject");
-list($("anims"), Object.entries(ANIMS), "anim");
+// ?subject=&anim=&cam= pick the starting state (headless screenshots can't click).
+const q = new URLSearchParams(location.search);
+if (q.get("cam") in CAMS) ui.cam = q.get("cam");
+pickSubject(SUBJECTS.some((x) => x.id === q.get("subject") && !x.later) ? q.get("subject") : ui.subject);
+if (q.get("anim") in animsOf(ui.subject)) pickAnim(q.get("anim"));
 list($("scenes"), Object.entries(SCENES), "scene", setScene);
 list($("cams"), Object.entries(CAMS), "cam", setCam);
 buildExperiments();
@@ -198,12 +250,13 @@ function frame(now) {
 
   // A treadmill: the run pose plays in place; nothing moves in x.
   const facing = $("facing").checked ? -1 : 1;
-  const p = ANIMS[ui.anim].pose(mission.time);
+  const p = ui.subject in ANIMS_OWN ? ANIMS.idle.pose() : ANIMS[ui.anim].pose(mission.time);
   soldier.vx = p.vx * facing;
   soldier.facing = facing;
   soldier.crouched = p.crouched;
   soldier.h = p.crouched ? CROUCH_H : SOLDIER_H;
   soldier.y = GROUND.y - soldier.h;
+  soldier.onGround = true; // the worm's throw clears it below, per frame
   soldier.aimVec = p.aimVec && { x: p.aimVec.x * facing, y: p.aimVec.y };
 
   // Fog anchored behind the play plane, as in the game.
@@ -212,7 +265,19 @@ function frame(now) {
   fog.far = d + 2000;
   scene.fog = $("fog").checked ? fog : null;
 
+  // The worm moves the soldier when it throws him, so it goes before he is
+  // posed; it answers with the camera shake.
+  const { shake, lift } = worm.update(paused ? 0 : dt * +$("speed").value);
+  if (lift > 0) { soldier.y -= lift; soldier.onGround = false; }
+  trooper.update(dt * +$("speed").value, { facing });
+  if (ui.subject === "worm") {
+    if (!scrubbing) $("time").value = worm.time();
+    $("clock").textContent = `${worm.time().toFixed(2)}s · ${worm.phase()}`;
+  }
+
   controls.update();
+  const jolt = new THREE.Vector3((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0);
+  camera.position.add(jolt);
   background.update(mission, { position: camera.position, target: controls.target, view: { width: 600 } });
   halos.begin();
   soldiers.sync(mission, halos);
@@ -223,10 +288,11 @@ function frame(now) {
 
   renderer.info.reset();
   composer.render();
+  camera.position.sub(jolt);
   const i = renderer.info.render;
   $("status").innerHTML =
     `<span>${fps.toFixed(0)} fps</span><span>${i.calls} draws</span><span>${i.triangles} tris</span>` +
-    `<span>model: src/mission/view3d/soldier.js</span>`;
+    `<span>model: ${MODEL_OF[ui.subject] ?? "src/mission/view3d/soldier.js"}</span>`;
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
