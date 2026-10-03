@@ -23,6 +23,7 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { ModelMap, applyFlash, burnHalo, muzzleHalo } from "./actors.js";
+import { loadArmour, makeArmour, fitArmour } from "./armour.js";
 import { setColor, shade, viewY } from "./util.js";
 
 const ROUND = new RoundedBoxGeometry(1, 1, 1, 2, 0.18);
@@ -134,7 +135,7 @@ function make(s) {
   shadow.renderOrder = 1;
   root.add(shadow);
 
-  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, mats, gait: 0, phase: 0, t: null };
+  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, mats, armour: null, gait: 0, phase: 0, t: null };
 }
 
 // Place a part from its fractional rect, in the body group's space (origin at
@@ -145,6 +146,19 @@ function put(mesh, s, r, oy = 0) {
   mesh.visible = true;
   mesh.scale.set(Math.max(0.5, (x1 - x0) * w), Math.max(0.5, (y1 - y0) * h), d);
   mesh.position.set((x0 + x1) / 2 * w - w / 2, h / 2 - (y0 + y1) / 2 * h - oy, z);
+}
+
+// The Blender helmet and chest over the cube parts, attached on the first
+// frame the kit has loaded (make() usually runs before it has). The Shells
+// join the model's materials, so the hit flash reaches them.
+function armour(v, s) {
+  if (!v.armour) {
+    v.armour = makeArmour(s.color, TONE);
+    if (!v.armour) return;
+    v.upper.add(v.armour.helmet, v.armour.chest);
+    v.mats.push(...v.armour.mats);
+  }
+  fitArmour(v.armour, v.parts);
 }
 
 // How far below the hip a leg's foot is, at hip angle `a` and knee fold `k`.
@@ -184,6 +198,7 @@ function pose(v, s, time) {
   v.upper.position.set(0, hipY, 0);
   v.upper.rotation.z = -lean;
   for (const r of layout(s)) put(v.parts[r[0]], s, r, h / 2 - HIP_Y * h);
+  armour(v, s);
 
   const legW = LEG_W * w;
   v.legs.forEach((leg, i) => {
@@ -233,6 +248,7 @@ function pose(v, s, time) {
 }
 
 export function createSoldiers(parent) {
+  loadArmour();
   const models = new ModelMap(parent, make);
   return {
     sync(m, halos) {
