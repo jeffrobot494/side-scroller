@@ -34,7 +34,11 @@ export function buildTerrain(platforms) {
   if (bodies.length) {
     group.add(new THREE.Mesh(mergeGeometries(bodies),
       new THREE.MeshStandardMaterial({ color: "#27425f", roughness: 0.8, metalness: 0.25 })));
-    group.add(new THREE.Mesh(mergeGeometries(edges), new THREE.MeshBasicMaterial({ color: "#6fd3ff" })));
+    // The strip's top face is coplanar with the body's; the offset makes the
+    // strip win the depth test instead of z-fighting it.
+    group.add(new THREE.Mesh(mergeGeometries(edges), new THREE.MeshBasicMaterial({
+      color: "#6fd3ff", polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    })));
   }
   for (const g of bodies.concat(edges)) g.dispose();
   return group;
