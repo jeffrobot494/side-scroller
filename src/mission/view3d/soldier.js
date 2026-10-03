@@ -65,6 +65,16 @@ const TONE = {
   torso: 0, stripe: 20, pad: 8, kneePad: 4,
 };
 
+// Shoulder squares: a plain dark block on each shoulder, square from the side
+// camera, hung from the top of the shoulder. Deep enough to sit on the torso's
+// side (z 7) and still cover the arm's shoulder joint (z 8.5, 4.6 thick).
+const SHOULDER = {
+  size: 7,                    // px, the square seen from the side
+  back: 2, up: 2,             // px nudged back (away from facing) and up from the shoulder
+  z: [[7, 11.5], [-7, -9.5]], // px, near and far: torso side → outer face
+  color: "#1b202b",
+};
+
 // The standing leg rig, as fractions of w / h: hip height, hip x standing
 // (the 2D figure's two legs) and running (closer, as seen side-on), leg
 // width, and where the thigh ends.
@@ -105,6 +115,12 @@ function make(s) {
   parts.visor = new THREE.Mesh(BOX, mat("#7ad7ff", { emissive: "#3aa8e0", roughness: 0.2, metalness: 0.6 }));
   parts.visor.name = "visor";
   upper.add(parts.visor);
+  const shoulderMat = mat(SHOULDER.color, { roughness: 0.5, metalness: 0.4 });
+  const shoulders = SHOULDER.z.map(() => {
+    const m = new THREE.Mesh(BOX, shoulderMat);
+    upper.add(m);
+    return m;
+  });
 
   // Legs: hip group → thigh + knee group → shin + boot.
   const bootMat = mat(shade(s.color, BOOT_TONE));
@@ -135,7 +151,7 @@ function make(s) {
   shadow.renderOrder = 1;
   root.add(shadow);
 
-  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, mats, armour: null, gait: 0, phase: 0, t: null };
+  return { root, body, upper, parts, legs, gun, barrel, grip, sight, shadow, shoulders, mats, armour: null, gait: 0, phase: 0, t: null };
 }
 
 // Place a part from its fractional rect, in the body group's space (origin at
@@ -159,6 +175,18 @@ function armour(v, s) {
     v.mats.push(...v.armour.mats);
   }
   fitArmour(v.armour, v.parts);
+}
+
+// Hung from the top of the shoulder: the torso's top, or the helmet's bottom
+// where the crouch sinks the head below it. x is the shoulder's.
+function shoulders(v) {
+  const { torso, helmet } = v.parts;
+  const top = Math.min(torso.position.y + torso.scale.y / 2, helmet.position.y - helmet.scale.y / 2);
+  v.shoulders.forEach((b, i) => {
+    const [z0, z1] = SHOULDER.z[i];
+    b.scale.set(SHOULDER.size, SHOULDER.size, Math.abs(z1 - z0));
+    b.position.set(-SHOULDER.back, top - SHOULDER.size / 2 + SHOULDER.up, (z0 + z1) / 2);
+  });
 }
 
 // How far below the hip a leg's foot is, at hip angle `a` and knee fold `k`.
@@ -199,6 +227,7 @@ function pose(v, s, time) {
   v.upper.rotation.z = -lean;
   for (const r of layout(s)) put(v.parts[r[0]], s, r, h / 2 - HIP_Y * h);
   armour(v, s);
+  shoulders(v);
 
   const legW = LEG_W * w;
   v.legs.forEach((leg, i) => {
