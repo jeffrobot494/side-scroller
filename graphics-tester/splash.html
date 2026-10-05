@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solar Defense Force</title>
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Russo+One&display=swap">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    #view { display: block; width: 100vw; height: 100vh; }
+    /* Only if the 3D title's font never arrives. */
+    #fallback { position: absolute; left: 0; right: 0; top: 4vh; text-align: center; display: none;
+      font: 9vw/0.95 "Russo One", sans-serif; letter-spacing: .02em; pointer-events: none;
+      background: linear-gradient(#fff6d8, #f2c35a 45%, #a8661c 55%, #ffe08a); -webkit-background-clip: text;
+      background-clip: text; color: transparent; filter: drop-shadow(0 0 18px #ff9a2a88); }
+    #fallback small { display: block; font-size: 6.4vw; }
+    #err { position: absolute; top: 12px; left: 12px; color: #ff9a8a; white-space: pre-wrap; font: 12px ui-monospace, monospace; }
+    #hud { position: absolute; right: 10px; bottom: 8px; color: #fff6; font: 11px ui-monospace, monospace; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="fallback">SOLAR<small>DEFENSE FORCE</small></div>
+  <div id="hud"></div>
+  <div id="err"></div>
+  <script type="module" src="./splash.js"></script>
+</body>
+</html>

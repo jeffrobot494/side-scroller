@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gradient-text",
+        "value": "*",
+        "files": [
+          "graphics-tester/splash.html"
+        ],
+        "createdAt": "2026-10-05T02:48:29.561Z",
+        "reason": "Claude: fallback for a gold-metal game logo copied from Bo's splash-screen.png poster; the gradient imitates the metal, it is not decoration"
+      }
+    ]
+  }
+}

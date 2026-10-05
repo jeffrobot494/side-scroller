@@ -329,5 +329,8 @@ export function createEnemyModels(scene, { groundY, soldierX }) {
     centre: () => frameC.clone(),
     half: () => frameHalf,
     loaded: () => loaded,
+    // id -> { group, body, bones, spec, wings? } once the glb is in; a host
+    // that stages them itself (splash.js) moves the groups after update().
+    models: () => models,
   };
 }
