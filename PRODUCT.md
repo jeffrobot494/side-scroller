@@ -86,7 +86,7 @@ room · Ops.
 
 | | |
 |---|---|
-| Name | **"XCOM Task Force"** is explicitly a *working title* (`design/GDD.md`). The real name is **Undecided** — and the current one borrows a live trademark, which matters once anyone outside sees it |
+| Name | **Solar Defense Force** (`design/GDD.md`) |
 | Incumbent visual world | Deliberate and documented in code: "the feeling of looking into carved-out rooms and tunnels deep under an underground command bunker. Concrete, earth, and thin strips of artificial light" (`src/hub/hub.css` header). Fourteen CSS custom properties on `:root` are the token set |
 | Voice in docs and UI | Dense, plainly formatted, neutral. **No salesy language** (`CLAUDE.md`, and `MEMORY.md` records it as a standing preference) |
 | Art direction | `design/art-direction.md` is authored and binding where it applies: raster where static, procedural where it moves; nothing breaks for lack of art; shipping with coloured boxes is acceptable for a long time |

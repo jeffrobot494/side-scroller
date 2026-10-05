@@ -232,13 +232,6 @@ a { color: var(--ctrl); text-underline-offset: 3px; text-decoration-thickness: 1
   text-shadow: 0 1px 0 #050606, 0 -1px 0 rgba(255, 255, 255, 0.06);
   white-space: nowrap;
 }
-.brand-rule {
-  width: 14px; height: 1px;
-  background: var(--light);
-  opacity: 0.55;
-  box-shadow: 0 0 6px var(--light-dim);
-}
-
 .resources { display: flex; align-items: center; gap: var(--s5); }
 
 /* A readout is a labelled instrument: what it measures, then the measurement.

@@ -269,7 +269,7 @@ export class Hub {
     const low = h <= 25 ? " is-critical" : h <= 50 ? " is-warning" : "";
     return `
       <header class="topbar">
-        <div class="brand">XCOM<i class="brand-rule"></i>TASK FORCE</div>
+        <div class="brand">SOLAR DEFENSE FORCE</div>
         <div class="resources">
           <div class="readout">
             <span class="ro-label">Day</span>

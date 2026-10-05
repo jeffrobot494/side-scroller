@@ -8,7 +8,7 @@ tags: [vision]
 
 # Vision
 
-> **Working title:** XCOM Task Force (side-scroller)
+> **Title:** Solar Defense Force (side-scroller)
 > **Status:** Playable end to end and built well past the original vertical
 > slice. `CLAUDE.md` is the accurate account of what exists; the status notes in
 > §13 and the repo layout in §12 predate most of it.

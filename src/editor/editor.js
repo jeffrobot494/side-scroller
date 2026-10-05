@@ -129,7 +129,7 @@ function render() {
 
   root.innerHTML = `
     <header class="ed-top">
-      <div class="ed-brand">⚙ XCOM&nbsp;TASK&nbsp;FORCE <span>· EDITOR</span></div>
+      <div class="ed-brand">⚙ SOLAR&nbsp;DEFENSE&nbsp;FORCE <span>· EDITOR</span></div>
       <nav class="ed-tabs">
         <button data-tab="settings" class="${tab === "settings" ? "active" : ""}">Settings &amp; Tuning</button>
         <button data-tab="sound" class="${tab === "sound" ? "active" : ""}">Sound</button>

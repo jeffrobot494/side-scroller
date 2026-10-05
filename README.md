@@ -1,4 +1,4 @@
-# XCOM Task Force — side-scroller
+# Solar Defense Force — side-scroller
 
 An XCOM-style squad game with a strategy hub in DOM and run-and-gun missions on
 Canvas. Hire soldiers, send them into procedurally generated missions, fight
