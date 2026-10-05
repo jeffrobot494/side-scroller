@@ -21,7 +21,7 @@ import { haloPool } from "../src/mission/view3d/util.js";
 import { EXPERIMENTS } from "./experiments.js";
 import { createWorm, WORM_ANIMS } from "./worm.js";
 import { createTrooper, TROOPER_ANIMS } from "./trooper.js";
-import { createEnemyModels, ENEMY_SUBJECTS, ENEMY_ANIMS, isEnemySubject } from "./enemies.js";
+import { createEnemyModels, ENEMY_SUBJECTS, enemyAnims, isEnemySubject } from "./enemies.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -190,12 +190,13 @@ function buildExperiments() {
 // --- subjects --------------------------------------------------------------
 // Each subject brings its own animation list. The soldier's poses the fake
 // entity; the worm's are the worm's, with the soldier standing as its target.
-const animsOf = (id) => (id === "worm" ? WORM_ANIMS : id === "trooper" ? TROOPER_ANIMS : isEnemySubject(id) ? ENEMY_ANIMS : ANIMS);
+const animsOf = (id) => (id === "worm" ? WORM_ANIMS : id === "trooper" ? TROOPER_ANIMS : isEnemySubject(id) ? enemyAnims(id) : ANIMS);
 function pickAnim(id) {
   ui.anim = id;
   if (ui.subject === "worm") { worm.setMode(id); $("time").max = worm.duration(); }
   if (ui.subject === "trooper") trooper.setMode(id);
-  if (isEnemySubject(ui.subject)) enemies.setMode(id);
+  // Enemy modes can leap out of frame, so the camera re-frames per mode.
+  if (isEnemySubject(ui.subject)) { enemies.setMode(id); setCam(ui.cam); }
   list($("anims"), Object.entries(animsOf(ui.subject)), "anim", pickAnim);
 }
 function pickSubject(id) {
@@ -278,14 +279,16 @@ function frame(now) {
   const { shake, lift } = worm.update(paused ? 0 : dt * +$("speed").value);
   if (lift > 0) { soldier.y -= lift; soldier.onGround = false; }
   trooper.update(dt * +$("speed").value, { facing });
-  if (isEnemySubject(ui.subject)) enemies.update(dt * +$("speed").value, { facing, compare: $("compare").checked });
+  // Big enemies' stomps and blasts shake the camera too.
+  const foe = isEnemySubject(ui.subject) ? enemies.update(dt * +$("speed").value, { facing, compare: $("compare").checked }) : null;
   if (ui.subject === "worm") {
     if (!scrubbing) $("time").value = worm.time();
     $("clock").textContent = `${worm.time().toFixed(2)}s · ${worm.phase()}`;
   }
 
   controls.update();
-  const jolt = new THREE.Vector3((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0);
+  const sh = shake + (foe?.shake ?? 0);
+  const jolt = new THREE.Vector3((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh, 0);
   camera.position.add(jolt);
   background.update(mission, { position: camera.position, target: controls.target, view: { width: 600 } });
   halos.begin();

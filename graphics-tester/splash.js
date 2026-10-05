@@ -1035,7 +1035,7 @@ function gunTip(s, out, dir) {
 }
 
 // --- enemies: the Blender roster ------------------------------------------------------
-const enemies = createEnemyModels(scene, { groundY: 0, soldierX: 0 });
+const enemies = createEnemyModels(scene, { groundY: 0, soldierX: 0, fx: false });
 enemies.setSubject("lineup");
 enemies.setMode("move");
 // Where each one is, per frame: position, scale, yaw. Flyers circle and swoop
@@ -1053,7 +1053,7 @@ function stageEnemies(dt, t) {
   enemies.update(dt);
   for (const [id, m] of Object.entries(enemies.models())) {
     const f = ENEMY_STAGE[id];
-    if (!f) continue;
+    if (!f) { m.group.visible = false; continue; } // not staged in this scene
     const st = f(t);
     m.group.position.set(...st.p);
     m.group.scale.setScalar(st.s);
