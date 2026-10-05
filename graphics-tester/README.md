@@ -20,9 +20,10 @@ resolve to `/app.js` (404).
 
 | File | What it is |
 |---|---|
-| `models/` | Blender sources: `kit.py` (shared helpers; exports the game's `.glb` files into `src/mission/view3d/models/`, tester-only ones here), `helmet.py`, `chest.py`, `worm.py`, `trooper.py`, and their `.blend` files |
+| `models/` | Blender sources: `kit.py` (shared helpers; exports the game's `.glb` files into `src/mission/view3d/models/`, tester-only ones here), `helmet.py`, `chest.py`, `worm.py`, `trooper.py`, `enemies.py`, and their `.blend` files |
 | `worm.js` | The sand worm subject: a tester-only look, not a game enemy. Follow-the-leader body on `models/worm.glb`, clipped at the ground, with its own animations (attack cycle, swim, burrow, maw open) and effects; it throws the fake soldier |
 | `trooper.js` | The XCOM trooper subject: a tester-only look, not the game's soldier. An adult, realistically proportioned soldier on `models/trooper.glb` (built by `models/trooper.py`: one skinned mesh, 30-bone rig, IK baked into three clips — Idle, Run, Shoot; the face is one sculpted surface — a dense head mesh pushed by named bumps and dents in `FEATURES`/`NOSE`/`LIPS` — with lips, brows, nostrils, lash line and beard shadow painted as vertex colour by `paint()`; the earlier primitive-built face is kept in `models/trooper-shapes-face/`), played by an `AnimationMixer`; muzzle flash on the Shoot clip's shot frames |
+| `enemies.js` | The enemy roster, re-modelled: one subject per enemy in the game's `ENEMY_FILE` plus an **Enemy lineup**, on `models/enemies.glb` (built by `models/enemies.py`: per enemy one armature named by spec id and one rigidly skinned mesh, Shell + Detail, so two draw calls; bones point up with no roll, so `rotation.z` swings a part in the screen plane). Each model stands in its spec's box and takes its spec colour; idle/move/attack are procedural, per enemy, in `ANIM`; telegraph and muzzle glows are the game's `cues`. **Game model beside it** draws the current in-game look with `createEnemies`. Looks only — nothing here is in the game yet |
 | `index.html` | Layout: sidebar (left) + viewport. Import map for `three` (same CDN + version as the game's `index.html`). |
 | `app.js` | Renderer, lights, bloom, camera, the fake mission, the sidebar menus, the frame loop. |
 | `experiments.js` | `EXPERIMENTS` — the toggleable layers. Where most requested changes go first. |
@@ -53,7 +54,7 @@ and crouching switches the box to the game's 22px, as `entities.js` does. Lights
 | A new look to try (laser sight, cape, fog colour) | An entry in `experiments.js`, toggled from the sidebar |
 | A fix to an existing model (z-fighting, proportions) | Directly in `src/mission/view3d/` — then `node test/run.mjs` |
 | A new animation / scene / camera / slider | The tables in `app.js` (`ANIMS`, `SCENES`, `CAMS`) or a control in `index.html` |
-| A new subject (enemy) | `SUBJECTS` in `app.js` — the game's enemies are listed as `later` and not wired; wiring one means building a fake `scene.specRoots` for `createEnemies` (`src/mission/view3d/enemy.js`). A look the game has no enemy for (the sand worm) is its own module here with its own animation table; `animsOf` in `app.js` picks the list per subject |
+| A new subject (enemy) | A roster enemy: model it in `models/enemies.py` (an `Enemy(...)` block named by its spec id) and give it an `ANIM` entry in `enemies.js`; it is listed automatically from `ENEMY_FILE`. A look the game has no enemy for (the sand worm) is its own module here with its own animation table; `animsOf` in `app.js` picks the list per subject |
 
 **Experiments explore looks, not ports.** Build the best version of the idea;
 don't limit it by whether or how the game could ship it. Reusing game code is
