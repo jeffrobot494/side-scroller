@@ -684,6 +684,9 @@ no process — but reach for it deliberately, not by habit.
   neighbouring suite first: the case that MISSED the bug is usually there, and
   the new case belongs next to it saying why it missed. **Keep the ceremony in
   proportion to the fix** — comment the non-obvious line, not every line.
+- **CI:** `.github/workflows/test.yml` runs `node test/run.mjs` and
+  `node build.mjs` on every push and pull request (Node 22, no install step).
+  There is no CD: deploys to run.world and Fly are still by hand.
 - **Regression bar before committing:** `node test/run.mjs` green, plus a
   serve-check that new files return 200 (`python3 -m http.server`). There is no
   browser here — verify logic headlessly and tell the user to eyeball visuals;

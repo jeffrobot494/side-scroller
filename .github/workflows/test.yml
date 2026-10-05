@@ -1,0 +1,25 @@
+# CI: the regression bar on every push and pull request, whoever made the
+# commit. GitHub marks the commit with a check or a cross.
+#
+# No `npm install`: the repo has no dependencies (CLAUDE.md). Node 22 matches
+# the Dockerfile. The build step fails when the game references a file that
+# does not exist, so a broken run.world build shows up here, not at deploy.
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test suite
+        run: node test/run.mjs
+      - name: run.world build
+        run: node build.mjs
