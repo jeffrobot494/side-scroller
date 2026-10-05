@@ -203,7 +203,7 @@ export default async function run(t) {
     t.eq("list: a clean store is the six placeable file entries", missionRoster().length, 6);
     t.ok("list: and every entry came from the file",
       es.enemyEntries().every((e) => e.origin === "file"));
-    t.eq("list: the file's boss is in the list too", es.enemyEntries().length, 7);
+    t.eq("list: the file's boss and its out-of-missions entries are in the list too", es.enemyEntries().length, 10);
 
     const mite = () => ({
       v: 1, id: "rust_mite", name: "Rust Mite", threat: 40, role: "charger", tier: 1, intelligence: 1,
@@ -216,7 +216,7 @@ export default async function run(t) {
     // enemy must therefore not change what generates until it is switched on.
     const added = es.saveEnemyToList(mite());
     t.ok("list: a new enemy is added under its own id", added.ok && added.id === "rust_mite" && added.added);
-    t.eq("list: the list grew by one", es.enemyEntries().length, 8);
+    t.eq("list: the list grew by one", es.enemyEntries().length, 11);
     t.eq("list: but the generator roster did not", missionRoster().length, 6);
     t.ok("list: because it arrived switched off",
       es.enemyEntries().find((e) => e.id === "rust_mite").inMissions === false);
@@ -261,7 +261,7 @@ export default async function run(t) {
     es.saveEnemyToList(tougher);
     const edited = es.enemyEntries().find((e) => e.id === "husk_charger");
     t.ok("list: editing a shipped enemy marks it edited, not duplicated",
-      edited.origin === "edited" && edited.threat === 999 && es.enemyEntries().length === 8);
+      edited.origin === "edited" && edited.threat === 999 && es.enemyEntries().length === 11);
     t.ok("list: the file's own export is untouched by the edit",
       es.ENEMY_FILE.find((r) => r.spec.id === "husk_charger").spec.threat === 50);
     es.revertEnemy("husk_charger");

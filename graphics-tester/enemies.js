@@ -8,8 +8,7 @@
 // mirrored here for the left wing.
 //
 // Sizes, colours and the moth's wing offsets come from the game's own enemy
-// list (ENEMY_FILE, then roster-extra.js for specs the file does not ship
-// yet), so each model stands in the box its spec gives it. The Shell takes the
+// list (ENEMY_FILE), so each model stands in the box its spec gives it. The Shell takes the
 // spec colour — per PART for enemies whose bones are named after their spec's
 // child parts (the Assault Bot, the Siege Automaton). Telegraph and muzzle
 // glows are the game's own `cues`, except where an enemy has its own effects
@@ -23,10 +22,9 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { ENEMY_FILE } from "../src/game/enemyspecs.js";
 import { createEnemies, cues } from "../src/mission/view3d/enemy.js";
 import { setColor, viewY } from "../src/mission/view3d/util.js";
-import { EXTRA_SPECS } from "./roster-extra.js";
 import { createFx } from "./enemy-fx.js";
 
-const SPECS = [...ENEMY_FILE.map((r) => r.spec), ...EXTRA_SPECS.filter((x) => !ENEMY_FILE.some((r) => r.spec.id === x.id))];
+const SPECS = ENEMY_FILE.map((r) => r.spec);
 const isFlying = (s) => s.root.tags?.includes("flying") || s.root.motion?.type === "hover";
 const nameOf = (o) => o.userData.name ?? o.name;
 const boxOf = (s) => [s.root.body?.w ?? s.root.visual.size[0], s.root.body?.h ?? s.root.visual.size[1]];

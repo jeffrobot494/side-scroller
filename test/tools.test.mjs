@@ -298,16 +298,17 @@ export default async function run(t) {
     es.resetEnemyList();
 
     const ed = createEnemyDesigner(makeEl(), () => {});
-    t.eq("enemy-designer: the list opens on what the build ships", ed.roster().length, 7);
+    t.eq("enemy-designer: the list opens on what the build ships", ed.roster().length, 10);
     t.ok("enemy-designer: all of them from the file", ed.roster().every((e) => e.origin === "file"));
-    t.ok("enemy-designer: and all of them in missions", ed.roster().every((e) => e.inMissions));
+    t.ok("enemy-designer: each with the file's own in-missions flag",
+      ed.roster().every((e) => e.inMissions === es.ENEMY_FILE.find((r) => r.spec.id === e.id).inMissions));
 
     // Save gates on accept() — a spec the engine rejects never lands.
     ed.load({ v: 1, id: "bad_thing", name: "Bad Thing", threat: 40, role: "charger", tier: 1,
       root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [20, 20], color: "#888" },
         health: { max: 10 }, motion: { type: "no_such_motion" }, contact: { damage: 5 } } });
     t.ok("enemy-designer: saving a spec the engine rejects is refused",
-      !ed.save().ok && ed.roster().length === 7);
+      !ed.save().ok && ed.roster().length === 10);
 
     const hound = { v: 1, id: "scrap_hound", name: "Scrap Hound", threat: 45, role: "charger", tier: 1, intelligence: 1,
       root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [24, 22], color: "#909090" },
@@ -315,7 +316,7 @@ export default async function run(t) {
     ed.load(hound, { pin: true });
     const saved = ed.save();
     t.ok("enemy-designer: a complete enemy is saved", saved.ok && saved.id === "scrap_hound" && saved.added);
-    t.eq("enemy-designer: and joins the list", ed.roster().length, 8);
+    t.eq("enemy-designer: and joins the list", ed.roster().length, 11);
     // E6a: Save is not the mission gate. The switch is.
     t.ok("enemy-designer: but not in missions until it is switched on",
       ed.roster().find((e) => e.id === "scrap_hound").inMissions === false);
@@ -332,7 +333,7 @@ export default async function run(t) {
     t.eq("enemy-designer: a saved entry keeps its id when renamed", ed.specNow().id, "scrap_hound");
     const again = ed.save();
     t.ok("enemy-designer: re-saving a renamed entry updates it", again.ok && !again.added);
-    t.eq("enemy-designer: so there is still one added enemy", ed.roster().length, 8);
+    t.eq("enemy-designer: so there is still one added enemy", ed.roster().length, 11);
 
     // …but an UNPINNED spec (a template, a chat landing) still follows its name,
     // or a fresh design would be stuck with the template's id.
@@ -365,7 +366,7 @@ export default async function run(t) {
 
     const ed = createEnemyDesigner(makeEl(), () => {});
     t.eq("enemy-designer: opens on the list, not the workspace", ed.screen(), "list");
-    t.eq("enemy-designer: showing every enemy the build ships", ed.rows().length, 7);
+    t.eq("enemy-designer: showing every enemy the build ships", ed.rows().length, 10);
 
     // Open is what crosses to the workspace, and it pins the id so Save
     // overwrites rather than minting a second enemy.
@@ -383,7 +384,7 @@ export default async function run(t) {
     t.ok("enemy-designer: a duplicate takes a new id", ed.specNow().id !== "lurk_gunner");
     t.ok("enemy-designer: derived from its new name", ed.specNow().id.includes("copy"));
     t.eq("enemy-designer: and inherits the placement hint", ed.placement(), "shooter");
-    t.ok("enemy-designer: saving it adds an eighth enemy", ed.save().ok && ed.roster().length === 8);
+    t.ok("enemy-designer: saving it adds an eleventh enemy", ed.save().ok && ed.roster().length === 11);
 
     // ＋New: blank and template, both unpinned.
     ed.create("blank");
@@ -410,7 +411,7 @@ export default async function run(t) {
 
     // Filter and the tabs are views of the same list.
     t.eq("enemy-designer: the filter matches on name and id", ed.filter("husk").length, 1);
-    t.eq("enemy-designer: an empty filter is everything", ed.filter("").length, 8);
+    t.eq("enemy-designer: an empty filter is everything", ed.filter("").length, 11);
     t.ok("enemy-designer: the Changed tab shows only local entries",
       ed.tab("changed").length === 2 && ed.tab("changed").includes("husk_charger"));
     t.eq("enemy-designer: the In-missions tab excludes the new ones", ed.tab("missions").length, 7);
@@ -419,13 +420,13 @@ export default async function run(t) {
     // Export → Import round trip, and a bad spec is skipped and NAMED.
     const dump = ed.exportList();
     t.ok("enemy-designer: Export is parseable and carries every enemy",
-      JSON.parse(dump).enemies.length === 8);
+      JSON.parse(dump).enemies.length === 11);
     es.resetEnemyList();
     ed.show("list");
-    t.eq("enemy-designer: reset is back to the file", ed.rows().length, 7);
+    t.eq("enemy-designer: reset is back to the file", ed.rows().length, 10);
     const back = ed.importList(dump, { seconds: 2 });
-    t.ok("enemy-designer: Import merges it back in", back.ok && back.added === 8);
-    t.eq("enemy-designer: without duplicating the shipped entries", ed.rows().length, 8);
+    t.ok("enemy-designer: Import merges it back in", back.ok && back.added === 11);
+    t.eq("enemy-designer: without duplicating the shipped entries", ed.rows().length, 11);
     // Import must not walk past the mission gate — but re-importing your own
     // export must not switch the shipped enemies off either.
     t.ok("enemy-designer: a re-imported shipped enemy keeps its place",
@@ -440,7 +441,7 @@ export default async function run(t) {
     t.ok("enemy-designer: junk is refused without throwing", !ed.importList("not json").ok);
 
     ed.resetList();
-    t.eq("enemy-designer: Reset my changes drops everything local", ed.rows().length, 7);
+    t.eq("enemy-designer: Reset my changes drops everything local", ed.rows().length, 10);
 
     ed.dispose();
     es.resetEnemyList();
