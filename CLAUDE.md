@@ -607,6 +607,11 @@ The static-only path is worth keeping — it is what proves the game still needs
 no process — but reach for it deliberately, not by habit.
 
 - `index.html` → `src/main.js` — the game (single page + scene manager).
+- `npm run build` (`build.mjs`) → `dist/` — the copy run.world publishes
+  (`game.config.prod.json`; then `rundot deploy`). No compile: it copies exactly
+  the files `index.html` reaches by following imports, plus `public/`, so the
+  editor, labs and server-only code stay out. `dist/` is gitignored; rebuild it
+  before every deploy. Single-player only — rooms need `server.mjs`.
 - `editor.html` → `src/editor/editor.js` — the dev editor (settings + GUI tools).
 - Modules load in the browser as native ESM (`<script type="module">`); the
   browser ignores `package.json`.

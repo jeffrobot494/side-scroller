@@ -2,9 +2,10 @@
   "name": "side-scroller",
   "private": true,
   "type": "module",
-  "description": "Static, no-build browser game. package.json carries no dependencies: it exists so node runs the ESM test suite, and so a host can find `npm start`. The browser ignores it and there is still no build step.",
+  "description": "Static, no-build browser game. package.json carries no dependencies: it exists so node runs the ESM test suite, and so a host can find `npm start`. The browser ignores it and there is still no compile step: `npm run build` only copies the files the game reaches into dist/ for run.world.",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "build": "node build.mjs"
   }
 }
