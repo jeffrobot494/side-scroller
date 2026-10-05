@@ -223,8 +223,8 @@ export const EXTRA_SPECS = [
             "weapon"
           ],
           "at": [
-            -23,
-            -2
+            20,
+            4
           ],
           "visual": {
             "shape": "box",
@@ -240,7 +240,7 @@ export const EXTRA_SPECS = [
           "emitters": {
             "punch": {
               "at": [
-                -12,
+                12,
                 0
               ],
               "projectile": {
