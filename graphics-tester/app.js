@@ -20,6 +20,7 @@ import { buildMist } from "../src/mission/view3d/mist.js";
 import { haloPool } from "../src/mission/view3d/util.js";
 import { EXPERIMENTS } from "./experiments.js";
 import { createWorm, WORM_ANIMS } from "./worm.js";
+import { createSmoothWorm, SMOOTH_WORM_ANIMS } from "./smooth-worm.js";
 import { createTrooper, TROOPER_ANIMS } from "./trooper.js";
 import { createEnemyModels, ENEMY_SUBJECTS, enemyAnims, isEnemySubject } from "./enemies.js";
 
@@ -52,6 +53,8 @@ const SUBJECTS = [
   { id: "trooper", label: "XCOM trooper" },
   // Not a game enemy (yet): a look, built here. The soldier stays as its target.
   { id: "worm", label: "Sand worm" },
+  // The same worm with one continuous scaled hide instead of plated segments.
+  { id: "smoothworm", label: "Smooth worm" },
   // The game's enemy roster, re-modelled in Blender (looks, not yet shipped).
   ...ENEMY_SUBJECTS,
 ];
@@ -67,8 +70,8 @@ function sweep(t) {
   return { x: Math.cos(a), y: -Math.sin(a) };
 }
 // Subjects with their own animation tables; the fake soldier idles under them.
-const ANIMS_OWN = { worm: true, trooper: true };
-const MODEL_OF = { worm: "graphics-tester/worm.js", trooper: "graphics-tester/trooper.js" };
+const ANIMS_OWN = { worm: true, smoothworm: true, trooper: true };
+const MODEL_OF = { worm: "graphics-tester/worm.js", smoothworm: "graphics-tester/smooth-worm.js", trooper: "graphics-tester/trooper.js" };
 const modelOf = (id) => MODEL_OF[id] ?? (isEnemySubject(id) ? "graphics-tester/models/enemies.py" : "src/mission/view3d/soldier.js");
 const SCENES = { mission: "Mission backdrop", studio: "Studio grey", black: "Black" };
 const CAMS = { side: "Game view (side-on)", orbit: "Free orbit" };
@@ -128,7 +131,13 @@ const halos = haloPool(scene);
 // A treadmill: the soldier runs on the spot, so the air streams past instead.
 const soldiers = createSoldiers(scene, { wind: (s) => -(s.vx || 0) });
 const lasers = createLasers(scene);
-const worm = createWorm(scene, { ground: -GROUND.y, soldier });
+const worms = {
+  worm: { model: createWorm(scene, { ground: -GROUND.y, soldier }), anims: WORM_ANIMS },
+  smoothworm: { model: createSmoothWorm(scene, { ground: -GROUND.y, soldier }), anims: SMOOTH_WORM_ANIMS },
+};
+const worm = worms.worm.model;
+// The worm subject on show (either worm), or null.
+const wormOn = () => worms[ui.subject]?.model ?? null;
 const trooper = createTrooper(scene, { ground: -GROUND.y, x: soldier.x + soldier.w / 2, color: soldier.color });
 const enemies = createEnemyModels(scene, { groundY: GROUND.y, soldierX: soldier.x });
 const mist = buildMist(WORLD, [GROUND]);
@@ -144,7 +153,7 @@ function setScene(id) {
 // Side-on: the game's camera shape — looking down -z, framing ~300px of height
 // (the worm, rearing 250px over the soldier, gets ~640).
 function setCam(id) {
-  const big = ui.subject === "worm", foe = isEnemySubject(ui.subject);
+  const big = ui.subject in worms, foe = isEnemySubject(ui.subject);
   if (foe) enemies.update(0, { compare: $("compare").checked });
   const c = big ? centre().add(new THREE.Vector3(60, 140, 0))
     : ui.subject === "trooper" ? trooper.centre() : foe ? enemies.centre() : centre();
@@ -190,10 +199,10 @@ function buildExperiments() {
 // --- subjects --------------------------------------------------------------
 // Each subject brings its own animation list. The soldier's poses the fake
 // entity; the worm's are the worm's, with the soldier standing as its target.
-const animsOf = (id) => (id === "worm" ? WORM_ANIMS : id === "trooper" ? TROOPER_ANIMS : isEnemySubject(id) ? enemyAnims(id) : ANIMS);
+const animsOf = (id) => (id in worms ? worms[id].anims : id === "trooper" ? TROOPER_ANIMS : isEnemySubject(id) ? enemyAnims(id) : ANIMS);
 function pickAnim(id) {
   ui.anim = id;
-  if (ui.subject === "worm") { worm.setMode(id); $("time").max = worm.duration(); }
+  if (wormOn()) { wormOn().setMode(id); $("time").max = wormOn().duration(); }
   if (ui.subject === "trooper") trooper.setMode(id);
   // Enemy modes can leap out of frame, so the camera re-frames per mode.
   if (isEnemySubject(ui.subject)) { enemies.setMode(id); setCam(ui.cam); }
@@ -202,12 +211,12 @@ function pickAnim(id) {
 function pickSubject(id) {
   ui.subject = id;
   list($("subjects"), SUBJECTS.map((s) => [s.id, s]), "subject", pickSubject);
-  worm.setVisible(id === "worm");
+  for (const [k, w] of Object.entries(worms)) w.model.setVisible(id === k);
   trooper.setVisible(id === "trooper");
   enemies.setSubject(id);
   soldier.alive = id !== "trooper"; // the trooper stands where the game's soldier does
-  $("scrub").style.display = id === "worm" ? "flex" : "none";
-  pickAnim(Object.keys(animsOf(id))[id === "worm" ? 0 : 1]);
+  $("scrub").style.display = id in worms ? "flex" : "none";
+  pickAnim(Object.keys(animsOf(id))[id in worms ? 0 : 1]);
   setCam(ui.cam);
 }
 // The worm's timeline: paused, it holds the pose (and can be orbited);
@@ -220,9 +229,9 @@ function setPaused(on) {
 $("play").onclick = () => setPaused(!paused);
 $("time").addEventListener("pointerdown", () => { scrubbing = true; });
 addEventListener("pointerup", () => { scrubbing = false; });
-$("time").oninput = (e) => { setPaused(true); worm.seek(+e.target.value); };
+$("time").oninput = (e) => { setPaused(true); wormOn()?.seek(+e.target.value); };
 
-window.gt = { pickSubject, pickAnim, worm, trooper, enemies, mission, setPaused }; // for headless screenshots
+window.gt = { pickSubject, pickAnim, worm, worms, trooper, enemies, mission, setPaused }; // for headless screenshots
 
 // --- wiring ----------------------------------------------------------------
 // ?subject=&anim=&cam= pick the starting state (headless screenshots can't click).
@@ -276,14 +285,14 @@ function frame(now) {
 
   // The worm moves the soldier when it throws him, so it goes before he is
   // posed; it answers with the camera shake.
-  const { shake, lift } = worm.update(paused ? 0 : dt * +$("speed").value);
+  const { shake, lift } = wormOn()?.update(paused ? 0 : dt * +$("speed").value) ?? { shake: 0, lift: 0 };
   if (lift > 0) { soldier.y -= lift; soldier.onGround = false; }
   trooper.update(dt * +$("speed").value, { facing });
   // Big enemies' stomps and blasts shake the camera too.
   const foe = isEnemySubject(ui.subject) ? enemies.update(dt * +$("speed").value, { facing, compare: $("compare").checked }) : null;
-  if (ui.subject === "worm") {
-    if (!scrubbing) $("time").value = worm.time();
-    $("clock").textContent = `${worm.time().toFixed(2)}s · ${worm.phase()}`;
+  if (wormOn()) {
+    if (!scrubbing) $("time").value = wormOn().time();
+    $("clock").textContent = `${wormOn().time().toFixed(2)}s · ${wormOn().phase()}`;
   }
 
   controls.update();
