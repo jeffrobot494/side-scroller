@@ -21,7 +21,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { TEMPLATE_BY_ID } from "../src/game/enemyspec/templates.js";
-import { MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC } from "../src/game/enemyspecs.js";
+import { ENEMY_FILE, MISSION_ENEMY_SPECS, MISSION_BOSS_SPEC } from "../src/game/enemyspecs.js";
 import { instantiate, updateSpecEnemy, applyDamage } from "../src/mission/enemyspec/runtime.js";
 import { makeRng } from "../src/game/gen/rng.js";
 
@@ -102,8 +102,12 @@ function fixtures() {
   const out = [];
   const add = (name, nspec) => out.push({ name, nspec });
 
-  // built-in production roster (normalized) + the boss
-  for (const s of MISSION_ENEMY_SPECS) add(`roster:${s.id}`, normalizeSpec(s));
+  // built-in production roster (normalized) + the boss. Each fixture is seeded
+  // by its INDEX, so roster entries the file lists after the boss go last
+  // (below): a new enemy adds a fixture without moving anyone else's seed.
+  const bossAt = ENEMY_FILE.findIndex((r) => r.spec === MISSION_BOSS_SPEC);
+  const late = (s) => ENEMY_FILE.findIndex((r) => r.spec === s) > bossAt;
+  for (const s of MISSION_ENEMY_SPECS.filter((s) => !late(s))) add(`roster:${s.id}`, normalizeSpec(s));
   add(`roster:${MISSION_BOSS_SPEC.id}`, normalizeSpec(MISSION_BOSS_SPEC));
 
   // authoring / few-shot templates
@@ -120,6 +124,7 @@ function fixtures() {
   add("ctl:orbit", synthetic("s_orbit", { type: "orbit", around: "player", radius: 90, degPerSec: 90 }, { size: [20, 20], gravity: 0 }));
   add("ctl:home", synthetic("s_home", { type: "home", speed: 180, turnRate: 3 }, { size: [16, 16], gravity: 0 }));
 
+  for (const s of MISSION_ENEMY_SPECS.filter(late)) add(`roster:${s.id}`, normalizeSpec(s));
   return out;
 }
 

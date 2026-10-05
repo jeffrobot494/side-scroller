@@ -200,10 +200,10 @@ export default async function run(t) {
 
     // An untouched store is exactly the file — which is what keeps the golden
     // level file frozen.
-    t.eq("list: a clean store is the six placeable file entries", missionRoster().length, 6);
+    t.eq("list: a clean store is the nine placeable file entries", missionRoster().length, 9);
     t.ok("list: and every entry came from the file",
       es.enemyEntries().every((e) => e.origin === "file"));
-    t.eq("list: the file's boss and its out-of-missions entries are in the list too", es.enemyEntries().length, 10);
+    t.eq("list: the file's boss is in the list too", es.enemyEntries().length, 10);
 
     const mite = () => ({
       v: 1, id: "rust_mite", name: "Rust Mite", threat: 40, role: "charger", tier: 1, intelligence: 1,
@@ -217,7 +217,7 @@ export default async function run(t) {
     const added = es.saveEnemyToList(mite());
     t.ok("list: a new enemy is added under its own id", added.ok && added.id === "rust_mite" && added.added);
     t.eq("list: the list grew by one", es.enemyEntries().length, 11);
-    t.eq("list: but the generator roster did not", missionRoster().length, 6);
+    t.eq("list: but the generator roster did not", missionRoster().length, 9);
     t.ok("list: because it arrived switched off",
       es.enemyEntries().find((e) => e.id === "rust_mite").inMissions === false);
     t.ok("list: its placement hint is seeded from its role",
@@ -231,12 +231,12 @@ export default async function run(t) {
     const refused = es.setEnemyEnabled("broken_mite", true, { seconds: 2 });
     t.ok("list: a spec the engine rejects cannot be switched into missions",
       !refused.ok && !!refused.error);
-    t.eq("list: so the generator roster is unchanged", missionRoster().length, 6);
+    t.eq("list: so the generator roster is unchanged", missionRoster().length, 9);
     es.deleteEnemy("broken_mite");
 
     const on = es.setEnemyEnabled("rust_mite", true, { seconds: 2 });
     t.ok("list: a valid spec passes the mission dry run", on.ok && on.enabled);
-    t.eq("list: and the roster grew by one", missionRoster().length, 7);
+    t.eq("list: and the roster grew by one", missionRoster().length, 10);
     t.ok("list: applyEnemyRoster installs it for the loader",
       es.applyEnemyRoster().includes("rust_mite") && !!missionSpecById.rust_mite);
 
@@ -285,11 +285,11 @@ export default async function run(t) {
     // the fallback must hold anyway, or missions generate with no enemies.
     es.deleteEnemy("rust_mite");
     for (const e of es.enemyEntries()) store.setInMissions(e.id, false);
-    t.eq("list: an all-off store falls back to the file's placeable entries", missionRoster().length, 6);
+    t.eq("list: an all-off store falls back to the file's placeable entries", missionRoster().length, 9);
     t.ok("list: which still generates enemies", generateLevel({ seed: 32, difficulty: "high" }).level.enemies.length > 0);
 
     es.resetEnemyList();
-    t.eq("list: reset is back to the untouched six", missionRoster().length, 6);
+    t.eq("list: reset is back to the untouched nine", missionRoster().length, 9);
     t.ok("list: and nothing local is left", es.enemyEntries().every((e) => e.origin === "file"));
     t.eq("list: with an empty delta store", Object.keys(store.readDeltas().records).length, 0);
   }

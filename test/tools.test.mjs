@@ -414,7 +414,7 @@ export default async function run(t) {
     t.eq("enemy-designer: an empty filter is everything", ed.filter("").length, 11);
     t.ok("enemy-designer: the Changed tab shows only local entries",
       ed.tab("changed").length === 2 && ed.tab("changed").includes("husk_charger"));
-    t.eq("enemy-designer: the In-missions tab excludes the new ones", ed.tab("missions").length, 7);
+    t.eq("enemy-designer: the In-missions tab excludes the new ones", ed.tab("missions").length, 10);
     ed.tab("all");
 
     // Export → Import round trip, and a bad spec is skipped and NAMED.

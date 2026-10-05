@@ -235,9 +235,7 @@ const IRON_MOTH = {
 };
 
 
-// Authored in the Enemy Designer and committed from Bo's export. Shipped out of
-// missions (`inMissions: false` below), so a clean browser generates the same
-// levels as before; a browser that switched one on keeps its own flag.
+// Authored in the Enemy Designer and committed from Bo's export.
 const FLOATING_FACTORY = {
   v: 1,
   id: "floating_factory",
@@ -632,9 +630,9 @@ export const ENEMY_FILE = [
   rec(COWARD_DUELIST, "charger"),
   rec(SKY_DUELIST, "shooter"),
   rec(IRON_MOTH, "shooter"),
-  rec(FLOATING_FACTORY, "shooter", false),
-  rec(ASSAULT_BOT, "charger", false),
-  rec(SIEGE_AUTOMATON, "charger", false),
+  rec(FLOATING_FACTORY, "shooter"),
+  rec(ASSAULT_BOT, "charger"),
+  rec(SIEGE_AUTOMATON, "charger"),
 ];
 
 // The file's PLACEABLE entries: what the never-empty fallback restores, so an
