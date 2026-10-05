@@ -9,3 +9,7 @@ netproto
 
 # Screenshots are documentation.
 screen-shots
+
+# The RUN.world SDK is licensed for RUN only, and only the run.world build
+# (build.mjs → dist/) loads it.
+vendor/rundot-sdk

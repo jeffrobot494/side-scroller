@@ -611,7 +611,10 @@ no process — but reach for it deliberately, not by habit.
   (`game.config.prod.json`; then `rundot deploy`). No compile: it copies exactly
   the files `index.html` reaches by following imports, plus `public/`, so the
   editor, labs and server-only code stay out. `dist/` is gitignored; rebuild it
-  before every deploy. Single-player only — rooms need `server.mjs`.
+  before every deploy. Single-player only — rooms need `server.mjs`. It also
+  adds the vendored RUN.world SDK (`vendor/rundot-sdk/`, licensed RUN-only, kept
+  out of the Fly image) to `dist/index.html`: run.world's host fails the load
+  after ~1 min unless the SDK reports ready, which importing it does.
 - `editor.html` → `src/editor/editor.js` — the dev editor (settings + GUI tools).
 - Modules load in the browser as native ESM (`<script type="module">`); the
   browser ignores `package.json`.

@@ -20,11 +20,16 @@
 // folder before the template is copied whole. A templated dynamic import()
 // cannot be followed at all and fails the build rather than ship without it.
 //
+// The RUN.world SDK (vendor/rundot-sdk) is added to dist/index.html only, as
+// its own module script after the game's: importing it initialises the SDK and
+// reports ready to run.world's host, which otherwise fails the load after about
+// a minute. A separate script, so an SDK failure cannot stop the game starting.
+//
 // This is the SINGLE-PLAYER game: run.world serves static files, so rooms
 // (?room=, ?seat=), which need server.mjs, cannot work from it. Fly serves those.
 // ---------------------------------------------------------------------------
 
-import { readFileSync, existsSync, statSync, readdirSync, rmSync, mkdirSync, cpSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, rmSync, mkdirSync, cpSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -69,7 +74,11 @@ function scan(rel) {
   if (blind) throw new Error(`${rel} has a templated import() the build cannot follow: ${blind[0]}…`);
 }
 
+const SDK = "vendor/rundot-sdk/rundot-game-api/index.js";
+
 want("", "./index.html");
+want("", "./" + SDK);
+want("", "./vendor/rundot-sdk/LICENSE.md");
 while (queue.length) scan(queue.shift());
 
 rmSync(OUT, { recursive: true, force: true });
@@ -79,6 +88,11 @@ for (const rel of files) {
 }
 for (const dir of folders) cpSync(join(ROOT, dir), join(OUT, dir), { recursive: true });
 if (existsSync(join(ROOT, "public"))) cpSync(join(ROOT, "public"), OUT, { recursive: true });
+
+const page = readFileSync(join(OUT, "index.html"), "utf8");
+const game = '<script type="module" src="./src/main.js"></script>';
+if (!page.includes(game)) throw new Error(`index.html no longer loads the game as ${game}; update build.mjs`);
+writeFileSync(join(OUT, "index.html"), page.replace(game, `${game}\n  <!-- RUN.world SDK: reports ready to the host (added by build.mjs). -->\n  <script type="module" src="./${SDK}"></script>`));
 
 // Report: what went in, by top folder, and the size (run.world caps 100 MB zipped).
 function walk(dir, out = []) {
