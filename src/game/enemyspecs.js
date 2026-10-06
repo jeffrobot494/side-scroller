@@ -51,6 +51,33 @@ const HUSK_CHARGER = {
     motion: { type: "chase", speed: 210 },
     contact: { damage: 10 },
   },
+  // Close in, then stop, crouch and lunge. The stop and the standing recovery
+  // are steps, not windup/recovery: a utility windup only counts down, and the
+  // root's chase would carry it on through. Distance, speed, recovery and
+  // cooldown are placeholders P3-P6 in tech/mission-3d-enemies.md.
+  brain: {
+    mode: "utility", start: "hunt",
+    states: {
+      hunt: {
+        decisionInterval: 0.2,
+        actions: [
+          {
+            id: "lunge",
+            when: "sense.los && sense.dist < 150",
+            score: 2,
+            steps: [
+              { setMotion: { type: "static" } },
+              { telegraph: { time: 0.6 } },
+              { dash: { target: "player", speed: 520, duration: 0.5 } },
+              { wait: 0.6 },
+              { setMotion: { type: "chase", speed: 210 } },
+            ],
+            cooldown: 2.5,
+          },
+        ],
+      },
+    },
+  },
 };
 
 const LURK_GUNNER = {

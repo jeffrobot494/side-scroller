@@ -453,6 +453,26 @@ export default async function run(t) {
     t.ok("dead root: its drone is killable", !drone.alive && root.spawned.length === 0);
   }
 
+  // ---- Husk Charger: stop, crouch (telegraph), lunge, stand, chase ---------
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "husk_charger"));
+    const root = instantiate(spec, 500, 500 - spec.root.body.h);
+    const { ctx } = makeCtx(() => root);
+    let n = 0;
+    while (n++ < 300 && !(root.telegraph > 0)) updateSpecEnemy(root, STEP, scene, ctx);
+    const gap = scene.soldiers[0].x - (root.x + root.w);
+    t.ok(`husk: telegraphs once it is close (${gap.toFixed(0)}px)`, root.telegraph > 0 && gap < 150);
+    sim(root, scene, ctx, 0.3);
+    t.ok(`husk: stands still through the telegraph (vx ${root.vx.toFixed(1)})`, Math.abs(root.vx) < 1 && root.telegraph > 0);
+    sim(root, scene, ctx, 0.4);
+    t.ok(`husk: then lunges at dash speed (vx ${root.vx.toFixed(0)})`, root.vx > 400);
+    sim(root, scene, ctx, 0.5);
+    t.ok(`husk: then stands for its recovery (vx ${root.vx.toFixed(1)})`, Math.abs(root.vx) < 1);
+    sim(root, scene, ctx, 0.6);
+    t.ok("husk: then chases again", root.motion.type === "chase" && !root.brainState.commit);
+  }
+
   // ---- Assault Bot leap: the landing spot is fixed at takeoff ---------------
   // It used to steer at the live player all the way down, so a dodge could not
   // work. Move the player 400px mid-leap: the bot must land on the old spot.
