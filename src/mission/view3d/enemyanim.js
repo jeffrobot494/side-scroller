@@ -13,7 +13,7 @@
 // comes from.
 // ---------------------------------------------------------------------------
 
-import { legIK } from "./enemyrig.js";
+import { legIK, stand, walk } from "./enemyrig.js";
 
 const WINDUP = 0.6;    // s of the tester's attack spent telegraphing
 const AFTER = 1.0;     // s an attack pose runs on past the telegraph
@@ -23,6 +23,12 @@ const MOVING = 20;     // px/s of record speed that reads as moving
 // Legs at rest (models/enemies.py), in the model's frame (x forward, y up).
 const LURK = { hip: { x: -1, y: -5 }, knee: { x: 4, y: -12 }, ankle: { x: -2, y: -19 },
   names: (s) => ["leg" + s, "shin" + s, "foot" + s] };
+const named = (s) => [s + "Leg", s + "Shin", s + "Foot"];
+const SIDES = ["right", "left"];
+const BOT = { hip: { x: 0, y: -14 }, knee: { x: 5, y: -24 }, ankle: { x: -3, y: -33 }, names: named, sides: SIDES };
+// The Bot's planted walk: the foot slides 16px over 45% of a cycle, so a cycle
+// is 35.6px walked.
+const BOT_WALK = { stance: 0.45, stride: 16, lift: 7, pitch: 0.5 };
 
 // P: the poser. t: seconds. mode: idle|move|attack. a: the attack clock.
 // kick: 0..1 after a round. v: the model. k: { walked } from the record.
@@ -131,11 +137,112 @@ export const ANIM = {
   },
 };
 
+// A breaching robot (M7), from the tester's Assault Bot, re-timed to the
+// fight. Runs with planted feet, leaning in, fist pumping. rifleBurst: the
+// rifle comes up through the windup and kicks on each round. punchCombo: the
+// fist cocks back through the windup and jabs on each round. screenLeap:
+// crouches through the windup, tucks in the air, lands hard, then its punch or
+// rifle on their own rounds. Any other time in the air tucks too.
+ANIM.breach_hopper = function (P, t, mode, a, kick, v, s) {
+  const st = v.state, dt = s.dt, act = s.act.id;
+  const look = Math.sin(t * 0.7) ** 3 * 0.35;
+  P.rot("head", Math.sin(t * 1.1) * 0.05, look);
+  const leap = act === "screenLeap" || act === "vaultUp";
+  // Smoothed pose targets: crouch in a jump's windup, tuck in the air, the
+  // rifle up for a burst (and after a leap's landing, where it fires).
+  const sinceLand = s.landAt !== undefined ? t - s.landAt : 9;
+  const crouch = Math.max(ease(st, "crouch", leap && s.act.phase === "windup" ? 1 : 0, 6, dt), bump(0, 0.42, sinceLand) * 0.9);
+  const tuck = ease(st, "tuck", s.air ? 1 : 0, 8, dt);
+  const punching = s.fired("fistArm").some((x) => t - x < 0.45);
+  const up = ease(st, "up", act === "rifleBurst" || (act === "screenLeap" && s.act.phase !== "windup" && !s.air && !punching) ? 1 : 0, 9, dt);
+  const rec = recoil(t, s.fired("gunArm"), 0.12);
+  // The jab: cocked back in punchCombo's windup, out on each round, back to
+  // the guard 0.23s later (the tester's keyframes, anchored on the round).
+  const cock = ease(st, "cock", act === "punchCombo" && s.act.phase === "windup" ? 1 : 0, 10, dt);
+  let jab = 0;
+  for (const x of s.fired("fistArm")) jab = Math.max(jab, interp([[0, 0], [0.06, 1], [0.13, 0.93], [0.23, 0.1], [0.3, 0]], t - x));
+  const lunge = Math.max(cock * 0.3, jab);
+
+  let gun = -0.28, arm = 0, fist = 0;
+  if (s.air || tuck > 0.05) {
+    // In the air: legs at rest under the body, feet pulled up.
+    for (const side of SIDES) {
+      const o = side === "right" ? 0.4 : -0.2;
+      legIK(P, v.body, BOT, side, BOT.ankle.x + 3 * tuck + o, BOT.ankle.y + v.body.position.y + 8 * tuck, -0.3 * tuck);
+    }
+  } else if (s.moving && jab === 0) {
+    const ph = ((s.walked / (BOT_WALK.stride / BOT_WALK.stance)) % 1 + 1) % 1;
+    P.lift(-1.2 + 2.4 * (1 - Math.cos(ph * 4 * Math.PI)) / 2);
+    P.tilt(-0.18 + 0.03 * Math.sin(ph * 4 * Math.PI));
+    P.shift(1.2);
+    arm = 0.3 * Math.sin(ph * 2 * Math.PI);
+    fist = 0.15 - 0.15 * Math.sin(ph * 2 * Math.PI);
+    gun = -0.1 + 0.05 * Math.sin(ph * 4 * Math.PI);
+    walk(P, v, BOT, ph, BOT_WALK);
+  } else {
+    P.shift(Math.sin(t * 1.3) * 0.6);
+    P.lift(Math.sin(t * 2) * 0.4);
+    arm = 0.06 * Math.sin(t * 1.7);
+    fist = 0.08 * Math.sin(t * 1.7 + 0.5);
+    stand(P, v, BOT);
+  }
+  // The punch: the upper arm swings level and the elbow straightens.
+  if (cock > 0 || jab > 0) {
+    arm = -0.3 * cock * (1 - jab) + 1.3 * jab;
+    fist = 0.3 * cock * (1 - jab) - 1.95 * jab;
+    P.shift(5 * lunge); P.tilt(-0.16 * lunge); P.lift(-2 * lunge);
+    P.yaw(-0.25 * cock * (1 - jab) + 0.18 * jab);
+  }
+  // The leap: crouch, then tuck.
+  if (crouch > 0 || tuck > 0) {
+    P.lift(-7 * crouch);
+    P.tilt(-0.22 * crouch + 0.04 * tuck);
+    arm += -0.3 * crouch + 0.5 * tuck;
+    fist += 0.3 * crouch - 0.3 * tuck;
+  }
+  gun = gun * (1 - up) + up * s.aim(2, 14) - 0.45 * lunge - 0.4 * crouch + 0.35 * tuck + 0.3 * rec;
+  P.tilt(-0.04 * up + 0.05 * rec); P.shift(-1.2 * rec);
+  P.rot("gunArm", gun);
+  P.rot("fistArm", arm);
+  P.rot("fist", fist);
+  P.rot("jets", -0.25 * tuck + Math.sin(t * 2) * 0.05 * (1 - tuck));
+};
+
 export const hasMotion = (id) => typeof ANIM[id] === "function";
 
 // This frame's mode, attack clock and kick for one rigged root, from its
-// record and its parts' telegraphs. `st` is the model's own state.
+// record and its parts' telegraphs, plus what the event-driven motions read:
+//   act       the committed action { id, phase, at (its start), phaseAt }
+//   fired(p)  the times of part p's recent rounds (the last 1.5s)
+//   air       airborne now; upAt / landAt the last takeoff and landing
+//   dt        seconds since this model's last frame (for smoothing)
+// `st` is the model's own state; `aim` is filled in by the caller.
 export function clock(st, root, rec, time) {
+  const dt = st.time === undefined ? 0 : Math.max(0, Math.min(0.1, time - st.time));
+  st.time = time;
+  st.fires ??= {};
+  if (rec) {
+    for (const ev of rec.events) {
+      if (ev.kind === "fire") (st.fires[ev.part] ??= []).push(time);
+      else if (ev.kind === "action") st.actAt = time;
+      else if (ev.kind === "takeoff") st.upAt = time;
+      else if (ev.kind === "land") st.landAt = time;
+    }
+    for (const k in st.fires) st.fires[k] = st.fires[k].filter((x) => time - x < 1.5);
+  }
+  const act = rec && rec.action.id
+    ? { id: rec.action.id, phase: rec.action.phase, at: st.actAt ?? rec.action.since, phaseAt: rec.action.since }
+    : { id: "", phase: "", at: time, phaseAt: time };
+  const base = attackClock(st, root, rec, time);
+  return {
+    ...base, dt, act,
+    moving: !!(rec && rec.speed > MOVING),
+    fired: (p) => st.fires[p] || [],
+    air: !!(rec && rec.airborne), upAt: st.upAt, landAt: st.landAt,
+  };
+}
+
+function attackClock(st, root, rec, time) {
   // The longest telegraph on any part: the windup the player is reading.
   let tele = 0;
   const walk = (e) => {
@@ -165,4 +272,28 @@ export function clock(st, root, rec, time) {
   }
   const kick = st.fireAt !== undefined ? Math.max(0, 1 - (time - st.fireAt) / KICK) : 0;
   return { mode, a, kick, walked: rec ? rec.walked : 0, telegraph: tele > 0 };
+}
+
+// Cycle helpers: 0..1 ease between two times, a 0..1..0 hump, keyframes,
+// the recoil left by rounds fired at `times`, and a value eased toward a
+// target at `rate` per second (kept in `st`).
+export function smooth(a, b, x) { const u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
+export function bump(a, b, x) { return x <= a || x >= b ? 0 : Math.sin(((x - a) / (b - a)) * Math.PI); }
+export function interp(keys, x) {
+  for (let i = 1; i < keys.length; i++) {
+    if (x <= keys[i][0]) {
+      const [t0, v0] = keys[i - 1], [t1, v1] = keys[i];
+      return v0 + (v1 - v0) * smooth(t0, t1, x);
+    }
+  }
+  return keys[keys.length - 1][1];
+}
+export function recoil(t, times, len) {
+  let r = 0;
+  for (const s of times) if (t >= s && t < s + len) r = Math.max(r, 1 - (t - s) / len);
+  return r;
+}
+function ease(st, key, target, rate, dt) {
+  const v = st[key] ?? target;
+  return (st[key] = v + (target - v) * Math.min(1, rate * dt));
 }

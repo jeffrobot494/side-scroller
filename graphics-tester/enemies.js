@@ -40,9 +40,23 @@ const nameOf = (o) => o.userData.name ?? o.name;
 const boxOf = (s) => [s.root.body?.w ?? s.root.visual.size[0], s.root.body?.h ?? s.root.visual.size[1]];
 // Drawn by the game's own rig and motion (see the header).
 const promoted = (s) => hasMotion(s.id);
-// What a promoted enemy does in each mode beyond the generic script: the Husk
-// Charger's lunge is a dash after its telegraph [start, length, px/s].
-const SCRIPT = { husk_charger: { dash: [0.6, 0.5, 520] } };
+// A promoted enemy's fight, per mode, as data: one cycle of `len` seconds,
+// replayed. The game draws it from these fields alone, as it would a real one.
+//   act   [id, windup end, steps end]: the committed action and its phases
+//   tele  [[t0, t1, part?]]: telegraph windows (the root unless named)
+//   fire  { part: [times] }: rounds
+//   run   [[t0, t1, px/s]]: treadmill speed (move mode runs at the spec's)
+//   air   [t0, t1, height]: a jump's arc
+const GENERIC_ATTACK = { len: 2, tele: [[0, 0.6]], fire: { root: [0.6] } };
+const SCRIPT = {
+  husk_charger: { attack: { len: 2, tele: [[0, 0.6]], run: [[0.6, 1.1, 520]] } },
+  breach_hopper: {
+    attack: { len: 1.6, act: ["rifleBurst", 0.25, 0.42], tele: [[0, 0.25]], fire: { gunArm: [0.25, 0.33, 0.41] } },
+    punch: { len: 1.4, act: ["punchCombo", 0.18, 0.5], tele: [[0, 0.18]], fire: { fistArm: [0.18, 0.49] } },
+    leap: { len: 3, act: ["screenLeap", 0.48, 2.27], tele: [[0, 0.48], [1.9, 2.1]], air: [0.48, 1.68, 125],
+      run: [[0.48, 1.68, 300]], fire: { gunArm: [2.1, 2.18, 2.26] } },
+  },
+};
 
 export const ENEMY_SUBJECTS = [
   ...SPECS.map((s) => ({ id: s.id, label: s.name })),
@@ -125,6 +139,8 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   fx.setFloor(viewY(groundY));
   fx.setTarget({ x0: soldierX, x1: soldierX + 30, y0: viewY(groundY), y1: viewY(groundY - 46) });
   const TARGET = new THREE.Vector3(soldierX + 15, viewY(groundY - 24), 0);
+  // The same soldier as the game sees one, for the game's aim.
+  const TARGET_ENT = { alive: true, x: soldierX, y: groundY - 46, w: 30, h: 46 };
   let drone = null, missile = null; // loose models the effects clone
 
   // One fake entity per enemy (and per moth wing): a box in game coordinates,
@@ -308,76 +324,6 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
         P.move("crane", 0, -9 * drop);
         P.tilt(a > 1.6 && a < 2.0 ? -0.04 * Math.sin((a - 1.6) / 0.4 * Math.PI) : 0); // the release lifts the nose
       }
-    },
-
-    // A breaching robot. Runs leaning in, fist pumping; the rifle comes up and
-    // kicks; the punch is two jabs from the guard, arm straightening;
-    // the screen leap crouches, fires the jets, tucks, lands hard and shoots.
-    breach_hopper(P, t, mode, a, kick, m, k) {
-      let gun = -0.28, arm = 0, fist = 0, crouch = 0, air = 0, tuck = 0;
-      const look = Math.sin(t * 0.7) ** 3 * 0.35;
-      P.rot("head", Math.sin(t * 1.1) * 0.05, look);
-      if (mode === "idle") {
-        P.shift(Math.sin(t * 1.3) * 0.6);
-        P.lift(Math.sin(t * 2) * 0.4);
-        arm = 0.06 * Math.sin(t * 1.7);
-        fist = 0.08 * Math.sin(t * 1.7 + 0.5);
-        stand(P, m, BOT);
-      } else if (mode === "move") {
-        const ph = (t / BOT.T) % 1;
-        P.lift(-1.2 + 2.4 * (1 - Math.cos(ph * 4 * Math.PI)) / 2);
-        P.tilt(-0.18 + 0.03 * Math.sin(ph * 4 * Math.PI));
-        P.shift(1.2);
-        arm = 0.3 * Math.sin(ph * 2 * Math.PI);
-        fist = 0.15 - 0.15 * Math.sin(ph * 2 * Math.PI);
-        gun = -0.1 + 0.05 * Math.sin(ph * 4 * Math.PI);
-        walk(P, m, BOT, ph, { stance: 0.45, stride: 16, lift: 7, pitch: 0.5 });
-      } else if (mode === "attack") {
-        // Raise, three rounds, lower.
-        const up = smooth(0, 0.22, a) * (1 - smooth(0.9, 1.3, a));
-        const rec = recoil(a, [0.25, 0.33, 0.41], 0.12);
-        gun = -0.28 + up * (0.28 + k.aim(2, 14)) + 0.3 * rec;
-        P.tilt(-0.04 * up + 0.05 * rec); P.shift(-1.2 * rec);
-        fist = 0.1 * up;
-        stand(P, m, BOT);
-      } else if (mode === "punch") {
-        // Cock back, jab (hit at 0.27), back to the guard, jab again (0.58):
-        // the upper arm swings level and the elbow straightens.
-        arm = interp([[0, 0], [0.18, -0.3], [0.27, 1.25], [0.4, 1.15], [0.5, 0.15], [0.58, 1.35], [0.75, 1.25], [1.15, 0]], a);
-        fist = interp([[0, 0], [0.18, 0.3], [0.27, -1.9], [0.4, -1.8], [0.5, 0], [0.58, -2.0], [0.75, -1.9], [1.15, 0]], a);
-        const lunge = bump(0.18, 0.75, a);
-        P.shift(5 * lunge); P.tilt(-0.16 * lunge);
-        P.yaw(-0.25 * smooth(0, 0.18, a) * (1 - smooth(0.2, 0.3, a)) + 0.18 * bump(0.25, 0.7, a));
-        gun = -0.45 * lunge;
-        P.lift(-2 * lunge);
-        stand(P, m, BOT);
-      } else if (mode === "leap") {
-        // 0-0.48 crouch, 0.48-1.68 airborne, land, 1.9-2.1 raise, rounds at 2.1.
-        crouch = smooth(0, 0.42, a) * (a < 0.48 ? 1 : 0) + (a >= 1.68 ? bump(1.68, 2.1, a) * 0.9 : 0);
-        if (a >= 0.48 && a < 1.68) {
-          const u = (a - 0.48) / 1.2;
-          air = 125 * 4 * u * (1 - u);
-          tuck = Math.sin(u * Math.PI);
-        }
-        P.lift(air - 7 * crouch);
-        P.tilt(-0.22 * crouch - 0.2 * tuck * (1 - (a - 0.48) / 1.2) + 0.12 * tuck * ((a - 0.48) / 1.2));
-        arm = -0.3 * crouch + 0.5 * tuck;
-        fist = 0.3 * crouch - 0.3 * tuck;
-        const up = smooth(1.9, 2.08, a) * (1 - smooth(2.6, 2.95, a));
-        const rec = recoil(a, [2.1, 2.18, 2.26], 0.12);
-        gun = -0.4 * crouch + 0.35 * tuck - 0.28 * (1 - up) + up * k.aim(2, 14) + 0.3 * rec;
-        if (air > 0) {
-          // In the air: legs at rest under the body, feet pulled up.
-          for (const side of ["right", "left"]) {
-            const o = side === "right" ? 0.4 : -0.2;
-            legIK(P, m.body, BOT, side, BOT.ankle.x + 3 * tuck + o, BOT.ankle.y + m.body.position.y + 8 * tuck, -0.3 * tuck);
-          }
-        } else stand(P, m, BOT);
-      }
-      P.rot("gunArm", gun);
-      P.rot("fistArm", arm);
-      P.rot("fist", fist);
-      P.rot("jets", mode === "leap" ? -0.25 * tuck : Math.sin(t * 2) * 0.05);
     },
 
     // A walking siege engine. Stomps; the cannon charges and fires four with the
@@ -954,31 +900,14 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
     if (withFx) fx.update(dt);
     const ga = t % ATTACK;
     const kick = mode === "attack" && ga >= WINDUP ? Math.max(0, 1 - (ga - WINDUP) / 0.25) : 0;
-    // The promoted: script each real root from its fake's box, run the game's
-    // record over them (moved along a treadmill, so walking reads as walking),
-    // and feel their kicks.
+    // The promoted: script each real root from its fake's box and its SCRIPT,
+    // run the game's record over them (moved along a treadmill, so walking
+    // reads as walking), and feel their kicks.
     const live = [];
     for (const s of SPECS) {
       const r = roots[s.id];
       if (!r) continue;
-      const e = ents[s.id];
-      r.x = e.x; r.y = e.y;
-      r.children.forEach((c, i) => { c.x = e.children[i].x; c.y = e.children[i].y; });
-      r.facing = s.role === "boss" ? 1 : facing;
-      r.telegraph = 0;
-      if (r.muzzleFlash > 0) r.muzzleFlash -= dt;
-      let v = mode === "move" ? s.root.motion?.speed ?? 60 : 0;
-      if (mode === "attack") {
-        if (ga < WINDUP) r.telegraph = WINDUP - ga;
-        if (dt > 0 && ga >= WINDUP && ga - dt < WINDUP) {
-          r.fireCount++;
-          r.muzzleFlash = 0.055;
-          r.muzzleColor = e.muzzleColor;
-        }
-        const dash = SCRIPT[s.id]?.dash;
-        if (dash && ga >= dash[0] && ga < dash[0] + dash[1]) v = dash[2];
-      }
-      odo[s.id] = (odo[s.id] ?? 0) + v * dt;
+      scriptRoot(r, s, ents[s.id], dt, facing);
       if (shown().includes(s)) live.push(r);
     }
     for (const r of live) r.x += odo[r.specTop.id];
@@ -1020,10 +949,50 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   }
 
   // Inside the app's halos.begin()/end(): the glows, and the game's own model.
+  // One frame of a promoted root's scripted fight (see SCRIPT).
+  const walkTree = (e, fn) => { fn(e); for (const c of e.children) walkTree(c, fn); };
+  // Parts by id, with "root" always the root whatever its spec calls it.
+  const parts = (r) => { const out = {}; walkTree(r, (e) => { out[e.id] = e; }); out.root = r; return out; };
+  const crossed = (T, a, pa, dt) => dt > 0 && ((pa < T && T <= a) || (a < pa && (T > pa || T <= a)));
+  function scriptRoot(r, s, e, dt, facing) {
+    r.x = e.x; r.y = e.y;
+    r.children.forEach((c, i) => { c.x = e.children[i].x; c.y = e.children[i].y; });
+    r.facing = s.role === "boss" ? 1 : facing;
+    const sc = mode === "move" || mode === "idle" ? null : SCRIPT[s.id]?.[mode] ?? (mode === "attack" ? GENERIC_ATTACK : null);
+    const len = sc?.len ?? 1, a = t % len, pa = ((t - dt) % len + len) % len;
+    const P = parts(r);
+    walkTree(r, (x) => { x.telegraph = 0; if (x.muzzleFlash > 0) x.muzzleFlash -= dt; });
+    for (const [t0, t1, part] of sc?.tele || []) if (a >= t0 && a < t1) P[part || "root"].telegraph = t1 - a;
+    for (const [part, times] of Object.entries(sc?.fire || {})) {
+      for (const T of times) {
+        if (!crossed(T, a, pa, dt)) continue;
+        const x = P[part];
+        x.fireCount++;
+        x.muzzleFlash = 0.055;
+        x.muzzleColor = Object.values(x.spec.emitters || {})[0]?.projectile?.color;
+      }
+    }
+    const bs = r.brainState;
+    if (sc?.act) {
+      const [id, w, end] = sc.act;
+      if (!bs.commit || bs.commit.action.id !== id || a < pa) bs.commitSerial++; // a new commitment
+      bs.commit = { action: { id }, phase: a < w ? "windup" : a < end ? "steps" : "recovery" };
+    } else bs.commit = null;
+    let lift = 0;
+    if (sc?.air) {
+      const [t0, t1, h] = sc.air;
+      if (a >= t0 && a < t1) { const u = (a - t0) / (t1 - t0); lift = h * 4 * u * (1 - u); }
+    }
+    walkTree(r, (x) => { x.y -= lift; });
+    let v = mode === "move" ? s.root.motion?.speed ?? 60 : 0;
+    for (const [t0, t1, sp] of sc?.run || []) if (a >= t0 && a < t1) v = sp;
+    odo[s.id] = (odo[s.id] ?? 0) + v * dt;
+  }
+
   let shownRoots = [];
   function sync(mission, halos, compare) {
     const m = { time: mission.time };
-    game.sync({ time: t, scene: { specRoots: shownRoots }, motion }, halos);
+    game.sync({ time: t, scene: { specRoots: shownRoots, soldiers: [TARGET_ENT] }, motion }, halos);
     for (const s of shown()) if (!promoted(s)) cues(ents[s.id], m, halos, 0.5 + 0.5 * Math.sin(mission.time * 26));
     for (const s of shown()) oldEnts[s.id].facing = ents[s.id].facing;
     old.sync({ time: mission.time, scene: { specRoots: compare ? shown().map((s) => oldEnts[s.id]) : [] } }, halos);

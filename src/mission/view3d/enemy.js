@@ -153,13 +153,15 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
     const index = (e) => { for (const c of e.children) { parts.set(c.id, c); index(c); } };
     index(r);
     const c = clock(v.state, r, m.motion ? m.motion.get(r) : null, m.time);
-    ANIM[v.id](poser(v), m.time, c.mode, c.a, c.kick, v, c);
     // At the box's centre, scaled to the box, turned by facing. A boss faces
     // the camera, as in the tester: turning it would show its back.
     const [nw, nh] = v.natural, sx = r.w / nw, sy = r.h / nh;
+    const facing = r.specTop.role !== "boss" && r.facing < 0 ? -1 : 1;
+    c.aim = aimAt(v, r, nearestSoldier(m.scene.soldiers, r), facing, sx, sy);
+    ANIM[v.id](poser(v), m.time, c.mode, c.a, c.kick, v, c);
     v.root.position.set(r.x + r.w / 2, viewY(r.y + r.h / 2), 0);
     v.root.scale.set(sx, sy, (sx + sy) / 2);
-    v.root.rotation.y = r.specTop.role !== "boss" && r.facing < 0 ? Math.PI : 0;
+    v.root.rotation.y = facing < 0 ? Math.PI : 0;
     for (const w of v.wings) {
       const e = parts.get(w.id);
       w.hinge.visible = !!e && e.alive && !e.disabled;
@@ -207,6 +209,30 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
     },
     // A root's rig group, once drawn (the graphics tester stages it).
     modelOf: (r) => rigs.map.get(r)?.root ?? null,
+  };
+}
+
+function nearestSoldier(list, r) {
+  let best = null, d = Infinity;
+  for (const s of list || []) {
+    if (!s.alive) continue;
+    const k = Math.abs(s.x + s.w / 2 - (r.x + r.w / 2)) + Math.abs(s.y + s.h / 2 - (r.y + r.h / 2));
+    if (k < d) { d = k; best = s; }
+  }
+  return best;
+}
+
+// The angle, in the model's frame, from the model point (x, y) to the target,
+// clamped to ±0.6 rad as in the tester; 0 when the target is behind or too
+// close to aim at. The real round leads its target, so this can be a few
+// degrees off the bolt.
+function aimAt(v, r, target, facing, sx, sy) {
+  return (x, y) => {
+    if (!target) return 0;
+    const dx = ((target.x + target.w / 2) - (r.x + r.w / 2)) * facing / sx - x;
+    const dy = ((r.y + r.h / 2) - (target.y + target.h / 2)) / sy - (v.body.position.y + y);
+    if (dx < 20) return 0;
+    return Math.max(-0.6, Math.min(0.6, Math.atan2(dy, dx)));
   };
 }
 
