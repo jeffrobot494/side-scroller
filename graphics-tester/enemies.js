@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // GRAPHICS TESTER — the enemy roster, re-modelled (looks, not yet the game's).
 //
-// Model: models/enemies.glb (built by models/enemies.py): one armature per
-// enemy, named by spec id, with ONE rigidly skinned mesh (Shell + Detail, two
-// draw calls). Every bone's local axes are the world's, so rotation.z swings a
+// Model: src/mission/view3d/models/enemies.glb (built by models/enemies.py):
+// one armature per enemy, named by spec id, with ONE rigidly skinned mesh
+// (Shell + Detail, two draw calls). Every bone's local axes are the world's, so rotation.z swings a
 // part in the screen plane. The Iron Moth's wing is a separate unskinned mesh,
 // mirrored here for the left wing.
 //
@@ -159,7 +159,7 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   }
 
   // --- the models -----------------------------------------------------------
-  new GLTFLoader().load(new URL("./models/enemies.glb", import.meta.url).href, (gltf) => {
+  new GLTFLoader().load(new URL("../src/mission/view3d/models/enemies.glb", import.meta.url).href, (gltf) => {
     const wingSrc = gltf.scene.getObjectByName("iron_moth_wing");
     drone = gltf.scene.getObjectByName("factory_drone");
     missile = gltf.scene.getObjectByName("seeker_missile");
