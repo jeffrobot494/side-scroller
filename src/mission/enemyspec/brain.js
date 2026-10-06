@@ -139,6 +139,7 @@ function tickUtility(root, state, dt, scene, ctx) {
   if (!best) return;
 
   bs.cooldowns[best.id] = root.age + best.cooldown;
+  bs.commitSerial = (bs.commitSerial || 0) + 1;
   bs.commit = {
     action: best,
     phase: best.windup > 0 ? "windup" : "steps",

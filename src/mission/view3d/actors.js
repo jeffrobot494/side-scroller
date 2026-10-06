@@ -46,6 +46,7 @@ export class ModelMap {
   _drop(obj, v) {
     this.parent.remove(v.root);
     disposeTree(v.root);
+    if (v.dispose) v.dispose(); // what disposeTree cannot reach (a skeleton's bone texture)
     this.map.delete(obj);
   }
   dispose() {

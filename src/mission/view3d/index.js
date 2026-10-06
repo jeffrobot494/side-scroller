@@ -27,6 +27,7 @@ import { buildBackground } from "./background.js";
 import { buildTerrain } from "./terrain.js";
 import { createSoldiers } from "./soldier.js";
 import { createEnemies } from "./enemy.js";
+import { createEnemyFx } from "./enemyfx.js";
 import { createEffects } from "./effects.js";
 import { createLasers } from "./laser.js";
 import { buildMist } from "./mist.js";
@@ -124,7 +125,9 @@ export function createView3D(canvas) {
 
     halos.begin();
     level.soldiers.sync(m, halos);
-    level.enemies.sync(m, halos);
+    // Enemy effects (enemyFx3d): off draws none and explosions as spheres.
+    if (!config.enemyFx3d) level.enemyFx.hide();
+    level.enemies.sync(m, halos, config.enemyFx3d ? level.enemyFx : null);
     level.effects.sync(m, halos);
     halos.end();
     // After the soldiers: the beams read the guns as posed this frame.
@@ -154,6 +157,7 @@ export function createView3D(canvas) {
         background,
         soldiers: createSoldiers(scene),
         enemies: createEnemies(scene),
+        enemyFx: createEnemyFx(scene),
         effects: createEffects(scene),
         lasers: createLasers(scene),
         mist,
@@ -169,6 +173,7 @@ export function createView3D(canvas) {
       level.background.sky.dispose();
       level.soldiers.dispose();
       level.enemies.dispose();
+      level.enemyFx.dispose();
       level.effects.dispose();
       level.lasers.dispose();
       scene.remove(level.mist.group);

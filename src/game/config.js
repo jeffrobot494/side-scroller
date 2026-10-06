@@ -390,6 +390,14 @@ export const SCHEMA = [
         help: "A cloth cape on every soldier in the 3D mission view, simulated per soldier at 60Hz. Off hides it and stops the simulation, which is the most expensive look on a slow device. The 2D view has none.",
       },
       {
+        key: "enemyFx3d",
+        label: "Enemy effects (3D)",
+        type: "bool",
+        live: true,
+        default: true,
+        help: "The 3D mission view's enemy effects: smoke, sparks, dust, thruster flames, lights, muzzle and launch flashes, and explosions drawn as fireballs. Off draws explosions as glowing spheres and none of the rest. Camera shake is not an effect and stays. The 2D view has none of these.",
+      },
+      {
         key: "showFps",
         label: "Show FPS",
         type: "bool",

@@ -2,9 +2,9 @@
 #   exec(open(r"...\models\enemies.py").read())
 # or headless:  blender -b --factory-startup --python enemies.py
 #
-# One enemies.glb, tester-only. Each enemy is an armature (named after its
-# spec id) with ONE rigidly skinned mesh, so it costs two draw calls whatever
-# moves: every part is weighted 1.0 to a single bone, and
+# One enemies.glb, written into the game (src/mission/view3d/models/). Each
+# enemy is an armature (named after its spec id) with ONE rigidly skinned mesh,
+# so it costs two draw calls whatever moves: every part is weighted 1.0 to a single bone, and
 # graphics-tester/enemies.js animates the bones by name.
 #   Shell  - the armour / hull; enemies.js tints it with the spec's colour.
 #   Detail - everything else, colour and glow from PALETTE below (16x1).
@@ -847,7 +847,7 @@ for mesh, arm in BUILT:
     mesh.select_set(True); arm.select_set(True)
 for o in LOOSE: o.select_set(True)
 bpy.context.view_layer.objects.active = wing
-bpy.ops.export_scene.gltf(filepath=os.path.join(MODELS, "enemies.glb"), use_selection=True,
+bpy.ops.export_scene.gltf(filepath=os.path.join(GAME_MODELS, "enemies.glb"), use_selection=True,
                           export_format="GLB", export_apply=False, export_animations=False)
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(MODELS, "enemies.blend"))
 for mesh, arm in BUILT + [(o, None) for o in LOOSE]:

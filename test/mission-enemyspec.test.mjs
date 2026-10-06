@@ -6,6 +6,11 @@ import { generateLevel } from "../src/game/gen/levelgen.js";
 import { loadMission, Loot } from "../src/mission/entities.js";
 import { updateSpecEnemy, collidables, applyDamage } from "../src/mission/enemyspec/runtime.js";
 import { updateProjectiles } from "../src/mission/combat.js";
+import { instantiate } from "../src/mission/enemyspec/runtime.js";
+import { missionSpecById } from "../src/game/enemyspecs.js";
+import { Mission } from "../src/mission/mission.js";
+import { makeEl } from "./harness.mjs";
+import { STEP, SEED, SQUAD, scriptedInput } from "./mission-trace.mjs";
 
 // A ctx like the mission's: route spec damage/kill into the runtime.
 function makeCtx(scene) {
@@ -94,4 +99,35 @@ export default async function run(t) {
   }
   t.ok("bookkeeping: killer credited exactly one kill", killer.kills === 1);
   t.ok("bookkeeping: one loot dropped, carrying the root's item", drops.length === 1 && drops[0].item === victim.loot);
+
+  // ---- the Siege Automaton's overload, in a real Mission ---------------------
+  // The death is the overload's START: credit, loot and the death cue come then,
+  // and the explosion's own cue 2.4s later, when the overload blows.
+  {
+    const g = generateLevel({ seed: SEED, difficulty: "high" });
+    const m = new Mission(makeEl("canvas"), () => {});
+    m.start(g.mission, g.level, SQUAD);
+    m.running = false;
+    m.input = scriptedInput();
+    const cues = [];
+    const sound = m.scene.sound;
+    m.scene.sound = (id, o) => { cues.push([id, m.time]); return sound && sound(id, o); };
+    const hero = m.scene.soldiers[0];
+    const bot = instantiate(missionSpecById.siege_automaton, hero.x + 600, hero.y - 300, "enemy", m.scene.rng);
+    bot.loot = m.scene.specRoots[0].loot;
+    m.scene.specRoots = [bot];
+    const kills = hero.kills, loot = m.scene.loot.length;
+    m._damage(bot, 1e6, hero);
+    m.update(STEP);
+    t.ok("overload mission: the killer is credited at the death", hero.kills === kills + 1);
+    t.ok("overload mission: loot drops at the death", m.scene.loot.length === loot + 1);
+    t.ok("overload mission: the death plays the ordinary death cue", cues.some(([id]) => id === "enemy.death"));
+    t.ok("overload mission: the overload is running", bot.spawned.some((e) => e.id === "overload"));
+    const t0 = m.time;
+    for (let i = 0; i < 180; i++) m.update(STEP);
+    const boom = cues.find(([id]) => id === "impact.explode");
+    t.ok(`overload mission: the explosion cue comes with the blast (${boom && (boom[1] - t0).toFixed(2)}s)`,
+      !!boom && Math.abs(boom[1] - t0 - 2.4) < 0.1);
+    t.ok("overload mission: credit is not paid twice", hero.kills === kills + 1);
+  }
 }

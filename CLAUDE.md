@@ -509,6 +509,18 @@ section + the tests are the source of truth for what currently exists):
   `view3d/models/`, built by `graphics-tester/models/*.py`), shoulder squares
   and IK arms (in `soldier.js`), and a verlet cape per soldier (`cape.js`).
   `laserSight3d`, `groundMist3d` and `cape3d` switch the costly ones off.
+  **Every roster enemy is its Blender rig too** (`tech/mission-3d-enemies.md`
+  M0–M10): `enemyrig.js` (one `enemies.glb` per page, a per-root Shell tinted
+  per bone through the skin index), `enemyanim.js` (poses from what the enemy
+  is DOING) and `enemyfx.js` (effects, off with `enemyFx3d`). What it is doing
+  is `src/mission/enemyspec/motion.js`: one record per root, built only from
+  wire fields (fire counts, spawn serials, the committed action), run per
+  rendered frame by the mission and the source of enemy camera kicks
+  (`raiseShake`; `shk` only ever raises now). The same spec changed play in
+  both views: a `burst` fires its rounds in sequence, a dead root's spawned
+  list is still stepped, the Siege Automaton's death is a 2.4s overload made of
+  enemy data, and the Husk Charger stops, crouches and lunges. The graphics
+  tester's enemy subjects are now a harness over the game's code.
 - **Player2 Lab (`tech/player2-lab.md` L0–L4 — built):** `player2-lab.html` at
   the repo root, linked from nothing in the game or the editor, runs every
   Player2 generation modality — chat (multi-turn, streamed or whole), embeddings,

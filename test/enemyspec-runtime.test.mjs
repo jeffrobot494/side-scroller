@@ -296,6 +296,183 @@ export default async function run(t) {
     t.ok("lastSeen: no memory → no hunt", Math.abs(b.x - 300) < 30);
   }
 
+  // ---- burst: rounds leave in sequence, never on one frame -----------------
+  // patternAngles used to return every burst angle at once, so a burst was an
+  // aimed volley with a wider jitter.
+  {
+    const shot = { speed: 300, w: 6, h: 6, color: "#fff", life: 5, damage: 1 };
+    const mk = (steps) => normalizeSpec({
+      id: "burster",
+      root: {
+        health: { max: 100 }, motion: { type: "static" },
+        children: [{ id: "arm", at: [0, 0], visual: { size: [10, 10] }, health: { max: 5 }, emitters: { gun: { at: [0, 0], projectile: shot } } }],
+      },
+      defs: { pip: { visual: { size: [6, 6] }, body: { gravity: 0, ghost: true }, motion: { type: "static" }, life: { ttl: 5 } } },
+      brain: { start: "s", states: { s: { tracks: [{ id: "t", loop: false, steps }] } } },
+    });
+    // Frame index of each new projectile (or spawn) over `seconds`.
+    const frames = (root, scene, ctx, seconds, count) => {
+      const out = [];
+      for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) {
+        const before = count();
+        updateSpecEnemy(root, STEP, scene, ctx);
+        for (let k = before; k < count(); k++) out.push(i);
+      }
+      return out;
+    };
+    const gaps = (f) => f.slice(1).map((x, i) => (x - f[i]) * STEP);
+
+    let scene = makeScene();
+    let root = instantiate(mk([{ fire: { emitter: "arm.gun", count: 3, pattern: "burst", interval: 0.08 } }, { wait: 9 }]), 300, 300);
+    let { ctx } = makeCtx(() => root);
+    const arm = findEntity(root, "arm");
+    let f = frames(root, scene, ctx, 1, () => scene.projectiles.length);
+    t.eq("burst: three rounds", f.length, 3);
+    t.ok(`burst: each round 0.08s after the last, within a frame (${gaps(f).map((g) => g.toFixed(3))})`,
+      f.length === 3 && gaps(f).every((g) => Math.abs(g - 0.08) <= STEP + 1e-9));
+    t.eq("burst: the fire count is bumped per round", arm.fireCount, 3);
+
+    scene = makeScene();
+    root = instantiate(mk([{ if: { when: "1", then: [{ fire: { emitter: "arm.gun", count: 3, pattern: "burst", interval: 0.2 } }] } }, { wait: 9 }]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    f = frames(root, scene, ctx, 1, () => scene.projectiles.length);
+    t.ok(`burst: spaced inside an if branch too (${gaps(f).map((g) => g.toFixed(3))})`,
+      f.length === 3 && gaps(f).every((g) => Math.abs(g - 0.2) <= STEP + 1e-9));
+
+    scene = makeScene();
+    root = instantiate(mk([{ spawn: { ref: "pip", count: 3, pattern: "burst", interval: 0.15 } }, { wait: 9 }]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    let spawns = 0;
+    f = [];
+    for (let i = 0; i < 60; i++) {
+      const before = root.spawned.length;
+      updateSpecEnemy(root, STEP, scene, ctx);
+      spawns += root.spawned.length - before;
+      if (root.spawned.length > before) f.push(i);
+    }
+    t.ok(`burst: a spawn burst is spaced (${gaps(f).map((g) => g.toFixed(3))})`,
+      spawns === 3 && gaps(f).every((g) => Math.abs(g - 0.15) <= STEP + 1e-9));
+
+    scene = makeScene();
+    root = instantiate(mk([{ fire: { emitter: "arm.gun", count: 5, pattern: "burst", interval: 0.1 } }, { wait: 9 }]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    sim(root, scene, ctx, 0.15);
+    killEntity(root, findEntity(root, "arm"), null, scene, ctx);
+    sim(root, scene, ctx, 1);
+    t.eq("burst: pending rounds die with the part", scene.projectiles.length, 2);
+
+    scene = makeScene();
+    root = instantiate(mk([
+      { fire: { emitter: "arm.gun", count: 5, pattern: "burst", interval: 0.2 } },
+      { wait: 0.1 },
+      { fire: { emitter: "arm.gun", count: 2, pattern: "burst", interval: 0.2 } },
+      { wait: 9 },
+    ]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    sim(root, scene, ctx, 2);
+    t.eq("burst: a second burst replaces the first's pending rounds", scene.projectiles.length, 3);
+  }
+
+  // ---- a dead root's spawns live on ----------------------------------------
+  // updateSpecEnemy returned early for a dead root, so its death blast froze
+  // unhit and its drones froze in the air the moment it died.
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "siege_automaton"));
+    const root = instantiate(spec, 830, 500 - spec.root.body.h);
+    const { ctx, log } = makeCtx(() => root);
+    killEntity(root, root, null, scene, ctx);
+    sim(root, scene, ctx, 5);
+    t.ok(`dead root: the death blast damages a soldier beside it (${log.playerDamage})`, log.playerDamage >= 60);
+    t.eq("dead root: everything it spawned has expired", root.spawned.length, 0);
+  }
+
+  // ---- the Siege Automaton's overload, as enemy data ------------------------
+  // Its death spawns a 2.4s overload; the pod and cannon still on it become
+  // charges that hold their place and blow at 0.4s and 1.0s; then the blast.
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "siege_automaton"));
+    const root = instantiate(spec, 300, 500 - spec.root.body.h);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, STEP); // seat the parts
+    const at = (id) => { const e = findEntity(root, id); return [e.x + e.w / 2, e.y + e.h / 2]; };
+    const pod = at("missilePack"), cannon = at("cannonArm"), body = [root.x + root.w / 2, root.y + root.h / 2];
+    killEntity(root, root, null, scene, ctx);
+    const find = (id) => root.spawned.find((e) => e.id === id && e.alive);
+    const overload = find("overload"), podCharge = find("podCharge"), cannonCharge = find("cannonCharge");
+    t.ok("overload: spawned at the death", !!overload);
+    t.ok("overload: the pod and cannon become charges", !!podCharge && !!cannonCharge);
+    const near = (e, p) => Math.hypot(e.x + e.w / 2 - p[0], e.y + e.h / 2 - p[1]) < 1;
+    t.ok("overload: each charge stands where its part was, the overload on the body",
+      near(podCharge, pod) && near(cannonCharge, cannon) && near(overload, body));
+    t.ok("overload: takes no hits", !collidables(root).includes(overload));
+    const firstSeen = {}, gone = {};
+    const watch = { overload, podCharge, cannonCharge };
+    for (let i = 1; i <= 200; i++) {
+      updateSpecEnemy(root, STEP, scene, ctx);
+      for (const e of root.spawned) if (firstSeen[e.id] === undefined) firstSeen[e.id] = i * STEP;
+      for (const [k, e] of Object.entries(watch)) if (!e.alive && gone[k] === undefined) gone[k] = i * STEP;
+    }
+    const close = (a, b) => a !== undefined && Math.abs(a - b) <= STEP + 1e-9;
+    t.ok(`overload: the pod charge blows at 0.4s (${gone.podCharge})`, close(gone.podCharge, 0.4));
+    t.ok(`overload: the cannon charge blows at 1.0s (${gone.cannonCharge})`, close(gone.cannonCharge, 1.0));
+    t.ok(`overload: ends at 2.4s (${gone.overload})`, close(gone.overload, 2.4));
+    t.ok(`overload: a micro blast comes with the first charge (${firstSeen.microBlast})`, close(firstSeen.microBlast, 0.4));
+    t.ok(`overload: the death blast follows the overload (${firstSeen.deathBlast})`, close(firstSeen.deathBlast, 2.4));
+    t.ok("overload: did not move", near(overload, body));
+    t.ok("overload: charges did not fall", near(podCharge, pod) && near(cannonCharge, cannon));
+  }
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "siege_automaton"));
+    const root = instantiate(spec, 300, 500 - spec.root.body.h);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, STEP);
+    applyDamage(root, findEntity(root, "missilePack"), 999, null, scene, ctx);
+    sim(root, scene, ctx, 1); // its own blast plays out
+    killEntity(root, root, null, scene, ctx);
+    t.ok("overload: a pod shot off first leaves no pod charge",
+      !root.spawned.some((e) => e.id === "podCharge") && root.spawned.some((e) => e.id === "cannonCharge"));
+  }
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "floating_factory"));
+    const root = instantiate(spec, 200, 150);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, 7.5);
+    const drone = root.spawned.find((s) => s.id === "drone");
+    t.ok("dead root: the Factory launched a drone", !!drone);
+    killEntity(root, root, null, scene, ctx);
+    const x0 = drone.x, y0 = drone.y;
+    sim(root, scene, ctx, 0.5);
+    t.ok("dead root: its drone is still stepped", Math.hypot(drone.x - x0, drone.y - y0) > 20);
+    t.ok("dead root: its drone is still hittable", collidables(root).includes(drone));
+    applyDamage(root, drone, 999, null, scene, ctx);
+    sim(root, scene, ctx, STEP);
+    t.ok("dead root: its drone is killable", !drone.alive && root.spawned.length === 0);
+  }
+
+  // ---- Husk Charger: stop, crouch (telegraph), lunge, stand, chase ---------
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "husk_charger"));
+    const root = instantiate(spec, 500, 500 - spec.root.body.h);
+    const { ctx } = makeCtx(() => root);
+    let n = 0;
+    while (n++ < 300 && !(root.telegraph > 0)) updateSpecEnemy(root, STEP, scene, ctx);
+    const gap = scene.soldiers[0].x - (root.x + root.w);
+    t.ok(`husk: telegraphs once it is close (${gap.toFixed(0)}px)`, root.telegraph > 0 && gap < 150);
+    sim(root, scene, ctx, 0.3);
+    t.ok(`husk: stands still through the telegraph (vx ${root.vx.toFixed(1)})`, Math.abs(root.vx) < 1 && root.telegraph > 0);
+    sim(root, scene, ctx, 0.4);
+    t.ok(`husk: then lunges at dash speed (vx ${root.vx.toFixed(0)})`, root.vx > 400);
+    sim(root, scene, ctx, 0.5);
+    t.ok(`husk: then stands for its recovery (vx ${root.vx.toFixed(1)})`, Math.abs(root.vx) < 1);
+    sim(root, scene, ctx, 0.6);
+    t.ok("husk: then chases again", root.motion.type === "chase" && !root.brainState.commit);
+  }
+
   // ---- Assault Bot leap: the landing spot is fixed at takeoff ---------------
   // It used to steer at the live player all the way down, so a dodge could not
   // work. Move the player 400px mid-leap: the bot must land on the old spot.
