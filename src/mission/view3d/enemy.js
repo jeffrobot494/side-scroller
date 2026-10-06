@@ -22,8 +22,8 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { ModelMap, applyFlash, burnHalo } from "./actors.js";
 import { setColor, shade, putHalo, viewY } from "./util.js";
-import { loadEnemyRigs, rigLoaded, rigFits, makeRig, paintRig, poser } from "./enemyrig.js";
-import { ANIM, DEATH, RIG_DRAWS, dying, hasMotion, clock } from "./enemyanim.js";
+import { loadEnemyRigs, rigLoaded, rigFits, makeRig, paintRig, poser, makeLoose, looseFor } from "./enemyrig.js";
+import { ANIM, DEATH, RIG_DRAWS, dying, hasMotion, clock, flyLoose } from "./enemyanim.js";
 
 const shared = (g) => ((g.userData.shared = true), g);
 const G = {
@@ -137,6 +137,8 @@ function pose(v, e, time) {
 export function createEnemies(parent, { rigs: useRigs = true } = {}) {
   const models = new ModelMap(parent, make);
   const rigs = new ModelMap(parent, makeRig);
+  // Spawned entities drawn as a model of their own (the drone, the missile).
+  const loose = new ModelMap(parent, (e) => makeLoose(looseFor(e.root.specTop.id, e.id), e.color));
   const fits = new WeakMap(); // root → whether it draws as its rig, once the kit is in
   if (useRigs) loadEnemyRigs();
 
@@ -153,6 +155,13 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
   function wreck(r, m) {
     const v = rigs.map.get(r);
     return !!v && dying(v, m.motion ? m.motion.get(r) : null);
+  }
+
+  function flown(e, m, halos) {
+    const v = loose.get(e);
+    flyLoose(v, looseFor(e.root.specTop.id, e.id), e, m.time, viewY);
+    const pulse = applyFlash(v.mats, e.hitFlash > 0, e.telegraph > 0, m.time);
+    cues(e, m, halos, pulse);
   }
 
   function rig(r, m, halos) {
@@ -204,6 +213,7 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
     sync(m, halos) {
       models.begin();
       rigs.begin();
+      loose.begin();
       for (const r of m.scene.specRoots) {
         const drawn = rigged(r) && (r.alive || wreck(r, m));
         if (drawn) rig(r, m, halos);
@@ -211,15 +221,21 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
         // What the rig draws itself (the Siege Automaton's overload and
         // charges) is not drawn again as blocks.
         const own = (drawn && RIG_DRAWS[r.specTop.id]) || [];
-        for (const sp of r.spawned) if (!own.includes(sp.id)) tree(sp, m, halos);
+        for (const sp of r.spawned) {
+          if (own.includes(sp.id)) continue;
+          if (useRigs && rigLoaded() && sp.alive && looseFor(r.specTop.id, sp.id)) flown(sp, m, halos);
+          else tree(sp, m, halos);
+        }
       }
       // A part that is merely disabled comes back; anything dead is gone.
       models.end((e) => e.alive);
       rigs.end((r) => r.alive);
+      loose.end((e) => e.alive);
     },
     dispose() {
       models.dispose();
       rigs.dispose();
+      loose.dispose();
     },
     // A root's rig group, once drawn (the graphics tester stages it).
     modelOf: (r) => rigs.map.get(r)?.root ?? null,

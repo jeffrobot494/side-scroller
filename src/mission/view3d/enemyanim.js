@@ -336,6 +336,73 @@ export const DEATH = {
     }
   },
 };
+// A flying factory (M9), from the tester's Floating Factory. Hovers on four
+// thruster pods, which tip back while it drifts. The five deck pistons rise
+// toward the next launch, timed from the last drone the record saw spawn and
+// the spec's own spawn period, and stay full while a launch is overdue. Ahead
+// of the predicted launch the bay doors swing down and the crane lowers the
+// drone being built; the real spawn releases it and the doors close.
+const FACTORY_PERIOD = 7;  // s between drones: the Floating Factory's spawn loop
+const BUILD = 1.6;         // s of the tester's build cycle before the release
+ANIM.floating_factory = function (P, t, mode, a, kick, v, s) {
+  const st = v.state;
+  st.born ??= t;
+  P.lift(Math.sin(t * 1.7) * 8);
+  P.tilt(Math.cos(t * 1.7) * 0.025 + (s.moving ? -0.05 : 0));
+  P.roll(Math.sin(t * 0.9) * 0.05);
+  const last = s.last("spawn:drone");
+  const from = last ?? st.born, next = from + FACTORY_PERIOD;
+  const fill = Math.min(1, (t - from) / FACTORY_PERIOD / 0.85);
+  for (let i = 0; i < 5; i++) P.move(`pis${i}`, 0, 6 * smooth(0, 1, fill * 5 - i));
+  const push = s.moving ? -0.4 : 0;
+  P.rot("thrB", push + Math.sin(t * 1.3) * 0.08);
+  P.rot("thrF", push + Math.sin(t * 1.3 + 1) * 0.08);
+  // Where the build is: before the release it runs toward the predicted
+  // launch and holds there if the launch is late; after it, it runs on.
+  let b = null;
+  if (last !== undefined && t - last < 1.4) b = BUILD + (t - last);
+  else if (t >= next - BUILD) b = Math.min(BUILD - 0.05, t - (next - BUILD));
+  st.build = b;
+  if (b !== null) {
+    const door = b < 0.6 ? smooth(0, 0.6, b) : b < 2.4 ? 1 : 1 - smooth(2.4, 3.0, b);
+    P.rot("doorB", -1.35 * door);
+    P.rot("doorF", 1.35 * door);
+    const drop = b < 0.6 ? 0 : b < BUILD ? smooth(0.6, 1.5, b) : 1 - smooth(1.7, 2.4, b);
+    P.move("crane", 0, -9 * drop);
+    P.tilt(b > BUILD && b < 2.0 ? -0.04 * Math.sin((b - BUILD) / 0.4 * Math.PI) : 0); // the release lifts the nose
+  }
+  if (v.held) {
+    v.held.root.visible = b !== null && b > 0.5 && b < BUILD;
+    if (v.held.root.visible) v.held.root.rotation.set(0, (b - 0.5) ** 2 * 8, 0);
+  }
+};
+
+// A spawned model in flight (M9): a drone spins on its axis and leans into
+// its flight; a missile points its nose along its travel and rolls. The
+// heading is measured from the entity's own movement, so a viewer, which
+// moves it at snapshot rate, sees the same; a new entity starts fresh.
+const X = new THREE.Vector3(1, 0, 0), dir = new THREE.Vector3();
+export function flyLoose(v, name, e, time, viewY) {
+  const st = v.state;
+  const x = e.x + e.w / 2, y = viewY(e.y + e.h / 2);
+  const dt = st.time === undefined ? 0 : time - st.time;
+  if (st.x !== undefined && dt > 0 && (x !== st.x || y !== st.y)) {
+    const k = Math.min(1, dt * 12);
+    st.vx = (st.vx ?? 0) + ((x - st.x) / dt - (st.vx ?? 0)) * k;
+    st.vy = (st.vy ?? 0) + ((y - st.y) / dt - (st.vy ?? 0)) * k;
+  }
+  st.x = x; st.y = y; st.time = time;
+  v.root.position.set(x, y, 0);
+  st.spin = (st.spin ?? 0) + Math.max(0, dt) * (name === "seeker_missile" ? 9 : 7);
+  const vx = st.vx ?? 0, vy = st.vy ?? 0;
+  if (name === "seeker_missile") {
+    if (vx || vy) v.obj.quaternion.setFromUnitVectors(X, dir.set(vx, vy, 0).normalize());
+    v.obj.rotateX(st.spin);
+  } else {
+    v.obj.rotation.set(0, st.spin, -Math.atan2(vx, 400) * 0.6);
+  }
+}
+
 // Spawned entities a rig draws itself, so the blocks skip them.
 export const RIG_DRAWS = { siege_automaton: ["overload", "podCharge", "cannonCharge"] };
 // Whether a dead root's rig is still showing: its overload has started (the

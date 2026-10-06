@@ -28,6 +28,20 @@ let cloneSkinned = null;
 // Child parts a rig draws without a bone: the moth's wings, on hinges.
 export const HINGES = { iron_moth: ["leftWing", "rightWing"] };
 
+// Points on bones, as [bone, point in the model's Blender coordinates] (models/
+// enemies.py: +X facing, -Y towards the camera, +Z up), resolved at clone to
+// the bone's own frame so a socket rides its bone. From the tester's SOCKETS.
+export const SOCKETS = {
+  floating_factory: { hook: ["crane", [2, 0, -24]], bay: ["root", [2, -4, -15]] },
+};
+
+// Spawned defs drawn as a model of their own, by the root's spec id. The Iron
+// Moth's `seeker` keeps its block: only this pairing was shown in the tester.
+export const SPAWN_MODELS = {
+  floating_factory: { drone: "factory_drone" },
+  siege_automaton: { seekerMissile: "seeker_missile" },
+};
+
 export function loadEnemyRigs() {
   loading ??= Promise.all([
     import("three/addons/loaders/GLTFLoader.js"),
@@ -50,7 +64,11 @@ export function loadEnemyRigs() {
           if (m.name !== "Shell") m.userData.shared = true;
         }
       });
-      kit = { rigs, wing: gltf.scene.getObjectByName("iron_moth_wing") };
+      kit = {
+        rigs,
+        wing: gltf.scene.getObjectByName("iron_moth_wing"),
+        loose: { factory_drone: gltf.scene.getObjectByName("factory_drone"), seeker_missile: gltf.scene.getObjectByName("seeker_missile") },
+      };
     })
     .catch((err) => console.warn("3D enemy models did not load; keeping the blocks", err));
   return loading;
@@ -176,12 +194,26 @@ export function makeRig(root) {
   }
 
   // Each bone's head in the model's frame at rest (group at the origin), for
-  // the arm IK and for flinging a part off.
+  // the arm IK and for flinging a part off; and each socket in its bone's frame.
   group.updateMatrixWorld(true);
   const rest = Object.fromEntries(Object.entries(bones).map(([n, { b }]) => [n, b.getWorldPosition(new THREE.Vector3())]));
+  const sockets = {};
+  for (const [k, [bn, [x, y, z]]] of Object.entries(SOCKETS[id] || {})) {
+    const b = bones[bn] && bones[bn].b;
+    if (b) sockets[k] = { b, local: b.worldToLocal(new THREE.Vector3(x, z, -y)) };
+  }
+
+  // The Floating Factory carries the drone it is building on its crane.
+  let held = null;
+  if (id === "floating_factory" && kit.loose.factory_drone && sockets.hook) {
+    const def = root.specTop.defs && root.specTop.defs.drone;
+    held = makeLoose("factory_drone", def ? def.visual.color : root.color);
+    sockets.hook.b.add(held.root);
+    held.root.position.copy(sockets.hook.local);
+  }
 
   return {
-    root: group, body, bones, shell, skeleton, boneParts, wings, rest,
+    root: group, body, bones, shell, skeleton, boneParts, wings, rest, sockets, held,
     natural: NATURAL[id] || [root.w, root.h],
     id,
     state: {}, // the animation's own clock, never on an entity
@@ -189,6 +221,37 @@ export function makeRig(root) {
     dispose: () => { for (const m of meshes) m.skeleton.dispose(); },
   };
 }
+
+// A loose model (the factory's drone, the seeker missile) for one spawned
+// entity, or null while the kit is not in: a clone with its own Shell, tinted
+// and flashed like a block part. Geometry and Detail are shared.
+export function makeLoose(name, color) {
+  const src = kit && kit.loose[name];
+  if (!src) return null;
+  const obj = src.clone();
+  obj.position.set(0, 0, 0);
+  obj.rotation.set(0, 0, 0);
+  const mats = [];
+  obj.traverse((o) => {
+    if (!o.isMesh) return;
+    const list = Array.isArray(o.material) ? o.material : [o.material];
+    o.material = list.map((m) => {
+      if (m.name !== "Shell") return m;
+      const c = m.clone();
+      c.userData.base = setColor(new THREE.Color(), color);
+      c.userData.glow = c.userData.base.clone().multiplyScalar(0.18);
+      setColor(c.color, color);
+      c.emissive.copy(c.userData.glow);
+      mats.push(c);
+      return c;
+    });
+    if (o.material.length === 1) o.material = o.material[0];
+  });
+  const root = new THREE.Group();
+  root.add(obj);
+  return { root, obj, mats, state: {} };
+}
+export const looseFor = (rootId, defId) => (SPAWN_MODELS[rootId] && SPAWN_MODELS[rootId][defId]) || null;
 
 // Per frame: each bone's tint and flash from its part; a dead or disabled
 // part's bone collapsed; the whole hull red while anything telegraphs.

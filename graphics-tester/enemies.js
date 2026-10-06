@@ -29,7 +29,7 @@ import { ENEMY_FILE } from "../src/game/enemyspecs.js";
 import { createEnemies, cues } from "../src/mission/view3d/enemy.js";
 import { setColor, viewY } from "../src/mission/view3d/util.js";
 import { hasMotion } from "../src/mission/view3d/enemyanim.js";
-import { instantiate, killEntity, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
+import { instantiate, killEntity, updateSpecEnemy, spawnFromDef } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { createMotion } from "../src/mission/enemyspec/motion.js";
 import { createFx } from "./enemy-fx.js";
@@ -47,10 +47,15 @@ const promoted = (s) => hasMotion(s.id);
 //   fire  { part: [times] }: rounds
 //   run   [[t0, t1, px/s]]: treadmill speed (move mode runs at the spec's)
 //   air   [t0, t1, height]: a jump's arc
+//   spawn { def: [times] }: real spawns, flown at the soldier by the tester
 //   die   t: a fresh root each cycle, killed at t; the game's runtime then
 //         plays what its death spawns (the Siege Automaton's overload)
 const GENERIC_ATTACK = { len: 2, tele: [[0, 0.6]], fire: { root: [0.6] } };
+// The Floating Factory launches every 7s in every mode, as its spawn loop does
+// in the game, so the game's motion predicts the tester's launches.
+const FACTORY = { len: 7, spawn: { drone: [6.99] } };
 const SCRIPT = {
+  floating_factory: { idle: FACTORY, move: FACTORY, attack: FACTORY },
   husk_charger: { attack: { len: 2, tele: [[0, 0.6]], run: [[0.6, 1.1, 520]] } },
   breach_hopper: {
     attack: { len: 1.6, act: ["rifleBurst", 0.25, 0.42], tele: [[0, 0.25]], fire: { gunArm: [0.25, 0.33, 0.41] } },
@@ -60,7 +65,8 @@ const SCRIPT = {
   },
   siege_automaton: {
     attack: { len: 2.2, act: ["cannonBurst", 0.38, 0.75], tele: [[0, 0.38]], fire: { cannonArm: [0.38, 0.49, 0.6, 0.71] } },
-    missiles: { len: 3.6, act: ["missileVolley", 0.7, 0.9], tele: [[0, 0.7], [0.4, 0.7, "missilePack"]], fire: { missilePack: [0.7, 0.88] } },
+    missiles: { len: 3.6, act: ["missileVolley", 0.7, 0.9], tele: [[0, 0.7], [0.4, 0.7, "missilePack"]], fire: { missilePack: [0.7, 0.88] },
+      spawn: { seekerMissile: [0.7, 0.7, 0.88, 0.88] } },
     jump: { len: 3.4, act: ["jumpBarrage", 0.5, 1.75], tele: [[0, 0.5]], air: [0.5, 1.7, 115], run: [[0.5, 1.7, 150]],
       fire: { cannonArm: [0.74], missilePack: [0.94] } },
     death: { len: 7, die: 0.05 },
@@ -314,28 +320,6 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   // Per enemy: (bone setter, time, mode, attack phase) -> poses for this frame.
   // `a` runs 0..ATTACK; the shot is at WINDUP. `kick` decays after the shot.
   const ANIM = {
-    // Hovers on four thruster pods; drifting tips the pods back. The five
-    // deck pistons rise one by one toward the next launch. Building a drone: the bay doors swing down, the crane lowers
-    // the new drone and lets it go, the doors close.
-    floating_factory(P, t, mode, a) {
-      P.lift(Math.sin(t * 1.7) * 8);
-      P.tilt(Math.cos(t * 1.7) * 0.025 + (mode === "move" ? -0.05 : 0));
-      P.roll(Math.sin(t * 0.9) * 0.05);
-      const { fill } = droneProgress(mode, a, t);
-      for (let i = 0; i < 5; i++) P.move(`pis${i}`, 0, 6 * smooth(0, 1, fill * 5 - i));
-      const push = mode === "move" ? -0.4 : 0;
-      P.rot("thrB", push + Math.sin(t * 1.3) * 0.08);
-      P.rot("thrF", push + Math.sin(t * 1.3 + 1) * 0.08);
-      if (mode === "attack") {
-        const door = a < 0.6 ? smooth(0, 0.6, a) : a < 2.4 ? 1 : 1 - smooth(2.4, 3.0, a);
-        P.rot("doorB", -1.35 * door);
-        P.rot("doorF", 1.35 * door);
-        const drop = a < 0.6 ? 0 : a < 1.6 ? smooth(0.6, 1.5, a) : 1 - smooth(1.7, 2.4, a);
-        P.move("crane", 0, -9 * drop);
-        P.tilt(a > 1.6 && a < 2.0 ? -0.04 * Math.sin((a - 1.6) / 0.4 * Math.PI) : 0); // the release lifts the nose
-      }
-    },
-
   };
 
   // The next drone's progress, 0..1, and whether it is ready. Building: the
@@ -820,11 +804,36 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   // Parts by id, with "root" always the root whatever its spec calls it.
   const parts = (r) => { const out = {}; walkTree(r, (e) => { out[e.id] = e; }); out.root = r; return out; };
   const crossed = (T, a, pa, dt) => dt > 0 && ((pa < T && T <= a) || (a < pa && (T > pa || T <= a)));
+  // A live root's spawns are flown here, not simulated: each turns onto the
+  // soldier at its def's own speed and turn rate after a short launch, and is
+  // gone when it reaches him or its life runs out — which the record reads as
+  // its death.
+  const LAUNCH = { drone: [0.35, 4], seekerMissile: [0.22, 6] }; // delay, life
+  function flySpawned(r, dt) {
+    const tx = TARGET_ENT.x + TARGET_ENT.w / 2, ty = TARGET_ENT.y + TARGET_ENT.h / 2;
+    for (const sp of r.spawned) {
+      const m = sp.spec.motion || {}, [delay, life] = LAUNCH[sp.id] || [0, 4];
+      sp.age = (sp.age ?? 0) + dt;
+      const cx = sp.x + sp.w / 2, cy = sp.y + sp.h / 2;
+      if (sp.age > delay) {
+        const want = Math.atan2(ty - cy, tx - cx), cur = Math.atan2(sp.vy, sp.vx);
+        let d = want - cur;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        const ang = cur + Math.max(-(m.turnRate ?? 2.5) * dt, Math.min((m.turnRate ?? 2.5) * dt, d));
+        const sp0 = Math.hypot(sp.vx, sp.vy), speed = sp0 + ((m.speed ?? 200) - sp0) * Math.min(1, dt * 3);
+        sp.vx = Math.cos(ang) * speed; sp.vy = Math.sin(ang) * speed;
+      }
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt;
+      if (sp.age > life || Math.hypot(tx - cx, ty - cy) < 12) sp.alive = false;
+    }
+    if (r.spawned.some((sp) => !sp.alive)) r.spawned = r.spawned.filter((sp) => sp.alive);
+  }
+
   // A dead root's spawns are stepped by the game's runtime in this scene.
   const DEATH_SCENE = { world: { width: 1e6, height: 1e4, gravity: 2000 }, platforms: FLOOR, soldiers: [], enemies: [], projectiles: [] };
   const DEATH_CTX = { friendlyFire: false, damageMult: 1, damage() {}, kill() {} };
   function scriptRoot(s, e, dt, facing) {
-    const sc = mode === "move" || mode === "idle" ? null : SCRIPT[s.id]?.[mode] ?? (mode === "attack" ? GENERIC_ATTACK : null);
+    const sc = SCRIPT[s.id]?.[mode] ?? (mode === "attack" ? GENERIC_ATTACK : null);
     const len = sc?.len ?? 1, a = t % len, pa = ((t - dt) % len + len) % len;
     // A dying script rebuilds its root each cycle; leaving it brings one back.
     if (sc?.die !== undefined ? crossed(0, a, pa, dt) || (dt === 0 && a === 0) : !roots[s.id].alive) roots[s.id] = fresh(s);
@@ -846,6 +855,17 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
         x.muzzleColor = Object.values(x.spec.emitters || {})[0]?.projectile?.color;
       }
     }
+    for (const [def, times] of Object.entries(sc?.spawn || {})) {
+      times.forEach((T, n) => {
+        if (!crossed(T, a, pa, dt)) return;
+        // From the bay, or out of the pod's tubes: up and a little forward.
+        const from = def === "drone" ? [r.x + r.w / 2, r.y + r.h / 2 + 20] : [P.missilePack.x + P.missilePack.w / 2 + (n % 2 ? 14 : -14), P.missilePack.y];
+        const vel = def === "drone" ? { vx: 0, vy: 90 } : { vx: r.facing * 60, vy: -150 };
+        r.spawnStamps = [];
+        spawnFromDef(r, def, from[0], from[1], vel, DEATH_SCENE, DEATH_CTX);
+      });
+    }
+    flySpawned(r, dt);
     const bs = r.brainState;
     if (sc?.act) {
       const [id, w, end] = sc.act;
