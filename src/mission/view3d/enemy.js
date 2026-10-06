@@ -24,6 +24,7 @@ import { ModelMap, applyFlash, burnHalo } from "./actors.js";
 import { setColor, shade, putHalo, viewY } from "./util.js";
 import { loadEnemyRigs, rigLoaded, rigFits, makeRig, paintRig, poser, makeLoose, looseFor } from "./enemyrig.js";
 import { ANIM, DEATH, RIG_DRAWS, dying, hasMotion, clock, flyLoose } from "./enemyanim.js";
+import { FX, EXPLOSIONS, fxContext } from "./enemyfx.js";
 
 const shared = (g) => ((g.userData.shared = true), g);
 const G = {
@@ -140,6 +141,8 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
   // Spawned entities drawn as a model of their own (the drone, the missile).
   const loose = new ModelMap(parent, (e) => makeLoose(looseFor(e.root.specTop.id, e.id), e.color));
   const fits = new WeakMap(); // root → whether it draws as its rig, once the kit is in
+  const blasts = new WeakSet(); // explosion entities already set off as effects
+  let fx = null, lastTime = null, fxDt = 0; // this frame's effects pool (null = off)
   if (useRigs) loadEnemyRigs();
 
   function rigged(r) {
@@ -188,6 +191,12 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
       if (e) applyFlash(w.mats, e.hitFlash > 0, c.telegraph, m.time);
     }
     const pulse = paintRig(v, r, parts, c.telegraph, m.time);
+    if (fx && FX[v.id]) {
+      v.root.updateMatrixWorld(true);
+      const t = nearestSoldier(m.scene.soldiers, r);
+      const target = t ? new THREE.Vector3(t.x + t.w / 2, viewY(t.y + t.h / 2), 0) : null;
+      FX[v.id](fxContext(fx, v, r, c, m.motion ? m.motion.get(r) : null, m.time, fxDt, viewY(r.y + r.h), target));
+    }
     const tells = (e) => {
       if (!e.alive) return;
       if (!e.disabled) cues(e, m, halos, pulse);
@@ -210,7 +219,13 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
   }
 
   return {
-    sync(m, halos) {
+    // `effects`: the enemy effects pool (enemyfx.js) while they are on, else
+    // null, and explosions draw as their blocks.
+    sync(m, halos, effects = null) {
+      fx = effects;
+      fxDt = lastTime === null ? 0 : Math.max(0, Math.min(0.1, m.time - lastTime));
+      lastTime = m.time;
+      if (fx) fx.begin(fxDt);
       models.begin();
       rigs.begin();
       loose.begin();
@@ -221,8 +236,18 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
         // What the rig draws itself (the Siege Automaton's overload and
         // charges) is not drawn again as blocks.
         const own = (drawn && RIG_DRAWS[r.specTop.id]) || [];
+        const booms = (fx && EXPLOSIONS[r.specTop.id]) || [];
         for (const sp of r.spawned) {
           if (own.includes(sp.id)) continue;
+          if (booms.includes(sp.id)) {
+            // The tester's explosion at the entity's own size, once, in place
+            // of a glowing sphere.
+            if (!blasts.has(sp)) {
+              blasts.add(sp);
+              fx.explosion(new THREE.Vector3(sp.x + sp.w / 2, viewY(sp.y + sp.h / 2), 0), sp.w);
+            }
+            continue;
+          }
           if (useRigs && rigLoaded() && sp.alive && looseFor(r.specTop.id, sp.id)) flown(sp, m, halos);
           else tree(sp, m, halos);
         }

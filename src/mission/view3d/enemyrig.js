@@ -32,7 +32,27 @@ export const HINGES = { iron_moth: ["leftWing", "rightWing"] };
 // enemies.py: +X facing, -Y towards the camera, +Z up), resolved at clone to
 // the bone's own frame so a socket rides its bone. From the tester's SOCKETS.
 export const SOCKETS = {
-  floating_factory: { hook: ["crane", [2, 0, -24]], bay: ["root", [2, -4, -15]] },
+  breach_hopper: {
+    muzzle: ["gunArm", [43.5, -13.5, 4.3]], eject: ["gunArm", [20, -16, 7]], knuckles: ["fist", [19, 13, 14]],
+    jetL: ["jets", [-16.6, 6, 0.4]], jetR: ["jets", [-16.6, -6, 0.4]], visor: ["head", [10, -2, 30.5]],
+    footL: ["leftFoot", [2, 7, -39]], footR: ["rightFoot", [2, -7, -39]], port: ["root", [3, -11.2, -2.5]],
+  },
+  siege_automaton: {
+    muzzle: ["cannonBarrel", [81, -34, 8]], charge: ["cannonBarrel", [77.5, -34, 8]], cannonMid: ["cannonArm", [34, -34, 8]],
+    shoulder: ["root", [8, -30, 30]], tubeL: ["missilePack", [6, -14, 53]], tubeR: ["missilePack", [38, -14, 53]],
+    pack: ["missilePack", [22, -24, 40]], arming: ["missilePack", [44, -24.8, 44]], core: ["core", [4, -24.5, 8]],
+    stackA: ["root", [-30, 9, 53]], stackB: ["root", [-30, -9, 53]], eyes: ["head", [19.5, -8, 60]],
+    footL: ["leftFoot", [4, 17, -82]], footR: ["rightFoot", [4, -17, -82]], head: ["head", [0, -10, 62]],
+    finger: ["leftIndex", [12.4, 25.5, -52.5]], hip: ["root", [0, -14, -27]], chest: ["root", [10, -22, 26]],
+  },
+  floating_factory: {
+    hook: ["crane", [2, 0, -24]], bay: ["root", [2, -4, -15]],
+    stack1: ["root", [-36, 4, 33]], stack2: ["root", [-25, 4, 33]], weld: ["crane", [2, -6, -15]],
+    thrBn: ["thrB", [-36, -15, -26]], thrBf: ["thrB", [-36, 15, -26]], thrFn: ["thrF", [32, -15, -26]], thrFf: ["thrF", [32, 15, -26]],
+    mast: ["root", [30, 0, 42.4]], nose: ["root", [47.5, -2, 1]], tailN: ["root", [-50.5, -10, 4]], tailF: ["root", [-50.5, 10, 4]],
+    window: ["root", [-26, -21, 4]], bridge: ["root", [22, -9, 24.5]],
+    ...Object.fromEntries([-14, -10, -6, -2, 2].map((x, i) => [`cap${i}`, [`pis${i}`, [x, -4, 25]]])),
+  },
 };
 
 // Spawned defs drawn as a model of their own, by the root's spec id. The Iron

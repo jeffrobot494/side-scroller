@@ -353,6 +353,7 @@ ANIM.floating_factory = function (P, t, mode, a, kick, v, s) {
   const last = s.last("spawn:drone");
   const from = last ?? st.born, next = from + FACTORY_PERIOD;
   const fill = Math.min(1, (t - from) / FACTORY_PERIOD / 0.85);
+  st.fill = fill; // the effects light a cap per raised piston
   for (let i = 0; i < 5; i++) P.move(`pis${i}`, 0, 6 * smooth(0, 1, fill * 5 - i));
   const push = s.moving ? -0.4 : 0;
   P.rot("thrB", push + Math.sin(t * 1.3) * 0.08);
