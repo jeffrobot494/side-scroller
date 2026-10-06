@@ -6,6 +6,7 @@ import {
   instantiate, updateSpecEnemy, applyDamage, killEntity, collidables, findEntity, spawnFromDef,
 } from "../src/mission/enemyspec/runtime.js";
 import { dryRunSpec } from "../src/game/enemyspec/dryrun.js";
+import { MISSION_ENEMY_SPECS } from "../src/game/enemyspecs.js";
 
 const STEP = 1 / 60;
 
@@ -293,6 +294,24 @@ export default async function run(t) {
     const { ctx: bctx } = makeCtx(() => b);
     sim(b, blind, bctx, 2);
     t.ok("lastSeen: no memory → no hunt", Math.abs(b.x - 300) < 30);
+  }
+
+  // ---- Assault Bot leap: the landing spot is fixed at takeoff ---------------
+  // It used to steer at the live player all the way down, so a dodge could not
+  // work. Move the player 400px mid-leap: the bot must land on the old spot.
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "breach_hopper"));
+    const root = instantiate(spec, 200, 500 - spec.root.body.h);
+    const { ctx } = makeCtx(() => root);
+    let n = 0;
+    while (n++ < 300 && !(root.moveOrder && !root.onGround)) updateSpecEnemy(root, STEP, scene, ctx);
+    const aimX = root.moveOrder && root.moveOrder.x;
+    t.ok("leap: airborne with a fixed landing point", !!root.moveOrder && !root.onGround);
+    scene.soldiers[0].x += 400;
+    while (n++ < 600 && !root.onGround) updateSpecEnemy(root, STEP, scene, ctx);
+    t.ok("leap: lands on the takeoff-time spot, not the dodged player",
+      Math.abs(root.x + root.w / 2 - aimX) < 40);
   }
 
   // ---- dry-run gate -------------------------------------------------------

@@ -339,9 +339,10 @@ const ASSAULT_BOT = {
             windup: 0.48,
             steps: [
               { telegraph: { time: 0.18 } },
-              { setMotion: { target: "root", type: "keepDistance", min: 50, max: 68, speed: 800 } },
               { jump: {} },
-              { wait: 1.2 },
+              // moveTo resolves the player ONCE, here: the landing spot is fixed
+              // at takeoff so a player who moves can dodge it.
+              { moveTo: { target: "player", offset: [-55, 0], speed: 800, timeout: 1.2 } },
               { setMotion: { target: "root", type: "chase", speed: 175 } },
               { telegraph: { time: 0.2 } },
               { if: { when: "sense.dist <= 80", then: [{ fire: { emitter: "fistArm.punch", count: 2, pattern: "burst", aim: "current" } }] } },
