@@ -3,7 +3,13 @@
 //
 // The walk is drawSpecEnemy's (src/mission/enemyspec/render.js): a live root,
 // its alive children, its `spawned` list (a dead root's included, since what it
-// spawned outlives it); a disabled part is not drawn but its children are. So a part is visible here exactly when it is in 2D.
+// spawned outlives it); a disabled part is not drawn but its children are. So
+// a part is visible here exactly when it is in 2D.
+//
+// M6 (tech/mission-3d-enemies.md): a root whose spec id has a Blender rig and a
+// motion (enemyrig.js, enemyanim.js) is drawn as that one rigged model instead
+// of its part blocks, posed from the mission's motion record. Every other root,
+// and everything spawned, keeps the blocks below.
 //
 // R5: each part is a model of its `spec.visual.shape` in `spec.visual.color`,
 // sized to the part's box every frame, with the detail a flat shape cannot
@@ -16,6 +22,8 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { ModelMap, applyFlash, burnHalo } from "./actors.js";
 import { setColor, shade, putHalo, viewY } from "./util.js";
+import { loadEnemyRigs, rigLoaded, rigFits, makeRig, paintRig, poser } from "./enemyrig.js";
+import { ANIM, hasMotion, clock } from "./enemyanim.js";
 
 const shared = (g) => ((g.userData.shared = true), g);
 const G = {
@@ -124,8 +132,48 @@ function pose(v, e, time) {
   }
 }
 
-export function createEnemies(parent) {
+// `rigs: false` keeps every root on blocks (the graphics tester's "game model
+// beside it" comparison).
+export function createEnemies(parent, { rigs: useRigs = true } = {}) {
   const models = new ModelMap(parent, make);
+  const rigs = new ModelMap(parent, makeRig);
+  const fits = new WeakMap(); // root → whether it draws as its rig, once the kit is in
+  if (useRigs) loadEnemyRigs();
+
+  function rigged(r) {
+    if (!useRigs || !rigLoaded() || !r.specTop) return false;
+    let ok = fits.get(r);
+    if (ok === undefined) fits.set(r, (ok = hasMotion(r.specTop.id) && rigFits(r)));
+    return ok;
+  }
+
+  function rig(r, m, halos) {
+    const v = rigs.get(r);
+    const parts = new Map();
+    const index = (e) => { for (const c of e.children) { parts.set(c.id, c); index(c); } };
+    index(r);
+    const c = clock(v.state, r, m.motion ? m.motion.get(r) : null, m.time);
+    ANIM[v.id](poser(v), m.time, c.mode, c.a, c.kick, v, c);
+    // At the box's centre, scaled to the box, turned by facing. A boss faces
+    // the camera, as in the tester: turning it would show its back.
+    const [nw, nh] = v.natural, sx = r.w / nw, sy = r.h / nh;
+    v.root.position.set(r.x + r.w / 2, viewY(r.y + r.h / 2), 0);
+    v.root.scale.set(sx, sy, (sx + sy) / 2);
+    v.root.rotation.y = r.specTop.role !== "boss" && r.facing < 0 ? Math.PI : 0;
+    for (const w of v.wings) {
+      const e = parts.get(w.id);
+      w.hinge.visible = !!e && e.alive && !e.disabled;
+      w.hinge.position.set(w.at[0] - w.side * w.w / 2, -w.at[1], 0).add(v.body.position);
+      if (e) applyFlash(w.mats, e.hitFlash > 0, c.telegraph, m.time);
+    }
+    const pulse = paintRig(v, r, parts, c.telegraph, m.time);
+    const tells = (e) => {
+      if (!e.alive) return;
+      if (!e.disabled) cues(e, m, halos, pulse);
+      for (const ch of e.children) tells(ch);
+    };
+    tells(r);
+  }
 
   function part(e, m, halos) {
     const v = models.get(e);
@@ -143,16 +191,22 @@ export function createEnemies(parent) {
   return {
     sync(m, halos) {
       models.begin();
+      rigs.begin();
       for (const r of m.scene.specRoots) {
-        tree(r, m, halos); // a dead root draws nothing, but its spawned list does
+        if (r.alive && rigged(r)) rig(r, m, halos);
+        else tree(r, m, halos); // a dead root draws nothing, but its spawned list does
         for (const sp of r.spawned) tree(sp, m, halos);
       }
       // A part that is merely disabled comes back; anything dead is gone.
       models.end((e) => e.alive);
+      rigs.end((r) => r.alive);
     },
     dispose() {
       models.dispose();
+      rigs.dispose();
     },
+    // A root's rig group, once drawn (the graphics tester stages it).
+    modelOf: (r) => rigs.map.get(r)?.root ?? null,
   };
 }
 

@@ -1051,6 +1051,7 @@ const ENEMY_STAGE = {
 };
 function stageEnemies(dt, t) {
   enemies.update(dt);
+  enemies.sync({ time: t }, halosStub, false); // poses the game's own models
   for (const [id, m] of Object.entries(enemies.models())) {
     const f = ENEMY_STAGE[id];
     if (!f) { m.group.visible = false; continue; } // not staged in this scene

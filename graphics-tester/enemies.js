@@ -13,8 +13,14 @@
 // child parts (the Assault Bot, the Siege Automaton). Telegraph and muzzle
 // glows are the game's own `cues`, except where an enemy has its own effects
 // in FX (enemy-fx.js: shots, missiles, drones, jets, dust, explosions).
-// "Game model beside it" draws the current in-game look next to each one with
-// the game's createEnemies.
+// "Game model beside it" draws the block look next to each one with the
+// game's createEnemies.
+//
+// PROMOTED enemies (tech/mission-3d-enemies.md M6 on) are the game's now: their
+// rig and motion live in src/mission/view3d/enemyrig.js + enemyanim.js, and
+// this file only scripts a real root per mode — box, facing, telegraph, fire
+// count — runs the game's motion record over it and draws it with the game's
+// createEnemies. ANIM/FX/SOCKETS below keep only the enemies not promoted yet.
 // ---------------------------------------------------------------------------
 
 import * as THREE from "three";
@@ -22,12 +28,21 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { ENEMY_FILE } from "../src/game/enemyspecs.js";
 import { createEnemies, cues } from "../src/mission/view3d/enemy.js";
 import { setColor, viewY } from "../src/mission/view3d/util.js";
+import { hasMotion } from "../src/mission/view3d/enemyanim.js";
+import { instantiate } from "../src/mission/enemyspec/runtime.js";
+import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
+import { createMotion } from "../src/mission/enemyspec/motion.js";
 import { createFx } from "./enemy-fx.js";
 
 const SPECS = ENEMY_FILE.map((r) => r.spec);
 const isFlying = (s) => s.root.tags?.includes("flying") || s.root.motion?.type === "hover";
 const nameOf = (o) => o.userData.name ?? o.name;
 const boxOf = (s) => [s.root.body?.w ?? s.root.visual.size[0], s.root.body?.h ?? s.root.visual.size[1]];
+// Drawn by the game's own rig and motion (see the header).
+const promoted = (s) => hasMotion(s.id);
+// What a promoted enemy does in each mode beyond the generic script: the Husk
+// Charger's lunge is a dash after its telegraph [start, length, px/s].
+const SCRIPT = { husk_charger: { dash: [0.6, 0.5, 520] } };
 
 export const ENEMY_SUBJECTS = [
   ...SPECS.map((s) => ({ id: s.id, label: s.name })),
@@ -96,7 +111,15 @@ const GAP = 46;          // px between models in the lineup
 export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true }) {
   const models = {};     // id -> { group, body, bones, wings?, sockets?, rest? }
   let subject = null, mode = "move", t = 0, loaded = false;
-  const old = createEnemies(scene);
+  const old = createEnemies(scene, { rigs: false });
+  // The promoted enemies: one real root each, scripted per mode, its record
+  // kept by the game's motion module and drawn by the game's view.
+  const game = createEnemies(scene);
+  const motion = createMotion();
+  const roots = {}, odo = {};
+  for (const s of SPECS) if (promoted(s)) roots[s.id] = instantiate(normalizeSpec(s), 0, 0);
+  // The record's ground: one endless floor at the tester's ground line.
+  const FLOOR = [{ x: -1e6, y: groundY, w: 2e6, h: 40 }];
   // The effects, and what they aim at: the tester's soldier (30x46 on the ground).
   const fx = createFx(scene);
   fx.setFloor(viewY(groundY));
@@ -168,7 +191,7 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
     if (missile && siege) tint(missile, siege.defs.seekerMissile.visual.color);
     for (const s of SPECS) {
       const rig = gltf.scene.getObjectByName(s.id);
-      if (!rig) continue;
+      if (!rig || promoted(s)) continue;
       const group = new THREE.Group(), body = new THREE.Group();
       group.add(body);
       body.add(rig);
@@ -265,105 +288,6 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   // Per enemy: (bone setter, time, mode, attack phase) -> poses for this frame.
   // `a` runs 0..ATTACK; the shot is at WINDUP. `kick` decays after the shot.
   const ANIM = {
-    husk_charger(P, t, mode, a, kick) {
-      const g = t * 15;
-      const run = mode === "move" || (mode === "attack" && a > WINDUP && a < WINDUP + 0.5);
-      const sw = run ? 0.6 : 0.05;
-      P.rot("legFL", Math.sin(g) * sw); P.rot("legBR", Math.sin(g) * sw);
-      P.rot("legFR", -Math.sin(g) * sw); P.rot("legBL", -Math.sin(g) * sw);
-      P.lift(run ? Math.abs(Math.sin(g)) * 1.4 : Math.sin(t * 3) * 0.4);
-      P.tilt(run ? -0.06 : 0);
-      if (mode === "attack") {
-        const crouch = a < WINDUP ? a / WINDUP : 0;
-        const lunge = a >= WINDUP && a < WINDUP + 0.5 ? Math.sin(((a - WINDUP) / 0.5) * Math.PI) : 0;
-        P.rot("head", -0.35 * crouch - 0.2 * lunge);
-        P.shift(-3 * crouch + 14 * lunge);
-      } else P.rot("head", Math.sin(t * 1.7) * 0.08 + (run ? -0.12 : 0));
-    },
-    lurk_gunner(P, t, mode, a, kick, m) {
-      // A stalking walk: each foot plants and slides back along the ground for
-      // STANCE of the cycle, then lifts and swings forward; the other leg is
-      // half a cycle behind. Feet are placed on the ground and the legs are
-      // solved to reach them, so the body can bob, lean and recoil while the
-      // feet stay put. Idle and attack plant both feet at rest.
-      const walk = mode === "move", T = 0.7, STANCE = 0.6, STRIDE = 13;
-      const ph = (t / T) % 1;
-      if (walk) {
-        P.lift(0.9 * (1 - Math.cos(ph * 4 * Math.PI)) / 2);
-        P.tilt(-0.05 + 0.02 * Math.sin(ph * 2 * Math.PI));
-        P.shift(0.6 * Math.sin(ph * 4 * Math.PI));
-      } else P.lift(Math.sin(t * 2) * 0.4);
-      P.tilt(-0.12 * kick);
-      P.rot("head", Math.sin(t * 1.3) * 0.06 + (walk ? 0.05 * Math.sin(ph * 4 * Math.PI) : 0));
-      const aim = mode === "attack" ? Math.min(1, a / 0.3) * (a < WINDUP + 0.6 ? 1 : 0) : 0;
-      P.rot("gun", 0.18 * aim + 0.35 * kick + (walk ? Math.sin(ph * 2 * Math.PI) * 0.06 : 0));
-      for (const [side, off] of [["R", 0], ["L", 0.5]]) {
-        let dx = 0, up = 0, pitch = 0;
-        if (walk) {
-          const p = (ph + off) % 1;
-          if (p < STANCE) {
-            dx = STRIDE * (0.5 - p / STANCE);                  // planted, sliding back
-            pitch = p > STANCE - 0.15 ? -0.5 * (p - STANCE + 0.15) / 0.15 : 0; // heel peels up
-          } else {
-            const u = (p - STANCE) / (1 - STANCE), e = u * u * (3 - 2 * u);
-            dx = STRIDE * (e - 0.5);                           // swinging forward
-            up = 5.5 * Math.sin(Math.PI * u);
-            pitch = -0.5 * (1 - u) + 0.25 * Math.sin(Math.PI * u);
-          }
-        }
-        legIK(P, m.body, LURK, side, LURK.ankle.x + dx, LURK.ankle.y + up, pitch);
-      }
-    },
-    spore_wisp(P, t, mode, a, kick) {
-      const beat = Math.sin(t * 3);
-      P.squash(1 + 0.04 * beat, 1 - 0.06 * beat);
-      P.lift(Math.sin(t * 2.2) * 3);
-      P.tilt(mode === "move" ? -0.15 : 0);
-      for (let i = 0; i < 5; i++) P.rot(`t${i}`, Math.sin(t * 2 + i * 1.3) * 0.25 + (mode === "move" ? 0.3 : 0), Math.sin(t * 1.5 + i) * 0.2);
-      const swell = mode === "attack" && a < WINDUP ? a / WINDUP : 0;
-      P.scale("pods", 1 + 0.35 * swell - 0.25 * kick);
-    },
-    strafe_raider(P, t, mode, a, kick) {
-      const pass = mode !== "idle";
-      P.lift(Math.sin(t * 2.4) * 1.5);
-      P.tilt(pass ? -0.1 : Math.sin(t * 1.1) * 0.04);
-      P.roll(pass ? Math.sin(t * 1.8) * 0.9 : Math.sin(t * 1.5) * 0.3);
-      if (mode === "attack") P.shift(a < WINDUP ? -4 * (a / WINDUP) : 30 * Math.sin(Math.min(1, (a - WINDUP) / 0.55) * Math.PI) - 3 * kick);
-    },
-    cowardly_duelist(P, t, mode, a, kick) {
-      const g = t * 9, back = mode === "move";
-      P.rot("legL", back ? Math.sin(g) * 0.5 : Math.sin(t * 2) * 0.05);
-      P.rot("legR", back ? -Math.sin(g) * 0.5 : -Math.sin(t * 2) * 0.05);
-      P.lift(back ? Math.abs(Math.cos(g)) * 1.3 : 0);
-      P.shift(back ? 0 : Math.sin(t * 2) * 0.7);
-      P.tilt(back ? 0.12 : 0);
-      P.rot("coat", back ? 0.25 + Math.sin(g * 2) * 0.05 : Math.sin(t * 2) * 0.05);
-      // A nervous glance over its shoulder every few seconds.
-      const glance = Math.max(0, Math.sin(t * 0.9)) ** 8;
-      P.rot("head", Math.sin(t * 7) * 0.03, glance * 1.2);
-      const aim = mode === "attack" ? Math.min(1, a / 0.35) * (a < WINDUP + 0.6 ? 1 : 0) : 0;
-      P.rot("gun", 0.12 * aim + 0.4 * kick - (back ? 0.25 : 0));
-    },
-    sky_duelist(P, t, mode, a, kick) {
-      P.lift(Math.sin(t * 2) * 2.5);
-      P.tilt(mode === "move" ? -0.14 : Math.sin(t * 1.3) * 0.05);
-      P.roll(Math.sin(t * 1.1) * 0.12);
-      P.rot("rider", mode === "move" ? -0.1 : Math.sin(t * 1.7) * 0.04);
-      const aim = mode === "attack" ? Math.min(1, a / 0.3) * (a < WINDUP + 0.6 ? 1 : 0) : 0;
-      P.rot("gun", 0.1 * aim + 0.35 * kick);
-    },
-    iron_moth(P, t, mode, a, kick, m) {
-      const rate = mode === "move" ? 7 : 4;
-      for (const w of m.wings || []) {
-        w.hinge.rotation.y = w.side * Math.sin(t * rate) * 0.5;
-        w.hinge.rotation.z = w.side * Math.sin(t * rate + 0.6) * 0.08;
-      }
-      P.lift(Math.sin(t * 1.6) * 4);
-      P.rot("antL", Math.sin(t * 2.5) * 0.12 - 0.04); P.rot("antR", -Math.sin(t * 2.5 + 0.7) * 0.12 + 0.04);
-      const open = mode === "attack" ? (a < WINDUP ? a / WINDUP : Math.max(0, 1 - (a - WINDUP) / 0.5)) : 0.1 + 0.1 * Math.sin(t * 3);
-      P.rot("jawL", 0.4 * open); P.rot("jawR", -0.4 * open);
-    },
-
     // Hovers on four thruster pods; drifting tips the pods back. The five
     // deck pistons rise one by one toward the next launch. Building a drone: the bay doors swing down, the crane lowers
     // the new drone and lets it go, the doors close.
@@ -635,8 +559,6 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
 
   // Legs at rest (models/enemies.py), in the model's frame (x forward, y up),
   // with the bones each leg is made of, and the walk's cycle length.
-  const LURK = { hip: { x: -1, y: -5 }, knee: { x: 4, y: -12 }, ankle: { x: -2, y: -19 },
-    names: (s) => ["leg" + s, "shin" + s, "foot" + s] };
   const named = (s) => [s + "Leg", s + "Shin", s + "Foot"];
   const BOT = { hip: { x: 0, y: -14 }, knee: { x: 5, y: -24 }, ankle: { x: -3, y: -33 }, names: named, T: 0.46 };
   const SIEGE = { hip: { x: 0, y: -30 }, knee: { x: 12, y: -54 }, ankle: { x: 2, y: -72 }, names: named, T: 1.6 };
@@ -1032,6 +954,39 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
     if (withFx) fx.update(dt);
     const ga = t % ATTACK;
     const kick = mode === "attack" && ga >= WINDUP ? Math.max(0, 1 - (ga - WINDUP) / 0.25) : 0;
+    // The promoted: script each real root from its fake's box, run the game's
+    // record over them (moved along a treadmill, so walking reads as walking),
+    // and feel their kicks.
+    const live = [];
+    for (const s of SPECS) {
+      const r = roots[s.id];
+      if (!r) continue;
+      const e = ents[s.id];
+      r.x = e.x; r.y = e.y;
+      r.children.forEach((c, i) => { c.x = e.children[i].x; c.y = e.children[i].y; });
+      r.facing = s.role === "boss" ? 1 : facing;
+      r.telegraph = 0;
+      if (r.muzzleFlash > 0) r.muzzleFlash -= dt;
+      let v = mode === "move" ? s.root.motion?.speed ?? 60 : 0;
+      if (mode === "attack") {
+        if (ga < WINDUP) r.telegraph = WINDUP - ga;
+        if (dt > 0 && ga >= WINDUP && ga - dt < WINDUP) {
+          r.fireCount++;
+          r.muzzleFlash = 0.055;
+          r.muzzleColor = e.muzzleColor;
+        }
+        const dash = SCRIPT[s.id]?.dash;
+        if (dash && ga >= dash[0] && ga < dash[0] + dash[1]) v = dash[2];
+      }
+      odo[s.id] = (odo[s.id] ?? 0) + v * dt;
+      if (shown().includes(s)) live.push(r);
+    }
+    for (const r of live) r.x += odo[r.specTop.id];
+    const k = motion.update(live, FLOOR, t);
+    for (const r of live) r.x -= odo[r.specTop.id];
+    if (withFx && k > 0) fx.kick(k);
+    shownRoots = live;
+
     for (const s of SPECS) {
       const m = models[s.id], e = ents[s.id], on = shown().includes(s), own = FX[s.id];
       // Enemies with their own effects show their own tells instead of the game's.
@@ -1065,9 +1020,11 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   }
 
   // Inside the app's halos.begin()/end(): the glows, and the game's own model.
+  let shownRoots = [];
   function sync(mission, halos, compare) {
     const m = { time: mission.time };
-    for (const s of shown()) cues(ents[s.id], m, halos, 0.5 + 0.5 * Math.sin(mission.time * 26));
+    game.sync({ time: t, scene: { specRoots: shownRoots }, motion }, halos);
+    for (const s of shown()) if (!promoted(s)) cues(ents[s.id], m, halos, 0.5 + 0.5 * Math.sin(mission.time * 26));
     for (const s of shown()) oldEnts[s.id].facing = ents[s.id].facing;
     old.sync({ time: mission.time, scene: { specRoots: compare ? shown().map((s) => oldEnts[s.id]) : [] } }, halos);
   }
@@ -1089,8 +1046,17 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
     centre: () => frameC.clone(),
     half: () => frameHalf,
     loaded: () => loaded,
-    // id -> { group, body, bones, spec, wings? } once the glb is in; a host
-    // that stages them itself (splash.js) moves the groups after update().
-    models: () => models,
+    // id -> { group } once the glb is in (plus body, bones, spec, wings? for
+    // the tester's own); a host that stages them itself (splash.js) moves the
+    // groups after update() and sync(). A promoted enemy's group is the game's
+    // model, posed by the game's motion.
+    models: () => {
+      const out = { ...models };
+      for (const [id, r] of Object.entries(roots)) {
+        const g = game.modelOf(r);
+        if (g) out[id] = { group: g };
+      }
+      return out;
+    },
   };
 }
