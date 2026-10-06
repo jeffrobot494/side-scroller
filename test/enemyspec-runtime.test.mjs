@@ -382,10 +382,58 @@ export default async function run(t) {
     const root = instantiate(spec, 830, 500 - spec.root.body.h);
     const { ctx, log } = makeCtx(() => root);
     killEntity(root, root, null, scene, ctx);
-    t.ok("dead root: the Automaton's death blast was spawned", root.spawned.some((s) => s.id === "deathBlast"));
-    sim(root, scene, ctx, 3);
+    sim(root, scene, ctx, 5);
     t.ok(`dead root: the death blast damages a soldier beside it (${log.playerDamage})`, log.playerDamage >= 60);
     t.eq("dead root: everything it spawned has expired", root.spawned.length, 0);
+  }
+
+  // ---- the Siege Automaton's overload, as enemy data ------------------------
+  // Its death spawns a 2.4s overload; the pod and cannon still on it become
+  // charges that hold their place and blow at 0.4s and 1.0s; then the blast.
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "siege_automaton"));
+    const root = instantiate(spec, 300, 500 - spec.root.body.h);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, STEP); // seat the parts
+    const at = (id) => { const e = findEntity(root, id); return [e.x + e.w / 2, e.y + e.h / 2]; };
+    const pod = at("missilePack"), cannon = at("cannonArm"), body = [root.x + root.w / 2, root.y + root.h / 2];
+    killEntity(root, root, null, scene, ctx);
+    const find = (id) => root.spawned.find((e) => e.id === id && e.alive);
+    const overload = find("overload"), podCharge = find("podCharge"), cannonCharge = find("cannonCharge");
+    t.ok("overload: spawned at the death", !!overload);
+    t.ok("overload: the pod and cannon become charges", !!podCharge && !!cannonCharge);
+    const near = (e, p) => Math.hypot(e.x + e.w / 2 - p[0], e.y + e.h / 2 - p[1]) < 1;
+    t.ok("overload: each charge stands where its part was, the overload on the body",
+      near(podCharge, pod) && near(cannonCharge, cannon) && near(overload, body));
+    t.ok("overload: takes no hits", !collidables(root).includes(overload));
+    const firstSeen = {}, gone = {};
+    const watch = { overload, podCharge, cannonCharge };
+    for (let i = 1; i <= 200; i++) {
+      updateSpecEnemy(root, STEP, scene, ctx);
+      for (const e of root.spawned) if (firstSeen[e.id] === undefined) firstSeen[e.id] = i * STEP;
+      for (const [k, e] of Object.entries(watch)) if (!e.alive && gone[k] === undefined) gone[k] = i * STEP;
+    }
+    const close = (a, b) => a !== undefined && Math.abs(a - b) <= STEP + 1e-9;
+    t.ok(`overload: the pod charge blows at 0.4s (${gone.podCharge})`, close(gone.podCharge, 0.4));
+    t.ok(`overload: the cannon charge blows at 1.0s (${gone.cannonCharge})`, close(gone.cannonCharge, 1.0));
+    t.ok(`overload: ends at 2.4s (${gone.overload})`, close(gone.overload, 2.4));
+    t.ok(`overload: a micro blast comes with the first charge (${firstSeen.microBlast})`, close(firstSeen.microBlast, 0.4));
+    t.ok(`overload: the death blast follows the overload (${firstSeen.deathBlast})`, close(firstSeen.deathBlast, 2.4));
+    t.ok("overload: did not move", near(overload, body));
+    t.ok("overload: charges did not fall", near(podCharge, pod) && near(cannonCharge, cannon));
+  }
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "siege_automaton"));
+    const root = instantiate(spec, 300, 500 - spec.root.body.h);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, STEP);
+    applyDamage(root, findEntity(root, "missilePack"), 999, null, scene, ctx);
+    sim(root, scene, ctx, 1); // its own blast plays out
+    killEntity(root, root, null, scene, ctx);
+    t.ok("overload: a pod shot off first leaves no pod charge",
+      !root.spawned.some((e) => e.id === "podCharge") && root.spawned.some((e) => e.id === "cannonCharge"));
   }
   {
     const scene = makeScene();

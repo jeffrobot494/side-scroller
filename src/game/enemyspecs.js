@@ -445,8 +445,48 @@ const SIEGE_AUTOMATON = {
       life: { ttl: 1.25 },
       contact: { damage: 18, destroySelf: true, knockback: 0.35 },
     },
+    // The death is an overload: the robot stands for 2.4s while what is left
+    // of its pod and cannon blows, then the blast. Each charge holds its part's
+    // place and look until it blows; a part already shot off has none. All
+    // three float (gravity 0, ghost, static: a walking body would fall).
+    overload: {
+      tags: ["effect", "overload"],
+      visual: { shape: "box", size: [78, 164], color: "#ff7a1a" }, // P2: the body box in the flash's orange
+      body: { gravity: 0, ghost: true },
+      motion: { type: "static" },
+      life: { ttl: 2.4 },
+      on: {
+        destroy: [
+          { spawn: { ref: "deathFlash", count: 1, pattern: "single", speed: 0 } },
+          { spawn: { ref: "deathBlast", count: 1, pattern: "single", speed: 0 } },
+          { spawn: { ref: "deathShrapnel", count: 20, pattern: "ring", speed: 440 } },
+          { sound: { id: "impact.explode", gain: 1.5 } },
+        ],
+      },
+    },
+    podCharge: {
+      tags: ["effect", "charge"],
+      visual: { shape: "box", size: [54, 34], color: "#7d3f34" },
+      body: { gravity: 0, ghost: true },
+      motion: { type: "static" },
+      life: { ttl: 0.4 },
+      on: {
+        destroy: [
+          { spawn: { ref: "microBlast", count: 1, pattern: "single", speed: 0 } },
+          { spawn: { ref: "deathShrapnel", count: 8, pattern: "ring", speed: 240 } },
+        ],
+      },
+    },
+    cannonCharge: {
+      tags: ["effect", "charge"],
+      visual: { shape: "box", size: [62, 28], color: "#8b98a8" },
+      body: { gravity: 0, ghost: true },
+      motion: { type: "static" },
+      life: { ttl: 1.0 },
+      on: { destroy: [{ spawn: { ref: "microBlast", count: 1, pattern: "single", speed: 0 } }] },
+    },
   },
-  sounds: { fire: "weapon.fire.enemy", hurt: "enemy.hurt", death: { cue: "impact.explode", gain: 1.5 }, part: "enemy.part" },
+  sounds: { fire: "weapon.fire.enemy", hurt: "enemy.hurt", death: "enemy.death", part: "enemy.part" },
   root: {
     id: "root",
     tags: ["enemy", "robot", "elite"],
@@ -470,7 +510,7 @@ const SIEGE_AUTOMATON = {
         at: [48, -8],
         visual: { shape: "box", size: [62, 28], color: "#8b98a8" },
         health: { max: 100 },
-        link: { onParentDeath: "destroy", onOwnDeath: "destroy" },
+        link: { onParentDeath: "transform", transformTo: "cannonCharge", onOwnDeath: "destroy" },
         emitters: {
           pulseCannon: { at: [30, 0], projectile: { speed: 680, w: 18, h: 8, color: "#73e8ff", life: 1.7, damage: 18, shape: "bolt" }, sound: "weapon.fire.bolt" },
         },
@@ -482,7 +522,7 @@ const SIEGE_AUTOMATON = {
         at: [22, -38],
         visual: { shape: "box", size: [54, 34], color: "#7d3f34" },
         health: { max: 120 },
-        link: { onParentDeath: "destroy", onOwnDeath: "destroy" },
+        link: { onParentDeath: "transform", transformTo: "podCharge", onOwnDeath: "destroy" },
         emitters: {
           leftTube: { at: [-16, -6], ref: "seekerMissile", sound: "weapon.fire.missile" },
           rightTube: { at: [16, -6], ref: "seekerMissile", sound: "weapon.fire.missile" },
@@ -509,13 +549,7 @@ const SIEGE_AUTOMATON = {
         link: { onParentDeath: "destroy" },
       },
     ],
-    on: {
-      destroy: [
-        { spawn: { ref: "deathFlash", count: 1, pattern: "single", speed: 0 } },
-        { spawn: { ref: "deathBlast", count: 1, pattern: "single", speed: 0 } },
-        { spawn: { ref: "deathShrapnel", count: 20, pattern: "ring", speed: 440 } },
-      ],
-    },
+    on: { destroy: [{ spawn: { ref: "overload", count: 1, pattern: "single", speed: 0 } }] },
   },
   brain: {
     mode: "utility",

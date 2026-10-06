@@ -205,6 +205,18 @@ export default async function run(t) {
       es.enemyEntries().every((e) => e.origin === "file"));
     t.eq("list: the file's boss is in the list too", es.enemyEntries().length, 10);
 
+    // ---- the Siege Automaton out of missions and back in -------------------
+    // Its death is an overload now (tech/mission-3d-enemies.md M3): switching it
+    // back in re-runs the full mission dry run on the new defs. Placement reads
+    // no behaviour, so the same seed places the same level after.
+    const siegeLevel = () => JSON.stringify(generateLevel({ seed: 33, difficulty: "high" }).level.enemies);
+    const placedBefore = siegeLevel();
+    t.ok("siege: switches out of missions", es.setEnemyEnabled("siege_automaton", false).ok && missionRoster().length === 8);
+    const back = es.setEnemyEnabled("siege_automaton", true);
+    t.ok(`siege: passes the mission dry run back in (${back.error || "ok"})`, back.ok && missionRoster().length === 9);
+    t.eq("siege: the same seed places the same enemies", siegeLevel(), placedBefore);
+    es.resetEnemyList();
+
     const mite = () => ({
       v: 1, id: "rust_mite", name: "Rust Mite", threat: 40, role: "charger", tier: 1, intelligence: 1,
       root: { id: "root", tags: ["enemy"], visual: { shape: "box", size: [22, 20], color: "#a0a0a0" },

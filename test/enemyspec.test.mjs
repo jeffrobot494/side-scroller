@@ -9,6 +9,8 @@ import {
   addNode, duplicateNode, deleteNode, moveNode, promoteToDef, takenIds,
 } from "../src/editor/tools/spec-tree.js";
 import { diffSpecs, summarize } from "../src/game/enemyspec/specdiff.js";
+import { accept } from "../src/game/enemyspec/generate.js";
+import { ENEMY_FILE } from "../src/game/enemyspecs.js";
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const boss = () => clone(TEMPLATES.find((t) => t.id === "tpl_boss_moth"));
@@ -103,6 +105,14 @@ export default async function run(t) {
   for (const bad of [0, -0.1, "0.1"]) {
     t.ok(`validate: interval ${JSON.stringify(bad)} rejected on fire`, hasErr(validateSpec(withStep({ fire: { emitter: "maw", pattern: "burst", interval: bad } })), "interval"));
     t.ok(`validate: interval ${JSON.stringify(bad)} rejected on spawn`, hasErr(validateSpec(withStep({ spawn: { ref: "shard", pattern: "burst", interval: bad } })), "interval"));
+  }
+  // The Siege Automaton by name: its overload and charges are ordinary defs,
+  // and the engine's own gate takes it (tech/mission-3d-enemies.md M3).
+  {
+    const siege = ENEMY_FILE.find((r) => r.spec.id === "siege_automaton").spec;
+    const res = accept(siege);
+    t.ok(`siege: passes accept() (${(res.errors || []).join("; ") || "ok"})`, res.ok);
+    t.ok("siege: with its overload and charge defs", ["overload", "podCharge", "cannonCharge"].every((d) => siege.defs[d]));
   }
   t.ok("vocabulary: lists the burst interval", /fire: \{[^\n]*interval/.test(vocabularyDoc()) && /spawn: \{[^\n]*interval/.test(vocabularyDoc()));
 
