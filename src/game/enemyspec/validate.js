@@ -286,6 +286,11 @@ function checkSteps(err, steps, path, refs, { instantOnly = false, owner = null 
   }
 }
 
+// A burst's spacing: seconds between rounds, above 0.
+function checkInterval(err, path, args) {
+  if (args.interval !== undefined && !(typeof args.interval === "number" && args.interval > 0)) err(`${path}.interval`, "interval must be a number of seconds above 0");
+}
+
 function checkAction(err, name, args, path, refs, owner) {
   switch (name) {
     case "fire": {
@@ -304,12 +309,14 @@ function checkAction(err, name, args, path, refs, owner) {
       }
       if (args.pattern !== undefined && !PATTERNS.includes(args.pattern)) err(`${path}.pattern`, `pattern must be one of ${PATTERNS.join(", ")}`);
       if (args.aim !== undefined && !AIM_STYLES.includes(args.aim)) err(`${path}.aim`, `aim must be one of ${AIM_STYLES.join(", ")}`);
+      checkInterval(err, path, args);
       break;
     }
     case "spawn":
       if (!args || !args.ref) err(path, "spawn needs { ref }");
       else if (!refs.defIds.has(args.ref)) err(`${path}.ref`, `spawn ref '${args.ref}' not found in defs`);
       if (args && args.pattern !== undefined && !PATTERNS.includes(args.pattern)) err(`${path}.pattern`, `pattern must be one of ${PATTERNS.join(", ")}`);
+      if (args) checkInterval(err, path, args);
       break;
     case "setMotion":
       if (!args || !MOTIONS[args.type]) err(path, `setMotion needs { type: ${Object.keys(MOTIONS).join("|")} }`);

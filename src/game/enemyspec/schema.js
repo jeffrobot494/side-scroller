@@ -81,8 +81,8 @@ export const ACTIONS = {
   moveTo:    { blocking: true },  // { moveTo: { target|at:[x,y], speed, timeout? } }
   dash:      { blocking: true },  // { dash: { target?, speed, duration, away? } } — a committed burst; each body actuates its own axes
   jump:      { blocking: false }, // { jump: {} } — hop if on the ground; the body owns the impulse
-  fire:      { blocking: false }, // { fire: { emitter, count?, pattern?, spreadDeg?, aim?, speed? } }
-  spawn:     { blocking: false }, // { spawn: { ref, count?, pattern?, speed?, at? } }
+  fire:      { blocking: false }, // { fire: { emitter, count?, pattern?, spreadDeg?, aim?, speed?, interval? } }
+  spawn:     { blocking: false }, // { spawn: { ref, count?, pattern?, speed?, at?, interval? } }
   setMotion: { blocking: false }, // { setMotion: { target?, type, ...params } }
   set:       { blocking: false }, // { set: { target: "root.vars.x", value } }
   add:       { blocking: false }, // { add: { target, value } }
@@ -98,7 +98,11 @@ export const ACTIONS = {
 
 // Fire/spawn geometry patterns (initial position/angle/timing only — the spawned
 // entity's own components take over after launch, doc §6.4).
+// A burst's rounds leave in sequence, `interval` seconds apart (> 0).
 export const PATTERNS = ["single", "aimed", "burst", "fan", "ring"];
+// Spacing for a burst that names no interval. Placeholder P1 in
+// tech/mission-3d-enemies.md: Bo has not chosen it.
+export const BURST_INTERVAL = 0.1;
 
 // Aim styles for `aimed` fire (smarter-AI doc §3): current position, lead the
 // player's velocity, or target the predicted landing point.
@@ -286,8 +290,9 @@ export function vocabularyDoc() {
     `Sound cue ids (the closed set — never invent one): ${CUE_IDS.join(", ")}.`,
     `  Blocking (occupy the track for a duration): wait, telegraph, moveTo, dash. Every looping track needs at least one.`,
     `  moveTo/dash targets: "player", "parent", "spawn", "lastSeen" (where the player was last visible), "anchor" (a companion's leader), or at:[x,y]. Optional offset:[along,up] — along is on the line toward the target (positive = a point PAST it → fly-through strafing passes; negative = standoff short of it), up is vertical (negative = above). e.g. { moveTo: { target:"player", offset:[-260,-140], speed:260 } } = a firing perch above and short of the player; { moveTo: { target:"player", offset:[240,0], speed:420 } } = a strafing pass through them.`,
-    `  fire: { emitter: "<name>" or "<childId>.<name>", count, pattern: ${PATTERNS.join("|")}, spreadDeg, aim: ${AIM_STYLES.join("|")} }`,
-    `  spawn: { ref: "<defId>", count, pattern, speed }`,
+    `  fire: { emitter: "<name>" or "<childId>.<name>", count, pattern: ${PATTERNS.join("|")}, spreadDeg, aim: ${AIM_STYLES.join("|")}, interval }`,
+    `  spawn: { ref: "<defId>", count, pattern, speed, interval }`,
+    `  pattern "burst" fires its count in sequence, one round every \`interval\` seconds (> 0, default ${BURST_INTERVAL}); fan/ring/aimed leave together.`,
     `Expressions (strings): arithmetic/comparison/boolean over self.hpPct, self.x/y, self.vars.*, root.vars.*, player.x/y/vx/vy/isGrounded, arena.time/width, sense.los/dist/playerAbove/playerBelow/playerApproaching/cornered/timeSinceSeen/anchorDist (anchorX/anchorY = a companion's leader, or the spawn point), sense.routeSteps/routeReachable/navBlocked (navigation: edges left on the route, whether the destination is gettable at all, and whether this agent gave up trying to jump to it), and functions ${EXPR_FUNCTIONS.join(", ")}. No scripting.`,
     `limits: { maxAlive<=${LIMIT_CAPS.maxAlive}, maxSpawnsPerSecond<=${LIMIT_CAPS.maxSpawnsPerSecond}, maxSpawnDepth<=${LIMIT_CAPS.maxSpawnDepth} } — engine-enforced.`,
     `intelligence rubric — HOW SMART the behavior reads, NOT how hard it hits (damage/hp/attack rate belong in threat):`,

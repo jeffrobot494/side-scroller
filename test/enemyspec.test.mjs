@@ -3,7 +3,7 @@ import { parseExpr, evaluate } from "../src/game/enemyspec/expr.js";
 import { validateSpec } from "../src/game/enemyspec/validate.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { TEMPLATES } from "../src/game/enemyspec/templates.js";
-import { ENTITY_KEYS, ENTITY_FIELDS, motionFields, MOTIONS } from "../src/game/enemyspec/schema.js";
+import { ENTITY_KEYS, ENTITY_FIELDS, motionFields, MOTIONS, vocabularyDoc } from "../src/game/enemyspec/schema.js";
 import {
   treeNodes, nodeAt, valueAt, setAt, availableAdds, errorCounts,
   addNode, duplicateNode, deleteNode, moveNode, promoteToDef, takenIds,
@@ -93,6 +93,18 @@ export default async function run(t) {
   s = boss();
   s.brain.states.orphan = { tracks: [] };
   t.ok("validate: unreachable state", hasErr(validateSpec(s), "unreachable"));
+
+  // A burst's spacing: seconds between rounds, on fire and spawn, above 0.
+  const withStep = (step) => { const b = boss(); b.brain.states.phase1.tracks[0].steps = [step, { wait: 1 }]; return b; };
+  t.ok("validate: fire burst interval accepted",
+    !hasErr(validateSpec(withStep({ fire: { emitter: "maw", count: 3, pattern: "burst", interval: 0.08 } })), "interval"));
+  t.ok("validate: spawn burst interval accepted",
+    !hasErr(validateSpec(withStep({ spawn: { ref: "shard", count: 3, pattern: "burst", interval: 0.2 } })), "interval"));
+  for (const bad of [0, -0.1, "0.1"]) {
+    t.ok(`validate: interval ${JSON.stringify(bad)} rejected on fire`, hasErr(validateSpec(withStep({ fire: { emitter: "maw", pattern: "burst", interval: bad } })), "interval"));
+    t.ok(`validate: interval ${JSON.stringify(bad)} rejected on spawn`, hasErr(validateSpec(withStep({ spawn: { ref: "shard", pattern: "burst", interval: bad } })), "interval"));
+  }
+  t.ok("vocabulary: lists the burst interval", /fire: \{[^\n]*interval/.test(vocabularyDoc()) && /spawn: \{[^\n]*interval/.test(vocabularyDoc()));
 
   s = boss();
   s.root.children[0].wings = true;

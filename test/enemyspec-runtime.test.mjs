@@ -296,6 +296,83 @@ export default async function run(t) {
     t.ok("lastSeen: no memory → no hunt", Math.abs(b.x - 300) < 30);
   }
 
+  // ---- burst: rounds leave in sequence, never on one frame -----------------
+  // patternAngles used to return every burst angle at once, so a burst was an
+  // aimed volley with a wider jitter.
+  {
+    const shot = { speed: 300, w: 6, h: 6, color: "#fff", life: 5, damage: 1 };
+    const mk = (steps) => normalizeSpec({
+      id: "burster",
+      root: {
+        health: { max: 100 }, motion: { type: "static" },
+        children: [{ id: "arm", at: [0, 0], visual: { size: [10, 10] }, health: { max: 5 }, emitters: { gun: { at: [0, 0], projectile: shot } } }],
+      },
+      defs: { pip: { visual: { size: [6, 6] }, body: { gravity: 0, ghost: true }, motion: { type: "static" }, life: { ttl: 5 } } },
+      brain: { start: "s", states: { s: { tracks: [{ id: "t", loop: false, steps }] } } },
+    });
+    // Frame index of each new projectile (or spawn) over `seconds`.
+    const frames = (root, scene, ctx, seconds, count) => {
+      const out = [];
+      for (let i = 0, n = Math.round(seconds / STEP); i < n; i++) {
+        const before = count();
+        updateSpecEnemy(root, STEP, scene, ctx);
+        for (let k = before; k < count(); k++) out.push(i);
+      }
+      return out;
+    };
+    const gaps = (f) => f.slice(1).map((x, i) => (x - f[i]) * STEP);
+
+    let scene = makeScene();
+    let root = instantiate(mk([{ fire: { emitter: "arm.gun", count: 3, pattern: "burst", interval: 0.08 } }, { wait: 9 }]), 300, 300);
+    let { ctx } = makeCtx(() => root);
+    const arm = findEntity(root, "arm");
+    let f = frames(root, scene, ctx, 1, () => scene.projectiles.length);
+    t.eq("burst: three rounds", f.length, 3);
+    t.ok(`burst: each round 0.08s after the last, within a frame (${gaps(f).map((g) => g.toFixed(3))})`,
+      f.length === 3 && gaps(f).every((g) => Math.abs(g - 0.08) <= STEP + 1e-9));
+    t.eq("burst: the fire count is bumped per round", arm.fireCount, 3);
+
+    scene = makeScene();
+    root = instantiate(mk([{ if: { when: "1", then: [{ fire: { emitter: "arm.gun", count: 3, pattern: "burst", interval: 0.2 } }] } }, { wait: 9 }]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    f = frames(root, scene, ctx, 1, () => scene.projectiles.length);
+    t.ok(`burst: spaced inside an if branch too (${gaps(f).map((g) => g.toFixed(3))})`,
+      f.length === 3 && gaps(f).every((g) => Math.abs(g - 0.2) <= STEP + 1e-9));
+
+    scene = makeScene();
+    root = instantiate(mk([{ spawn: { ref: "pip", count: 3, pattern: "burst", interval: 0.15 } }, { wait: 9 }]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    let spawns = 0;
+    f = [];
+    for (let i = 0; i < 60; i++) {
+      const before = root.spawned.length;
+      updateSpecEnemy(root, STEP, scene, ctx);
+      spawns += root.spawned.length - before;
+      if (root.spawned.length > before) f.push(i);
+    }
+    t.ok(`burst: a spawn burst is spaced (${gaps(f).map((g) => g.toFixed(3))})`,
+      spawns === 3 && gaps(f).every((g) => Math.abs(g - 0.15) <= STEP + 1e-9));
+
+    scene = makeScene();
+    root = instantiate(mk([{ fire: { emitter: "arm.gun", count: 5, pattern: "burst", interval: 0.1 } }, { wait: 9 }]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    sim(root, scene, ctx, 0.15);
+    killEntity(root, findEntity(root, "arm"), null, scene, ctx);
+    sim(root, scene, ctx, 1);
+    t.eq("burst: pending rounds die with the part", scene.projectiles.length, 2);
+
+    scene = makeScene();
+    root = instantiate(mk([
+      { fire: { emitter: "arm.gun", count: 5, pattern: "burst", interval: 0.2 } },
+      { wait: 0.1 },
+      { fire: { emitter: "arm.gun", count: 2, pattern: "burst", interval: 0.2 } },
+      { wait: 9 },
+    ]), 300, 300);
+    ({ ctx } = makeCtx(() => root));
+    sim(root, scene, ctx, 2);
+    t.eq("burst: a second burst replaces the first's pending rounds", scene.projectiles.length, 3);
+  }
+
   // ---- Assault Bot leap: the landing spot is fixed at takeoff ---------------
   // It used to steer at the live player all the way down, so a dodge could not
   // work. Move the player 400px mid-leap: the bot must land on the old spot.

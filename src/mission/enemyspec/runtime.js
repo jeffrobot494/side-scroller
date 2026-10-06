@@ -26,6 +26,7 @@ import { tickBrain } from "./brain.js";
 import { updateSense, nearestHostile, losBetween, spotExposure, myShot } from "./perception.js";
 import { specSound, emitterSound } from "../../audio/cues.js";
 import { config } from "../../game/config.js";
+import { BURST_INTERVAL } from "../../game/enemyspec/schema.js";
 
 const WALL_EPS = 4;
 
@@ -101,6 +102,8 @@ function makeInstance(def, parent, root, rng) {
     depth: 0,
     telegraph: 0,
     contactCooldown: 0,
+    fireCount: 0, // bumped once per round fired (a burst bumps it per round)
+    burst: null,  // the rounds of a burst still to leave; see startBurst
     hitFlash: 0,
     burn: null,
     slow: null,
@@ -178,6 +181,7 @@ function updateTree(root, ent, dt, scene, ctx) {
   // its face; and `1/60` per DRAW is frame-rate coupled, so the flash was 2.4x
   // shorter at 144fps than at 60. A renderer must not mutate what it renders.
   if (ent.muzzleFlash > 0) ent.muzzleFlash -= dt;
+  if (ent.burst) tickBurst(root, ent, dt, scene, ctx);
 
   if (!ent.disabled) {
     moveEntity(root, ent, dt, scene);
@@ -1053,11 +1057,10 @@ export function execStep(root, self, step, scene, ctx) {
     }
     case "spawn": {
       const count = args.count || 1;
-      const speed = args.speed || 200;
-      const angles = patternAngles(root, self, args.pattern || "ring", count, args.spreadDeg, scene, "current");
-      for (const a of angles) {
-        spawnFromDef(root, args.ref, cx(self), cy(self), { vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, depth: self.depth + 1 }, scene, ctx);
-      }
+      const pattern = args.pattern || "ring";
+      const round = { kind: "spawn", ref: args.ref, speed: args.speed || 200 };
+      if (pattern === "burst") startBurst(root, self, round, count, args.interval, aimAngle(root, self, pattern, scene, "current"), scene, ctx);
+      else spawnRound(root, self, round, patternAngles(root, self, pattern, count, args.spreadDeg, scene, "current"), scene, ctx);
       return null;
     }
     case "setMotion": {
@@ -1132,19 +1135,28 @@ function doFire(root, self, args, scene, ctx) {
   const { owner, def } = em;
   if (!owner.alive || owner.disabled) return;
 
-  const ox = cx(owner) + def.at[0];
-  const oy = cy(owner) + def.at[1];
   const count = args.count || 1;
   const pattern = args.pattern || (count > 1 ? "fan" : "aimed");
-  const angles = patternAngles(root, owner, pattern, count, args.spreadDeg, scene, args.aim || "current", { x: ox, y: oy });
+  const round = { kind: "fire", def, speed: args.speed };
+  const origin = muzzle(owner, def);
+  if (pattern === "burst") startBurst(root, owner, round, count, args.interval, aimAngle(root, owner, pattern, scene, args.aim || "current", origin), scene, ctx);
+  else fireRound(root, owner, round, patternAngles(root, owner, pattern, count, args.spreadDeg, scene, args.aim || "current", origin), scene, ctx);
+}
 
+const muzzle = (owner, def) => ({ x: cx(owner) + def.at[0], y: cy(owner) + def.at[1] });
+
+// One fire: every angle leaves at once from the emitter's muzzle, with one
+// flash, one count and one cue (a 9-shot fan is one report).
+function fireRound(root, owner, round, angles, scene, ctx) {
+  const { def } = round;
+  const { x: ox, y: oy } = muzzle(owner, def);
   for (const a of angles) {
     if (def.ref) {
-      const speed = args.speed || 200;
+      const speed = round.speed || 200;
       spawnFromDef(root, def.ref, ox, oy, { vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, depth: owner.depth + 1 }, scene, ctx);
     } else {
       const p = def.projectile;
-      const speed = args.speed || p.speed;
+      const speed = round.speed || p.speed;
       // team follows the agent's allegiance (root.team): an enemy spec's rounds
       // hit the squad; a player-team spec's rounds hit the enemy roster.
       scene.projectiles.push(
@@ -1152,13 +1164,52 @@ function doFire(root, self, args, scene, ctx) {
       );
     }
   }
+  owner.fireCount++;
   owner.muzzleFlash = 0.055;
   owner.muzzleColor = def.projectile ? def.projectile.color : "#ff8a5a";
-  // One cue per fire ACTION, not per angle — a 9-shot fan is one report.
   if (scene.sound) {
     const shot = emitterSound(root.specTop, def);
     scene.sound(shot.cue, { x: ox, y: oy, gain: shot.gain });
   }
+}
+
+function spawnRound(root, self, round, angles, scene, ctx) {
+  for (const a of angles) {
+    spawnFromDef(root, round.ref, cx(self), cy(self), { vx: Math.cos(a) * round.speed, vy: Math.sin(a) * round.speed, depth: self.depth + 1 }, scene, ctx);
+  }
+}
+
+// A burst is rounds in sequence, never all on one frame. The first leaves now;
+// the rest wait on the EMITTING entity, not the track, because fire is
+// non-blocking and an `if` branch or an event handler runs instantly — so a
+// burst is spaced wherever it is written. The direction is fixed here, once;
+// each round adds the burst's own jitter. A new burst from the same entity
+// replaces any rounds still pending.
+const BURST_JITTER = 0.1; // rad, full width
+
+function startBurst(root, ent, round, count, interval, base, scene, ctx) {
+  ent.burst = null;
+  releaseRound(root, ent, round, base, scene, ctx);
+  if (count > 1) ent.burst = { round, base, left: count - 1, every: interval || BURST_INTERVAL, t: interval || BURST_INTERVAL };
+}
+
+function releaseRound(root, ent, round, base, scene, ctx) {
+  const angles = [base + (root.rng() - 0.5) * BURST_JITTER];
+  if (round.kind === "fire") fireRound(root, ent, round, angles, scene, ctx);
+  else spawnRound(root, ent, round, angles, scene, ctx);
+}
+
+// Pending rounds die with the part, a disable, or the root.
+function tickBurst(root, ent, dt, scene, ctx) {
+  if (!root.alive || ent.disabled) { ent.burst = null; return; }
+  const b = ent.burst;
+  b.t -= dt;
+  while (b.t <= 0 && b.left > 0 && ent.burst === b) {
+    b.left--;
+    b.t += b.every;
+    releaseRound(root, ent, b.round, b.base, scene, ctx);
+  }
+  if (ent.burst === b && b.left <= 0) ent.burst = null;
 }
 
 function resolveEmitter(root, self, ref) {
@@ -1179,7 +1230,7 @@ function resolveEmitter(root, self, ref) {
 // Initial launch angles for a pattern. Aim styles (smarter-AI doc §3): current
 // position, lead (position + velocity * predictionTime), landing (lead in x,
 // player's feet line in y).
-function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin) {
+function aimAngle(root, from, pattern, scene, aim, origin) {
   const o = origin || { x: cx(from), y: cy(from) };
   const t = nearestHostile(root, scene);
   let base = from.facing >= 0 ? 0 : Math.PI;
@@ -1198,7 +1249,11 @@ function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin
     }
     base = Math.atan2(ty - o.y, tx - o.x);
   }
+  return base;
+}
 
+function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin) {
+  const base = aimAngle(root, from, pattern, scene, aim, origin);
   const angles = [];
   switch (pattern) {
     case "ring": {
@@ -1209,10 +1264,6 @@ function patternAngles(root, from, pattern, count, spreadDeg, scene, aim, origin
       const spread = ((spreadDeg ?? 40) * Math.PI) / 180;
       if (count === 1) angles.push(base);
       else for (let i = 0; i < count; i++) angles.push(base - spread / 2 + (spread * i) / (count - 1));
-      break;
-    }
-    case "burst": {
-      for (let i = 0; i < count; i++) angles.push(base + (root.rng() - 0.5) * 0.1);
       break;
     }
     case "single":
