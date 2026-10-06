@@ -901,9 +901,8 @@ export class Mission {
     const scene = this.scene;
     // Every mission enemy is an EnemySpec root: the runtime drives movement, the
     // brain, contact damage to soldiers, and enemy-team projectile fire.
-    for (const r of scene.specRoots) {
-      if (r.alive) updateSpecEnemy(r, dt, scene, this._ctx);
-    }
+    // A dead root is stepped too: what it spawned outlives it.
+    for (const r of scene.specRoots) updateSpecEnemy(r, dt, scene, this._ctx);
 
     // Root-death bookkeeping (once per root): kill credit, loot drop, burst.
     // A part/child dying never counts — only the root (the "enemy").
@@ -925,7 +924,8 @@ export class Mission {
 
     // Rebuild the flat damageable set combat.js hits (parts die, seekers spawn).
     // MUST run before _updateProjectiles, which reads scene.enemies.
-    scene.enemies = scene.specRoots.flatMap((r) => (r.alive ? collidables(r) : []));
+    // A dead root contributes its spawned list, which collidables walks.
+    scene.enemies = scene.specRoots.flatMap((r) => collidables(r));
   }
 
   _updateProjectiles(dt) {
@@ -1311,7 +1311,7 @@ export class Mission {
     } else {
       this._drawExit(ctx, scene.exit, z);
       for (const l of scene.loot) this._drawLoot(ctx, l);
-      for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z);
+      for (const r of scene.specRoots) drawSpecEnemy(ctx, r, this.time, z);
       for (const p of scene.projectiles) this._drawProjectile(p, z);
       for (const s of scene.soldiers) this._drawSoldier(s, s === drivenHere, z);
       this._drawParticles(ctx);
@@ -1471,7 +1471,7 @@ export class Mission {
   _drawTells(ctx, drivenHere, z = 1) {
     const scene = this.scene;
     this._drawExitLabel(ctx, scene.exit, z);
-    for (const r of scene.specRoots) if (r.alive) drawSpecEnemy(ctx, r, this.time, z, { body: false });
+    for (const r of scene.specRoots) drawSpecEnemy(ctx, r, this.time, z, { body: false });
     for (const s of scene.soldiers) {
       if (!s.alive) continue;
       const x = this._snap(s.x, z), y = this._snap(s.y, z);

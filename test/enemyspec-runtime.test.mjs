@@ -373,6 +373,38 @@ export default async function run(t) {
     t.eq("burst: a second burst replaces the first's pending rounds", scene.projectiles.length, 3);
   }
 
+  // ---- a dead root's spawns live on ----------------------------------------
+  // updateSpecEnemy returned early for a dead root, so its death blast froze
+  // unhit and its drones froze in the air the moment it died.
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "siege_automaton"));
+    const root = instantiate(spec, 830, 500 - spec.root.body.h);
+    const { ctx, log } = makeCtx(() => root);
+    killEntity(root, root, null, scene, ctx);
+    t.ok("dead root: the Automaton's death blast was spawned", root.spawned.some((s) => s.id === "deathBlast"));
+    sim(root, scene, ctx, 3);
+    t.ok(`dead root: the death blast damages a soldier beside it (${log.playerDamage})`, log.playerDamage >= 60);
+    t.eq("dead root: everything it spawned has expired", root.spawned.length, 0);
+  }
+  {
+    const scene = makeScene();
+    const spec = normalizeSpec(MISSION_ENEMY_SPECS.find((s) => s.id === "floating_factory"));
+    const root = instantiate(spec, 200, 150);
+    const { ctx } = makeCtx(() => root);
+    sim(root, scene, ctx, 7.5);
+    const drone = root.spawned.find((s) => s.id === "drone");
+    t.ok("dead root: the Factory launched a drone", !!drone);
+    killEntity(root, root, null, scene, ctx);
+    const x0 = drone.x, y0 = drone.y;
+    sim(root, scene, ctx, 0.5);
+    t.ok("dead root: its drone is still stepped", Math.hypot(drone.x - x0, drone.y - y0) > 20);
+    t.ok("dead root: its drone is still hittable", collidables(root).includes(drone));
+    applyDamage(root, drone, 999, null, scene, ctx);
+    sim(root, scene, ctx, STEP);
+    t.ok("dead root: its drone is killable", !drone.alive && root.spawned.length === 0);
+  }
+
   // ---- Assault Bot leap: the landing spot is fixed at takeoff ---------------
   // It used to steer at the live player all the way down, so a dodge could not
   // work. Move the player 400px mid-leap: the bot must land on the old spot.

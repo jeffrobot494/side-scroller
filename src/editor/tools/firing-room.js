@@ -286,8 +286,9 @@ export function createFiringRoom(container, onBack) {
 
     // Designed EnemySpec waves: the runtime drives them; refresh the target list
     // (parts die, seekers spawn) every frame.
-    for (const r of specRoots) if (r.alive) updateSpecEnemy(r, dt, scene, cctx);
-    if (specRoots.length) scene.enemies = specRoots.flatMap((r) => (r.alive ? collidables(r) : []));
+    // Dead roots too: what an enemy spawned outlives it (its blast, its drones).
+    for (const r of specRoots) updateSpecEnemy(r, dt, scene, cctx);
+    if (specRoots.length) scene.enemies = specRoots.flatMap((r) => collidables(r));
 
     // Non-spec targets are the respawning dummies (spec parts are updated above).
     for (const d of scene.enemies) {
@@ -354,7 +355,7 @@ export function createFiringRoom(container, onBack) {
     }
 
     // designed EnemySpec targets (parts, telegraphs, spawned entities)
-    for (const r of specRoots) if (r.alive) drawSpecEnemy(ctx, r, stats.elapsed);
+    for (const r of specRoots) drawSpecEnemy(ctx, r, stats.elapsed);
 
     // targets
     for (const d of scene.enemies) {

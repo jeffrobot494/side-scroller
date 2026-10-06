@@ -1620,13 +1620,14 @@ export function createEnemyDesigner(container, onBack) {
     audio.setListener(shooter.x + shooter.w / 2); // pan follows the player
 
     // ---- the enemy --------------------------------------------------------
+    // A dead root is still stepped, so its death spawns (a blast, an
+    // overload) play out; the reset waits until they are gone.
     if (preview.root) {
-      if (!preview.root.alive) {
+      updateSpecEnemy(preview.root, dt, scene, previewCtx);
+      scene.enemies = collidables(preview.root);
+      if (!preview.root.alive && !preview.root.spawned.length) {
         preview.respawn += dt;
         if (preview.respawn > 1.2) resetPreview();
-      } else {
-        updateSpecEnemy(preview.root, dt, scene, previewCtx);
-        scene.enemies = collidables(preview.root);
       }
     }
 

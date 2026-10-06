@@ -2,8 +2,8 @@
 // 3D VIEW — EnemySpec enemies (tech/mission-3d.md).
 //
 // The walk is drawSpecEnemy's (src/mission/enemyspec/render.js): a live root,
-// its alive children, its `spawned` list; a disabled part is not drawn but its
-// children are. So a part is visible here exactly when it is in 2D.
+// its alive children, its `spawned` list (a dead root's included, since what it
+// spawned outlives it); a disabled part is not drawn but its children are. So a part is visible here exactly when it is in 2D.
 //
 // R5: each part is a model of its `spec.visual.shape` in `spec.visual.color`,
 // sized to the part's box every frame, with the detail a flat shape cannot
@@ -144,8 +144,7 @@ export function createEnemies(parent) {
     sync(m, halos) {
       models.begin();
       for (const r of m.scene.specRoots) {
-        if (!r.alive) continue;
-        tree(r, m, halos);
+        tree(r, m, halos); // a dead root draws nothing, but its spawned list does
         for (const sp of r.spawned) tree(sp, m, halos);
       }
       // A part that is merely disabled comes back; anything dead is gone.

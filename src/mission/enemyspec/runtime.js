@@ -153,13 +153,19 @@ export function makeTrackStates(state) {
 
 // ---- per-frame update -----------------------------------------------------
 
+// A dead root's own tree is done, but what it spawned outlives it (a dying
+// boss's blast still lands and its missiles don't vanish mid-air): the spawned
+// list is stepped until it empties, and the root's clock keeps running so its
+// spawn-rate window ages out. Every host calls this for dead roots too.
 export function updateSpecEnemy(root, dt, scene, ctx) {
-  if (!root.alive) return;
+  if (!root.alive && !root.spawned.length) return;
   cacheHost(root, scene, ctx);
   root.age += dt;
-  updateSense(root, scene, dt);
-  tickBrain(root, dt, scene, ctx);
-  updateTree(root, root, dt, scene, ctx);
+  if (root.alive) {
+    updateSense(root, scene, dt);
+    tickBrain(root, dt, scene, ctx);
+    updateTree(root, root, dt, scene, ctx);
+  }
   for (const sp of root.spawned) {
     if (sp.alive) updateTree(root, sp, dt, scene, ctx);
   }
