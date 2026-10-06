@@ -175,8 +175,13 @@ export function makeRig(root) {
     wings.push({ id: c.id, hinge, side, at: c.spec.at || [0, 0], w: c.w, mats: wm });
   }
 
+  // Each bone's head in the model's frame at rest (group at the origin), for
+  // the arm IK and for flinging a part off.
+  group.updateMatrixWorld(true);
+  const rest = Object.fromEntries(Object.entries(bones).map(([n, { b }]) => [n, b.getWorldPosition(new THREE.Vector3())]));
+
   return {
-    root: group, body, bones, shell, skeleton, boneParts, wings,
+    root: group, body, bones, shell, skeleton, boneParts, wings, rest,
     natural: NATURAL[id] || [root.w, root.h],
     id,
     state: {}, // the animation's own clock, never on an entity
@@ -198,9 +203,13 @@ export function paintRig(v, root, partsById, telegraph, time) {
   }
   const pulse = telegraph ? 0.5 + 0.5 * Math.sin(time * 26) : 0;
   v.shell.userData.tele.value.copy(RED).multiplyScalar(telegraph ? 0.35 + pulse * 0.65 : 0);
-  for (const [id, e] of partsById) {
-    const B = v.bones[id];
-    if (B && (!e.alive || e.disabled)) B.b.scale.setScalar(0.001);
+  // A dead part's bone collapses, unless it is in flight (state.flying), and
+  // only while the root lives: a dead root's death motion owns what shows.
+  if (root.alive) {
+    for (const [id, e] of partsById) {
+      const B = v.bones[id];
+      if (B && (!e.alive || e.disabled) && !(v.state.flying && v.state.flying[id])) B.b.scale.setScalar(0.001);
+    }
   }
   return pulse;
 }
@@ -272,4 +281,51 @@ export function walk(P, v, rig, ph, { stance, stride, lift, pitch }) {
     }
     legIK(P, v.body, rig, side, rig.ankle.x + dx, rig.ankle.y + up, pt);
   });
+}
+
+// Two-bone IK for an arm (the Siege Automaton's far arm), in the model's frame
+// (three's axes): the wrist at T, the elbow bent toward `pole`, the fingers
+// along `hand`. Every bone is identity at rest, so each solved rotation is
+// blended from rest by `w`. `curl` bends the index finger in. `bones` names
+// the shoulder, elbow, wrist and finger bones.
+const I = new THREE.Quaternion();
+export function armIK(P, v, [sh, el, wr, fi], T, pole, hand, w, curl) {
+  const S = v.rest[sh], E0 = v.rest[el], W0 = v.rest[wr], F0 = v.rest[fi];
+  const L1 = E0.distanceTo(S), L2 = W0.distanceTo(E0);
+  const n = T.clone().sub(S), d = Math.min(n.length(), L1 + L2 - 0.5);
+  n.normalize();
+  const a = (L1 * L1 - L2 * L2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+  const side = pole.clone().addScaledVector(n, -pole.dot(n)).normalize();
+  const E = S.clone().addScaledVector(n, a).addScaledVector(side, h), W = S.clone().addScaledVector(n, d);
+  const qa = new THREE.Quaternion().setFromUnitVectors(E0.clone().sub(S).normalize(), E.clone().sub(S).normalize());
+  const inv = qa.clone().invert();
+  const qb = new THREE.Quaternion().setFromUnitVectors(W0.clone().sub(E0).normalize(), W.clone().sub(E).normalize().applyQuaternion(inv));
+  const qh = new THREE.Quaternion().setFromUnitVectors(F0.clone().sub(W0).normalize(), hand.clone().normalize());
+  const qc = qa.clone().multiply(qb).invert().multiply(qh);
+  P.quat(sh, I.clone().slerp(qa, w));
+  P.quat(el, I.clone().slerp(qb, w));
+  P.quat(wr, I.clone().slerp(qc, w));
+  P.rot(fi, curl * w);
+}
+
+// A part flung off: its bone flies from rest by (vx, vy) px/s under gravity
+// with `spin` rad/s, in the model's frame as it stood when the part went
+// (`frame`, a frozen copy of the group's world matrix), lands at `lieY` px off
+// the floor and lies at `lieRot`. The spin is wound so it arrives at that
+// angle rather than snapping. Returns whether it has landed.
+const GRAV = -900;
+const world = new THREE.Vector3();
+export function fling(v, bn, [vx, vy, spin, lieY, lieRot], dt, frame) {
+  const B = v.bones[bn], rest = v.rest[bn];
+  if (!B || !rest) return true;
+  const floorY = -v.natural[1] / 2;
+  const land = (-vy - Math.sqrt(vy * vy - 2 * GRAV * (rest.y - floorY - lieY))) / GRAV;
+  const turns = Math.round((spin * land - lieRot) / (2 * Math.PI)), w2 = (lieRot + turns * 2 * Math.PI) / land;
+  let y = vy * dt + 0.5 * GRAV * dt * dt, x = vx * dt, r = w2 * dt;
+  if (dt > land) { x = vx * land; y = floorY + lieY - rest.y; r = lieRot; }
+  world.set(rest.x + x, rest.y + y, rest.z).applyMatrix4(frame);
+  B.b.parent.updateWorldMatrix(true, false);
+  B.b.position.copy(B.b.parent.worldToLocal(world));
+  B.b.rotation.set(0, 0, r - v.body.rotation.z);
+  return dt > land;
 }

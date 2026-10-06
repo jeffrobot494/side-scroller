@@ -29,7 +29,7 @@ import { ENEMY_FILE } from "../src/game/enemyspecs.js";
 import { createEnemies, cues } from "../src/mission/view3d/enemy.js";
 import { setColor, viewY } from "../src/mission/view3d/util.js";
 import { hasMotion } from "../src/mission/view3d/enemyanim.js";
-import { instantiate } from "../src/mission/enemyspec/runtime.js";
+import { instantiate, killEntity, updateSpecEnemy } from "../src/mission/enemyspec/runtime.js";
 import { normalizeSpec } from "../src/game/enemyspec/normalize.js";
 import { createMotion } from "../src/mission/enemyspec/motion.js";
 import { createFx } from "./enemy-fx.js";
@@ -47,6 +47,8 @@ const promoted = (s) => hasMotion(s.id);
 //   fire  { part: [times] }: rounds
 //   run   [[t0, t1, px/s]]: treadmill speed (move mode runs at the spec's)
 //   air   [t0, t1, height]: a jump's arc
+//   die   t: a fresh root each cycle, killed at t; the game's runtime then
+//         plays what its death spawns (the Siege Automaton's overload)
 const GENERIC_ATTACK = { len: 2, tele: [[0, 0.6]], fire: { root: [0.6] } };
 const SCRIPT = {
   husk_charger: { attack: { len: 2, tele: [[0, 0.6]], run: [[0.6, 1.1, 520]] } },
@@ -55,6 +57,13 @@ const SCRIPT = {
     punch: { len: 1.4, act: ["punchCombo", 0.18, 0.5], tele: [[0, 0.18]], fire: { fistArm: [0.18, 0.49] } },
     leap: { len: 3, act: ["screenLeap", 0.48, 2.27], tele: [[0, 0.48], [1.9, 2.1]], air: [0.48, 1.68, 125],
       run: [[0.48, 1.68, 300]], fire: { gunArm: [2.1, 2.18, 2.26] } },
+  },
+  siege_automaton: {
+    attack: { len: 2.2, act: ["cannonBurst", 0.38, 0.75], tele: [[0, 0.38]], fire: { cannonArm: [0.38, 0.49, 0.6, 0.71] } },
+    missiles: { len: 3.6, act: ["missileVolley", 0.7, 0.9], tele: [[0, 0.7], [0.4, 0.7, "missilePack"]], fire: { missilePack: [0.7, 0.88] } },
+    jump: { len: 3.4, act: ["jumpBarrage", 0.5, 1.75], tele: [[0, 0.5]], air: [0.5, 1.7, 115], run: [[0.5, 1.7, 150]],
+      fire: { cannonArm: [0.74], missilePack: [0.94] } },
+    death: { len: 7, die: 0.05 },
   },
 };
 
@@ -131,7 +140,8 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   const game = createEnemies(scene);
   const motion = createMotion();
   const roots = {}, odo = {};
-  for (const s of SPECS) if (promoted(s)) roots[s.id] = instantiate(normalizeSpec(s), 0, 0);
+  const fresh = (s) => instantiate(normalizeSpec(s), 0, 0);
+  for (const s of SPECS) if (promoted(s)) roots[s.id] = fresh(s);
   // The record's ground: one endless floor at the tester's ground line.
   const FLOOR = [{ x: -1e6, y: groundY, w: 2e6, h: 40 }];
   // The effects, and what they aim at: the tester's soldier (30x46 on the ground).
@@ -326,108 +336,7 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
       }
     },
 
-    // A walking siege engine. Stomps; the cannon charges and fires four with the
-    // far hand bracing it (armIK); pointing at the target with a red beam, the
-    // missile pod opens and looses two pairs; the jump barrage leaps, fans the
-    // cannon and fires both tubes in the air; destroyed, the pod and the cannon
-    // blow off, the core overloads, and it comes apart.
-    siege_automaton(P, t, mode, a, kick, m, k) {
-      let gun = -0.12, swing = 0, lid = 0, crouch = 0, air = 0, brace = 0, point = 0;
-      P.scale("core", 1 + 0.06 * Math.sin(t * 3));
-      P.rot("head", Math.sin(t * 0.9) * 0.03, Math.sin(t * 0.45) ** 3 * 0.3);
-      if (mode === "idle") {
-        P.lift(Math.sin(t * 1.2) * 0.8);
-        gun += Math.sin(t * 0.9) * 0.03;
-        swing = 0.3 + Math.sin(t * 0.8) * 0.03;
-        stand(P, m, SIEGE);
-      } else if (mode === "move") {
-        const ph = (t / SIEGE.T) % 1;
-        const bob = (1 - Math.cos(ph * 4 * Math.PI)) / 2;
-        P.lift(-2.5 + 3.5 * bob);
-        P.tilt(-0.045 + 0.02 * Math.sin(ph * 2 * Math.PI));
-        P.roll(0.03 * Math.sin(ph * 2 * Math.PI));
-        P.rot("head", 0.02 * Math.sin(ph * 4 * Math.PI), Math.sin(t * 0.45) ** 3 * 0.3);
-        gun = -0.16 + 0.04 * Math.sin(ph * 2 * Math.PI);
-        swing = 0.25 - 0.14 * Math.sin(ph * 2 * Math.PI);
-        walk(P, m, SIEGE, ph, { stance: 0.62, stride: 34, lift: 11, pitch: 0.35 });
-      } else if (mode === "attack") {
-        const up = smooth(0, 0.3, a) * (1 - smooth(1.4, 1.9, a));
-        const shots = [0.38, 0.49, 0.6, 0.71], rec = recoil(a, shots, 0.1);
-        gun = -0.12 + up * (0.12 + k.aim(8, 30)) + 0.06 * rec;
-        P.move("cannonBarrel", -7 * rec, 0);
-        P.shift(-1.4 * rec); P.tilt(0.012 * rec);
-        brace = smooth(0.05, 0.35, a) * (1 - smooth(1.3, 1.8, a));
-        stand(P, m, SIEGE);
-      } else if (mode === "missiles") {
-        lid = smooth(0, 0.4, a) * (1 - smooth(1.8, 2.4, a));
-        const rec = recoil(a, [0.7, 0.88], 0.2);
-        P.rot("missilePack", -0.07 * rec);
-        P.tilt(0.015 * rec); P.lift(-1.2 * rec);
-        point = smooth(0.05, 0.4, a) * (1 - smooth(1.9, 2.5, a));
-        stand(P, m, SIEGE);
-      } else if (mode === "jump") {
-        // 0-0.5 crouch, 0.5-1.7 airborne (cannon fan at 0.74, tubes at 0.94), land.
-        crouch = smooth(0, 0.45, a) * (a < 0.5 ? 1 : 0) + (a >= 1.7 ? bump(1.7, 2.3, a) : 0);
-        let tuck = 0;
-        if (a >= 0.5 && a < 1.7) { const u = (a - 0.5) / 1.2; air = 115 * 4 * u * (1 - u); tuck = Math.sin(u * Math.PI); }
-        P.lift(air - 14 * crouch);
-        P.tilt(-0.08 * crouch + 0.05 * tuck);
-        const up = smooth(0.5, 0.7, a) * (1 - smooth(1.3, 1.7, a));
-        const rec = recoil(a, [0.74], 0.15);
-        gun = -0.12 - 0.15 * crouch + up * (0.12 + k.aim(8, 30)) + 0.1 * rec;
-        P.move("cannonBarrel", -7 * rec, 0);
-        lid = smooth(0.55, 0.8, a) * (1 - smooth(1.3, 1.7, a));
-        swing = 0.7 * tuck;
-        if (air > 0) {
-          for (const side of ["right", "left"]) {
-            legIK(P, m.body, SIEGE, side, SIEGE.ankle.x + 4 * tuck, SIEGE.ankle.y + m.body.position.y + 12 * tuck, -0.2 * tuck);
-          }
-        } else stand(P, m, SIEGE);
-      } else if (mode === "death") {
-        siegeDeath(P, m, a);
-        return;
-      }
-      P.rot("cannonArm", gun);
-      P.rot("packLid", 1.15 * lid);
-      P.rot("leftArm", swing);
-      P.rot("leftFore", 0.35 + (mode === "jump" ? -0.3 * swing : 0));
-      if (brace > 0) {
-        // The far hand on top of the cannon, riding its aim and its kick.
-        const C = m.rest.cannonArm, R = (v) => v.sub(C).applyAxisAngle(Z, gun).add(C);
-        armIK(P, m, R(V(44, 32, 27)), V(0, -1, -0.7), V(0.45, -0.9, 0.15).applyAxisAngle(Z, gun), brace, 0.9);
-      } else if (point > 0) {
-        // Pointing out the target with the whole arm, finger straight.
-        const S = m.rest.leftArm, ang = k.aim(S.x, S.y);
-        const dir = V(Math.cos(ang), Math.sin(ang), 0.3).normalize();
-        armIK(P, m, S.clone().addScaledVector(dir, 66), V(0, -1, -0.4), dir, point, 0);
-      }
-    },
   };
-
-  // Two-bone IK for the Siege Automaton's far arm, in the body frame (three's
-  // axes): the wrist at T, the elbow bent toward `pole`, the fingers along
-  // `hand`. Every bone is identity at rest, so each solved rotation is blended
-  // from rest by `w`. `curl` bends the index finger in.
-  const Z = new THREE.Vector3(0, 0, 1);
-  function armIK(P, m, T, pole, hand, w, curl) {
-    const S = m.rest.leftArm, E0 = m.rest.leftFore, W0 = m.rest.leftHand, F0 = m.rest.leftIndex;
-    const L1 = E0.distanceTo(S), L2 = W0.distanceTo(E0);
-    const n = T.clone().sub(S), d = Math.min(n.length(), L1 + L2 - 0.5);
-    n.normalize();
-    const a = (L1 * L1 - L2 * L2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
-    const side = pole.clone().addScaledVector(n, -pole.dot(n)).normalize();
-    const E = S.clone().addScaledVector(n, a).addScaledVector(side, h), W = S.clone().addScaledVector(n, d);
-    const qa = new THREE.Quaternion().setFromUnitVectors(E0.clone().sub(S).normalize(), E.clone().sub(S).normalize());
-    const inv = qa.clone().invert();
-    const qb = new THREE.Quaternion().setFromUnitVectors(W0.clone().sub(E0).normalize(), W.clone().sub(E).normalize().applyQuaternion(inv));
-    const qh = new THREE.Quaternion().setFromUnitVectors(F0.clone().sub(W0).normalize(), hand.clone().normalize());
-    const qc = qa.clone().multiply(qb).invert().multiply(qh);
-    const I = new THREE.Quaternion();
-    P.quat("leftArm", I.clone().slerp(qa, w));
-    P.quat("leftFore", I.clone().slerp(qb, w));
-    P.quat("leftHand", I.clone().slerp(qc, w));
-    P.rot("leftIndex", curl * w);
-  }
 
   // The next drone's progress, 0..1, and whether it is ready. Building: the
   // pistons rise over 85% of the cycle from one launch (at 1.6s) to the next,
@@ -438,52 +347,10 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
     return { fill: Math.min(1, raw / 0.85), ready: raw >= 0.85 };
   }
 
-  // --- the Siege Automaton coming apart ------------------------------------
+  // --- the Siege Automaton coming apart (its effects; the motion is the game's)
   // Pod blown at 0.4, cannon at 1.0, the core overloads, everything goes at
   // 2.4; the hull falls back and burns; gone at 6.2, rebuilt at 7.
   const SIEGE_BLAST = 2.4;
-  // bone: [time, vx, vy, spin] in px/s and rad/s in the group frame, then how
-  // it lies once down: the bone head's height off the ground and its angle.
-  // The spin is wound so the part arrives at that angle rather than snapping.
-  const FLY = {
-    missilePack: [0.4, -50, 300, 5, 4, 0], cannonArm: [1.0, 170, 160, -4, 34, 0],
-    head: [SIEGE_BLAST, -70, 430, 5, 4, 0.35], leftArm: [SIEGE_BLAST, -230, 240, 3, 7, 1.5],
-    leftLeg: [SIEGE_BLAST, -90, 140, 2.5, 9, -1.55], rightLeg: [SIEGE_BLAST, 110, 160, -2.5, 9, 1.55],
-  };
-  function siegeDeath(P, m, a) {
-    const shudder = a < SIEGE_BLAST ? smooth(1.0, SIEGE_BLAST, a) : 0;
-    P.shift((Math.random() - 0.5) * (0.6 + 4 * shudder));
-    P.lift((Math.random() - 0.5) * 3 * shudder);
-    P.scale("core", 1 + 0.6 * shudder + 0.15 * shudder * Math.sin(a * 40));
-    P.rot("packLid", 0.4 * smooth(0, 0.3, a));
-    P.rot("cannonArm", -0.2 * smooth(0.4, 0.9, a));
-    stand(P, m, SIEGE);
-    if (a >= SIEGE_BLAST) {
-      // The hull falls back onto the ground.
-      const u = smooth(SIEGE_BLAST, SIEGE_BLAST + 0.9, a);
-      P.tilt(1.25 * u); P.lift(-52 * u); P.shift(-24 * u);
-      P.scale("core", 0.001);
-    }
-    if (a >= 6.2) { P.scale("root", 0.001); return; }
-    m.group.updateMatrixWorld(true);
-    const g = -900, floorY = -m.spec.root.body.h / 2;
-    for (const [bn, [t0, vx, vy, w, lieY, lieRot]] of Object.entries(FLY)) {
-      if (a < t0) continue;
-      const B = m.bones[bn];
-      if (!B) continue;
-      const dt = a - t0, rest = m.rest[bn];
-      // When the head comes down to its lying height, and the turn that lands
-      // it at its lying angle.
-      const land = (-vy - Math.sqrt(vy * vy - 2 * g * (rest.y - floorY - lieY))) / g;
-      const turns = Math.round((w * land - lieRot) / (2 * Math.PI)), w2 = (lieRot + turns * 2 * Math.PI) / land;
-      let y = vy * dt + 0.5 * g * dt * dt, x = vx * dt, spin = w2 * dt;
-      if (dt > land) { x = vx * land; y = floorY + lieY - rest.y; spin = lieRot; }
-      const world = m.group.localToWorld(new THREE.Vector3(rest.x + x, rest.y + y, rest.z));
-      B.b.position.copy(B.b.parent.worldToLocal(world));
-      B.b.rotation.set(0, 0, spin - m.body.rotation.z);
-    }
-  }
-
   // Cycle helpers: 0..1 ease between two times, a 0..1..0 hump, keyframes,
   // and the recoil left by shots fired at `times`.
   function smooth(a, b, x) { const u = Math.max(0, Math.min(1, (x - a) / (b - a))); return u * u * (3 - 2 * u); }
@@ -905,9 +772,8 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
     // reads as walking), and feel their kicks.
     const live = [];
     for (const s of SPECS) {
-      const r = roots[s.id];
-      if (!r) continue;
-      scriptRoot(r, s, ents[s.id], dt, facing);
+      if (!roots[s.id]) continue;
+      const r = scriptRoot(s, ents[s.id], dt, facing);
       if (shown().includes(s)) live.push(r);
     }
     for (const r of live) r.x += odo[r.specTop.id];
@@ -954,12 +820,20 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
   // Parts by id, with "root" always the root whatever its spec calls it.
   const parts = (r) => { const out = {}; walkTree(r, (e) => { out[e.id] = e; }); out.root = r; return out; };
   const crossed = (T, a, pa, dt) => dt > 0 && ((pa < T && T <= a) || (a < pa && (T > pa || T <= a)));
-  function scriptRoot(r, s, e, dt, facing) {
+  // A dead root's spawns are stepped by the game's runtime in this scene.
+  const DEATH_SCENE = { world: { width: 1e6, height: 1e4, gravity: 2000 }, platforms: FLOOR, soldiers: [], enemies: [], projectiles: [] };
+  const DEATH_CTX = { friendlyFire: false, damageMult: 1, damage() {}, kill() {} };
+  function scriptRoot(s, e, dt, facing) {
+    const sc = mode === "move" || mode === "idle" ? null : SCRIPT[s.id]?.[mode] ?? (mode === "attack" ? GENERIC_ATTACK : null);
+    const len = sc?.len ?? 1, a = t % len, pa = ((t - dt) % len + len) % len;
+    // A dying script rebuilds its root each cycle; leaving it brings one back.
+    if (sc?.die !== undefined ? crossed(0, a, pa, dt) || (dt === 0 && a === 0) : !roots[s.id].alive) roots[s.id] = fresh(s);
+    const r = roots[s.id];
     r.x = e.x; r.y = e.y;
     r.children.forEach((c, i) => { c.x = e.children[i].x; c.y = e.children[i].y; });
     r.facing = s.role === "boss" ? 1 : facing;
-    const sc = mode === "move" || mode === "idle" ? null : SCRIPT[s.id]?.[mode] ?? (mode === "attack" ? GENERIC_ATTACK : null);
-    const len = sc?.len ?? 1, a = t % len, pa = ((t - dt) % len + len) % len;
+    if (sc?.die !== undefined && r.alive && crossed(sc.die, a, pa, dt)) killEntity(r, r, null, DEATH_SCENE, DEATH_CTX);
+    if (!r.alive) { updateSpecEnemy(r, dt, DEATH_SCENE, DEATH_CTX); return r; }
     const P = parts(r);
     walkTree(r, (x) => { x.telegraph = 0; if (x.muzzleFlash > 0) x.muzzleFlash -= dt; });
     for (const [t0, t1, part] of sc?.tele || []) if (a >= t0 && a < t1) P[part || "root"].telegraph = t1 - a;
@@ -987,6 +861,7 @@ export function createEnemyModels(scene, { groundY, soldierX, fx: withFx = true 
     let v = mode === "move" ? s.root.motion?.speed ?? 60 : 0;
     for (const [t0, t1, sp] of sc?.run || []) if (a >= t0 && a < t1) v = sp;
     odo[s.id] = (odo[s.id] ?? 0) + v * dt;
+    return r;
   }
 
   let shownRoots = [];

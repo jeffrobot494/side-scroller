@@ -23,7 +23,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { ModelMap, applyFlash, burnHalo } from "./actors.js";
 import { setColor, shade, putHalo, viewY } from "./util.js";
 import { loadEnemyRigs, rigLoaded, rigFits, makeRig, paintRig, poser } from "./enemyrig.js";
-import { ANIM, hasMotion, clock } from "./enemyanim.js";
+import { ANIM, DEATH, RIG_DRAWS, dying, hasMotion, clock } from "./enemyanim.js";
 
 const shared = (g) => ((g.userData.shared = true), g);
 const G = {
@@ -147,18 +147,28 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
     return ok;
   }
 
+  // A dead root whose rig plays a death (the Siege Automaton's overload and
+  // wreck) stays drawn until its record's wreck end. The rig map keeps the
+  // model as long as it is drawn, then disposes it with its skeleton.
+  function wreck(r, m) {
+    const v = rigs.map.get(r);
+    return !!v && dying(v, m.motion ? m.motion.get(r) : null);
+  }
+
   function rig(r, m, halos) {
     const v = rigs.get(r);
     const parts = new Map();
     const index = (e) => { for (const c of e.children) { parts.set(c.id, c); index(c); } };
     index(r);
     const c = clock(v.state, r, m.motion ? m.motion.get(r) : null, m.time);
+    c.parts = parts;
     // At the box's centre, scaled to the box, turned by facing. A boss faces
     // the camera, as in the tester: turning it would show its back.
     const [nw, nh] = v.natural, sx = r.w / nw, sy = r.h / nh;
     const facing = r.specTop.role !== "boss" && r.facing < 0 ? -1 : 1;
     c.aim = aimAt(v, r, nearestSoldier(m.scene.soldiers, r), facing, sx, sy);
-    ANIM[v.id](poser(v), m.time, c.mode, c.a, c.kick, v, c);
+    if (r.alive) ANIM[v.id](poser(v), m.time, c.mode, c.a, c.kick, v, c);
+    else DEATH[v.id](poser(v), m.time, v, c);
     v.root.position.set(r.x + r.w / 2, viewY(r.y + r.h / 2), 0);
     v.root.scale.set(sx, sy, (sx + sy) / 2);
     v.root.rotation.y = facing < 0 ? Math.PI : 0;
@@ -195,9 +205,13 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
       models.begin();
       rigs.begin();
       for (const r of m.scene.specRoots) {
-        if (r.alive && rigged(r)) rig(r, m, halos);
+        const drawn = rigged(r) && (r.alive || wreck(r, m));
+        if (drawn) rig(r, m, halos);
         else tree(r, m, halos); // a dead root draws nothing, but its spawned list does
-        for (const sp of r.spawned) tree(sp, m, halos);
+        // What the rig draws itself (the Siege Automaton's overload and
+        // charges) is not drawn again as blocks.
+        const own = (drawn && RIG_DRAWS[r.specTop.id]) || [];
+        for (const sp of r.spawned) if (!own.includes(sp.id)) tree(sp, m, halos);
       }
       // A part that is merely disabled comes back; anything dead is gone.
       models.end((e) => e.alive);

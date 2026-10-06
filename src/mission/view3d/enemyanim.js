@@ -13,7 +13,8 @@
 // comes from.
 // ---------------------------------------------------------------------------
 
-import { legIK, stand, walk } from "./enemyrig.js";
+import * as THREE from "three";
+import { legIK, stand, walk, armIK, fling } from "./enemyrig.js";
 
 const WINDUP = 0.6;    // s of the tester's attack spent telegraphing
 const AFTER = 1.0;     // s an attack pose runs on past the telegraph
@@ -208,6 +209,144 @@ ANIM.breach_hopper = function (P, t, mode, a, kick, v, s) {
   P.rot("jets", -0.25 * tuck + Math.sin(t * 2) * 0.05 * (1 - tuck));
 };
 
+// A walking siege engine (M8), from the tester's Siege Automaton, re-timed to
+// the fight. Stomps; cannonBurst raises and charges the cannon with the far
+// hand bracing it and recoils on each round; missileVolley opens the pod lid,
+// points the left arm at the target and kicks the pod per pair; any jump
+// crouches, tucks and lands, raising the cannon if it fires in the air. A pod
+// or cannon shot off in a fight is flung, lies a second, then is gone.
+const SIEGE = { hip: { x: 0, y: -30 }, knee: { x: 12, y: -54 }, ankle: { x: 2, y: -72 }, names: named, sides: SIDES };
+const SIEGE_WALK = { stance: 0.62, stride: 34, lift: 11, pitch: 0.35 }; // 54.8px a cycle
+const SIEGE_JUMPS = ["jumpBarrage", "clearLedge", "emergencyLeap", "closeQuartersBurst"];
+const SIEGE_ARM = ["leftArm", "leftFore", "leftHand", "leftIndex"];
+// bone: [vx, vy, spin, lie height, lie angle] in px/s and rad/s, model frame.
+const FLY = {
+  missilePack: [-50, 300, 5, 4, 0], cannonArm: [170, 160, -4, 34, 0],
+  head: [-70, 430, 5, 4, 0.35], leftArm: [-230, 240, 3, 7, 1.5],
+  leftLeg: [-90, 140, 2.5, 9, -1.55], rightLeg: [110, 160, -2.5, 9, 1.55],
+};
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const Z = V3(0, 0, 1);
+
+ANIM.siege_automaton = function (P, t, mode, a, kick, v, s) {
+  const st = v.state, dt = s.dt, act = s.act.id;
+  const jumping = SIEGE_JUMPS.includes(act);
+  P.scale("core", 1 + 0.06 * Math.sin(t * 3));
+  P.rot("head", Math.sin(t * 0.9) * 0.03, Math.sin(t * 0.45) ** 3 * 0.3);
+  const sinceLand = s.landAt !== undefined ? t - s.landAt : 9;
+  const crouch = Math.max(ease(st, "crouch", jumping && s.act.phase === "windup" ? 1 : 0, 5, dt), bump(0, 0.6, sinceLand));
+  const tuck = ease(st, "tuck", s.air ? 1 : 0, 6, dt);
+  const cannonFired = s.fired("cannonArm");
+  const airShot = s.air && cannonFired.some((x) => t - x < 0.6);
+  const up = ease(st, "up", act === "cannonBurst" || airShot ? 1 : 0, 6, dt);
+  const brace = ease(st, "brace", act === "cannonBurst" && !s.air ? 1 : 0, 5, dt);
+  const lid = ease(st, "lid", act === "missileVolley" || (act === "jumpBarrage" && s.air) ? 1 : 0, 4, dt);
+  const point = ease(st, "point", act === "missileVolley" ? 1 : 0, 4, dt);
+  const rec = recoil(t, cannonFired, 0.1);
+  const podRec = recoil(t, s.fired("missilePack"), 0.2);
+
+  let gun = -0.12, swing = 0;
+  if (s.air || tuck > 0.05) {
+    for (const side of SIDES) legIK(P, v.body, SIEGE, side, SIEGE.ankle.x + 4 * tuck, SIEGE.ankle.y + v.body.position.y + 12 * tuck, -0.2 * tuck);
+  } else if (s.moving) {
+    const ph = ((s.walked / (SIEGE_WALK.stride / SIEGE_WALK.stance)) % 1 + 1) % 1;
+    const bob = (1 - Math.cos(ph * 4 * Math.PI)) / 2;
+    P.lift(-2.5 + 3.5 * bob);
+    P.tilt(-0.045 + 0.02 * Math.sin(ph * 2 * Math.PI));
+    P.roll(0.03 * Math.sin(ph * 2 * Math.PI));
+    P.rot("head", 0.02 * Math.sin(ph * 4 * Math.PI), Math.sin(t * 0.45) ** 3 * 0.3);
+    gun = -0.16 + 0.04 * Math.sin(ph * 2 * Math.PI);
+    swing = 0.25 - 0.14 * Math.sin(ph * 2 * Math.PI);
+    walk(P, v, SIEGE, ph, SIEGE_WALK);
+  } else {
+    P.lift(Math.sin(t * 1.2) * 0.8);
+    gun += Math.sin(t * 0.9) * 0.03;
+    swing = 0.3 + Math.sin(t * 0.8) * 0.03;
+    stand(P, v, SIEGE);
+  }
+  P.lift(-14 * crouch);
+  P.tilt(-0.08 * crouch + 0.05 * tuck);
+  gun = gun * (1 - up) + up * (s.aim(8, 30)) - 0.15 * crouch + 0.06 * rec;
+  P.move("cannonBarrel", -7 * rec, 0);
+  P.shift(-1.4 * rec); P.tilt(0.012 * rec);
+  P.rot("missilePack", -0.07 * podRec);
+  P.tilt(0.015 * podRec); P.lift(-1.2 * podRec);
+  swing = Math.max(swing, 0.7 * tuck);
+  P.rot("cannonArm", gun);
+  P.rot("packLid", 1.15 * lid);
+  P.rot("leftArm", swing);
+  P.rot("leftFore", 0.35 - 0.3 * swing * tuck);
+  if (brace > 0.01) {
+    // The far hand on top of the cannon, riding its aim and its kick.
+    const C = v.rest.cannonArm, R = (p) => p.sub(C).applyAxisAngle(Z, gun).add(C);
+    armIK(P, v, SIEGE_ARM, R(V3(44, 32, 27)), V3(0, -1, -0.7), V3(0.45, -0.9, 0.15).applyAxisAngle(Z, gun), brace, 0.9);
+  } else if (point > 0.01) {
+    // Pointing out the target with the whole arm, finger straight.
+    const S = v.rest.leftArm, ang = s.aim(S.x, S.y);
+    const dir = V3(Math.cos(ang), Math.sin(ang), 0.3).normalize();
+    armIK(P, v, SIEGE_ARM, S.clone().addScaledVector(dir, 66), V3(0, -1, -0.4), dir, point, 0);
+  }
+
+  // Shot off in a fight: flung from where it was, then gone a second after it
+  // lands (paintRig collapses it once it is no longer flying).
+  st.lost ??= {};
+  st.flying ??= {};
+  for (const id of ["missilePack", "cannonArm"]) {
+    const e = s.parts.get(id);
+    if (!e) continue;
+    if (!e.alive && !st.lost[id]) { v.root.updateMatrixWorld(true); st.lost[id] = { at: t, frame: v.root.matrixWorld.clone() }; }
+    const lost = st.lost[id];
+    if (!lost) continue;
+    v.root.updateMatrixWorld(true);
+    const landed = fling(v, id, FLY[id], t - lost.at, lost.frame);
+    st.flying[id] = !landed || t - lost.at < 2.4;
+  }
+};
+
+// The Siege Automaton's death (M8): the overload, drawn while its `overload`
+// entity runs. The rig stands where it died, the core swells and the hull
+// shudders; the pod and the cannon fly when their charges blow (a part shot
+// off before stays gone); at the overload's end everything left flies and the
+// hull falls back and burns, until the record's wreck end.
+export const DEATH = {
+  siege_automaton(P, t, v, s) {
+    const st = v.state;
+    if (st.diedAt === undefined) { v.root.updateMatrixWorld(true); st.diedAt = t; st.deathFrame = v.root.matrixWorld.clone(); }
+    const a = t - st.diedAt;
+    const blastAt = s.last("spawnDeath:overload");
+    const shudder = blastAt === undefined ? smooth(1.0, 2.4, a) : 0;
+    P.shift((Math.random() - 0.5) * (0.6 + 4 * shudder));
+    P.lift((Math.random() - 0.5) * 3 * shudder);
+    P.scale("core", 1 + 0.6 * shudder + 0.15 * shudder * Math.sin(a * 40));
+    P.rot("packLid", 0.4 * smooth(0, 0.3, a));
+    P.rot("cannonArm", -0.2 * smooth(0.4, 0.9, a));
+    stand(P, v, SIEGE);
+    if (blastAt !== undefined) {
+      const u = smooth(blastAt, blastAt + 0.9, t);
+      P.tilt(1.25 * u); P.lift(-52 * u); P.shift(-24 * u);
+      P.scale("core", 0.001);
+    }
+    v.root.updateMatrixWorld(true);
+    const go = { missilePack: s.last("spawnDeath:podCharge"), cannonArm: s.last("spawnDeath:cannonCharge") };
+    for (const [bn, f] of Object.entries(FLY)) {
+      if (st.lost && st.lost[bn]) { P.scale(bn, 0.001); continue; } // shot off before it died
+      const t0 = bn in go ? go[bn] ?? blastAt : blastAt; // a charge that never spawned goes with the blast
+      if (t0 === undefined || t < t0) continue;
+      fling(v, bn, f, t - t0, st.deathFrame);
+    }
+  },
+};
+// Spawned entities a rig draws itself, so the blocks skip them.
+export const RIG_DRAWS = { siege_automaton: ["overload", "podCharge", "cannonCharge"] };
+// Whether a dead root's rig is still showing: its overload has started (the
+// record saw it spawn — this frame, or before) and the wreck has not ended.
+export function dying(v, rec) {
+  if (!DEATH[v.id] || !rec || rec.diedAt === null) return false;
+  const last = v.state.last || {};
+  const started = last["spawn:overload"] !== undefined || rec.events.some((e) => e.kind === "spawn" && e.def === "overload");
+  return started && last["wreckEnd:"] === undefined && !rec.events.some((e) => e.kind === "wreckEnd");
+}
+
 export const hasMotion = (id) => typeof ANIM[id] === "function";
 
 // This frame's mode, attack clock and kick for one rigged root, from its
@@ -221,8 +360,10 @@ export function clock(st, root, rec, time) {
   const dt = st.time === undefined ? 0 : Math.max(0, Math.min(0.1, time - st.time));
   st.time = time;
   st.fires ??= {};
+  st.last ??= {}; // "kind:def|part|id" → the time it last happened
   if (rec) {
     for (const ev of rec.events) {
+      st.last[`${ev.kind}:${ev.def || ev.part || ev.id || ""}`] = time;
       if (ev.kind === "fire") (st.fires[ev.part] ??= []).push(time);
       else if (ev.kind === "action") st.actAt = time;
       else if (ev.kind === "takeoff") st.upAt = time;
@@ -238,6 +379,7 @@ export function clock(st, root, rec, time) {
     ...base, dt, act,
     moving: !!(rec && rec.speed > MOVING),
     fired: (p) => st.fires[p] || [],
+    last: (key) => st.last[key],
     air: !!(rec && rec.airborne), upAt: st.upAt, landAt: st.landAt,
   };
 }
