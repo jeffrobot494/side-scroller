@@ -56,6 +56,25 @@ export default async function run(t) {
     t.ok("companion: targets nearest enemy root (x=500), not x=900", near && near.x === 500);
   }
 
+  // ---- companion also targets what the roots emitted, if a round can hurt it --
+  // hostilesFor used to return specRoots alone, so a Factory's drones and a
+  // Siege's seeker missiles (in root.spawned) were invisible to the squad brain.
+  {
+    const drone = { x: 340, y: 300, w: 16, h: 16, alive: true, health: 51 };
+    const blast = { x: 310, y: 300, w: 40, h: 40, alive: true, health: null };
+    const factory = { x: 600, y: 100, w: 100, h: 66, alive: true, spawned: [drone, blast] };
+    const scene = { soldiers: [], specRoots: [factory], enemies: [], projectiles: [], platforms: [] };
+    const companion = { x: 300, y: 300, w: 20, h: 24, team: "player" };
+    const list = hostilesFor(companion, scene);
+    t.ok("spawns: a drone with health is a hostile", list.includes(drone));
+    t.ok("spawns: a blast with no health is not", !list.includes(blast));
+    t.ok("spawns: the nearer drone is the target, not its Factory", nearestHostile(companion, scene) === drone);
+    factory.alive = false;
+    t.ok("spawns: a dead Factory's drone is still a target", nearestHostile(companion, scene) === drone);
+    drone.alive = false;
+    t.ok("spawns: nothing alive → no target", nearestHostile(companion, scene) === null);
+  }
+
   // ---- enemy hostiles are the squad ---------------------------------------
   {
     const scene = { soldiers: [{ x: 1, y: 1, w: 2, h: 2, alive: true }], specRoots: [], enemies: [] };

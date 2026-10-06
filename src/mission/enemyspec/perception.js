@@ -443,10 +443,25 @@ export function entry(x0, y0, x1, y1, p) {
 }
 
 // Who this agent fights. An enemy (the default team) hunts the squad; a
-// player-team agent (a companion) hunts the enemy roots. The scene exposes both
-// lists; hosts without a specRoots view (a bare test scene) fall back to enemies.
+// player-team agent (a companion) hunts the enemy roots AND every living thing
+// they emitted that a round can hurt — a Factory's drones, a Siege's seeker
+// missiles. Having health is what makes a spawn a target; blasts and effects
+// have none. Parts are not added: a companion would spend its magazine on armour.
+// Hosts without a specRoots view (a bare test scene) fall back to enemies.
 export function hostilesFor(root, scene) {
-  if (root && root.team === "player") return scene.specRoots || scene.enemies || [];
+  if (root && root.team === "player") {
+    const roots = scene.specRoots;
+    if (!roots) return scene.enemies || [];
+    let out = null;
+    for (const r of roots) {
+      for (const sp of r.spawned || []) {
+        if (!sp.alive || sp.disabled || sp.health === null || sp.health === undefined) continue;
+        if (!out) out = roots.slice();
+        out.push(sp);
+      }
+    }
+    return out || roots; // no shootable spawn: the roots themselves, unallocated
+  }
   return scene.soldiers || [];
 }
 

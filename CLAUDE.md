@@ -304,7 +304,10 @@ section + the tests are the source of truth for what currently exists):
   `scene.specRoots`** (the kill-credit/loot pass needs it), so anything choosing
   a target must skip it: `nearestHostile` returns null when nothing is alive
   rather than degrading to `list[0]`, which used to leave companions holding the
-  last corpse's death spot and firing at it forever.
+  last corpse's death spot and firing at it forever. **What a companion targets
+  is `hostilesFor`**: the roots plus every living `spawned` entity with health
+  (a Factory's drones, a Siege's seeker missiles) — giving a spawn health is
+  what registers it; blasts and effects have none, and parts are never added.
 - **Crouch:** hold S/↓ to kneel (lower hitbox to dodge fire + let allies shoot
   over you); enemies aim at standing height so crouch ducks under.
 - **Squadmates duck (`tech/soldier-ducking.md` D1–D2 — built).** A reflex BELOW
