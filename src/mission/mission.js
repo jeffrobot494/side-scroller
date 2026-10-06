@@ -24,6 +24,7 @@ import {
   applyDamage as specDamage, killEntity as specKill,
 } from "./enemyspec/runtime.js";
 import { drawSpecEnemy } from "./enemyspec/render.js";
+import { createMotion, KICK_TO_SHAKE } from "./enemyspec/motion.js";
 import { solveCamera, parseCanvasSize, DESIGN_W, DESIGN_H } from "./camera.js";
 import { createFpsSampler } from "../game/fps.js";
 import { config, setConfig } from "../game/config.js";
@@ -315,6 +316,9 @@ export class Mission {
     // cosmetic-only state (never read by game logic)
     this.time = 0;
     this.shake = 0;
+    // What each enemy is doing, per root (enemyspec/motion.js): run per
+    // rendered frame by _frame, read by the 3D view, and the source of kicks.
+    this.motion = createMotion();
     this.particles = [];
     // 46 spores at the classic size, scaled by area so a bigger canvas doesn't
     // look emptier.
@@ -406,6 +410,7 @@ export class Mission {
       this.accumulator -= STEP;
       if (this._frozen()) break; // a squadmate died: stop on the frame of it (D4)
     }
+    this.updateMotion();
     this.render();
     requestAnimationFrame(this._frame);
   }
@@ -549,7 +554,9 @@ export class Mission {
         this._burst(args[0], args[1], args[2], args[3], args[4]);
         break;
       case "shk":
-        this.shake = Math.min(args[1], this.shake + args[0]);
+        // Adds up to a cap, and only ever RAISES: a small event under a big
+        // shake (your own shot under a death blast) must not cut it down.
+        this.raiseShake(Math.min(args[1], this.shake + args[0]));
         break;
       case "flh":
         this.damageFlash = args[0];
@@ -575,6 +582,22 @@ export class Mission {
   toWorld(px, py) {
     const z = this._zoom();
     return { x: px / z + this.camera.x, y: py / z + this.camera.y };
+  }
+
+  // The one way shake goes up without adding: to at least `amount`. Kicks
+  // combine by taking the larger, so repeated footfalls do not stack.
+  raiseShake(amount) {
+    if (amount > this.shake) this.shake = amount;
+  }
+
+  // Step every enemy's motion record to now and apply the kicks they raise.
+  // Once per RENDERED frame, on a host and on a room viewer alike (the records
+  // read only wire fields); a headless room never calls it, so raises none.
+  // Kicks are cosmetic and local: they never cross the wire.
+  updateMotion() {
+    if (!this.motion) return;
+    const kick = this.motion.update(this.scene.specRoots, this.scene.platforms, this.time);
+    if (kick > 0) this.raiseShake(kick * KICK_TO_SHAKE);
   }
 
   // ---- simulation ---------------------------------------------------------

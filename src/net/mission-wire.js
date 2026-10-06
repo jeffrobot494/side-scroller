@@ -159,6 +159,9 @@ function packEntity(e) {
     // are feedback for damage that already happened and cross for the same
     // reason a viewer needs to see who is being hit.
     q(e.telegraph || 0), q(e.hitFlash || 0), q(e.muzzleFlash || 0),
+    // A 0.055s flash mostly falls between snapshots; the COUNT of rounds does
+    // not, and a viewer lights its own flash when it rises.
+    e.fireCount || 0,
   ];
 }
 
@@ -177,6 +180,9 @@ function applyEntity(e, v) {
   e.telegraph = v[6];
   e.hitFlash = v[7];
   e.muzzleFlash = v[8];
+  const fired = v[9] || 0;
+  if (fired > (e.fireCount || 0)) e.muzzleFlash = Math.max(e.muzzleFlash, 0.055);
+  e.fireCount = fired;
 }
 
 function applyTree(e, list, at) {
@@ -196,9 +202,13 @@ function packRoot(r) {
   const spawned = r.spawned.map((sp) => {
     const t = [];
     walkTree(sp, t);
-    return [sp.spec.id, sp.depth || 1, t];
+    return [sp.spec.id, sp.depth || 1, t, sp.serial || 0];
   });
-  return [body, spawned, (r.brainState && r.brainState.current) || ""];
+  // The committed utility action, its phase and its serial: what the enemy is
+  // doing, which a viewer's 3D model and motion record are driven by.
+  const bs = r.brainState;
+  const c = bs && bs.commit;
+  return [body, spawned, (bs && bs.current) || "", c ? c.action.id : "", c ? c.phase : "", (bs && bs.commitSerial) || 0];
 }
 
 function applyRoot(r, v, scene, ctx) {
@@ -209,9 +219,11 @@ function applyRoot(r, v, scene, ctx) {
   // arrives is authoritative — extras are dropped, missing ones are built.
   if (r.spawned.length > wire.length) r.spawned.length = wire.length;
   for (let i = 0; i < wire.length; i++) {
-    const [defId, depth, tree] = wire[i];
+    const [defId, depth, tree, serial] = wire[i];
     let sp = r.spawned[i];
-    if (!sp || sp.spec.id !== defId) {
+    // By serial, not only def id: a drone replaced between two snapshots is a
+    // new drone, and must be built (and recorded) as one.
+    if (!sp || sp.spec.id !== defId || sp.serial !== serial) {
       // The limiter is the ROOM's rule and it has already applied it — this is
       // a mirror, not a second simulation, so the client's own rate window is
       // cleared rather than allowed to refuse an entity that demonstrably
@@ -221,10 +233,16 @@ function applyRoot(r, v, scene, ctx) {
       if (!sp) continue;
       r.spawned.pop(); // spawnFromDef appended it; put it where the room has it
       r.spawned[i] = sp;
+      sp.serial = serial; // the room's, or every later snapshot would rebuild it
     }
     applyTree(sp, tree, { i: 0 });
   }
-  if (r.brainState) r.brainState.current = v[2];
+  if (r.brainState) {
+    r.brainState.current = v[2];
+    // Only the fields a reader needs: a viewer never runs the brain.
+    r.brainState.commit = v[3] ? { action: { id: v[3] }, phase: v[4] } : null;
+    r.brainState.commitSerial = v[5] || 0;
+  }
 }
 
 // A soldier, keyed by id, with the fields a soldier is DRAWN from plus the

@@ -142,6 +142,7 @@ function initBrain(brain) {
     tracks: makeTrackStates(brain.states[brain.start]),
     decisionTimer: 0,
     commit: null, // { action, phase: "windup"|"steps"|"recovery", t, track }
+    commitSerial: 0, // bumped per commitment, so a repeat of the same action reads as new
     cooldowns: {}, // actionId → readyAt (root.age)
     lastDecision: null, // utility mode: last scoring pass, for the Behavior Lab
   };
@@ -1302,6 +1303,9 @@ export function spawnFromDef(root, defId, x, y, { vx = 0, vy = 0, depth = 1 } = 
   const inst = makeInstance(def, null, root, root.rng);
   inst.root = root;
   inst.depth = depth;
+  // Names this spawn for as long as it lives, so a viewer and the motion
+  // record can tell a replacement from the entity it replaced.
+  inst.serial = root.spawnSerial = (root.spawnSerial || 0) + 1;
   inst.x = x - inst.w / 2;
   inst.y = y - inst.h / 2;
   inst.anchorX = inst.x;
