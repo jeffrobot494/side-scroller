@@ -237,13 +237,10 @@ export default async function run(t) {
   t.ok("rebind: the old debug key was cleared", keyBindings.Backquote === undefined);
   resetKeys();
 
-  // The 2D/3D view toggle is a mission-time action like the overlays: bound,
-  // labelled, rebindable, and never on the wire (test/mission-net.test.mjs).
-  t.ok("controlmap: default KeyV → toggleRenderer", keyBindings.KeyV === "toggleRenderer");
-  t.ok("controlmap: toggleRenderer is an action with a label",
-    ACTIONS.includes("toggleRenderer") && !!ACTION_LABELS.toggleRenderer);
-  t.ok("controlmap: toggleRenderer sits just before pause",
-    ACTIONS.indexOf("toggleRenderer") === ACTIONS.length - 2);
+  // The 2D/3D view toggle is gone with the 2D view (tech/mission-3d-only.md
+  // O2). A KeyV binding a browser saved is dropped by load(), unknown action.
+  t.ok("controlmap: toggleRenderer is gone", !ACTIONS.includes("toggleRenderer") && !("toggleRenderer" in ACTION_LABELS));
+  t.ok("controlmap: KeyV is unbound by default", !("KeyV" in keyBindings));
 
   // pause (tech/pause-menu.md): Escape by default, rebindable, appended so no
   // earlier action's index — the wire's bit — moved.

@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 import { Mission } from "../src/mission/mission.js";
 import { generateLevel } from "../src/game/gen/levelgen.js";
 import { makeEl } from "./harness.mjs";
-import { resetConfig, config, setConfig } from "../src/game/config.js";
+import { resetConfig, config } from "../src/game/config.js";
 import { sampleScene, firstSampleDiff } from "../src/mission/checksum.js";
 
 const GOLDEN = fileURLToPath(new URL("./mission.golden.json", import.meta.url));
@@ -291,11 +291,12 @@ export default async function run(t) {
     }
   }
 
-  // ---- the external view hook (tech/mission-3d.md R1) ---------------------
-  // The 3D view is installed from outside and draws under the canvas. What this
-  // pins is the lifecycle and the split: begun per deploy, drawn only while
-  // "3d" is on, the 2D world pass skipped exactly then, ended at stop() — and
-  // drawing either way reads nothing back into the simulation.
+  // ---- the external view hook (tech/mission-3d.md R1, mission-3d-only O2) --
+  // The 3D view is installed from outside and is the only thing that draws the
+  // world. What this pins is the lifecycle: begun per deploy, drawn every
+  // frame, ended at stop() — with no live view, no world and no tells, only
+  // the waiting screen and the HUD — and drawing reads nothing back into the
+  // simulation. Freezing for a missing view is pause-menu.test.mjs's.
   {
     const g = generateLevel({ seed: SEED, difficulty: "high" });
     const calls = [];
@@ -305,29 +306,29 @@ export default async function run(t) {
       end: () => calls.push("end"),
     };
     const m = new Mission(makeEl("canvas"), () => {});
+    let tells = 0, waiting = 0, hud = 0;
+    const tell = m._drawTells, wait = m._drawWaiting, drawHud = m._drawHUD;
+    m._drawTells = (...a) => { tells++; return tell.apply(m, a); };
+    m._drawWaiting = (...a) => { waiting++; return wait.apply(m, a); };
+    m._drawHUD = (...a) => { hud++; return drawHud.apply(m, a); };
+    m.start(g.mission, g.level, SQUAD);
+    m.render();
+    t.ok("view: with none installed, the waiting screen and the HUD, no tells", waiting === 1 && hud === 1 && tells === 0);
+    m.stop();
     m.setView(view);
-    t.eq("view: installed before a deploy, nothing begins", calls.join(","), "");
+    t.eq("view: installed between deploys, nothing begins", calls.join(","), "");
     m.start(g.mission, g.level, SQUAD);
     t.eq("view: start() begins it once", calls.join(","), "begin");
-    let world = 0, tells = 0;
-    const plat = m._drawPlatforms, tell = m._drawTells;
-    m._drawPlatforms = (...a) => { world++; return plat.apply(m, a); };
-    m._drawTells = (...a) => { tells++; return tell.apply(m, a); };
     const before = sampleScene(m.scene);
-    setConfig("missionRenderer", "2d");
     m.render();
-    t.ok("view: in 2d the world pass runs and the view is not asked", world === 1 && tells === 0 && calls.length === 1);
-    setConfig("missionRenderer", "3d");
-    m.render();
-    t.eq("view: in 3d it is drawn at the canvas size", calls[1], `draw:${m.canvas.width}x${m.canvas.height}`);
-    t.ok("view: ...the 2D world pass is skipped and the tells are drawn flat", world === 1 && tells === 1);
-    t.ok("view: drawing in either mode changes nothing the simulation samples",
+    t.eq("view: it is drawn at the canvas size", calls[1], `draw:${m.canvas.width}x${m.canvas.height}`);
+    t.ok("view: ...under the tells and the HUD, with no waiting screen", tells === 1 && hud === 2 && waiting === 1);
+    t.ok("view: drawing changes nothing the simulation samples",
       firstSampleDiff(before, sampleScene(m.scene)) === null);
     m.stop();
     t.eq("view: stop() ends it", calls.at(-1), "end");
     m.render();
-    t.ok("view: an ended view falls back to 2D rather than drawing nothing", world === 2 && calls.at(-1) === "end");
-    resetConfig();
+    t.ok("view: an ended view is not drawn; the waiting screen is", calls.at(-1) === "end" && waiting === 2);
   }
 
   // The half that CANNOT be asserted in here: test/run.mjs installs the DOM

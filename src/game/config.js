@@ -335,15 +335,6 @@ export const SCHEMA = [
         help: "World scale. 1 = the classic framing; 0.5 shows twice as much level each way. The world is only 540px tall, so vertical gain is empty sky — below ~0.6 the action shrinks into a band at the bottom.",
       },
       {
-        key: "missionRenderer",
-        label: "Mission view",
-        type: "enum",
-        live: true,
-        options: ["2d", "3d"],
-        default: "3d",
-        help: "Draw the mission in Three.js (3d, the default) or flat (2d). Same simulation either way; the toggle key (V by default; Controls tool) flips it mid-mission. 3d loads Three.js from jsDelivr on first use and falls back to 2d if that fails.",
-      },
-      {
         key: "scanlines",
         label: "Scanlines (3D)",
         type: "range",
@@ -352,7 +343,7 @@ export const SCHEMA = [
         min: 0,
         max: 1,
         step: 0.05,
-        help: "Strength of the CRT scanline pass over the 3D mission view: how dark the dark lines get. 0 = off, and the pass is skipped entirely. The 2D view has none.",
+        help: "Strength of the CRT scanline pass over the 3D mission view: how dark the dark lines get. 0 = off, and the pass is skipped entirely.",
       },
       {
         key: "scanlineSpacing",
@@ -371,7 +362,7 @@ export const SCHEMA = [
         type: "bool",
         live: true,
         default: true,
-        help: "A red laser from under every soldier's barrel in the 3D mission view, stopping at the first platform or enemy it meets. Cosmetic only: aim and spread are unchanged. The 2D view has none.",
+        help: "A red laser from under every soldier's barrel in the 3D mission view, stopping at the first platform or enemy it meets. Cosmetic only: aim and spread are unchanged.",
       },
       {
         key: "groundMist3d",
@@ -379,7 +370,7 @@ export const SCHEMA = [
         type: "bool",
         live: true,
         default: true,
-        help: "Drifting bands of mist along the ground in the 3D mission view, behind the play plane and faintly in front of it. Off saves six large transparent layers on a slow device. The 2D view has none.",
+        help: "Drifting bands of mist along the ground in the 3D mission view, behind the play plane and faintly in front of it. Off saves six large transparent layers on a slow device.",
       },
       {
         key: "cape3d",
@@ -387,7 +378,7 @@ export const SCHEMA = [
         type: "bool",
         live: true,
         default: true,
-        help: "A cloth cape on every soldier in the 3D mission view, simulated per soldier at 60Hz. Off hides it and stops the simulation, which is the most expensive look on a slow device. The 2D view has none.",
+        help: "A cloth cape on every soldier in the 3D mission view, simulated per soldier at 60Hz. Off hides it and stops the simulation, which is the most expensive look on a slow device.",
       },
       {
         key: "enemyFx3d",
@@ -395,7 +386,7 @@ export const SCHEMA = [
         type: "bool",
         live: true,
         default: true,
-        help: "The 3D mission view's enemy effects: smoke, sparks, dust, thruster flames, lights, muzzle and launch flashes, and explosions drawn as fireballs. Off draws explosions as glowing spheres and none of the rest. Camera shake is not an effect and stays. The 2D view has none of these.",
+        help: "The 3D mission view's enemy effects: smoke, sparks, dust, thruster flames, lights, muzzle and launch flashes, and explosions drawn as fireballs. Off draws explosions as glowing spheres and none of the rest. Camera shake is not an effect and stays.",
       },
       {
         key: "showFps",

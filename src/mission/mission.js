@@ -16,7 +16,7 @@ import { MissionInput } from "./input.js";
 import { loadMission, stepActor, overlaps, clamp, Loot, startReload, tickReload, STAND_H } from "./entities.js";
 import { fire, updateCompanion, updateCompanionSpec, aimAccuracy, markVerdictHit } from "./ai.js";
 import { updateProjectiles, updateStatuses } from "./combat.js";
-import { drawProjectile, drawNavGraph, drawNavPath } from "./render.js";
+import { drawNavGraph, drawNavPath } from "./render.js";
 import { createDebugView, drawSquadDebug, drawSpeedLabel, drawDeathCard, tagText } from "./debugview.js";
 import { graphFor, soldierProfile } from "./navigation.js";
 import {
@@ -27,7 +27,7 @@ import { drawSpecEnemy } from "./enemyspec/render.js";
 import { createMotion, KICK_TO_SHAKE } from "./enemyspec/motion.js";
 import { solveCamera, parseCanvasSize, DESIGN_W, DESIGN_H } from "./camera.js";
 import { createFpsSampler } from "../game/fps.js";
-import { config, setConfig } from "../game/config.js";
+import { config } from "../game/config.js";
 import { audio } from "../audio/engine.js";
 import { specSound } from "../audio/cues.js";
 
@@ -85,13 +85,16 @@ export class Mission {
     // under this canvas — the Three.js view — installed by whoever hosts the
     // page, never imported here: this module must stay importable in bare
     // node. It answers begin(mission) once per deploy, draw(mission, frame)
-    // once per rendered frame, end(mission) at stop(). While it is live and
-    // config.missionRenderer is "3d", render() leaves the world to it and
-    // draws only the flat layer on top. `onRendererToggle(value)` tells the
-    // host the toggle key flipped the knob, so it can load or show the view.
+    // once per rendered frame, end(mission) at stop(). It is the only thing
+    // that draws the world (tech/mission-3d-only.md): render() draws the flat
+    // layer on top of it, and while it is not live, a dark screen with
+    // `viewStatus` and the HUD. `waitForView` is the host saying nobody can see
+    // this mission without a view, so hold it still until there is one — set
+    // by the game page, never defaulted, so a headless host keeps stepping.
     this.view = null;
     this._viewLive = false;
-    this.onRendererToggle = null;
+    this.waitForView = false;
+    this.viewStatus = "Loading 3D view…";
     // THE PAUSE (tech/pause-menu.md). `paused` means the pause menu is up.
     // Not gameplay state: update() never reads it, it never crosses the wire,
     // and only `_frame` — the host's loop — honours it, so a headless driver of
@@ -133,7 +136,7 @@ export class Mission {
   // Is this page holding its mission still? Only one it steps itself: a room's
   // mission is the room's, and one commander's menu does not stop it.
   _frozen() {
-    return (this.paused || !!this.deathCard) && this.hosted && !this.remote;
+    return (this.paused || !!this.deathCard || (this.waitForView && !this._viewLive)) && this.hosted && !this.remote;
   }
 
   // Dismiss the death card; the mission carries on. Drops the time that passed
@@ -146,7 +149,9 @@ export class Mission {
   }
 
   // Install (or, with null, remove) the external view. Mid-mission it begins at
-  // once, so a toggle that loads the view on first use takes effect this frame.
+  // once, so a view that finishes loading after the deploy takes effect this
+  // frame — and, as a release from waiting for it, drops the time and presses
+  // that passed meanwhile, the way dismissing the death card does.
   setView(view) {
     if (this.view === view) return;
     this._endView();
@@ -154,18 +159,14 @@ export class Mission {
     if (this.view && this.running && this.hosted) {
       this.view.begin(this);
       this._viewLive = true;
+      this.accumulator = 0;
+      this.input.dropPresses?.();
     }
   }
 
   _endView() {
     if (this.view && this._viewLive) this.view.end(this);
     this._viewLive = false;
-  }
-
-  // Is the 3D view drawing the world this frame? A configured "3d" whose view
-  // has not loaded (or failed to) draws 2D, never nothing.
-  _use3d() {
-    return this._viewLive && config.missionRenderer === "3d";
   }
 
   // `mission` = MISSIONS entry, `level` = the resolved LEVELS entry,
@@ -320,11 +321,6 @@ export class Mission {
     // rendered frame by _frame, read by the 3D view, and the source of kicks.
     this.motion = createMotion();
     this.particles = [];
-    // 46 spores at the classic size, scaled by area so a bigger canvas doesn't
-    // look emptier.
-    this.motes = this._makeMotes(
-      Math.round(46 * ((this.canvas.width * this.canvas.height) / (DESIGN_W * DESIGN_H)))
-    );
     this.damageFlash = 0; // red vignette pulse when the controlled soldier is hit
 
     this.running = true;
@@ -621,8 +617,6 @@ export class Mission {
       if (end.timer <= 0) this._finish(end.owner);
     }
 
-    this._handleViewToggle();
-
     // A VIEWER STOPS HERE (J8). Everything above this line is cosmetic state
     // the client owns outright — the clock, the shake, the motes, the intro
     // and the banner countdown — and `_updateCamera` below it is the same: a
@@ -697,17 +691,6 @@ export class Mission {
       const cur = this.currentSoldier(o);
       if (!cur || !cur.alive) this._swapControl(1, o);
     }
-  }
-
-  // The 2D/3D toggle. What the person looking at this canvas wants, not
-  // something a commander owns, so it sits above the viewer's early return —
-  // a page watching a room's mission is still a person looking at a canvas.
-  // It is not a debug tool and has no config gate. A host-free
-  // mission has nobody looking and never writes the knob.
-  _handleViewToggle() {
-    if (!this.hosted || !this.input.justPressed("toggleRenderer")) return;
-    setConfig("missionRenderer", config.missionRenderer === "3d" ? "2d" : "3d");
-    if (this.onRendererToggle) this.onRendererToggle(config.missionRenderer);
   }
 
   // The graph the SQUAD routes on. Soldier bodies all share one profile —
@@ -1223,14 +1206,6 @@ export class Mission {
 
   // ---- particles (cosmetic) ----------------------------------------------
 
-  _makeMotes(n) {
-    const W = this.canvas.width, H = this.canvas.height;
-    const a = [];
-    for (let i = 0; i < n; i++)
-      a.push({ x: Math.random() * W, y: Math.random() * H, r: 0.6 + Math.random() * 1.6, spd: 5 + Math.random() * 16, phase: Math.random() * 7 });
-    return a;
-  }
-
   _updateParticles(dt) {
     for (const p of this.particles) {
       p.vx *= 0.94;
@@ -1272,8 +1247,8 @@ export class Mission {
     const H = this.canvas.height;
     const z = this._zoom();
 
-    // The shake offset is rolled ONCE per frame and shared by the 2D world
-    // transform, the flat tells and the 3D view, so the layers shake together.
+    // The shake offset is rolled ONCE per frame and shared by the flat layer's
+    // world transform and the 3D view, so the layers shake together.
     // A frozen frame gets none, or a hit's shake would jitter on forever.
     let sx = 0, sy = 0;
     if (this.shake > 0 && !this._frozen()) {
@@ -1281,17 +1256,17 @@ export class Mission {
       sx = (Math.random() * 2 - 1) * m;
       sy = (Math.random() * 2 - 1) * m;
     }
-    const use3d = this._use3d();
-
-    if (use3d) {
-      // The view draws the world on its own canvas UNDER this one; this canvas
-      // becomes a transparent layer for the tells, overlays and HUD.
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, W, H);
-      this.view.draw(this, { W, H, z, sx, sy });
-    } else {
-      this._drawBackground(ctx, W, H, z);
+    // The view draws the world on its own canvas UNDER this one; this canvas
+    // is a transparent layer for the tells, overlays and HUD. With no live
+    // view there is no world: a dark screen that says why, and the HUD.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (!this._viewLive) {
+      this._drawWaiting(ctx, W, H);
+      this._drawHUD();
+      return;
     }
+    ctx.clearRect(0, 0, W, H);
+    this.view.draw(this, { W, H, z, sx, sy });
 
     ctx.save();
     // world → screen: (world - camera) * zoom, then screen-space shake.
@@ -1303,7 +1278,6 @@ export class Mission {
       -Math.round(this.camera.y * z) + sy
     );
 
-    if (!use3d) this._drawPlatforms(ctx, scene, z);
     // Nav overlays sit on the terrain and under everything alive, so bodies and
     // shots stay readable through them. One graph resolution per frame, shared
     // by both toggles.
@@ -1328,17 +1302,7 @@ export class Mission {
         scene, mates: this._debugMates(), time: this.time, clock: scene.survivalClock || 0, layers: this.debug, z,
       });
     }
-    const drivenHere = this.currentSoldier(); // hoisted: an id lookup, and the loop asks per soldier
-    if (use3d) {
-      this._drawTells(ctx, drivenHere, z);
-    } else {
-      this._drawExit(ctx, scene.exit, z);
-      for (const l of scene.loot) this._drawLoot(ctx, l);
-      for (const r of scene.specRoots) drawSpecEnemy(ctx, r, this.time, z);
-      for (const p of scene.projectiles) this._drawProjectile(p, z);
-      for (const s of scene.soldiers) this._drawSoldier(s, s === drivenHere, z);
-      this._drawParticles(ctx);
-    }
+    this._drawTells(ctx, this.currentSoldier(), z);
 
     ctx.restore();
 
@@ -1354,112 +1318,6 @@ export class Mission {
     if (end) this._drawEndBanner(end);
   }
 
-  // Screen space, but camera-aware. The horizon is measured from where the
-  // world's bottom edge lands ON SCREEN rather than from the canvas bottom, so
-  // the skyline stays welded to the ground slab instead of floating above it
-  // once the viewport is taller than the 540px world. At the classic size with
-  // no zoom `hy === H`, i.e. the original numbers.
-  _drawBackground(ctx, W, H, z = 1) {
-    const t = this.time;
-    const hy = (this.scene.world.height - this.camera.y) * z;
-    const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, "#060915");
-    sky.addColorStop(0.55, "#0c1424");
-    sky.addColorStop(0.82, "#14232a");
-    sky.addColorStop(1, "#1a2a22");
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, H);
-
-    // ominous hive glow low on the horizon
-    const gx = W * 0.72 - ((this.camera.x * z * 0.05) % (W * 2));
-    this._glow(ctx, gx, hy * 0.84, 340 * z, "rgba(110,240,170,0.16)");
-
-    // two parallax layers of ruined skyline
-    this._skyline(ctx, W, H, 0.18, hy * 0.66, 130, "#0a1420", 46, z);
-    this._skyline(ctx, W, H, 0.36, hy * 0.76, 90, "#0c1a24", 78, z);
-
-    // drifting spores
-    for (const m of this.motes) {
-      const yy = (((m.y - t * m.spd) % H) + H) % H;
-      const a = 0.12 + 0.14 * Math.sin(t * 2 + m.phase);
-      ctx.fillStyle = `rgba(150,220,190,${a})`;
-      ctx.beginPath();
-      ctx.arc(m.x, yy, m.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // Buildings are sized in screen px, so they scale with the zoom along with
-  // everything else on the horizon. The skyline is seeded from the building
-  // index, so it stays deterministic — a different zoom just picks a different
-  // (equally arbitrary) stretch of ruins.
-  _skyline(ctx, W, H, par, baseY, peak, color, step, z = 1) {
-    const sstep = step * z;
-    const off = this.camera.x * z * par;
-    ctx.fillStyle = color;
-    const start = Math.floor(off / sstep) - 1;
-    for (let i = start; i * sstep - off < W + sstep; i++) {
-      const seed = Math.sin(i * 12.9898) * 43758.5453;
-      const r = seed - Math.floor(seed);
-      const bh = peak * z * (0.4 + 0.6 * r);
-      const x = i * sstep - off;
-      ctx.fillRect(x, baseY - bh, sstep - 6 * z, bh + H);
-    }
-  }
-
-  _drawPlatforms(ctx, scene, z = 1) {
-    // "you can stand here" — hold the lit edge at its authored 2 device px when
-    // zoomed out, but let it scale up with everything else when zoomed in.
-    const edge = Math.max(2, 2 / z);
-    for (const p of scene.platforms) {
-      const g = ctx.createLinearGradient(0, p.y, 0, p.y + p.h);
-      g.addColorStop(0, "#27425f");
-      g.addColorStop(1, "#132132");
-      ctx.fillStyle = g;
-      ctx.fillRect(p.x, p.y, p.w, p.h);
-      // lit top edge
-      ctx.fillStyle = "#6fd3ff";
-      ctx.fillRect(p.x, p.y, p.w, edge);
-      ctx.fillStyle = "rgba(255,255,255,0.05)";
-      ctx.fillRect(p.x, p.y + edge, p.w, 2); // sits just under the lit edge
-      // rivets
-      ctx.fillStyle = "rgba(0,0,0,0.35)";
-      for (let rx = p.x + 10; rx < p.x + p.w - 6; rx += 28) {
-        ctx.fillRect(rx, p.y + 7, 2, 2);
-        if (p.h > 24) ctx.fillRect(rx, p.y + p.h - 9, 2, 2);
-      }
-      // bottom shadow
-      ctx.fillStyle = "rgba(0,0,0,0.4)";
-      ctx.fillRect(p.x, p.y + p.h - 2, p.w, 2);
-    }
-  }
-
-  _drawExit(ctx, ex, z = 1) {
-    const t = this.time;
-    const pulse = 0.5 + 0.5 * Math.sin(t * 4);
-    const beam = ctx.createLinearGradient(0, ex.y, 0, ex.y + ex.h);
-    beam.addColorStop(0, "rgba(140,255,190,0.04)");
-    beam.addColorStop(1, `rgba(140,255,190,${0.22 + pulse * 0.18})`);
-    ctx.fillStyle = beam;
-    ctx.fillRect(ex.x, ex.y, ex.w, ex.h);
-    // posts
-    ctx.fillStyle = "#8affc1";
-    ctx.fillRect(ex.x - 3, ex.y, 3, ex.h);
-    ctx.fillRect(ex.x + ex.w, ex.y, 3, ex.h);
-    // rising chevrons
-    ctx.fillStyle = `rgba(180,255,210,${0.5 + pulse * 0.4})`;
-    for (let i = 0; i < 3; i++) {
-      const yy = ex.y + ex.h - (((t * 60 + i * (ex.h / 3)) % ex.h));
-      ctx.beginPath();
-      ctx.moveTo(ex.x + ex.w / 2, yy - 8);
-      ctx.lineTo(ex.x + ex.w / 2 - 9, yy);
-      ctx.lineTo(ex.x + ex.w / 2 + 9, yy);
-      ctx.closePath();
-      ctx.fill();
-    }
-    this._drawExitLabel(ctx, ex, z);
-  }
-
   // The label is signage, not scenery: keep it screen-sized so it stays
   // readable when zoomed out. A tell — flat over the 3D view too.
   _drawExitLabel(ctx, ex, z = 1) {
@@ -1470,26 +1328,8 @@ export class Mission {
     ctx.textAlign = "left";
   }
 
-  _drawLoot(ctx, l) {
-    if (l.collected) return;
-    const y = l.y + Math.sin(l.bob) * 3;
-    const cx = l.x + l.w / 2, cy = y + l.h / 2;
-    this._glow(ctx, cx, cy, 22, `rgba(242,193,78,${0.35 + 0.15 * Math.sin(this.time * 5)})`);
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(Math.PI / 4);
-    ctx.fillStyle = "#f2c14e";
-    ctx.fillRect(-7, -7, 14, 14);
-    ctx.fillStyle = "#fff2c0";
-    ctx.fillRect(-7, -7, 14, 4);
-    ctx.strokeStyle = "rgba(255,255,255,0.5)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(-7, -7, 14, 14);
-    ctx.restore();
-  }
-
-  // The flat layer over the 3D view: every "tell" the world pass would have
-  // drawn in place, positioned by the same transform. Order: exit label, enemy
+  // The flat layer over the 3D view: the "tells" that read as signage rather
+  // than scenery, positioned by the world transform. Order: exit label, enemy
   // bars, then per soldier its ring and its bar.
   _drawTells(ctx, drivenHere, z = 1) {
     const scene = this.scene;
@@ -1507,73 +1347,6 @@ export class Mission {
   // makes the walk stutter in multi-pixel steps.
   _snap(v, z) {
     return Math.round(v * z) / z;
-  }
-
-  _drawSoldier(s, controlled, z = 1) {
-    const ctx = this.ctx;
-    if (!s.alive) return;
-    const x = this._snap(s.x, z), y = this._snap(s.y, z), w = s.w, h = s.h, cx = x + w / 2, dir = s.facing;
-
-    this._shadow(ctx, cx, y + h, w * 0.85);
-
-    if (controlled) this._drawRing(ctx, s, x, y, z);
-
-    const flash = s.hitFlash > 0;
-    const base = flash ? "#ffffff" : s.color;
-    const dark = flash ? "#ffffff" : this._shade(s.color, -22);
-
-    const gunLen = w * 0.62, gy = y + h * 0.42;
-
-    if (s.crouched) {
-      // Kneeling: back leg folded along the ground, forward knee up, hunched
-      // torso, gun braced low — a short silhouette shots pass over.
-      ctx.fillStyle = dark;
-      ctx.fillRect(x + w * 0.12, y + h * 0.62, w * 0.6, h * 0.38); // folded shin along the ground
-      ctx.fillRect(dir > 0 ? x + w * 0.5 : x + w * 0.24, y + h * 0.44, w * 0.26, h * 0.56); // forward knee
-      // backpack
-      ctx.fillStyle = this._shade(s.color, -34);
-      ctx.fillRect(dir > 0 ? x - 1 : x + w - 5, y + h * 0.16, 6, h * 0.42);
-      // hunched torso
-      ctx.fillStyle = base;
-      this._roundRect(ctx, x + w * 0.18, y + h * 0.16, w * 0.64, h * 0.5, 4);
-      ctx.fill();
-      // helmet
-      ctx.fillStyle = dark;
-      this._roundRect(ctx, dir > 0 ? x + w * 0.32 : x + w * 0.2, y, w * 0.48, h * 0.34, 4);
-      ctx.fill();
-      // visor
-      ctx.fillStyle = flash ? "#ffffff" : "#7ad7ff";
-      ctx.fillRect(dir > 0 ? cx + 1 : x + w * 0.24, y + h * 0.08, w * 0.26, h * 0.1);
-      // gun braced forward, low (points along manual aim when active)
-      this._drawGun(ctx, s, cx, gy, gunLen, y, h);
-    } else {
-      // legs
-      ctx.fillStyle = dark;
-      ctx.fillRect(x + w * 0.2, y + h * 0.62, w * 0.22, h * 0.38);
-      ctx.fillRect(x + w * 0.58, y + h * 0.62, w * 0.22, h * 0.38);
-      // backpack
-      ctx.fillStyle = this._shade(s.color, -34);
-      ctx.fillRect(dir > 0 ? x - 2 : x + w - 4, y + h * 0.3, 6, h * 0.3);
-      // torso
-      ctx.fillStyle = base;
-      this._roundRect(ctx, x + w * 0.16, y + h * 0.28, w * 0.68, h * 0.4, 4);
-      ctx.fill();
-      ctx.fillStyle = this._shade(s.color, 20);
-      ctx.fillRect(cx - 1, y + h * 0.3, 2, h * 0.34);
-      // helmet
-      ctx.fillStyle = dark;
-      this._roundRect(ctx, x + w * 0.24, y + h * 0.05, w * 0.52, h * 0.26, 5);
-      ctx.fill();
-      // visor
-      ctx.fillStyle = flash ? "#ffffff" : "#7ad7ff";
-      ctx.fillRect(dir > 0 ? cx - 1 : x + w * 0.26, y + h * 0.12, w * 0.28, h * 0.08);
-      // weapon (points along manual aim when active, else up/forward)
-      this._drawGun(ctx, s, cx, gy, gunLen, y, h);
-    }
-
-    if (s.muzzleFlash > 0) this._drawMuzzle(ctx, s, this._gunTip(s, cx, gy, gunLen, y));
-    if (s.burn) this._drawBurn(ctx, x, y, w, h);
-    this._soldierBar(s, x, y, controlled);
   }
 
   // "which one am I" — the ring and caret stay screen-sized, since finding
@@ -1600,80 +1373,33 @@ export class Mission {
     this._healthBar(x, y - 8, s.w, s.health / s.maxHealth, controlled ? "#7ad7ff" : "#6fcf97");
   }
 
-  // Draw the soldier's gun as a barrel from the shoulder pivot. Manual aim
-  // (aimVec) rotates it to the aimed direction; otherwise the legacy up/forward.
-  _drawGun(ctx, s, cx, gy, gunLen, y, h) {
-    ctx.fillStyle = "#0b0f18";
-    if (s.aimVec) {
-      ctx.save();
-      ctx.translate(cx, gy);
-      ctx.rotate(Math.atan2(s.aimVec.y, s.aimVec.x));
-      ctx.fillRect(0, -2.5, gunLen, 5);
-      ctx.restore();
-    } else if (s.aimUp) {
-      ctx.fillRect(cx - 2, y - 8, 4, h * 0.42);
-    } else if (s.facing > 0) {
-      ctx.fillRect(cx, gy, gunLen, 5);
-    } else {
-      ctx.fillRect(cx - gunLen, gy, gunLen, 5);
-    }
-  }
-
-  // Barrel-tip point (where the muzzle flash sits) for the current aim.
+  // Barrel-tip point for the current aim. Nothing here draws a gun any more:
+  // the 3D view places every muzzle flash with it (view3d/soldier.js), so it
+  // stays when the 2D figure is gone.
   _gunTip(s, cx, gy, gunLen, y) {
     if (s.aimVec) return { x: cx + s.aimVec.x * gunLen, y: gy + s.aimVec.y * gunLen };
     if (s.aimUp) return { x: cx, y: y - 10 };
     return { x: s.facing > 0 ? cx + gunLen : cx - gunLen, y: gy };
   }
 
-  _drawMuzzle(ctx, shooter, at) {
-    const col = shooter.muzzleColor || "#ffd36a";
-    this._glow(ctx, at.x, at.y, 15, this._alpha(col, 0.85));
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(at.x, at.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(at.x - 9, at.y);
-    ctx.lineTo(at.x + 9, at.y);
-    ctx.moveTo(at.x, at.y - 6);
-    ctx.lineTo(at.x, at.y + 6);
-    ctx.stroke();
-  }
-
-  _drawProjectile(p, z = 1) {
-    drawProjectile(this.ctx, p, z);
-  }
-
-  _drawParticles(ctx) {
-    if (!this.particles.length) return;
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (const p of this.particles) {
-      const a = clamp(p.life / p.max, 0, 1);
-      const s = p.size * (0.4 + 0.6 * a);
-      ctx.fillStyle = this._alpha(p.color, a);
-      ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+  // No live view: nothing can draw the world. Say why, centred, on dark,
+  // wrapped to most of the width — a load failure carries a URL.
+  _drawWaiting(ctx, W, H) {
+    ctx.fillStyle = "#060915";
+    ctx.fillRect(0, 0, W, H);
+    const px = Math.round(14 * this._uiScale());
+    ctx.fillStyle = "#8fa6c0";
+    ctx.font = `${px}px monospace`;
+    ctx.textAlign = "center";
+    const lines = [];
+    for (const word of String(this.viewStatus).split(" ")) {
+      const last = lines.length ? `${lines[lines.length - 1]} ${word}` : word;
+      if (lines.length && ctx.measureText(last).width <= W * 0.8) lines[lines.length - 1] = last;
+      else lines.push(word);
     }
-    ctx.restore();
-  }
-
-  _drawBurn(ctx, x, y, w, h) {
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 3; i++) {
-      const fx = x + (i + 0.5) * (w / 3) + Math.sin(this.time * 12 + i) * 2;
-      const fh = 6 + Math.random() * 8;
-      ctx.fillStyle = `rgba(255,${(120 + Math.random() * 80) | 0},40,0.55)`;
-      ctx.beginPath();
-      ctx.moveTo(fx - 3, y + 2);
-      ctx.lineTo(fx, y - fh);
-      ctx.lineTo(fx + 3, y + 2);
-      ctx.fill();
-    }
-    ctx.restore();
+    const top = H / 2 - ((lines.length - 1) * px * 1.5) / 2;
+    lines.forEach((line, i) => ctx.fillText(line, W / 2, top + i * px * 1.5));
+    ctx.textAlign = "left";
   }
 
   _healthBar(x, y, w, frac, color) {
@@ -1897,13 +1623,6 @@ export class Mission {
     ctx.closePath();
   }
 
-  _shadow(ctx, cx, by, rw) {
-    ctx.fillStyle = "rgba(0,0,0,0.3)";
-    ctx.beginPath();
-    ctx.ellipse(cx, by, rw / 2, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   _glow(ctx, x, y, r, color) {
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, color);
@@ -1918,32 +1637,5 @@ export class Mission {
     const parts = name.trim().split(/\s+/);
     if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     return name.slice(0, 2).toUpperCase();
-  }
-
-  // Lighten/darken an "hsl(h s% l%)" or "#rrggbb" colour by `d` (-100..100).
-  _shade(color, d) {
-    if (color.startsWith("hsl")) {
-      const m = color.match(/hsl\(\s*([\d.]+)[, ]+([\d.]+)%[, ]+([\d.]+)%/);
-      if (m) return `hsl(${+m[1]} ${+m[2]}% ${clamp(+m[3] + d, 0, 100)}%)`;
-      return color;
-    }
-    let c = color.replace("#", "");
-    if (c.length === 3) c = c.split("").map((x) => x + x).join("");
-    const f = d * 2.55;
-    const r = clamp(parseInt(c.slice(0, 2), 16) + f, 0, 255) | 0;
-    const g = clamp(parseInt(c.slice(2, 4), 16) + f, 0, 255) | 0;
-    const b = clamp(parseInt(c.slice(4, 6), 16) + f, 0, 255) | 0;
-    return `rgb(${r} ${g} ${b})`;
-  }
-
-  // Add an alpha channel to a "#rrggbb" colour (passes rgba/hsla through).
-  _alpha(color, a) {
-    if (color.startsWith("#")) {
-      let c = color.replace("#", "");
-      if (c.length === 3) c = c.split("").map((x) => x + x).join("");
-      const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
-      return `rgba(${r},${g},${b},${a})`;
-    }
-    return color;
   }
 }

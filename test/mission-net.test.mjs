@@ -54,7 +54,7 @@ import { ACTIONS } from "../src/game/controlmap.js";
 
 // The exception, restated here on purpose: a test that imported the production
 // list would agree with it by construction and assert nothing.
-const LOCAL = ["debugMenu", "toggleRenderer", "pause"];
+const LOCAL = ["debugMenu", "pause"];
 
 // The Squad survival group (tech/squad-survival.md) is all server-scoped and
 // grows a slice at a time, so it is counted rather than restated.
@@ -840,6 +840,11 @@ async function configRoutes(t) {
     const local = await postStatus(base, "/api/config", { key: "aimMode", value: "keyboard" });
     t.eq("config: an unmarked key is refused", local.status, 403);
     t.ok("config: ...and named in the answer, so a browser can report it", local.body.key === "aimMode");
+    // A key a newer build deleted, as an old export still carries it: no such
+    // knob. (The editor's Import never posts it — it drops keys the server
+    // did not offer — so this is what a hand-made request hears.)
+    const gone = await postStatus(base, "/api/config", { key: "missionRenderer", value: "2d" });
+    t.eq("config: a deleted key (missionRenderer) is a 400, not a 403", gone.status, 400);
     const missing = await postStatus(base, "/api/config", { value: 3 });
     t.eq("config: a body with no key is a 400 rather than a throw", missing.status, 400);
 
@@ -859,13 +864,14 @@ async function configRoutes(t) {
     }
     // 52 since progression P2 added the four server-scoped xpReward* knobs, plus
     // squad survival's group (tech/squad-survival.md), all server-scoped;
-    // 32 local: missionRenderer (mission-3d R1), then scanlines + scanlineSpacing,
+    // 31 local: scanlines + scanlineSpacing,
     // which only the 3D view in a page reads, then debugPauseOnDeath
     // (tech/squad-debug.md D4), which only a page's own mission reads, then
     // laserSight3d, groundMist3d and cape3d (tech/mission-3d-looks.md), the
     // 3D view's again, then enemyFx3d (tech/mission-3d-enemies.md M10).
+    // missionRenderer left (tech/mission-3d-only.md O2).
     t.eq("config: a whole exported config applies its server keys", applied, 52 + SURVIVAL_KNOBS);
-    t.eq("config: ...drops the other 32", refused, 32);
+    t.eq("config: ...drops the other 31", refused, 31);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");
     t.eq("config: the server-scoped key it carried landed", after.values.healPerDay, 3);

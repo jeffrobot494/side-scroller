@@ -44,7 +44,6 @@ import { createHubAmbient } from "./hub/ambient.js";
 import { createFpsMeter } from "./hub/fpsmeter.js";
 import { createPauseMenu } from "./hub/pause.js";
 import { audio } from "./audio/engine.js";
-import { config, setConfig } from "./game/config.js";
 
 const hubRoot = document.getElementById("hub-root");
 const canvas = document.getElementById("game");
@@ -120,7 +119,9 @@ let netSocket = null;
 // The mission scene calls back here when it resolves. No view and no seat, so
 // it is still built up front.
 const mission = new Mission(canvas, onMissionComplete);
-mission.onRendererToggle = () => syncRenderer();
+// The mission is only ever drawn by the 3D view (tech/mission-3d-only.md), so
+// this page's own mission holds still until the view is live.
+mission.waitForView = true;
 
 // ---- the pause menu (tech/pause-menu.md) ------------------------------------
 // The mission says when it opens and closes — its `pause` key, Resume, and
@@ -140,45 +141,34 @@ mission.onPauseChange = (open, screen) => {
     screen,
     debug: mission.remote ? null : mission.debug,
     resume: () => mission.setPaused(false),
-    // The 2D/3D switch is the same act from the menu as from the toggle key.
-    onChange: (key) => { if (key === "missionRenderer") syncRenderer(); },
   });
 };
 
-// ---- the 3D view (tech/mission-3d.md) ---------------------------------------
-// Fetched at page load when the setting is 3D (the default), so the first
-// mission does not open in 2D while Three.js downloads; a 2D player fetches it
-// only on switching. The mission only ever sees `setView` — this module, not
+// ---- the 3D view (tech/mission-3d.md, tech/mission-3d-only.md) -------------
+// The only way a mission is drawn. Fetched at page load so the first deploy
+// does not wait on it. The mission only ever sees `setView` — this module, not
 // mission.js, is what imports the view, which keeps mission.js bare-node safe.
+// A failed load is final for the page: it keeps the reason, the mission shows
+// it, and nothing retries — a failure that recurs (no WebGL) would otherwise
+// re-import and re-throw forever.
 let inMission = false;
 let view3d = null;
-let view3dLoading = null;
 
-function loadView3d() {
-  if (!view3dLoading) {
-    view3dLoading = import("./mission/view3d/index.js")
-      .then((mod) => { view3d = mod.createView3D(canvas3d); })
-      .catch((e) => {
-        view3dLoading = null; // a later switch tries again
-        // Never blank: back to 2D, and say why.
-        setConfig("missionRenderer", "2d");
-        viewNotice(`3D view unavailable (${e && e.message ? e.message : "load failed"}) — staying in 2D`);
-      });
-  }
-  return view3dLoading;
-}
+import("./mission/view3d/index.js")
+  .then((mod) => { view3d = mod.createView3D(canvas3d); syncView(); })
+  .catch((e) => {
+    const why = e && e.message ? e.message : "load failed";
+    mission.viewStatus = `3D view unavailable (${why}). Reload the page to try again.`;
+    viewNotice(mission.viewStatus);
+  });
 
-// Bring the page in line with config.missionRenderer: load and install the
-// view if 3D is wanted, and show its canvas only while it is drawing.
-function syncRenderer() {
-  const want = config.missionRenderer === "3d";
-  if (want && inMission && !view3d) loadView3d().then(syncRenderer);
+// Install the view once it exists, and show its canvas with the mission scene.
+function syncView() {
   if (view3d) mission.setView(view3d);
-  const on = inMission && want && !!view3d;
+  const on = inMission && !!view3d;
   canvas3d.style.display = on ? "block" : "none";
   canvas.classList.toggle("over3d", on);
 }
-if (config.missionRenderer === "3d") loadView3d();
 
 let noticeEl = null;
 function viewNotice(text) {
@@ -465,7 +455,7 @@ function showScene(name) {
   // that ended under it. The mission's own hook is what disposes it.
   if (!inMission) mission.setPaused(false);
   canvas.style.display = inMission ? "block" : "none";
-  syncRenderer();
+  syncView();
   hubRoot.style.display = inMission ? "none" : "block";
   ambient.setVisible(!inMission);
   fpsMeter.setSceneVisible(!inMission);

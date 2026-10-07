@@ -295,7 +295,7 @@ section + the tests are the source of truth for what currently exists):
   mapping defaults) and the mouse. Manual aim (`config.aimMode`: mouse/gamepad/
   auto/keyboard) sets a soldier's `aimVec`; `keyboard` = the legacy up/forward
   scheme. The drawn gun and the muzzle flash follow `aimVec` when it is set
-  (`_drawGun`/`_gunTip`), falling back to facing when it isn't. **Companions aim
+  (`_gunTip`, which the 3D view calls), falling back to facing when it isn't. **Companions aim
   in 2D too:** `updateCompanionSpec` writes `aimVec` at the nearest hostile every
   frame and the brain's `fire` goes down `fireDir()`, the same call the player
   uses. Before Aug 2026 they engaged only within a ±40px vertical band and shot
@@ -483,16 +483,19 @@ section + the tests are the source of truth for what currently exists):
   and Results print it; editor Tools → **Progression** edits the rules and the
   recruits' pairs with a live preview. No rebase: no campaign outlives a rules
   change, and a room server always runs the shipped rules.
-- **The mission has a 3D view (`tech/mission-3d.md` R1–R6 — built).** Same
-  simulation, drawn by Three.js on `#game3d` UNDER the mission canvas, which
-  goes transparent and keeps the tells (health bars, controlled ring + caret,
-  EXTRACT label), nav overlays, vignette and HUD. `config.missionRenderer`
-  (`2d`/`3d`, default 2d, local) picks it; `toggleRenderer` (default V, local-only
-  on the wire) flips it mid-mission. `src/main.js` lazy-imports
-  `src/mission/view3d/` at page load when the setting is 3D (else on the first
-  switch) and installs it with
-  `mission.setView()` — **mission.js never imports `three`** and stays bare-node
-  importable; a failed CDN load stays 2D with a notice. The view begins per
+- **The mission is drawn in 3D only (`tech/mission-3d.md` R1–R6,
+  `tech/mission-3d-only.md` O1–O2 — built).** Drawn by Three.js on `#game3d`
+  UNDER the mission canvas, which is transparent and keeps the tells (health
+  bars, controlled ring + caret, EXTRACT label), nav overlays, vignette and
+  HUD. **There is no 2D mission view**: `missionRenderer`, `toggleRenderer` and
+  the 2D world pass are deleted. three 0.180.0 is vendored in `vendor/three/`
+  (only the files the game reaches; `build.mjs` follows bare specifiers through
+  `index.html`'s import map). `src/main.js` imports `src/mission/view3d/` at
+  page load and installs it with `mission.setView()` — **mission.js never
+  imports `three`** and stays bare-node importable. Until the view is live,
+  `render()` draws a dark screen with `mission.viewStatus` and the HUD, and the
+  game page's mission is frozen (`waitForView`, a third `_frozen()` reason that
+  only `main.js` sets); a failed load is final, with a reload notice. The view begins per
   deploy, draws per frame, ends at stop. **The one invariant:**
   `solveCamera3D` (`src/mission/camera.js`) puts the z=0 plane exactly on the
   2D camera's pixels, rounded scroll and shake included, so aim, `toWorld()` and
