@@ -569,6 +569,21 @@ section + the tests are the source of truth for what currently exists):
   instead of a square: `src/space3d/` imports `src/space/sim.js` for tuning,
   weapons, recruits, enemy types and the derelict layout, and
   `src/space/audio.js` for sound, and copies the rules with a z.
+- **Trailer (`tech/trailer.md` T0–T6 — built).** `trailer.html` (linked
+  from nothing) + `trailer.mjs` render design/trailer.md's 60 s trailer from
+  the game itself: `node trailer.mjs shot1` … `shot14`, `cards`, then
+  `cut` → `output/trailer/trailer.mp4` (gitignored). A page-wide virtual
+  clock (`src/trailer/clock.js`) replaces rAF, `performance.now` and
+  `Math.random`, so every take is frame-exact; captured headless on the GPU
+  (D3D12 through Mesa under WSL, ~4 fps). Mission shots are staged segments
+  in `src/trailer/takes.js` run on the real `Mission` by `runner.js` (cues,
+  pre-roll, slow motion); kills are earned — a cue drops the target to 1 HP
+  on a beat where a round is measured to arrive. The 3D view has three
+  optional hooks the game never sets: `setCamera`, `setPass` (the long-lens
+  blur, injected so `dist/` does not carry it) and `setStage` (set dressing,
+  the trailer-only wing and Tex falls). Hub shots are the real `Hub` on a
+  staged campaign (`hubtakes.js`); shot 14 is `graphics-tester/splash.html`
+  unedited. Music is a 120 BPM click placeholder.
 - **Pause menu (`tech/pause-menu.md` P0–P3 — built).** Escape (the `pause`
   action, rebindable, local-only on the wire) opens `src/hub/pause.js` over a
   mission: Options and Resume. Options is `src/hub/controls.js` (moved from

@@ -1,7 +1,7 @@
 ---
 type: tech
 category: scenes
-status: unbuilt
+status: built
 resolution: sharp
 needs: [mission-3d, mission-3d-looks, mission-3d-enemies, mission-determinism]
 related: [mission-3d, mission-determinism, campaign-pacing]
@@ -49,6 +49,8 @@ How the 60-second trailer in `design/trailer.md` is rendered by the game itself:
 | Leads placed one per beat | The board's own generator makes them: the take raises `seedLeads` for the one `createState()` and then empties the board, putting the leads back one per beat |
 | Hub captured at 2× and cropped afterwards | Each frame names a page rectangle, and `Page.captureScreenshot` renders it scaled to 1920×1080. Chromium re-rasterizes at that scale, so the zoom onto Tex's card stays sharp with no 2× capture |
 | Splash readiness | The splash fetches three, its font and the armour after load. The capture waits for the network to go quiet before the first tick. No time passes on the page meanwhile, so the sequence starts at its `t=0` |
+| Cards drawn by the trailer page over the picture | The page draws the card layer alone on a transparent page (`trailer.mjs cards`). `trailer.mjs cut` lays it over the joined shots with ffmpeg. Frames without a card reuse one empty frame |
+| Shot 14's card, the game's name | No card: the splash title is the game's name |
 
 T0 is the foundation. T1, T2, T4 and T5 each land alone on top of it. T3 needs T1, and needs T2 only for shot 10. T6 needs all of them.
 

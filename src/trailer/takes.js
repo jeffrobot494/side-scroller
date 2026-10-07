@@ -358,6 +358,26 @@ export const SHOTS = [
   { n: 14, from: 106, to: 120, kind: "title" },
 ];
 
+// ---- the text cards (T6) ---------------------------------------------------------
+// Over the picture, never on black, in beats from the trailer's start. The
+// roster names are read off the roster, so a renamed enemy renames its card.
+// Shot 14's card is the game's name, which the splash title itself is.
+
+const nameOf = (id) => (missionSpecById[id] ? missionSpecById[id].name.toUpperCase() : id);
+
+export const CARDS = [
+  { from: 8.5, to: 12.5, text: "THEY ARE LANDING EVERYWHERE" },
+  { from: 13, to: 17.5, text: "YOU CANNOT ANSWER THEM ALL" },
+  { from: 34, to: 37, text: nameOf("lurk_gunner"), kind: "name" },
+  { from: 37, to: 40, text: nameOf("floating_factory"), kind: "name" },
+  { from: 40, to: 43, text: nameOf("breach_hopper"), kind: "name" },
+  { from: 43, to: 46, text: nameOf("sky_duelist"), kind: "name" },
+  { from: 48, to: 54, text: "THEY FIGHT BESIDE YOU" },
+  { from: 84, to: 89, text: "IT GETS WORSE" },
+  { from: 96.5, to: 100.5, text: "THE ONES WHO COME BACK GET BETTER" },
+  { from: 101, to: 105.5, text: "HOLD THE SECTOR. OR LOSE IT." },
+];
+
 // ---- T0 and T1's takes ------------------------------------------------------------
 
 // T0's take: a plain generated level under the game's own camera. Tex leads,

@@ -8,7 +8,7 @@ import { makeEl } from "./harness.mjs";
 import { resetConfig } from "../src/game/config.js";
 import { sampleScene, firstSampleDiff } from "../src/mission/checksum.js";
 import { startTake, prerollTarget, frameOfBeat, STEP } from "../src/trailer/runner.js";
-import { TAKES, RISK_FRAMINGS, SHOTS, missionSegments } from "../src/trailer/takes.js";
+import { TAKES, RISK_FRAMINGS, SHOTS, CARDS, missionSegments } from "../src/trailer/takes.js";
 import { missionSpecById } from "../src/game/enemyspecs.js";
 import { poseAt } from "../src/trailer/tracks.js";
 
@@ -147,5 +147,15 @@ export default async function run(t) {
     }
     t.ok(`T3: every enemy a segment places is on the roster${unknown.length ? ` — ${unknown.join("; ")}` : ""}`, !unknown.length);
     t.ok(`T3: every cue and pre-roll is on the eighth-note grid${off.length ? ` — ${off.join("; ")}` : ""}`, !off.length);
+  }
+
+  // T6: every card sits inside one shot, on the eighth-note grid, and no two
+  // are up at once.
+  {
+    const shotOf = (b) => SHOTS.find((s) => b >= s.from && b < s.to);
+    t.ok("T6: each card is inside one shot", CARDS.every((c) => c.to > c.from && shotOf(c.from) && shotOf(c.from) === shotOf(c.to - 1e-9)));
+    t.ok("T6: cards are on the eighth-note grid", CARDS.every((c) => onGrid(c.from, 0.5) && onGrid(c.to, 0.5)));
+    t.ok("T6: cards never overlap", CARDS.every((c, i) => !i || c.from >= CARDS[i - 1].to));
+    t.ok("T6: no card on black — none on the splash, which is the game's name", CARDS.every((c) => shotOf(c.from).kind !== "title"));
   }
 }

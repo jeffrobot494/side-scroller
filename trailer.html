@@ -16,6 +16,9 @@
     /* Shown only for the hub takes (T4). */
     body:not(.hub-take) #hub-root { display: none; }
     body.hub-take #game3d { display: none; }
+    /* The card layer (T6) is captured alone, on nothing. */
+    html:has(body.cards-take), body.cards-take { background: transparent !important; }
+    body.cards-take::after, body.cards-take #game3d, body.cards-take #game, body.cards-take #hub-root { display: none; }
   </style>
 </head>
 <body>

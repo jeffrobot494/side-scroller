@@ -2,6 +2,12 @@
 // THE TRAILER CAPTURE DRIVER (tech/trailer.md). Zero dependencies.
 //
 //   node trailer.mjs <take> [--frames N] [--soft]
+//   node trailer.mjs cut
+//
+// A take is shot1 … shot14 (shot14 is the splash), `cards` (the text cards
+// alone, transparent), or T0/T1's `proof` and `risk`. `cut` (T6) joins
+// shot1–14 in order, lays the cards over them and muxes a 120 BPM click:
+// output/trailer/trailer.mp4, 60 s, 1920×1080, 60 fps.
 //
 // Starts server.mjs on its own port, launches Playwright's headless Chromium
 // on the GPU (D3D12 through Mesa under WSL), opens trailer.html?take=<take>,
@@ -156,7 +162,47 @@ const TITLE = { take: "shot14", t: 0, frames: 14 * 30 };
 
 // ---- the capture --------------------------------------------------------------
 
+// T6: the cut. Every shot must have been captured, at its own length.
+function run(cmd, argv) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, argv, { stdio: ["ignore", "pipe", "inherit"] });
+    let out = "";
+    p.stdout.on("data", (b) => { out += b; });
+    p.on("exit", (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} exited ${code}`))));
+  });
+}
+
+async function cut() {
+  const shots = Array.from({ length: 14 }, (_, i) => join(OUT, `shot${i + 1}.mp4`));
+  const missing = shots.filter((f) => !existsSync(f));
+  if (missing.length) throw new Error(`capture these first: ${missing.map((f) => f.split("/").pop()).join(", ")}`);
+  if (!existsSync(join(OUT, "cards", "03599.png"))) throw new Error("capture the cards first: node trailer.mjs cards");
+  let frames = 0;
+  for (const f of shots) {
+    const n = Number((await run("ffprobe", ["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", f])).trim());
+    frames += n;
+  }
+  if (frames !== 60 * FPS) throw new Error(`the shots add up to ${frames} frames, not ${60 * FPS}`);
+  const list = join(OUT, "cut.txt");
+  writeFileSync(list, shots.map((f) => `file '${f}'`).join("\n") + "\n");
+  // The placeholder music: a click on every beat at 120 BPM, accented on the bar.
+  const click = join(OUT, "click.wav");
+  await run("ffmpeg", ["-y", "-loglevel", "error", "-f", "lavfi", "-i",
+    "aevalsrc='(0.35+0.35*lt(mod(t,2),0.5))*sin(2*PI*(1000+600*lt(mod(t,2),0.5))*t)*exp(-50*mod(t,0.5))':s=48000:d=60",
+    click]);
+  const out = join(OUT, "trailer.mp4");
+  await run("ffmpeg", ["-y", "-loglevel", "error",
+    "-f", "concat", "-safe", "0", "-i", list,
+    "-framerate", String(FPS), "-i", join(OUT, "cards", "%05d.png"),
+    "-i", click,
+    "-filter_complex", "[0:v][1:v]overlay=format=auto,format=yuv420p[v]",
+    "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-crf", "16", "-r", String(FPS),
+    "-c:a", "aac", "-b:a", "192k", "-t", "60", out]);
+  console.log(`${frames} frames → ${out}`);
+}
+
 async function main() {
+  if (take === "cut") return cut();
   const port = 8790 + Math.floor(Math.random() * 100);
   const server = await startServer(port);
   const chrome = await startChrome(flag("--soft"));
@@ -203,27 +249,38 @@ async function main() {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     const mp4 = join(OUT, `${take}.mp4`);
-    ff = spawn("ffmpeg", [
+    // The card layer (T6) is captured on a transparent page, PNGs only.
+    const cards = take === "cards";
+    ff = cards ? null : spawn("ffmpeg", [
       "-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(FPS), "-i", "-",
       "-vf", `scale=${W}:${H}`, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "16", mp4,
     ], { stdio: ["pipe", "inherit", "inherit"] });
-    const ffDone = new Promise((res) => ff.on("exit", res));
+    const ffDone = ff ? new Promise((res) => ff.on("exit", res)) : Promise.resolve();
 
     const t0 = Date.now();
+    if (cards) await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
+    let blank = null;
     for (let f = 0; f < frames; f++) {
       // A hub take answers with the page rectangle to scale to the frame (its
-      // slow zoom); a mission take answers nothing and is the whole viewport.
-      const c = await evaluate(cdp, "trailer.frame()");
-      const clip = c ? { x: c.x, y: c.y, width: c.width, height: (c.width * H) / W, scale: W / c.width } : { x: 0, y: 0, width: W, height: H, scale: 1 };
+      // slow zoom); a mission take answers nothing and is the whole viewport;
+      // the card layer answers "blank" on a frame with no card.
+      const c = await evaluate(cdp, `trailer.frame(${f})`);
+      if (c === "blank" && blank) {
+        writeFileSync(join(dir, `${String(f).padStart(5, "0")}.png`), blank);
+        continue;
+      }
+      const clip = c && typeof c === "object" ? { x: c.x, y: c.y, width: c.width, height: (c.width * H) / W, scale: W / c.width } : { x: 0, y: 0, width: W, height: H, scale: 1 };
       const shot = await cdp.send("Page.captureScreenshot", { format: "png", clip });
       const png = Buffer.from(shot.data, "base64");
       writeFileSync(join(dir, `${String(f).padStart(5, "0")}.png`), png);
+      if (c === "blank") blank = png;
+      if (cards) continue;
       if (!ff.stdin.write(png)) await new Promise((r) => ff.stdin.once("drain", r));
       if (f % 60 === 59) process.stdout.write(`\r${f + 1}/${frames} frames, ${((f + 1) / ((Date.now() - t0) / 1000)).toFixed(1)} fps`);
     }
-    ff.stdin.end();
+    if (ff) ff.stdin.end();
     await ffDone;
-    console.log(`\n${frames} frames → ${dir}\n${mp4}`);
+    console.log(`\n${frames} frames → ${dir}${ff ? `\n${mp4}` : ""}`);
     cdp.close();
   } finally {
     if (ff && ff.exitCode === null && !ff.stdin.writableEnded) ff.stdin.end();
