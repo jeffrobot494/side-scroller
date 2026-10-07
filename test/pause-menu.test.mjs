@@ -68,7 +68,6 @@ export default async function run(t) {
 
     // No shake offset on a frozen frame; the view is handed the offset.
     let off = null;
-    setConfig("missionRenderer", "3d");
     m.setView({ begin() {}, end() {}, draw: (_m, f) => { off = [f.sx, f.sy]; } });
     m.shake = 1;
     m.tick();
@@ -181,6 +180,28 @@ export default async function run(t) {
     m.stop();
   }
 
+  // ---- waiting for the view (tech/mission-3d-only.md O2) -------------------
+  // The game page sets waitForView: with no live view nobody can see the
+  // mission, so it holds still. A host that never sets it keeps stepping.
+  {
+    const m = build();
+    m.tick(10);
+    t.ok("wait: without the flag, no view still steps", m.input.frame >= 9);
+    m.waitForView = true;
+    const before = sampleScene(m.scene);
+    const samples = m.input.frame;
+    m.tick(60);
+    t.eq("wait: with the flag and no view, a frame takes no input sample", m.input.frame, samples);
+    t.ok("wait: ...and runs no step", firstSampleDiff(before, sampleScene(m.scene)) === null);
+    let drawn = 0;
+    m.setView({ begin() {}, end() {}, draw() { drawn++; } });
+    m.tick();
+    t.ok(`wait: a view arriving releases it with no catch-up burst (${m.input.frame - samples} step)`,
+      m.input.frame - samples === 1 && drawn === 1);
+    m.stop();
+    m.setView(null);
+  }
+
   // ---- D2: the three layers draw, and change nothing ------------------------
   // Nothing asserts on pixels; what is pinned is that every layer draws over
   // the harness's context without a throw, who it annotates, and that drawing
@@ -201,6 +222,7 @@ export default async function run(t) {
     s.duck = s.duck || { hold: 0, wait: 0, pending: null, judged: new WeakSet(), log: [] };
     s.duck.log.push({ round: {}, t: m.scene.survivalClock, verdict: "late", abandoned: false, hit: true });
     Object.assign(m.debug, { graph: true, path: true, threats: true, spots: true, dodges: true });
+    m.setView({ begin() {}, end() {}, draw() {} }); // the layers draw over a live view only
     const before = sampleScene(m.scene);
     const cache = m.scene.exposureCache;
     let threw = null;
@@ -382,9 +404,9 @@ export default async function run(t) {
     t.eq("overlay: a toggle changes the setting", config.friendlyFire, !ff);
     t.ok("overlay: ...kept the way the editor keeps it", isDefault("friendlyFire") === false
       && JSON.parse(localStorage.getItem("sidescroller.config.v1")).friendlyFire === !ff);
-    const other = config.missionRenderer === "3d" ? "2d" : "3d";
-    fire(el, "change", node({ key: "missionRenderer", type: "enum" }, { value: other }));
-    t.eq("overlay: the host hears each change, coerced", changes, [["friendlyFire", !ff], ["missionRenderer", other]]);
+    const other = config.aimMode === "mouse" ? "auto" : "mouse";
+    fire(el, "change", node({ key: "aimMode", type: "enum" }, { value: other }));
+    t.eq("overlay: the host hears each change, coerced", changes, [["friendlyFire", !ff], ["aimMode", other]]);
 
     fire(el, "click", node({ pm: "back" }));
     t.eq("overlay: Back returns to the menu", pm.screen(), "menu");

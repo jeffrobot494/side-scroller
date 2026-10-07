@@ -919,7 +919,15 @@ export function killEntity(root, ent, owner, scene, ctx) {
       // (dead entity stays in the tree but is no longer drawn/collidable)
     }
   }
-  if (ctx.burst && ent.maxHealth) ctx.burst(cx(ent), cy(ent), ent.color, ent.isRoot ? 18 : 9, 240);
+  // An ENEMY BODY — no parent, and health: a root, or a spawn with health (a
+  // drone, a seeker), the rule hostilesFor targets by — offers its death to the
+  // host's `explode` hook INSTEAD of bursting (tech/enemy-death-explosion.md
+  // E2). A host without the hook (the editor tools) bursts as it always did,
+  // and a destroyed part always bursts.
+  if (ent.maxHealth) {
+    if (!ent.parent && ctx.explode) ctx.explode(cx(ent), cy(ent), Math.max(ent.w, ent.h), ent.y + ent.h, root.specTop.id, !!ent.isRoot);
+    else if (ctx.burst) ctx.burst(cx(ent), cy(ent), ent.color, ent.isRoot ? 18 : 9, 240);
+  }
   // Root deaths are announced by the mission's own root-death polling (which
   // also owns kill credit + loot); here we only voice destructible PARTS, so a
   // dying enemy isn't double-reported.

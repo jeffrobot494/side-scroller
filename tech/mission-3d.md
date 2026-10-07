@@ -22,6 +22,8 @@ How the mission gets a Three.js view that draws the same simulation in 3D, switc
 | R5 | **Enemies.** An EnemySpec tree drawn part by part at each part's own box. The base form comes from the shape vocabulary (`box`, `circle`, `ellipse`, `diamond`) in `spec.visual.color`, then gets detail the 2D shape cannot carry: plating and seams, emissive cores, a glowing facing eye, and a subtle idle motion. Telegraph, hit flash, muzzle flash, burn and spawned children follow 2D's visibility rules exactly | Changed (3D only) |
 | R6 | **Shots and effects.** All six `PROJECTILE_SHAPES`, oriented along velocity, emissive with glow halos. Also the bobbing diamond loot crate, and the exit beam with its posts and rising chevrons | Changed (3D only). **After this slice, every element the design names has a finished 3D model** |
 
+**As built (`tech/mission-3d-only.md`, 2026-10-06):** R1's switch and R2's fallback are gone. There is no `missionRenderer` knob, no `toggleRenderer` action and no 2D world pass. three is vendored in `vendor/three/` rather than loaded from jsDelivr. A failed view load leaves the mission on a waiting screen with a reload notice, not in 2D. The external-view hook, the flat tells and the camera solve are unchanged.
+
 R1 is a pure refactor with a green suite. R2 is where it becomes playable, and where switching back must already work. R3–R6 are independent of each other after R2.
 
 **Acceptance for R3–R6 is Bo's eye.** Play the same seed with the view toggled back and forth. The design's two bars are that each model is an upgrade on its sprite, and that a soldier, an enemy and a shot are as easy to tell apart as in 2D. No test can judge either.

@@ -15,12 +15,10 @@
 // is inert unless config.debugOverlays is on — every debug control lives on
 // that screen, so the debug view takes one key and no game keys. It is bound
 // here rather than hardcoded because nothing in this game hardcodes a key.
-// Like pause, it is read once per rendered frame and never crosses the wire. toggleRenderer flips config.missionRenderer
-// (2D / 3D view) mid-mission; like the overlays it is a fact about the person
-// looking, so it never crosses the wire. pause opens the mission's pause menu
+// Like pause, it is read once per rendered frame and never crosses the wire. pause opens the mission's pause menu
 // (tech/pause-menu.md) and is read once per rendered frame, not per step; it is
 // local too — a room mission is never paused by one commander.
-export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload", "debugMenu", "toggleRenderer", "pause"];
+export const ACTIONS = ["left", "right", "jump", "crouch", "aimUp", "fire", "swap", "reload", "debugMenu", "pause"];
 
 // Human labels for the remap UI.
 export const ACTION_LABELS = {
@@ -33,7 +31,6 @@ export const ACTION_LABELS = {
   swap: "Swap soldier",
   reload: "Reload",
   debugMenu: "Debug menu",
-  toggleRenderer: "Toggle 2D / 3D view",
   pause: "Pause menu",
 };
 
@@ -55,7 +52,6 @@ export const DEFAULT_KEYS = {
   ShiftLeft: "jump",
   KeyR: "reload",
   Backquote: "debugMenu",
-  KeyV: "toggleRenderer",
   Escape: "pause",
 };
 

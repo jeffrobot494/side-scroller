@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Solar Defense Force</title>
   <link rel="stylesheet" href="./src/hub/hub.css" />
-  <!-- Three.js for the mission's 3D view (tech/mission-3d.md) — fetched only
-       when the view is first switched on; the 2D game never touches it. -->
-  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}</script>
+  <!-- Three.js for the mission's 3D view (tech/mission-3d.md), vendored in
+       vendor/three/ (tech/mission-3d-only.md O1). build.mjs reads this map to
+       follow bare specifiers into dist/. -->
+  <script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
 </head>
 <body>
   <!-- The two scenes share one page. main.js shows exactly one at a time. -->

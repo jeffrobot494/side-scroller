@@ -38,12 +38,12 @@ import { ACTIONS } from "../game/controlmap.js";
 
 // The actions that stay on this machine. An overlay is what the person looking
 // at a canvas wants to see, not something a commander owns, and a room's
-// mission draws nothing (J7). The 2D/3D view toggle is the same kind of fact,
-// and so is the pause menu: a room mission is never paused (tech/pause-menu.md).
+// mission draws nothing (J7). The pause menu is the same kind of fact: a room
+// mission is never paused (tech/pause-menu.md).
 //
 // This list is the whole of the exception, and it exists so that leaving an
 // action off the wire is a DECISION rather than an oversight.
-const LOCAL_ONLY = ["debugMenu", "toggleRenderer", "pause"];
+const LOCAL_ONLY = ["debugMenu", "pause"];
 
 // The gameplay actions, DERIVED from the control map rather than copied from
 // it. A second hand-written list is a list that drifts: add "grenade" to

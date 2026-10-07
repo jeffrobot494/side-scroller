@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // 3D VIEW — soldiers (tech/mission-3d.md, R4).
 //
-// A procedural model per soldier, built from the 2D figure (`_drawSoldier` in
-// src/mission/mission.js): helmet, visor, torso with a chest stripe, backpack,
+// A procedural model per soldier, built from the 2D figure (`_drawSoldier`,
+// deleted with the 2D view in tech/mission-3d-only.md O2): helmet, visor, torso with a chest stripe, backpack,
 // legs and gun, in the soldier's colour. Every part's rectangle is the 2D
 // figure's own fraction of the live collision box, so the model stays inside
 // the box it is hit with and the crouch is the 2D crouch — folded shin, knee

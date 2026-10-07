@@ -550,7 +550,7 @@ export default async function run(t) {
     t.ok("live: a next-deploy item's row does not", !/Live\./.test(rowOf("soldierMagazines")));
 
     const keys = (s) => s.flatMap((g) => g.items.map((it) => it.key));
-    const VIEWPORT = ["missionZoom", "missionRenderer", "scanlines", "scanlineSpacing", "laserSight3d", "groundMist3d", "cape3d", "enemyFx3d", "showFps", "debugOverlays", "debugPauseOnDeath"];
+    const VIEWPORT = ["missionZoom", "scanlines", "scanlineSpacing", "laserSight3d", "groundMist3d", "cape3d", "enemyFx3d", "deathExplosion3d", "showFps", "debugOverlays", "debugPauseOnDeath"];
     const SOUND = ["masterVolume", "sfxVolume", "uiVolume", "musicVolume", "muteOnBlur", "audioPan", "audioFalloff", "audioMaxVoices"];
     // The Squad survival group (tech/squad-survival.md): every one is live, so
     // the design's rule puts all of them on the menu.

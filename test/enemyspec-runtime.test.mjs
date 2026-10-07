@@ -117,6 +117,41 @@ export default async function run(t) {
     t.ok("boss: root death kills the enemy", !root.alive);
   }
 
+  // ---- the explosion hook (tech/enemy-death-explosion.md E2) --------------
+  // An enemy BODY (no parent, has health: the root or a spawn with health)
+  // offers its death to ctx.explode instead of bursting; a part still bursts;
+  // a spawn without health reaches neither; a host with no hook bursts as ever.
+  for (const hooked of [true, false]) {
+    const scene = makeScene();
+    const root = instantiate(norm("tpl_boss_moth"), 300, 160);
+    const { ctx } = makeCtx(() => root);
+    const booms = [], bursts = [];
+    if (hooked) ctx.explode = (...a) => booms.push(a);
+    ctx.burst = (...a) => bursts.push(a);
+    const tag = hooked ? "explode" : "no hook";
+    sim(root, scene, ctx, 4);
+    const seeker = root.spawned.find((s) => s.id === "seeker" && s.alive);
+    booms.length = bursts.length = 0;
+    applyDamage(root, seeker, 999, null, scene, ctx);
+    if (hooked) {
+      t.ok("explode: a shot-down seeker (a spawn with health) explodes and does not burst",
+        booms.length === 1 && bursts.length === 0 && booms[0][5] === false && booms[0][4] === root.specTop.id);
+      t.eq("explode: ...at its centre, its larger side, its bottom edge",
+        booms[0].slice(0, 4), [seeker.x + seeker.w / 2, seeker.y + seeker.h / 2, Math.max(seeker.w, seeker.h), seeker.y + seeker.h]);
+    } else t.ok("no hook: a seeker bursts, as it always did", bursts.length === 1 && bursts[0][3] === 9);
+    const shard = root.spawned.find((s) => s.id === "shard" && s.alive);
+    booms.length = bursts.length = 0;
+    killEntity(root, shard, null, scene, ctx);
+    t.ok(`${tag}: a spawn without health reaches neither`, shard && booms.length === 0 && bursts.length === 0);
+    applyDamage(root, findEntity(root, "leftWing"), 9999, null, scene, ctx);
+    t.ok(`${tag}: a destroyed part bursts`, booms.length === 0 && bursts.length === 1);
+    booms.length = bursts.length = 0;
+    killEntity(root, root, null, scene, ctx);
+    if (hooked) t.ok("explode: the root explodes, flagged as the root, and does not burst",
+      booms.length === 1 && booms[0][5] === true && bursts.length === 0);
+    else t.ok("no hook: the root bursts (18), as it always did", booms.length === 0 && bursts.length === 1 && bursts[0][3] === 18);
+  }
+
   // ---- hp transition (fury) ----------------------------------------------
   {
     const scene = makeScene();
