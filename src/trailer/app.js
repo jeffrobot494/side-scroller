@@ -7,6 +7,8 @@
 //   frames    how many output frames the take is
 //   renderer  the WebGL renderer string this page got
 //   frame()   advance the virtual clock one frame and draw one frame
+//   sounds    every cue the take asked for: { f, cue, x?, gain?, lx?, ls? },
+//             f in the take's own frames (src/trailer/mix.js mixes them)
 // ---------------------------------------------------------------------------
 
 import { createView3D } from "../mission/view3d/index.js";
@@ -79,6 +81,7 @@ async function buildCards() {
     const a = Math.min(1, (t - card.from / 2) / CARD.fade, (card.to / 2 - t) / CARD.fade);
     el.textContent = card.text;
     el.style.fontSize = `${card.kind === "name" ? CARD.nameSize : CARD.size}px`;
+    el.style.top = card.top || CARD.top;
     el.style.opacity = String(Math.max(0, a));
     return null;
   };
@@ -88,7 +91,8 @@ async function buildCards() {
 // the capture scales to the frame.
 function buildHub(n) {
   document.body.classList.add("hub-take");
-  const take = HUB_TAKES[n](document.getElementById("hub-root"), { W: innerWidth, H: innerHeight, aspect: W / H });
+  const sound = (e) => window.trailer.sounds.push(e);
+  const take = HUB_TAKES[n](document.getElementById("hub-root"), { W: innerWidth, H: innerHeight, aspect: W / H, sound });
   let f = 0;
   window.trailer.frames = take.frames;
   window.trailer.frame = () => {
@@ -127,12 +131,13 @@ async function build() {
     : TAKES[id] ? [{ make: TAKES[id], frames: null }] : null;
   if (!segs || !segs.length) throw new Error(`no mission take "${id}"`);
 
-  let i = -1, take = null, left = 0;
+  let i = -1, take = null, left = 0, base = 0;
   function next() {
-    if (take) { take.mission.stop(); stage.end(); }
+    if (take) { take.mission.stop(); stage.end(); base += take.frameIndex; }
     i++;
     const seg = segs[i].make();
-    take = startTake(seg, { canvas, view, size: { w: W, h: H } });
+    const at = base; // this segment's first frame in the take
+    take = startTake(seg, { canvas, view, size: { w: W, h: H }, onSound: (e) => window.trailer.sounds.push({ ...e, f: at + e.f }) });
     stage.begin(take.mission, seg);
     left = segs[i].frames ?? seg.frames;
   }
@@ -145,5 +150,5 @@ async function build() {
     left--;
   };
 }
-window.trailer = { renderer: rendererString(), frames: 0, frame: null };
+window.trailer = { renderer: rendererString(), frames: 0, frame: null, sounds: [] };
 window.trailer.ready = build();

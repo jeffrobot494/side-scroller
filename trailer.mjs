@@ -6,8 +6,10 @@
 //
 // A take is shot1 … shot14 (shot14 is the splash), `cards` (the text cards
 // alone, transparent), or T0/T1's `proof` and `risk`. `cut` (T6) joins
-// shot1–14 in order, lays the cards over them and muxes a 120 BPM click:
-// output/trailer/trailer.mp4, 60 s, 1920×1080, 60 fps.
+// shot1–14 in order, lays the cards over them, and mixes the game's own
+// sound effects (T7: each take's cues, saved as <take>.sfx.json and played
+// offline by src/trailer/mix.js) under the music, output/trailer/
+// trailer-music.mp3: output/trailer/trailer.mp4, 60 s, 1920×1080, 60 fps.
 //
 // Starts server.mjs on its own port, launches Playwright's headless Chromium
 // on the GPU (D3D12 through Mesa under WSL), opens trailer.html?take=<take>,
@@ -26,12 +28,20 @@ import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync, readFileSync
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mixEvents, wav } from "./src/trailer/mix.js";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = join(ROOT, "output", "trailer");
 const W = 1920;
 const H = 1080;
 const FPS = 60;
+// The mix (T7): the music as delivered, and the game's sound under it.
+const MUSIC = join(OUT, "trailer-music.mp3");
+const MUSIC_LEVEL = 1;
+const SFX_LEVEL = 0.8;
+// Cues the mix leaves out: a staged trace holds the trigger on an empty
+// magazine (shot 11), and the dry click is staging, not the shot.
+const SFX_SKIP = new Set(["weapon.empty"]);
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
@@ -178,25 +188,43 @@ async function cut() {
   if (missing.length) throw new Error(`capture these first: ${missing.map((f) => f.split("/").pop()).join(", ")}`);
   if (!existsSync(join(OUT, "cards", "03599.png"))) throw new Error("capture the cards first: node trailer.mjs cards");
   let frames = 0;
+  const counts = [];
   for (const f of shots) {
     const n = Number((await run("ffprobe", ["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", f])).trim());
+    counts.push(n);
     frames += n;
   }
   if (frames !== 60 * FPS) throw new Error(`the shots add up to ${frames} frames, not ${60 * FPS}`);
+  if (!existsSync(MUSIC)) throw new Error(`no music at ${MUSIC}`);
   const list = join(OUT, "cut.txt");
   writeFileSync(list, shots.map((f) => `file '${f}'`).join("\n") + "\n");
-  // The placeholder music: a click on every beat at 120 BPM, accented on the bar.
-  const click = join(OUT, "click.wav");
-  await run("ffmpeg", ["-y", "-loglevel", "error", "-f", "lavfi", "-i",
-    "aevalsrc='(0.35+0.35*lt(mod(t,2),0.5))*sin(2*PI*(1000+600*lt(mod(t,2),0.5))*t)*exp(-50*mod(t,0.5))':s=48000:d=60",
-    click]);
+  // The sound effects: every shot's cues on the cut's clock.
+  const events = [];
+  let at = 0;
+  for (let i = 0; i < shots.length; i++) {
+    const sfx = join(OUT, `shot${i + 1}.sfx.json`);
+    const n = counts[i];
+    if (existsSync(sfx)) {
+      for (const e of JSON.parse(readFileSync(sfx, "utf8"))) if (!SFX_SKIP.has(e.cue)) events.push({ ...e, t: (at + e.f) / FPS });
+    } else console.log(`(no ${sfx.split("/").pop()}: shot ${i + 1} is silent — recapture it)`);
+    at += n;
+  }
+  const mix = mixEvents(events, { duration: 60 });
+  const sfxWav = join(OUT, "sfx.wav");
+  writeFileSync(sfxWav, wav(mix));
+  console.log(`${mix.played} of ${events.length} cues played`);
   const out = join(OUT, "trailer.mp4");
   await run("ffmpeg", ["-y", "-loglevel", "error",
     "-f", "concat", "-safe", "0", "-i", list,
     "-framerate", String(FPS), "-i", join(OUT, "cards", "%05d.png"),
-    "-i", click,
-    "-filter_complex", "[0:v][1:v]overlay=format=auto,format=yuv420p[v]",
-    "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-crf", "16", "-r", String(FPS),
+    "-i", MUSIC, "-i", sfxWav,
+    "-filter_complex", [
+      "[0:v][1:v]overlay=format=auto,format=yuv420p[v]",
+      `[2:a]aresample=48000,volume=${MUSIC_LEVEL},apad[m]`,
+      `[3:a]volume=${SFX_LEVEL}[s]`,
+      "[m][s]amix=inputs=2:duration=shortest:normalize=0,alimiter=limit=0.95[a]",
+    ].join(";"),
+    "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-crf", "16", "-r", String(FPS),
     "-c:a", "aac", "-b:a", "192k", "-t", "60", out]);
   console.log(`${frames} frames → ${out}`);
 }
@@ -280,6 +308,12 @@ async function main() {
     }
     if (ff) ff.stdin.end();
     await ffDone;
+    // The cues the take asked for (T7), for the cut's mix. The splash has none.
+    if (!cards) {
+      const sounds = (await evaluate(cdp, "(window.trailer && window.trailer.sounds) || []")).filter((e) => e.f < frames);
+      writeFileSync(join(OUT, `${take}.sfx.json`), JSON.stringify(sounds));
+      console.log(`${sounds.length} sound cues → ${take}.sfx.json`);
+    }
     console.log(`\n${frames} frames → ${dir}${ff ? `\n${mp4}` : ""}`);
     cdp.close();
   } finally {

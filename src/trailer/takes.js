@@ -372,10 +372,15 @@ export const CARDS = [
   { from: 37, to: 40, text: nameOf("floating_factory"), kind: "name" },
   { from: 40, to: 43, text: nameOf("breach_hopper"), kind: "name" },
   { from: 43, to: 46, text: nameOf("sky_duelist"), kind: "name" },
-  { from: 48, to: 54, text: "THEY FIGHT BESIDE YOU" },
-  { from: 84, to: 89, text: "IT GETS WORSE" },
-  { from: 96.5, to: 100.5, text: "THE ONES WHO COME BACK GET BETTER" },
-  { from: 101, to: 105.5, text: "HOLD THE SECTOR. OR LOSE IT." },
+  { from: 48, to: 54, text: "FIGHT TOGETHER" },
+  // Shot 10: up just before Tex is hit (beat 75.5), held to the cut.
+  { from: 74.5, to: 78, text: "DEATH IS PERMANENT" },
+  { from: 84, to: 89, text: "HUNT THEIR CAPTAINS" },
+  { from: 96.5, to: 100.5, text: "LEVEL UP YOUR SOLDIERS" },
+  // One line per ending: shot 13 shows SECTOR SECURED at 101 and SECTOR LOST
+  // at 103.5, framed with room under each screen for its line.
+  { from: 101, to: 103.5, text: "HOLD THE SECTOR", top: "92%" },
+  { from: 103.5, to: 106, text: "OR LOSE IT", top: "92%" },
 ];
 
 // ---- T0 and T1's takes ------------------------------------------------------------

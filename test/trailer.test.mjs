@@ -11,6 +11,7 @@ import { startTake, prerollTarget, frameOfBeat, STEP } from "../src/trailer/runn
 import { TAKES, RISK_FRAMINGS, SHOTS, CARDS, missionSegments } from "../src/trailer/takes.js";
 import { missionSpecById } from "../src/game/enemyspecs.js";
 import { poseAt } from "../src/trailer/tracks.js";
+import { mixEvents } from "../src/trailer/mix.js";
 
 // Every track in the table, named: the risk framings and every shot's own.
 function allTracks() {
@@ -157,5 +158,26 @@ export default async function run(t) {
     t.ok("T6: cards are on the eighth-note grid", CARDS.every((c) => onGrid(c.from, 0.5) && onGrid(c.to, 0.5)));
     t.ok("T6: cards never overlap", CARDS.every((c, i) => !i || c.from >= CARDS[i - 1].to));
     t.ok("T6: no card on black — none on the splash, which is the game's name", CARDS.every((c) => shotOf(c.from).kind !== "title"));
+  }
+
+  // T7: a take records the cues the game asked for on captured frames, each
+  // with a listener, and the mix plays them by the engine's rules.
+  {
+    const sounds = [];
+    const take = startTake(TAKES.proof(), { canvas: makeEl("canvas"), onSound: (e) => sounds.push(e) });
+    for (let f = 0; f < 120; f++) take.frame();
+    const fires = sounds.filter((e) => e.cue.startsWith("weapon.fire"));
+    t.ok("T7: the proof take's shots are recorded as cues", fires.length > 0);
+    t.ok("T7: only captured frames, each with a listener", sounds.every((e) => e.f >= 0 && e.f < 120 && Number.isFinite(e.lx) && e.ls > 0));
+
+    const at = (t2, x = 0) => ({ t: t2, cue: "impact.explode", x, lx: 0, ls: 1 });
+    const peak = (m) => m.left.reduce((p, v) => Math.max(p, Math.abs(v)), 0);
+    const one = mixEvents([at(0.1)], { duration: 1 });
+    t.ok("T7: a cue at the listener is heard", one.played === 1 && peak(one) > 0.01);
+    t.eq("T7: a cue beyond the falloff is not", mixEvents([at(0.1, 5000)], { duration: 1 }).played, 0);
+    const pile = mixEvents(Array.from({ length: 40 }, () => at(0.1)), { duration: 1 });
+    t.ok("T7: a pile-up is capped by the entry's voices", pile.played > 0 && pile.played < 40);
+    const again = mixEvents(Array.from({ length: 40 }, () => at(0.1)), { duration: 1 });
+    t.ok("T7: the mix is reproducible", again.left.every((v, i) => v === pile.left[i]));
   }
 }

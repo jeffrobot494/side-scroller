@@ -17,7 +17,8 @@
 //
 // A take is { frames, frame(f) → clip }: `clip` is the page rectangle (CSS
 // px) the capture scales to the output frame, which is how the shots' slow
-// zoom and move are done.
+// zoom and move are done. `page.sound`, when the page passes it, takes the
+// cues a take plays ({ f, cue }).
 // ---------------------------------------------------------------------------
 
 import { createLoopback } from "../net/loopback.js";
@@ -56,15 +57,16 @@ function rectOf(el) {
   return { x: r.left, y: r.top, width: r.width, height: r.height };
 }
 
-// One campaign, its session and a mounted hub. `leads` seeds that many leads.
-function campaign(root, leads = 1) {
+// One campaign, its session and a mounted hub. `leads` seeds that many leads;
+// `squad` is hired before the take starts.
+function campaign(root, leads = 1, squad = SQUAD_IDS) {
   const keep = { seedLeads: config.seedLeads, leadCount: config.leadCount };
   config.seedLeads = leads;
   config.leadCount = Math.max(leads, keep.leadCount);
   const state = createState();
   Object.assign(config, keep);
   state.money = 100000;
-  for (const id of SQUAD_IDS) hire(state, id);
+  for (const id of squad) hire(state, id);
 
   let changed = null;
   const transport = createLoopback((announce, ch) => {
@@ -129,22 +131,46 @@ function shot2(root, page) {
   };
 }
 
-// 3 · The deploy screen. Tex's card is chosen last; a slow zoom onto it.
+// 3 · The barracks: four recruits hired one after another, each card moving
+// from Recruits Available up into Your Squad. The hub re-renders on a hire, so
+// the move is drawn here: the new squad card starts where its recruit card
+// was and eases into place (a transform per frame, on the virtual clock).
+const HIRES = [["vance", 8], ["osei", 36], ["reyes", 64], ["tex", 92]]; // [id, frame]
+const MOVE = 22; // frames a card takes to reach the squad
+
 function shot3(root, page) {
-  const c = campaign(root, 1);
-  c.hub.location = "operations";
+  const c = campaign(root, 1, []);
+  c.hub.location = "barracks";
   c.hub.render();
-  click(root, '[data-action="predeploy"]');
-  click(root, '[data-action="toggle"][data-id="vance"]');
-  click(root, '[data-action="toggle"][data-id="osei"]');
   const frames = 4 * FRAMES_PER_BEAT;
+  const panel = () => rectOf(root.querySelector("main.panel"));
+  const start = panel();
+  const moving = []; // { id, from, at }
+  const cardOf = (sel) => root.querySelector(sel)?.closest(".soldier-card");
   return {
     frames,
     frame(f) {
-      if (f === FRAMES_PER_BEAT) click(root, '[data-action="toggle"][data-id="tex"]');
-      const card = root.querySelector('[data-action="toggle"][data-id="tex"]').closest(".soldier-card");
-      const from = framed(rectOf(root.querySelector("main.panel")), page.aspect, 20);
-      const to = framed(rectOf(card), page.aspect, 90);
+      for (const [id, at] of HIRES) {
+        if (f !== at) continue;
+        const from = rectOf(cardOf(`[data-action="hire"][data-id="${id}"]`));
+        click(root, `[data-action="hire"][data-id="${id}"]`);
+        page.sound?.({ f, cue: "ui.click" }); // what src/main.js plays on a hub button
+        moving.push({ id, from, at });
+      }
+      for (const m of moving) {
+        // The roster is in hire order, so the squad card is the hire's index.
+        const card = root.querySelectorAll(".squad-block .soldier-card")[HIRES.findIndex(([id]) => id === m.id)];
+        if (!card) continue;
+        card.style.transform = "";
+        const to = rectOf(card);
+        const t = smooth((f - m.at) / MOVE);
+        card.style.transform = t >= 1 ? "" : `translate(${(m.from.x - to.x) * (1 - t)}px, ${(m.from.y - to.y) * (1 - t)}px)`;
+        card.style.position = "relative";
+        card.style.zIndex = t >= 1 ? "" : "5";
+      }
+      // The squad block and the recruits under it, a slow push in.
+      const from = framed(start, page.aspect, 20);
+      const to = framed(start, page.aspect, -30);
       return inside(lerpRect(from, to, smooth(f / frames)), page.W, page.H);
     },
   };
@@ -190,10 +216,12 @@ function shot13(root, page) {
         const to = framed(rectOf(panel), page.aspect, -40);
         return inside(lerpRect(from, to, smooth(f / (5 * FRAMES_PER_BEAT))), page.W, page.H);
       }
-      const end = root.querySelector(".end-screen") || root;
+      // The end screen with room under it for the card (takes.js, CARDS).
+      const r = rectOf(root.querySelector(".end-screen") || root);
+      const end = { ...r, height: r.height + 170 };
       const t = (b - (b < 7.5 ? 5 : 7.5)) / 2.5;
-      const from = framed(rectOf(end), page.aspect, 40);
-      const to = framed(rectOf(end), page.aspect, 0);
+      const from = framed(end, page.aspect, 40);
+      const to = framed(end, page.aspect, 0);
       return inside(lerpRect(from, to, smooth(t)), page.W, page.H);
     },
   };

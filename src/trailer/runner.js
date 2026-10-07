@@ -108,14 +108,37 @@ function tree(e, out = []) {
 // Build the mission for `seg` with `preroll` uncaptured frames, stepped to the
 // first captured frame. `canvas`/`view` as startTake. Returns the run; its
 // `frame()` steps one captured frame.
-function run(seg, preroll, { canvas = null, view = null, size = null, onEvent = null, cuesUntil = Infinity } = {}) {
+function run(seg, preroll, { canvas = null, view = null, size = null, onEvent = null, onSound = null, cuesUntil = Infinity } = {}) {
   const m = new Mission(canvas, () => {});
   let f = -preroll;
+  let pose = null; // the trailer camera's pose this frame, if it has one
   if (view) {
     m.setView(view);
-    view.setCamera(seg.camera ? (mm) => seg.camera(f, mm) : null);
+    view.setCamera(seg.camera ? (mm) => (pose = seg.camera(f, mm)) : null);
   }
   m.start(seg.mission, seg.level, seg.squad);
+  // Every cue the game asks for on a captured frame, with where the listener
+  // was (src/trailer/mix.js mixes them). The game's own funnel still runs.
+  if (onSound) {
+    const sound = m.scene.sound;
+    m.scene.sound = (cue, o = {}) => {
+      if (f >= 0) onSound({ f, cue, x: o.x, gain: o.gain, ...listener() });
+      return sound(cue, o);
+    };
+  }
+  // Where the sound is heard from: the middle of what the frame shows, its
+  // range widening with the width shown — the game's rule (_updateCamera),
+  // applied to the trailer's camera when it has one.
+  function listener() {
+    if (pose) {
+      const { position: p, target: t } = pose;
+      const d = Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z);
+      const shown = 2 * d * Math.tan((pose.fov * Math.PI) / 360) * (16 / 9);
+      return { lx: t.x, ls: Math.max(1, shown / 960) };
+    }
+    const viewW = m.canvas ? m.canvas.width / m._zoom() : 960;
+    return { lx: m.camera.x + viewW / 2, ls: viewW / 960 };
+  }
   m.running = false;
   m.input = traceInput(seg.trace, -preroll, m);
   if (size && canvas) {
