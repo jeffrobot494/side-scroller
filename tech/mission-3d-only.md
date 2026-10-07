@@ -83,9 +83,7 @@ O1 lands first, and it is a pure move with a green suite plus a clean `node buil
 
 | Where | What the build does | What catches it |
 |---|---|---|
-| No WebGL / the view throws | The mission holds on the failure message for good. The pause menu has no abort, so the deploy is stranded and a reload is the only way out. The day it cost is spent. What a reload does to an in-flight deploy is not checked here. **This contradicts the design's "changes nothing that happens to them"** until Bo answers | Nothing automated. **Open for Bo, see below** |
+| No WebGL / the view throws | The mission holds on the failure message for good. The pause menu has no abort, so the deploy is stranded and a reload is the only way out. The day it cost is spent. What a reload does to an in-flight deploy is not checked here. Bo accepted this (2026-10-06) | Nothing automated |
 | Room viewer while waiting | The room keeps simulating. This seat sees the waiting screen and the HUD and can still send input blind | Same as today's 3D-not-yet-loaded case, minus the 2D fallback |
 | Hub before deploy | The view loads at page load, and nothing in the hub says whether it succeeded | The notice shows on failure |
 | Vendored file set | Hand-picked from what the game imports. A new `three/addons/…` import without vendoring it first | `node build.mjs` fails, in CI |
-
-**Open for Bo (design):** what a player whose machine cannot run the 3D view gets. Today: a 2D game. After O2: a held mission and a message. The builder's default is above. The alternative is checking at page load and refusing to deploy, which is hub UI.

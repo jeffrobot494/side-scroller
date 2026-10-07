@@ -15,19 +15,23 @@ How every enemy death gets a default explosion in the 3D mission view, and gets 
 
 | # | Slice | Runtime behaviour |
 |---|---|---|
-| E1 | **Death bursts cross the wire.** The root-death block in `_updateEnemies` and the soldier death in `_kill` call `this._burst` directly. Every other cosmetic goes through `_feedback`. Route both through `_feedback("bst", …)`, the same as combat's bursts | **Changed in a room only.** A soldier's death burst reaches the other commander for the first time. An enemy's death already sent one burst, the runtime's (`src/mission/enemyspec/runtime.js`, through `ctx.burst`), and now it sends the second, mission-side burst a single-player mission has always drawn. Single-player is identical, because `applyFeedback("bst")` is the same `_burst` call |
-| E2 | **The explosion.** A sixth feedback kind, `xpl`, carrying the root's centre, its larger box dimension (raw, never scaled), the y of the ground under it, and the root's spec id. It is emitted once per root death, in the same block and with the same `cause` (`null`, so everybody perceives it) as the death's shake. `applyFeedback("xpl")` hands it to the external view through a new optional view method, `explosion`, when the view is live, and does nothing otherwise. That gate is only right because O2 has landed: before O2 the view is installed and live even while 2D is drawing, and its effect pools are not stepped then. The 3D view converts the point into its space (`viewY`) and calls the existing `explosion` composite in `src/mission/view3d/enemyfx.js`. It skips the call when `enemyFx3d` is off, and when the spec id has a bespoke rig death (`DEATH` in `src/mission/view3d/enemyanim.js`) **and** the rig file has loaded (`rigLoaded()`). If the rig never loaded, the enemy is drawn as blocks with no death sequence, so it gets the default. Which enemies those are is a view fact, so the id crosses and the view decides. **The view** multiplies the raw size by a new live, local config knob (min above 0). The knob is applied on the viewing page, never at the emitter: in a room the emitter is the server, which refuses local keys | **Changed: playable.** Every enemy that dies explodes, in single-player and on both screens in a room |
+| E1 | **A soldier's death burst crosses the wire.** `_kill` in `src/mission/mission.js` calls `this._burst` directly. Every other cosmetic goes through `_feedback`. Route it through `_feedback("bst", …)`, the same as combat's bursts | **Changed in a room only:** the other commander sees a soldier's death burst for the first time. Single-player is identical, because `applyFeedback("bst")` is the same `_burst` call |
+| E2 | **The explosion replaces the burst on every enemy body.** An *enemy body* is an entity with no parent and with health: a root, or a spawned entity with health. In today's roster the spawned ones are the Floating Factory's `drone`, the Iron Moth's `seeker` and the Siege Automaton's `seekerMissile`. Parts are not enemy bodies, and neither are spawned things without health (blasts, flashes, shards). Any cause of death counts: shot down, contact self-destruct, or lifetime running out. **Where:** `killEntity` in `src/mission/enemyspec/runtime.js` already makes every death's burst. For an enemy body, it now offers the death to an optional host hook on `ctx`. A host with the hook gets the death **instead of** the burst. A host without it bursts exactly as today, so the Firing Room, Enemy Designer and the other tools that run the runtime do not change. The mission's `_ctx` provides the hook, which logs a sixth feedback kind, `xpl`. It carries the body's centre, its larger box dimension (raw, never scaled), the y of its bottom edge, the root's spec id, and whether the body is the root. `cause` is `null`, so everybody perceives it. The mission-side burst in `_updateEnemies`' root-death block is deleted. `applyFeedback("xpl")` hands the event to the external view through a new optional view method, `explosion`, when the view is live, and does nothing otherwise. That gate is only right because O2 has landed: before O2 the view is installed and live even while 2D is drawing, and its effect pools are not stepped then. The 3D view converts the point into its space (`viewY`) and calls the existing `explosion` composite in `src/mission/view3d/enemyfx.js` in its own orange, scaled by the body's size times a new live, local config knob (min above 0). It applies the knob on the viewing page, never at the emitter, because in a room the emitter is the server, which refuses local keys. **It skips the call** when `enemyFx3d` is off, and when the event is a root whose spec id has a bespoke rig death (`DEATH` in `src/mission/view3d/enemyanim.js`) **and** the rig file has loaded (`rigLoaded()`). That root is the Siege Automaton, whose own overload and wreck are its death. If the rig never loaded, it is drawn as blocks with no death sequence, so it gets the default. Its seeker missiles are not roots and always explode | **Changed: playable.** Every enemy body that dies explodes, in single-player and on both screens in a room, and no longer makes a coloured burst. A destroyed part still bursts |
 
 E1 is independent and lands first. E2 is built after `tech/mission-3d-only.md` O2. See the gate note in E2.
 
-**Acceptance for E2 is Bo's eye**, on the gaps below.
+**Acceptance for E2 is Bo's eye.** Kill a Husk Charger, a Floating Factory and its drones, the Iron Moth's seekers, and a Siege Automaton. Then do it again in a room with two seats.
+
+**Bo's answers (2026-10-06):** no burst under the explosion. The Siege Automaton gets no default explosion. The explosion scales with the body, in the tester's orange. Drones and seeker missiles count as enemies. With `enemyFx3d` off there is no explosion, and that is accepted. A machine that cannot run the 3D view (`tech/mission-3d-only.md`) holding the deploy on an error is accepted.
 
 ## Reuses
 
 | What | Where | Why |
 |---|---|---|
 | The one feedback funnel: `_feedback` logs in a room and plays locally, `applyFeedback` is the only player, and an unknown kind is ignored | `src/mission/mission.js` | `xpl` crosses the wire with no wire change: `feedbackFor` in `src/net/mission-wire.js` forwards any kind, and an older page ignores it |
-| Root-death bookkeeping, run once per root (`_counted`), that already places the burst, the death cue and the shake | `src/mission/mission.js` (`_updateEnemies`) | The explosion is one more line in that block. A part or child dying never reaches it |
+| The one place every entity death runs once (`killEntity`, guarded by `alive`) and already makes the burst | `src/mission/enemyspec/runtime.js` | Roots and spawned bodies die through it, so one hook covers both. Root-death polling in `_updateEnemies` only sees roots |
+| The runtime's host bridge: a host passes `ctx` with optional hooks, and the runtime checks for each one before calling it (`ctx.burst &&`) | `src/mission/enemyspec/runtime.js`, `src/mission/mission.js` (`_ctx`) | The explosion hook is one more optional hook. Tools that pass no hook keep the burst |
+| "A spawn with health is an enemy" | `src/mission/enemyspec/perception.js` (`hostilesFor`), per `CLAUDE.md` | The same rule a companion already uses to decide what to shoot |
 | The tester's explosion: flash, fireball glows, smoke, sparks that bounce on a floor, shock ring, all pooled | `src/mission/view3d/enemyfx.js` (`explosion`) | Already used at a spawned entity's own size for the Siege Automaton's blasts (`src/mission/view3d/enemy.js`, `EXPLOSIONS`). Nothing new to draw |
 | The effects knob and its "hide" path | `src/game/config.js` (`enemyFx3d`), `src/mission/view3d/index.js` (`draw`) | Off already means no fireballs. The explosion obeys it |
 | The external-view contract | `src/mission/mission.js` (`setView`, `_viewLive`), `src/mission/view3d/index.js` (the returned object) | One more optional method. `mission.js` still never imports `three` |
@@ -37,18 +41,20 @@ E1 is independent and lands first. E2 is built after `tech/mission-3d-only.md` O
 
 | Path | What |
 |---|---|
-| `src/mission/mission.js` | E1: the two direct `_burst` calls become feedback. E2: emit `xpl` at root death, add the `applyFeedback` case, and update the feedback-kinds comment table |
-| `src/mission/view3d/index.js` | E2: `explosion(x, y, size, floor, specId)` on the view object. It applies the size knob. A no-op with no level, with `enemyFx3d` off, or for a spec id whose bespoke rig death will play. It needs `rigLoaded` (`src/mission/view3d/enemyrig.js`) and `DEATH` (`src/mission/view3d/enemyanim.js`) |
+| `src/mission/mission.js` | E1: `_kill`'s direct `_burst` becomes feedback. E2: the `_ctx` hook that logs `xpl`, the `applyFeedback` case, deleting the root-death block's burst, and updating the feedback-kinds comment table |
+| `src/mission/enemyspec/runtime.js` | E2: in `killEntity`, an enemy body offers its death to the host hook if there is one, else bursts as before |
+| `src/mission/view3d/index.js` | E2: `explosion(x, y, size, floor, specId, isRoot)` on the view object. It applies the size knob. A no-op with no level, with `enemyFx3d` off, or for a root whose bespoke rig death will play. It needs `rigLoaded` (`src/mission/view3d/enemyrig.js`) and `DEATH` (`src/mission/view3d/enemyanim.js`) |
 | `src/game/config.js` | E2: the size knob in the Viewport group beside `enemyFx3d`. `live: true`, local scope (only a page's view reads it), so a room's exported-config counts gain one local key, and `test/tools.test.mjs`'s `VIEWPORT` list and live-item count gain one |
 | `test/mission-net.test.mjs` | E1 and E2 cases in the feedback block |
+| `test/enemyspec-runtime.test.mjs` | E2: the hook-or-burst split in `killEntity` |
 
 ## The seam
 
 | Owns | Must not touch |
 |---|---|
-| A cosmetic event per root death | Anything the simulation reads. No damage, no `scene.rng`, no field `sampleScene` reads. The golden must not move |
+| A cosmetic event per enemy-body death | Anything the simulation reads. No damage, no `scene.rng`, no field `sampleScene` reads. The golden must not move |
 | The view's `explosion` method | `enemyfx.js`'s composite. It is reused as is, so the tester's explosion and the death explosion stay one look |
-| | Per-enemy bespoke deaths (`DEATH`, `FX`, `EXPLOSIONS` in `src/mission/view3d/`). Whether they also get the default is a gap below, not a change to them |
+| | Per-enemy bespoke deaths (`DEATH`, `FX`, `EXPLOSIONS` in `src/mission/view3d/`). They are untouched. The Siege's root skips the default; its missiles do not |
 
 ## Must not regress
 
@@ -57,7 +63,8 @@ E1 is independent and lands first. E2 is built after `tech/mission-3d-only.md` O
 | Suite | What it pins | New |
 |---|---|---|
 | `test/mission-golden.test.mjs` | Gameplay trace unchanged. Feedback is not sampled | — |
-| `test/mission-net.test.mjs` | Feedback logging, per-seat filtering, the 64-event cap, the local-knob count | E1: a root killed on a room mission logs one `bst` and builds no particles there. A seat applying that snapshot builds the burst. E2: one `xpl` per root death and none for a part's death. A local mission with a stub view hands `explosion` the root's centre, size and spec id. With no view, nothing throws. The knob count moves by one |
+| `test/mission-net.test.mjs` | Feedback logging, per-seat filtering, the 64-event cap, the local-knob count | E1: a soldier killed on a room mission logs one `bst` and builds no particles there. A seat applying that snapshot builds the burst. E2: a root's death logs one `xpl` and no `bst`. A spawned drone shot down logs one `xpl`. A part's death logs a `bst` and no `xpl`. A local mission with a stub view hands `explosion` the centre, size, spec id and the root flag. With no view, nothing throws. The knob count moves by one |
+| `test/enemyspec-runtime.test.mjs` | Death cascades, spawn lifecycle | With a hook: an enemy body's death calls it once and does not burst, and a part bursts. Without a hook: every death bursts as today. A spawned entity without health never reaches the hook |
 | `test/tools.test.mjs` | Viewport group membership and live-item count | One more item |
 | `test/docs.test.mjs` | This spec's citations | — |
 
@@ -67,17 +74,10 @@ E1 is independent and lands first. E2 is built after `tech/mission-3d-only.md` O
 
 | Where | What the build does | What catches it |
 |---|---|---|
-| Busy snapshots | The 64-event cap is per **snapshot**, not per step: `server.mjs` clears the log once per broadcast, so at the default `missionSnapshotHz` of 20, three steps share it. A death late in a busy window loses its `xpl`, and E1's extra bursts spend the same budget. Single-player has no cap | Same loss every spark and sound already takes. Not measured |
+| Busy snapshots | The 64-event cap is per **snapshot**, not per step: `server.mjs` clears the log once per broadcast, so at the default `missionSnapshotHz` of 20, three steps share it. A death late in a busy window loses its `xpl`, and E1's soldier bursts spend the same budget. Single-player has no cap | Same loss every spark and sound already takes. Not measured |
 | Pool overwrite | The enemy-effect pools are fixed rings (glows, smokes, sparks), written round-robin. Several large deaths at once overwrite live smoke, including a Siege Automaton's | By eye |
-| `enemyFx3d` off | No explosion at all. **A deviation from "every enemy death"**, so it is asked below | Bo |
+| `enemyFx3d` off | No explosion and no burst: an enemy dies with no effect at all. Bo accepted this | — |
 | Rig loaded but not fitting | A Siege Automaton whose rig loaded but does not fit its box is drawn as blocks with no death, and also gets no default | Rare. By eye |
-| Floor | The ground y is the root's bottom edge. A flyer killed in the air gets sparks that bounce on its own feet's level | By eye |
+| Floor | The ground y is the body's bottom edge. A flyer or missile killed in the air gets sparks that bounce on its own feet's level | By eye |
+| A missile's lifetime | A seeker that times out explodes the same as one shot down or one that hits. All three count as a death | By eye |
 | Timing on a host | Emitted during `update()`, so on a frame that runs several steps it is drawn starting from the frame's end, not mid-frame | Under one frame. Invisible |
-
-**Open for Bo (design).** Each needs an answer before E2's acceptance. The builder's default is in brackets.
-
-1. Does the coloured burst every death already makes stay, under the explosion? [stays]
-2. The Siege Automaton already has its own overload-and-wreck death. Does it also get the default explosion when it dies? [no]
-3. Does the explosion scale with the enemy's size, and what colour is it? [scales with the body; the tester's orange, not the enemy's colour]
-4. Do the Floating Factory's drones and the Siege's seeker missiles count as "enemies" for this? They are spawned entities, not roots, so the root-death block never sees them. [no]
-5. With enemy effects switched off in settings, there is no explosion at all. Every other explosion becomes a glowing sphere in that setting. Do you mind? [no explosion]
