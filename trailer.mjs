@@ -165,14 +165,17 @@ async function main() {
     const mp4 = join(OUT, `${take}.mp4`);
     ff = spawn("ffmpeg", [
       "-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(FPS), "-i", "-",
-      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "16", mp4,
+      "-vf", `scale=${W}:${H}`, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "16", mp4,
     ], { stdio: ["pipe", "inherit", "inherit"] });
     const ffDone = new Promise((res) => ff.on("exit", res));
 
     const t0 = Date.now();
     for (let f = 0; f < frames; f++) {
-      await evaluate(cdp, "trailer.frame()");
-      const shot = await cdp.send("Page.captureScreenshot", { format: "png", clip: { x: 0, y: 0, width: W, height: H, scale: 1 } });
+      // A hub take answers with the page rectangle to scale to the frame (its
+      // slow zoom); a mission take answers nothing and is the whole viewport.
+      const c = await evaluate(cdp, "trailer.frame()");
+      const clip = c ? { x: c.x, y: c.y, width: c.width, height: (c.width * H) / W, scale: W / c.width } : { x: 0, y: 0, width: W, height: H, scale: 1 };
+      const shot = await cdp.send("Page.captureScreenshot", { format: "png", clip });
       const png = Buffer.from(shot.data, "base64");
       writeFileSync(join(dir, `${String(f).padStart(5, "0")}.png`), png);
       if (!ff.stdin.write(png)) await new Promise((r) => ff.stdin.once("drain", r));

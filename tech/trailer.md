@@ -40,6 +40,15 @@ How the 60-second trailer in `design/trailer.md` is rendered by the game itself:
 | Shot 11's whip-pan | A track key can carry its own ease, so shot 11 is a smooth track with one whip, down with the first wing |
 | `src/trailer/stage.js` (not in the plan) | The set dressing and the falls, the only trailer module besides `app.js` that imports three. The deep floor reaches 4000 px in front so no camera stands in front of it |
 
+**As built (T4–T6):**
+
+| What the plan said | What shipped, and why |
+|---|---|
+| Hub takes in `src/trailer/app.js` | In `src/trailer/hubtakes.js`, so the page glue stays small. Each take seats a `createState()` campaign in a one-seat session through the loopback, as `src/main.js` does, and keeps the session's changed-callback so a direct state write repaints like a command |
+| `hire`, `deploy` and a scripted `missionResult` through the session | `hire` and `applyMissionResult` are called on the campaign directly. They are the same `src/game/state.js` actions those commands call, without the round a real `missionResult` needs (deploy, ready, dispatch). Tex being chosen last is a click on the real deploy screen's button |
+| Leads placed one per beat | The board's own generator makes them: the take raises `seedLeads` for the one `createState()` and then empties the board, putting the leads back one per beat |
+| Hub captured at 2× and cropped afterwards | Each frame names a page rectangle, and `Page.captureScreenshot` renders it scaled to 1920×1080. Chromium re-rasterizes at that scale, so the zoom onto Tex's card stays sharp with no 2× capture |
+
 T0 is the foundation. T1, T2, T4 and T5 each land alone on top of it. T3 needs T1, and needs T2 only for shot 10. T6 needs all of them.
 
 Bo's answers on cards, the title, the falls and the Automaton are at the end of this doc and are written into T3, T5 and T6 above.
@@ -77,6 +86,7 @@ Bo's answers on cards, the title, the falls and the Automaton are at the end of 
 | `src/trailer/tracks.js` (new) | Camera tracks: beat time → pose. Pure, DOM-free, no `three` |
 | `src/trailer/runner.js` (new) | Runs one mission segment: the trace stand-in, staging, pre-roll, cues, speed. DOM-free apart from the canvases it is handed |
 | `src/trailer/stage.js` (new) | The set dressing and the trailer-only falls, through the view's stage hook. Imports three |
+| `src/trailer/hubtakes.js` (new) | The hub takes (T4): campaign, session, a mounted `Hub`, staging, and the frame rectangle |
 | `src/trailer/app.js` (new) | Page glue, hub takes, cards. The only trailer module touching the DOM |
 | `src/mission/view3d/index.js` | T1: the optional camera override, and what reads the solved camera under it (fog, near/far, the background). T2: the optional injected pass. T3: the optional hook that hands the trailer the scene and an entity's drawn object |
 | `src/mission/view3d/soldier.js`, `src/mission/view3d/enemy.js` | T3 (as built): `objectOf` and `partObject`, which the stage hook hands the trailer. They read the model maps and change nothing drawn |

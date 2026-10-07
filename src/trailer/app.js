@@ -16,6 +16,7 @@ import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
 import { startTake, FRAMES_PER_BEAT } from "./runner.js";
 import { TAKES, SHOTS, FPS } from "./takes.js";
 import { createStage } from "./stage.js";
+import { HUB_TAKES } from "./hubtakes.js";
 
 const q = new URLSearchParams(location.search);
 const W = Number(q.get("w")) || 1920;
@@ -35,8 +36,23 @@ function rendererString() {
   return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
 }
 
+// A hub take (T4): the real hub, staged; frame() returns the page rectangle
+// the capture scales to the frame.
+function buildHub(n) {
+  document.body.classList.add("hub-take");
+  const take = HUB_TAKES[n](document.getElementById("hub-root"), { W: innerWidth, H: innerHeight, aspect: W / H });
+  let f = 0;
+  window.trailer.frames = take.frames;
+  window.trailer.frame = () => {
+    window.__clock.tick(1000 / FPS);
+    return take.frame(f++);
+  };
+}
+
 async function build() {
   const id = q.get("take") || "proof";
+  const hubShot = /^shot(\d+)$/.exec(id);
+  if (hubShot && HUB_TAKES[hubShot[1]]) return buildHub(hubShot[1]);
   const view = createView3D(canvas3d);
   // The long-lens blur (T2), injected so the game's view never imports it.
   view.setPass(({ scene, camera }) => {
