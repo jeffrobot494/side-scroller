@@ -389,6 +389,17 @@ export const SCHEMA = [
         help: "The 3D mission view's enemy effects: smoke, sparks, dust, thruster flames, lights, muzzle and launch flashes, and explosions drawn as fireballs. Off draws explosions as glowing spheres and none of the rest. Camera shake is not an effect and stays.",
       },
       {
+        key: "deathExplosion3d",
+        label: "Death explosion size (3D)",
+        type: "range",
+        live: true,
+        default: 1,
+        min: 0.1,
+        max: 3,
+        step: 0.05,
+        help: "Every enemy that dies explodes in the 3D mission view, sized by its body: this multiplies that size. Drones and seeker missiles count; a destroyed part does not. The Siege Automaton keeps its own death. Drawn only with Enemy effects (3D) on.",
+      },
+      {
         key: "showFps",
         label: "Show FPS",
         type: "bool",

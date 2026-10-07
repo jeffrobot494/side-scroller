@@ -550,7 +550,7 @@ export default async function run(t) {
     t.ok("live: a next-deploy item's row does not", !/Live\./.test(rowOf("soldierMagazines")));
 
     const keys = (s) => s.flatMap((g) => g.items.map((it) => it.key));
-    const VIEWPORT = ["missionZoom", "scanlines", "scanlineSpacing", "laserSight3d", "groundMist3d", "cape3d", "enemyFx3d", "showFps", "debugOverlays", "debugPauseOnDeath"];
+    const VIEWPORT = ["missionZoom", "scanlines", "scanlineSpacing", "laserSight3d", "groundMist3d", "cape3d", "enemyFx3d", "deathExplosion3d", "showFps", "debugOverlays", "debugPauseOnDeath"];
     const SOUND = ["masterVolume", "sfxVolume", "uiVolume", "musicVolume", "muteOnBlur", "audioPan", "audioFalloff", "audioMaxVoices"];
     // The Squad survival group (tech/squad-survival.md): every one is live, so
     // the design's rule puts all of them on the menu.
@@ -572,7 +572,7 @@ export default async function run(t) {
     ];
     const solo = pauseSchema({ room: false });
     t.eq("pauseSchema: single-player shows the design's settings", keys(solo).sort(), [...SOLO].sort());
-    t.eq("pauseSchema: 43 of them, plus squad survival's", keys(solo).length, 43 + SURVIVAL.length);
+    t.eq("pauseSchema: 44 of them, plus squad survival's", keys(solo).length, 44 + SURVIVAL.length);
     const room = pauseSchema({ room: true });
     t.eq("pauseSchema: a room shows Viewport, Sound, aimMode and padDeadzone",
       keys(room).sort(), [...VIEWPORT, ...SOUND, "aimMode", "padDeadzone"].sort());

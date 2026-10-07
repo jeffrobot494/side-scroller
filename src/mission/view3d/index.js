@@ -28,10 +28,12 @@ import { buildTerrain } from "./terrain.js";
 import { createSoldiers } from "./soldier.js";
 import { createEnemies } from "./enemy.js";
 import { createEnemyFx } from "./enemyfx.js";
+import { rigLoaded } from "./enemyrig.js";
+import { DEATH } from "./enemyanim.js";
 import { createEffects } from "./effects.js";
 import { createLasers } from "./laser.js";
 import { buildMist } from "./mist.js";
-import { haloPool, disposeTree } from "./util.js";
+import { haloPool, disposeTree, viewY } from "./util.js";
 
 export function createView3D(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -164,6 +166,16 @@ export function createView3D(canvas) {
       };
     },
     draw,
+    // An enemy body died (tech/enemy-death-explosion.md E2): the tester's
+    // explosion in its own orange, at the body's size times this page's knob.
+    // Not with effects off, and not for a root whose rig plays its own death
+    // (the Siege Automaton) — its spawned missiles are not roots and still go.
+    explosion(x, y, size, floor, specId, isRoot) {
+      if (!level || !config.enemyFx3d) return;
+      if (isRoot && DEATH[specId] && rigLoaded()) return;
+      const k = Math.max(0.1, +config.deathExplosion3d || 1);
+      level.enemyFx.explosion(new THREE.Vector3(x, viewY(y), 0), size * k, { floor: viewY(floor) });
+    },
     end() {
       if (!level) return;
       scene.remove(level.terrain);

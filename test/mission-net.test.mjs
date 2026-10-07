@@ -51,6 +51,8 @@ import {
   packInput, createWireInput, projectScene, applySnapshot, WIRE_ACTIONS,
 } from "../src/net/mission-wire.js";
 import { ACTIONS } from "../src/game/controlmap.js";
+import { instantiate, killEntity, applyDamage, spawnFromDef } from "../src/mission/enemyspec/runtime.js";
+import { missionSpecById } from "../src/game/enemyspecs.js";
 
 // The exception, restated here on purpose: a test that imported the production
 // list would agree with it by construction and assert nothing.
@@ -359,6 +361,47 @@ export default async function run(t) {
     seat.particles.length = 0;
     applySnapshot(seat, projectScene(room, "A", 0, room.feed));
     t.eq("feedback: the other commander's page builds it", seat.particles.length, 22);
+
+    // AN ENEMY BODY EXPLODES INSTEAD OF BURSTING (tech/enemy-death-explosion.md
+    // E2): a root, or a spawn with health. A destroyed part still bursts.
+    room.feed.length = 0;
+    const moth = instantiate(missionSpecById.iron_moth, 400, 120);
+    room.scene.specRoots.push(moth);
+    const kinds = () => room.feed.map((e) => e[0]);
+    applyDamage(moth, moth.children.find((c) => c.id === "leftWing"), 9999, null, room.scene, room._ctx);
+    t.ok("feedback: a part's death is a burst, not an explosion", kinds().includes("bst") && !kinds().includes("xpl"));
+    room.feed.length = 0;
+    killEntity(moth, moth, null, room.scene, room._ctx);
+    room.sampleInputs();
+    room.update(1 / 60); // the root-death pass, which used to add a second burst
+    const mx = moth.x + moth.w / 2, my = moth.y + moth.h / 2;
+    const booms = room.feed.filter((e) => e[0] === "xpl");
+    t.eq("feedback: a root's death logs one explosion, for everybody",
+      booms.map((e) => e.slice(1)), [[null, 0, mx, my, 96, moth.y + moth.h, "iron_moth", 1]]);
+    t.ok("feedback: ...and no burst where it died", !room.feed.some((e) => e[0] === "bst" && e[3] === mx && e[4] === my));
+    const factory = instantiate(missionSpecById.floating_factory, 600, 120);
+    room.scene.specRoots.push(factory);
+    const drone = spawnFromDef(factory, "drone", 600, 200, {}, room.scene, room._ctx);
+    room.feed.length = 0;
+    applyDamage(factory, drone, 9999, null, room.scene, room._ctx);
+    t.ok("feedback: a drone shot down explodes, flagged not-the-root",
+      room.feed.filter((e) => e[0] === "xpl").length === 1 && room.feed.find((e) => e[0] === "xpl")[8] === 0
+      && !room.feed.some((e) => e[0] === "bst"));
+
+    // The view draws it. The size crosses raw: the knob is the viewer's.
+    // A host-free mission never begins a view, so this stands in for the page
+    // that would have: a view installed and live.
+    const got = [];
+    solo.view = { begin() {}, end() {}, draw() {}, explosion: (...a) => got.push(a) };
+    solo._viewLive = true;
+    solo.applyFeedback("xpl", [10, 20, 30, 40, "iron_moth", 1]);
+    t.eq("feedback: a live view is handed centre, size, floor, spec id and the root flag", got, [[10, 20, 30, 40, "iron_moth", true]]);
+    solo._viewLive = false;
+    solo.applyFeedback("xpl", [10, 20, 30, 40, "iron_moth", 1]);
+    t.eq("feedback: ...and a view that is not live is not", got.length, 1);
+    solo.view = null;
+    t.ok("feedback: with no view an explosion is nothing, not a throw",
+      (() => { solo.applyFeedback("xpl", [10, 20, 30, 40, "iron_moth", 0]); return true; })());
 
     // THE ONE THAT WOULD HAVE BEEN REDISCOVERED. The sim runs at 60Hz and the
     // snapshot at 20, so a log cleared per STEP drops two thirds of every
@@ -877,14 +920,15 @@ async function configRoutes(t) {
     }
     // 52 since progression P2 added the four server-scoped xpReward* knobs, plus
     // squad survival's group (tech/squad-survival.md), all server-scoped;
-    // 31 local: scanlines + scanlineSpacing,
+    // 32 local: scanlines + scanlineSpacing,
     // which only the 3D view in a page reads, then debugPauseOnDeath
     // (tech/squad-debug.md D4), which only a page's own mission reads, then
     // laserSight3d, groundMist3d and cape3d (tech/mission-3d-looks.md), the
     // 3D view's again, then enemyFx3d (tech/mission-3d-enemies.md M10).
-    // missionRenderer left (tech/mission-3d-only.md O2).
+    // missionRenderer left (tech/mission-3d-only.md O2), and deathExplosion3d
+    // came (tech/enemy-death-explosion.md E2), read only by a page's view.
     t.eq("config: a whole exported config applies its server keys", applied, 52 + SURVIVAL_KNOBS);
-    t.eq("config: ...drops the other 31", refused, 31);
+    t.eq("config: ...drops the other 32", refused, 32);
     t.eq("config: ...and nothing in it errors", broke, 0);
     const after = await getJson(base, "/api/config");
     t.eq("config: the server-scoped key it carried landed", after.values.healPerDay, 3);

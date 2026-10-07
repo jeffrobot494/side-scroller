@@ -295,6 +295,12 @@ export class Mission {
       hit: (p, t) => { if (t.kind === "soldier") { markVerdictHit(t, p); this._hitBy.set(t, p); } },
       spark: (x, y, c, n, s) => this._feedback("spk", [x, y, c, n, s]),
       burst: (x, y, c, n, s) => this._feedback("bst", [x, y, c, n, s]),
+      // An enemy body died (tech/enemy-death-explosion.md E2): the view's
+      // explosion instead of a burst. Size is the raw larger box dimension —
+      // the scale knob is the VIEWING page's, applied there, because a room's
+      // emitter is the server, which holds no local knobs. Nobody's cause.
+      explode: (x, y, size, floor, specId, isRoot) =>
+        this._feedback("xpl", [x, y, size, floor, specId, isRoot ? 1 : 0], null),
     };
 
     // The one sound hook. Installed on the SCENE (not _ctx) because ai.js
@@ -494,19 +500,19 @@ export class Mission {
   // ---- feedback (J8) ------------------------------------------------------
   //
   // FEEDBACK IS NOT STATE. A snapshot projects the world at an instant; these
-  // five kinds are things that HAPPENED between two instants and leave no trace
+  // six kinds are things that HAPPENED between two instants and leave no trace
   // to project — a cue, a spray of sparks, a burst, a kick of shake, a red
   // flash. Send only the state and a viewer gets a silent, still, flash-less
   // mission, which is exactly what J8 shipped before this.
   //
-  // ONE FUNNEL, FIVE KINDS, and no call site had to move for it. `scene.sound`
+  // ONE FUNNEL, SIX KINDS, and no call site had to move for it. `scene.sound`
   // was already the single hook tech/sound.md insisted on (18 sites) and
   // `_ctx.spark`/`_ctx.burst` were already combat.js's cosmetics bridge; the
   // two that had no hook — shake and the damage flash — get one here.
   //
   //   snd  [cue, x, y, gain?]        spk  [x, y, colour, n, speed]
   //   bst  [x, y, colour, n, speed]  shk  [amount, cap]
-  //   flh  [seconds]
+  //   flh  [seconds]                xpl  [x, y, size, floor, specId, isRoot]
   //
   // `cause` is WHO MADE IT HAPPEN, not who perceives it, and it is carried even
   // when everybody perceives it. Today it drives one filter (`own`); the day
@@ -556,6 +562,11 @@ export class Mission {
         break;
       case "flh":
         this.damageFlash = args[0];
+        break;
+      case "xpl":
+        // Only the 3D view draws it; with no live view there is nothing to.
+        if (this.view && this._viewLive && this.view.explosion)
+          this.view.explosion(args[0], args[1], args[2], args[3], args[4], !!args[5]);
         break;
       default:
         break; // an unknown kind from a newer room is ignored, not a crash
@@ -910,7 +921,8 @@ export class Mission {
     // A dead root is stepped too: what it spawned outlives it.
     for (const r of scene.specRoots) updateSpecEnemy(r, dt, scene, this._ctx);
 
-    // Root-death bookkeeping (once per root): kill credit, loot drop, burst.
+    // Root-death bookkeeping (once per root): kill credit, loot drop. The
+    // explosion is the runtime's, from killEntity, which spawned bodies share.
     // A part/child dying never counts — only the root (the "enemy").
     for (const r of scene.specRoots) {
       if (r.alive || r._counted) continue;
@@ -918,7 +930,6 @@ export class Mission {
       const killer = r._lastAttacker;
       if (killer && killer.kind === "soldier") killer.kills += 1;
       const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-      this._burst(cx, cy, r.color || "#e05a5a", 18, 260);
       // Root death is announced here (not in the runtime) because this is where
       // kill credit and loot are settled; the cue still comes from the spec.
       const death = specSound(r.specTop, "death");

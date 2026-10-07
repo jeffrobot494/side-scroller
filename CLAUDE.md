@@ -495,7 +495,14 @@ section + the tests are the source of truth for what currently exists):
   imports `three`** and stays bare-node importable. Until the view is live,
   `render()` draws a dark screen with `mission.viewStatus` and the HUD, and the
   game page's mission is frozen (`waitForView`, a third `_frozen()` reason that
-  only `main.js` sets); a failed load is final, with a reload notice. The view begins per
+  only `main.js` sets); a failed load is final, with a reload notice. **Every
+  enemy body that dies explodes** (`tech/enemy-death-explosion.md` E1–E2):
+  `killEntity` offers a root's or a health-carrying spawn's death to
+  `ctx.explode` instead of bursting (hosts without it, the editor tools, still
+  burst), the mission logs it as a sixth feedback kind `xpl`, and the view
+  draws `enemyfx.js`'s explosion at the body's size × `deathExplosion3d` — not
+  with `enemyFx3d` off, and not for a root with a rig `DEATH` (the Siege
+  Automaton). The view begins per
   deploy, draws per frame, ends at stop. **The one invariant:**
   `solveCamera3D` (`src/mission/camera.js`) puts the z=0 plane exactly on the
   2D camera's pixels, rounded scroll and shake included, so aim, `toWorld()` and
