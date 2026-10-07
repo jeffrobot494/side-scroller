@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,6 +136,24 @@ async function evaluate(cdp, expression) {
   return r.result.value;
 }
 
+// Resolves once no request has been in flight for `quiet` ms.
+function networkIdle(cdp, quiet = 1500) {
+  const open = new Set();
+  let last = Date.now();
+  cdp.on("Network.requestWillBeSent", (p) => { open.add(p.requestId); last = Date.now(); });
+  const done = (p) => { open.delete(p.requestId); last = Date.now(); };
+  cdp.on("Network.loadingFinished", done);
+  cdp.on("Network.loadingFailed", done);
+  return () => new Promise((resolve) => {
+    const iv = setInterval(() => {
+      if (!open.size && Date.now() - last > quiet) { clearInterval(iv); resolve(); }
+    }, 100);
+  });
+}
+
+// Shot 14 (T5): graphics-tester/splash.js from its start, 14 beats.
+const TITLE = { take: "shot14", t: 0, frames: 14 * 30 };
+
 // ---- the capture --------------------------------------------------------------
 
 async function main() {
@@ -152,10 +170,32 @@ async function main() {
     await cdp.send("Page.enable");
     await cdp.send("Runtime.enable");
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
-    const loaded = cdp.once("Page.loadEventFired");
-    await cdp.send("Page.navigate", { url: `http://127.0.0.1:${port}/trailer.html?take=${encodeURIComponent(take)}&w=${W}&h=${H}` });
-    await loaded;
-    const info = await evaluate(cdp, "trailer.ready.then(() => ({ frames: trailer.frames, renderer: trailer.renderer }))");
+    let info;
+    if (take === TITLE.take) {
+      // T5: the splash itself, unedited, under the same clock injected before
+      // its first script. It fetches three, its font and the armour after
+      // load, so the capture waits for the network to go quiet first — no
+      // time passes on the page meanwhile, so nothing is missed.
+      await cdp.send("Network.enable");
+      const idle = networkIdle(cdp);
+      await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: readFileSync(join(ROOT, "src", "trailer", "clock.js"), "utf8") });
+      const loaded = cdp.once("Page.loadEventFired");
+      await cdp.send("Page.navigate", { url: `http://127.0.0.1:${port}/graphics-tester/splash.html?t=${TITLE.t}&seed=1` });
+      await loaded;
+      await idle();
+      info = await evaluate(cdp, `(() => {
+        document.getElementById("hud").style.display = "none";
+        const gl = document.createElement("canvas").getContext("webgl");
+        const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+        window.trailer = { frame: () => window.__clock.tick(1000 / 60) };
+        return { frames: ${TITLE.frames}, renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "(unknown)" };
+      })()`);
+    } else {
+      const loaded = cdp.once("Page.loadEventFired");
+      await cdp.send("Page.navigate", { url: `http://127.0.0.1:${port}/trailer.html?take=${encodeURIComponent(take)}&w=${W}&h=${H}` });
+      await loaded;
+      info = await evaluate(cdp, "trailer.ready.then(() => ({ frames: trailer.frames, renderer: trailer.renderer }))");
+    }
     console.log(`renderer: ${info.renderer}`);
     const frames = Number(opt("--frames")) || info.frames;
 

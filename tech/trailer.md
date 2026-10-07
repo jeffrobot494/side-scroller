@@ -48,6 +48,7 @@ How the 60-second trailer in `design/trailer.md` is rendered by the game itself:
 | `hire`, `deploy` and a scripted `missionResult` through the session | `hire` and `applyMissionResult` are called on the campaign directly. They are the same `src/game/state.js` actions those commands call, without the round a real `missionResult` needs (deploy, ready, dispatch). Tex being chosen last is a click on the real deploy screen's button |
 | Leads placed one per beat | The board's own generator makes them: the take raises `seedLeads` for the one `createState()` and then empties the board, putting the leads back one per beat |
 | Hub captured at 2× and cropped afterwards | Each frame names a page rectangle, and `Page.captureScreenshot` renders it scaled to 1920×1080. Chromium re-rasterizes at that scale, so the zoom onto Tex's card stays sharp with no 2× capture |
+| Splash readiness | The splash fetches three, its font and the armour after load. The capture waits for the network to go quiet before the first tick. No time passes on the page meanwhile, so the sequence starts at its `t=0` |
 
 T0 is the foundation. T1, T2, T4 and T5 each land alone on top of it. T3 needs T1, and needs T2 only for shot 10. T6 needs all of them.
 
