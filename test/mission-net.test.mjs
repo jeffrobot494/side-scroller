@@ -347,6 +347,19 @@ export default async function run(t) {
     t.eq("feedback: a viewer builds the burst the room only described", seat.particles.length, 18);
     t.ok("feedback: ...and takes the kick", seat.shake > 0.29);
 
+    // A SOLDIER'S DEATH BURST (tech/enemy-death-explosion.md E1). `_kill` used
+    // to call _burst directly, so in a room it was built for nobody and never
+    // logged: the other commander saw a soldier vanish without one.
+    room.feed.length = 0;
+    const fallen = room.scene.soldiers.find((s) => s.owner === "B");
+    room._kill(fallen, null);
+    const bursts = room.feed.filter((e) => e[0] === "bst");
+    t.ok("feedback: a soldier killed in a room logs one burst", bursts.length === 1 && bursts[0][6] === 22);
+    t.eq("feedback: ...and builds no particles there", room.particles.length, 0);
+    seat.particles.length = 0;
+    applySnapshot(seat, projectScene(room, "A", 0, room.feed));
+    t.eq("feedback: the other commander's page builds it", seat.particles.length, 22);
+
     // THE ONE THAT WOULD HAVE BEEN REDISCOVERED. The sim runs at 60Hz and the
     // snapshot at 20, so a log cleared per STEP drops two thirds of every
     // firefight — one of exactly two bugs netproto/smoke.mjs found on its first

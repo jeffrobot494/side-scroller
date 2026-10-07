@@ -976,8 +976,9 @@ export class Mission {
     this._noteDeath(target, owner);
     const cx = target.x + target.w / 2;
     const cy = target.y + target.h / 2;
-    // a soldier falling — a heavier, colder burst (enemies are spec-handled)
-    this._burst(cx, cy, "#c9d4e6", 22, 300);
+    // a soldier falling — a heavier, colder burst (enemies are spec-handled).
+    // Through the funnel, so the other commander in a room sees it too.
+    this._feedback("bst", [cx, cy, "#c9d4e6", 22, 300]);
     this.scene.sound("soldier.death", { x: cx, y: cy });
     this._feedback("shk", [0.5, 0.9], null);
   }
