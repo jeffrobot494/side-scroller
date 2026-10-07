@@ -51,7 +51,7 @@ export const RISK_FRAMINGS = [
   ["6 orbit", { kind: "orbit", keys: [{ b: 0, center: [0, -30, 0], radius: 320, angle: 20, rise: 40, fov: 36 }, { b: 2, center: [0, -30, 0], radius: 320, angle: 45, rise: 40, fov: 36 }] }],
   ["7 shoulder height", { kind: "locked", keys: [{ b: 0, pos: [-80, -62, 110], at: [320, -50, -20], fov: 45 }] }],
   ["9 pan up from behind the squad", { kind: "crane", keys: [{ b: 0, pos: [-260, -40, 320], at: [200, -40, 0], fov: 45 }, { b: 2, pos: [-260, -40, 320], at: [420, -320, 0], fov: 45 }] }],
-  ["10 long lens", { kind: "locked", keys: [{ b: 0, pos: [-220, -40, 2200], at: [0, -30, 0], fov: 10 }] }],
+  ["10 long lens", { kind: "locked", blur: { aperture: 4e-6, maxblur: 0.012 }, keys: [{ b: 0, pos: [-220, -40, 2200], at: [0, -30, 0], fov: 10 }] }],
   ["11 wide pan", { kind: "whip", keys: [{ b: 0, pos: [-200, -260, 1100], at: [200, -160, 0], fov: 50 }, { b: 2, pos: [200, -260, 1100], at: [600, -160, 0], fov: 50 }] }],
 ];
 

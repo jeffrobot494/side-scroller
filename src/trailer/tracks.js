@@ -9,6 +9,9 @@
 // A track is { kind, keys, subject? }:
 //   keys     [{ b, ... }] sorted by beat. Before the first key the track holds
 //            the first; after the last it holds the last.
+//   blur     optional { focus?, aperture, maxblur }: the long-lens blur (T2),
+//            passed through on every pose. focus defaults to the distance to
+//            the target.
 //   subject  optional: the keys' points are offsets from it. `poseAt` takes
 //            it as an argument ({ x, y }), so a track can follow a soldier
 //            without knowing what one is.
@@ -66,6 +69,7 @@ export function poseAt(track, b, subject = null) {
       target: vec(center),
       fov: lerp(a.fov, c.fov, t),
       roll: 0,
+      blur: track.blur || null,
     };
   }
   return {
@@ -73,6 +77,7 @@ export function poseAt(track, b, subject = null) {
     target: vec(add(lerp3(a.at, c.at, t))),
     fov: lerp(a.fov, c.fov, t),
     roll: lerp(a.roll || 0, c.roll || 0, t),
+    blur: track.blur || null,
   };
 }
 

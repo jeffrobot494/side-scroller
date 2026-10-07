@@ -12,6 +12,7 @@
 import { createView3D } from "../mission/view3d/index.js";
 import { loadEnemyRigs } from "../mission/view3d/enemyrig.js";
 import { loadArmour } from "../mission/view3d/armour.js";
+import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
 import { startTake } from "./runner.js";
 import { TAKES, FPS } from "./takes.js";
 
@@ -38,6 +39,18 @@ async function build() {
   const make = TAKES[id];
   if (!make) throw new Error(`no take "${id}"`);
   const view = createView3D(canvas3d);
+  // The long-lens blur (T2), injected so the game's view never imports it.
+  view.setPass(({ scene, camera }) => {
+    const pass = new BokehPass(scene, camera, { focus: 500, aperture: 0, maxblur: 0 });
+    return {
+      pass,
+      update(blur, cam) {
+        pass.uniforms.focus.value = blur.focus ?? cam.dist;
+        pass.uniforms.aperture.value = blur.aperture;
+        pass.uniforms.maxblur.value = blur.maxblur;
+      },
+    };
+  });
   // Frame one has the rigs and the armour, never the fallback blocks.
   await Promise.all([loadEnemyRigs(), loadArmour()]);
   const seg = make();

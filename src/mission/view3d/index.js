@@ -87,7 +87,8 @@ export function createView3D(canvas) {
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(960, 540), 0.7, 0.55, 0.82);
   composer.addPass(bloom);
-  composer.addPass(new OutputPass());
+  const output = new OutputPass();
+  composer.addPass(output);
 
   // Scanlines: after OutputPass, so they darken DISPLAY colour (post tone map
   // and sRGB) and bloom never blurs them. Keyed off gl_FragCoord, i.e. canvas
@@ -129,6 +130,20 @@ export function createView3D(canvas) {
   // GAME coordinates (y down, z toward the viewer), or null for the play
   // camera this frame. The trailer is its only caller.
   let cameraOverride = null;
+
+  // AN INJECTED PASS (tech/trailer.md, T2). The trailer's long-lens blur, handed
+  // in so this module never imports it and dist/ does not carry it. `make`
+  // is ({ scene, camera }) → { pass, update(blur, cam) }; the pass sits before
+  // OutputPass, and runs only on frames whose override pose carries `blur`.
+  let extra = null;
+  function setPass(make) {
+    if (extra) composer.removePass(extra.pass);
+    extra = make ? make({ scene, camera }) : null;
+    if (extra) {
+      extra.pass.enabled = false;
+      composer.insertPass(extra.pass, composer.passes.indexOf(output));
+    }
+  }
   const halos = haloPool(scene);
 
   function draw(m, f) {
@@ -167,6 +182,11 @@ export function createView3D(canvas) {
     if (config.laserSight3d) level.lasers.sync(m, level.soldiers.gunOf);
     else level.lasers.hide();
 
+    if (extra) {
+      extra.pass.enabled = !!(pose && pose.blur);
+      if (extra.pass.enabled) extra.update(pose.blur, c);
+    }
+
     const k = +config.scanlines || 0;
     scanlines.enabled = k > 0;
     scanlines.uniforms.strength.value = k;
@@ -198,6 +218,7 @@ export function createView3D(canvas) {
     },
     draw,
     setCamera(fn) { cameraOverride = fn || null; },
+    setPass,
     // An enemy body died (tech/enemy-death-explosion.md E2): the tester's
     // explosion in its own orange, at the body's size times this page's knob.
     // Not with effects off, and not for a root whose rig plays its own death
