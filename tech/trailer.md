@@ -23,6 +23,8 @@ How the 60-second trailer in `design/trailer.md` is rendered by the game itself:
 | T5 | **The title take: shot 14.** The capture script loads `graphics-tester/splash.html` with the same virtual clock injected before load (CDP `Page.addScriptToEvaluateOnNewDocument`), hides its fps readout, and captures `#view`. No edit to `graphics-tester/splash.js`: its clock adds a `dt` taken from `performance.now`, which the virtual clock makes exactly one frame. `?t=` still sets the start time. The splash loads three and its font from CDNs, so this take needs the network | **None** |
 | T6 | **Cards and the cut.** Text cards are drawn by the trailer page **over the picture, never on black**, on the beats the takes table names. Their type is a toned-down relative of the splash title, so that the splash reads as familiar and still lands as the payoff. It is the same face (Russo One, loaded from the URL `graphics-tester/splash.js` uses) in the same gold family, but flat (no extrusion), smaller, lighter, with less glow, wider tracking, and a short fade in and out. The style lives in the trailer page as one set of values, so it can be tuned against the splash by eye. The 14 shots are joined in order at their design times. A placeholder 120 BPM click track is muxed in. The output is a 60-second 1920×1080 60 fps MP4 in `output/trailer/` | **None in the game** |
 
+**As built (T0):** the clock is its own file, `src/trailer/clock.js`, so the splash take injects the same source rather than a copy. The capture runs at about 3.7 frames a second on the RTX 3050 (a screenshot per frame dominates), so the full minute is about a quarter of an hour.
+
 T0 is the foundation. T1, T2, T4 and T5 each land alone on top of it. T3 needs T1, and needs T2 only for shot 10. T6 needs all of them.
 
 Bo's answers on cards, the title, the falls and the Automaton are at the end of this doc and are written into T3, T5 and T6 above.
@@ -55,6 +57,7 @@ Bo's answers on cards, the title, the falls and the Automaton are at the end of 
 | `trailer.html` (new, repo root) | The capture page: the virtual clock as the first script, `#game3d`, a hidden `#game`, a hub root, the card layer, and `index.html`'s import map. Linked from nothing |
 | `trailer.mjs` (new, repo root) | The capture driver: server, browser, CDP, clock stepping, PNGs, `ffmpeg`. Zero dependencies |
 | `src/trailer/` (new) | The page's modules. They import the game; nothing in the game imports them |
+| `src/trailer/clock.js` (new) | The virtual clock, a classic script. `trailer.html` loads it first, and `trailer.mjs` injects the same file into the splash page (T5). One source for both |
 | `src/trailer/takes.js` (new) | The takes table as data: shots, segments, time spans in beats, staging, cues, pre-rolls, tracks, cards. DOM-free |
 | `src/trailer/tracks.js` (new) | Camera tracks: beat time → pose. Pure, DOM-free, no `three` |
 | `src/trailer/runner.js` (new) | Runs one mission segment: the trace stand-in, staging, pre-roll, cues, speed. DOM-free apart from the canvases it is handed |
