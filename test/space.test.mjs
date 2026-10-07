@@ -50,10 +50,11 @@ export default async function run_(t) {
   const outside = [];
   for (const f of readdirSync(dir).filter((f) => f.endsWith(".js"))) {
     for (const m of readFileSync(join(dir, f), "utf8").matchAll(/from\s+["']([^"']+)["']/g)) {
-      // Three is a library, not the game — and only the 3D view may load it,
-      // so the sim and the flat view stay importable under node.
+      // Three is a library, not the game — and only the 3D view (and its
+      // soldier model) may load it, so the sim and the flat view stay
+      // importable under node.
       const three = m[1] === "three" || m[1].startsWith("three/addons/");
-      if (!m[1].startsWith("./") && !(three && f === "view3d.js")) outside.push(`${f} → ${m[1]}`);
+      if (!m[1].startsWith("./") && !(three && (f === "view3d.js" || f === "soldier3d.js"))) outside.push(`${f} → ${m[1]}`);
     }
   }
   t.ok(`src/space imports nothing outside itself${outside.length ? ": " + outside.join(", ") : ""}`, outside.length === 0);

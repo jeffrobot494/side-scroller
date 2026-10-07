@@ -15,9 +15,10 @@
 // px; the sim is y-down and Three is y-up, so every placement negates y and
 // every angle.
 //
-// Soldiers are SIDE-VIEW figures — the game's soldier (src/mission/view3d/
-// soldier.js), rects given depth — turned in the play plane to their facing,
-// with the jetpack on the back pushing them the way they face.
+// Soldiers are SIDE-VIEW figures turned in the play plane to their facing,
+// with the jetpack on the back pushing them the way they face. The squad is
+// the game's soldier with its armour, arms and cape (soldier3d.js, a copy);
+// troopers are its older rects-given-depth figure, below, with a red visor.
 // ---------------------------------------------------------------------------
 
 import * as THREE from "three";
@@ -26,12 +27,11 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { CFG, controlled, ENEMY_TYPES } from "./sim.js";
+import { controlled, ENEMY_TYPES } from "./sim.js";
 import { cameraFor, figurePose } from "./view.js";
+import { FIGURE_W, FIGURE_H, loadArmour, makeSquadSoldier, poseSquadSoldier } from "./soldier3d.js";
 
 const FOV = 30; // degrees, as the game's VIEW3D_FOV
-const FIGURE_W = 28; // the soldier figure, ≈ the game's 30×46 in an r=18 circle
-const FIGURE_H = CFG.bodyLength;
 
 // ---- shared geometry --------------------------------------------------------------
 const BOX = new THREE.BoxGeometry(1, 1, 1);
@@ -62,9 +62,10 @@ function glowTexture() {
 
 function disposeTree(obj) {
   obj.traverse((o) => {
-    if (o.geometry && !SHARED.has(o.geometry)) o.geometry.dispose();
+    // `userData.shared`: soldier3d.js's boxes and the armour kit outlive a model.
+    if (o.geometry && !SHARED.has(o.geometry) && !o.geometry.userData.shared) o.geometry.dispose();
     const m = o.material;
-    if (m) for (const mm of Array.isArray(m) ? m : [m]) mm.dispose();
+    if (m) for (const mm of Array.isArray(m) ? m : [m]) if (!mm.userData.shared) mm.dispose();
   });
 }
 
@@ -201,14 +202,7 @@ function makeSoldier(s, visorKind = "squad") {
   const visor = mesh(BOX, std(vc, { emissive: ve, emissiveIntensity: 1.4, roughness: 0.2, metalness: 0.6 }), body);
   mats.push(visor.material);
   place(visor, ["visor", 0.48, 0.12, 0.8, 0.2, 4, 9]);
-  // Jet nozzle under the pack, and its flame pointing out behind.
-  const nozzle = mesh(BOX, std("#2a2f3a", { metalness: 0.7 }), body);
-  nozzle.scale.set(5, 8, 8);
-  nozzle.position.set(-0.64 * FIGURE_W, -0.05 * FIGURE_H, -2);
-  const flame = mesh(CONE, hot("#ffab40", 2.2), body);
-  flame.rotation.z = Math.PI; // apex out the back
-  const flameGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: "#ff9a3a", transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-  body.add(flameGlow);
+  const { flame, flameGlow } = makeJet(body, JET_Y);
 
   // The gun hangs off the shoulder and turns to the aim; it is a child of root
   // (turned, never mirrored), with its own flip so the grip stays under.
@@ -224,7 +218,42 @@ function makeSoldier(s, visorKind = "squad") {
   const sight = mesh(BOX, hot("#7ad7ff", 1.2), gun);
   sight.scale.set(4, 2, 3);
   sight.position.set(8, 3, 0);
-  return { root, body, gun, flame, flameGlow, mats, legs, soles, rot: null };
+  return { root, body, gun, flame, flameGlow, jetY: JET_Y, mats, legs, soles, rot: null };
+}
+
+// Jet nozzle under the pack, and its flame pointing out behind, at height `y`
+// in `parent`'s space.
+const JET_Y = -0.05 * FIGURE_H; // in the figure's box, centred
+function makeJet(parent, y) {
+  const nozzle = mesh(BOX, std("#2a2f3a", { metalness: 0.7 }), parent);
+  nozzle.scale.set(5, 8, 8);
+  nozzle.position.set(-0.64 * FIGURE_W, y, -2);
+  const flame = mesh(CONE, hot("#ffab40", 2.2), parent);
+  flame.rotation.z = Math.PI; // apex out the back
+  const flameGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: "#ff9a3a", transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+  parent.add(flameGlow);
+  return { flame, flameGlow };
+}
+
+function poseJet(v, on) {
+  v.flame.visible = on;
+  v.flameGlow.visible = on;
+  if (!on) return;
+  const len = 14 + Math.random() * 10;
+  v.flame.scale.set(len, 4.5, 4.5);
+  v.flame.position.set(-0.64 * FIGURE_W - 2 - len / 2, v.jetY, -2);
+  v.flameGlow.position.set(-0.64 * FIGURE_W - 8, v.jetY, 0);
+  v.flameGlow.scale.set(34, 34, 1);
+}
+
+// The squad: soldier3d.js's model, with the jet on its upper body (origin at
+// the hip, 0.12 of the figure below its centre), at the pack's middle: the
+// pack spans 0.26–0.64 of the figure down from its top (soldier3d.js LAYOUT).
+function makeSquad(s) {
+  const v = makeSquadSoldier(s);
+  v.jetY = (0.5 - (0.26 + 0.64) / 2 + 0.12) * FIGURE_H;
+  Object.assign(v, makeJet(v.upper, v.jetY));
+  return v;
 }
 
 function poseSoldier(v, s, t, dt, isCtrl) {
@@ -264,16 +293,7 @@ function poseSoldier(v, s, t, dt, isCtrl) {
     sole.position.x = sole.userData.x0 + (k === "legFar" ? -stride : stride);
   }
 
-  const on = s.thrusting;
-  v.flame.visible = on;
-  v.flameGlow.visible = on;
-  if (on) {
-    const len = 14 + Math.random() * 10;
-    v.flame.scale.set(len, 4.5, 4.5);
-    v.flame.position.set(-0.64 * FIGURE_W - 2 - len / 2, -0.05 * FIGURE_H, -2);
-    v.flameGlow.position.set(-0.64 * FIGURE_W - 8, -0.05 * FIGURE_H, 0);
-    v.flameGlow.scale.set(34, 34, 1);
-  }
+  poseJet(v, s.thrusting);
 
   // Gun: at the shoulder (mirrored with the body), pointing at the aim. A
   // companion with no one to shoot keeps its last aim in the sim; drawn, that
@@ -642,7 +662,8 @@ export function createView3D(canvas) {
 
   const actors = new THREE.Group();
   scene.add(actors);
-  const soldiers = new Models(actors, makeSoldier);
+  loadArmour();
+  const soldiers = new Models(actors, makeSquad);
   const enemies = new Models(actors, makeEnemy);
   const rocks = new Models(actors, makeAsteroid);
 
@@ -781,7 +802,10 @@ export function createView3D(canvas) {
     const lead = controlled(world);
     for (const s of world.soldiers) {
       if (!s.alive) continue;
-      poseSoldier(soldiers.get(s), s, t, dt, s === lead);
+      const v = soldiers.get(s);
+      poseSquadSoldier(v, s, t, dt, s === lead);
+      poseJet(v, s.thrusting);
+      flash(v.mats, s.flash > 0);
       if (s.muzzle > 0) halo(s.x + Math.cos(s.aim) * (s.r + 12), s.y + Math.sin(s.aim) * (s.r + 12), 26, "#fff4c8", 1, 14);
       status(s);
     }
