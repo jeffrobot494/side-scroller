@@ -135,6 +135,14 @@ export function createView3D(canvas) {
   // in so this module never imports it and dist/ does not carry it. `make`
   // is ({ scene, camera }) → { pass, update(blur, cam) }; the pass sits before
   // OutputPass, and runs only on frames whose override pose carries `blur`.
+  // THE STAGE (tech/trailer.md, T3). The trailer's set dressing and its
+  // trailer-only falls. Called once per frame after the models are posed,
+  // with the scene and a way to find the object drawn for an entity: a
+  // soldier's model, or an enemy part's (a rigged wing's hinge). The objects
+  // are the view's; the trailer clones them and never writes to them. Unset
+  // in the game.
+  let stage = null;
+
   let extra = null;
   function setPass(make) {
     if (extra) composer.removePass(extra.pass);
@@ -182,6 +190,14 @@ export function createView3D(canvas) {
     if (config.laserSight3d) level.lasers.sync(m, level.soldiers.gunOf);
     else level.lasers.hide();
 
+    if (stage) {
+      stage({
+        scene,
+        soldierObject: (sol) => level.soldiers.objectOf(sol),
+        partObject: (root, id) => level.enemies.partObject(root, id),
+      });
+    }
+
     if (extra) {
       extra.pass.enabled = !!(pose && pose.blur);
       if (extra.pass.enabled) extra.update(pose.blur, c);
@@ -219,6 +235,7 @@ export function createView3D(canvas) {
     draw,
     setCamera(fn) { cameraOverride = fn || null; },
     setPass,
+    setStage(fn) { stage = fn || null; },
     // An enemy body died (tech/enemy-death-explosion.md E2): the tester's
     // explosion in its own orange, at the body's size times this page's knob.
     // Not with effects off, and not for a root whose rig plays its own death

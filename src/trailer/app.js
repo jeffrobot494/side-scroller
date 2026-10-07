@@ -13,8 +13,9 @@ import { createView3D } from "../mission/view3d/index.js";
 import { loadEnemyRigs } from "../mission/view3d/enemyrig.js";
 import { loadArmour } from "../mission/view3d/armour.js";
 import { BokehPass } from "three/addons/postprocessing/BokehPass.js";
-import { startTake } from "./runner.js";
-import { TAKES, FPS } from "./takes.js";
+import { startTake, FRAMES_PER_BEAT } from "./runner.js";
+import { TAKES, SHOTS, FPS } from "./takes.js";
+import { createStage } from "./stage.js";
 
 const q = new URLSearchParams(location.search);
 const W = Number(q.get("w")) || 1920;
@@ -36,8 +37,6 @@ function rendererString() {
 
 async function build() {
   const id = q.get("take") || "proof";
-  const make = TAKES[id];
-  if (!make) throw new Error(`no take "${id}"`);
   const view = createView3D(canvas3d);
   // The long-lens blur (T2), injected so the game's view never imports it.
   view.setPass(({ scene, camera }) => {
@@ -53,14 +52,33 @@ async function build() {
   });
   // Frame one has the rigs and the armour, never the fallback blocks.
   await Promise.all([loadEnemyRigs(), loadArmour()]);
-  const seg = make();
-  const take = startTake(seg, { canvas, view, size: { w: W, h: H } });
-  window.trailer.frames = seg.frames;
+  const stage = createStage(view);
+
+  // A take is one segment (T0/T1's) or a shot: its segments in order, each a
+  // fresh mission on the same view, the last one stopped as the next starts.
+  const shot = /^shot(\d+)$/.exec(id);
+  const segs = shot
+    ? (SHOTS.find((s) => s.n === Number(shot[1]))?.segments || []).map((g) => ({ make: g.make, frames: (g.to - g.from) * FRAMES_PER_BEAT }))
+    : TAKES[id] ? [{ make: TAKES[id], frames: null }] : null;
+  if (!segs || !segs.length) throw new Error(`no mission take "${id}"`);
+
+  let i = -1, take = null, left = 0;
+  function next() {
+    if (take) { take.mission.stop(); stage.end(); }
+    i++;
+    const seg = segs[i].make();
+    take = startTake(seg, { canvas, view, size: { w: W, h: H } });
+    stage.begin(take.mission, seg);
+    left = segs[i].frames ?? seg.frames;
+  }
+  next();
+  window.trailer.frames = segs.reduce((n, g, k) => n + (g.frames ?? (k === 0 ? left : 0)), 0);
   window.trailer.frame = () => {
+    if (left <= 0 && i < segs.length - 1) next();
     window.__clock.tick(1000 / FPS);
     take.frame();
+    left--;
   };
 }
-
 window.trailer = { renderer: rendererString(), frames: 0, frame: null };
 window.trailer.ready = build();

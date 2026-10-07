@@ -22,6 +22,8 @@
 //   whip                         the same keys, but the move between two keys
 //                                is crammed into its middle fifth: a hold, a
 //                                snap, a hold
+//   any key may carry ease: "whip" | "smooth", which sets how the move INTO
+//   it goes, whatever the kind — one whip in an otherwise smooth track
 //   orbit                        { b, center: [x,y,z], radius, angle, rise, fov }
 //                                angle in degrees, 0 = straight in front (+z),
 //                                positive swings toward +x; rise = camera
@@ -55,7 +57,7 @@ const vec = (p) => ({ x: p[0], y: p[1], z: p[2] });
 
 export function poseAt(track, b, subject = null) {
   const [a, c, raw] = bracket(track.keys, b);
-  const t = track.kind === "whip" ? whipEase(raw) : smooth(raw);
+  const t = (c.ease || (track.kind === "whip" ? "whip" : "smooth")) === "whip" ? whipEase(raw) : smooth(raw);
   const off = subject && track.subject !== false ? [subject.x, subject.y, 0] : [0, 0, 0];
   const add = (p) => [p[0] + off[0], p[1] + off[1], p[2] + off[2]];
 

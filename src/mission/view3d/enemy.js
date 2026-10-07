@@ -219,6 +219,18 @@ export function createEnemies(parent, { rigs: useRigs = true } = {}) {
   }
 
   return {
+    // The object drawn for part `id` of `root`, drawn or not: a rigged wing's
+    // hinge, else the part's own model, else null (the trailer's stage clones
+    // it; tech/trailer.md T3).
+    partObject(root, id) {
+      const v = rigs.map.get(root);
+      const w = v && v.wings.find((x) => x.id === id);
+      if (w) return w.hinge;
+      const index = (e) => (e.id === id ? e : e.children.map(index).find(Boolean) || null);
+      const e = index(root);
+      const m = e && models.map.get(e);
+      return m ? m.root : null;
+    },
     // `effects`: the enemy effects pool (enemyfx.js) while they are on, else
     // null, and explosions draw as their blocks.
     sync(m, halos, effects = null) {

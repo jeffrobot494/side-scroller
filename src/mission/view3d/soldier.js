@@ -388,6 +388,12 @@ export function createSoldiers(parent, { wind = null } = {}) {
       const v = models.map.get(s);
       return v && v.root.visible ? v.gun : null;
     },
+    // The soldier's whole model, drawn or not, or null if it never had one
+    // (the trailer's stage clones it; tech/trailer.md T3).
+    objectOf(s) {
+      const v = models.map.get(s);
+      return v ? v.root : null;
+    },
     dispose() {
       models.dispose();
     },

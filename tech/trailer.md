@@ -25,6 +25,21 @@ How the 60-second trailer in `design/trailer.md` is rendered by the game itself:
 
 **As built (T0):** the clock is its own file, `src/trailer/clock.js`, so the splash take injects the same source rather than a copy. The capture runs at about 3.7 frames a second on the RTX 3050 (a screenshot per frame dominates), so the full minute is about a quarter of an hour.
 
+**As built (T3):**
+
+| What the plan said | What shipped, and why |
+|---|---|
+| Cues, boundaries and pre-rolls on the 0.5 s grid | Shot and segment boundaries are on the beat. Cues and pre-roll beats are on the eighth note (0.25 s), because a kill that looks earned lands where a round actually arrives: measured hits on Tex and the wings fell on half-beats, not whole ones |
+| A kill cue kills on its frame, with a round timed to arrive | A kill cue drops the target to 1 health on its beat, and the next round kills it through the game's own damage path. Beats are chosen where a round arrives within a frame, and the suite fails a death more than two frames late. A failsafe forces the death at +15 frames and is marked, so the suite fails it rather than hiding it |
+| Guard keeps full health | A guarded target holds 50× its health, because four soldiers put more than full health into one frame. It drops back to full when the guard ends |
+| Pin holds a position | Pin holds x only. A body pinned as it spawns is still in the air, and a soldier in the air can neither land nor duck |
+| Hold stops the brain | Hold points the brain at a state that does not exist, so `tickBrain` does nothing. Motion controllers still run, so the Iron Moth still drifts in shot 1 |
+| Enemy placement as the generator writes it | A placement is the body's top-left corner. Staged levels stand ground enemies on the floor using the height the runtime builds (the Siege Automaton is 164 px, twice its spec box). At the spec box height it spawned inside the floor, was pushed to the platform's end and fell out of the world |
+| Shots 5 and 6 with the squad | The Husk Charger and the four roster enemies face Vance alone, holding fire. Squad fire covered them in hit flashes |
+| Shot 7: the round crosses, Tex kneels | The raider fires from above at a downward angle, which kneeling cannot avoid. A `set` cue moves the round, off frame, onto a level line at Tex's head as it leaves the gun. Tex's own duck reflex does the rest, on seed 107 |
+| Shot 11's whip-pan | A track key can carry its own ease, so shot 11 is a smooth track with one whip, down with the first wing |
+| `src/trailer/stage.js` (not in the plan) | The set dressing and the falls, the only trailer module besides `app.js` that imports three. The deep floor reaches 4000 px in front so no camera stands in front of it |
+
 T0 is the foundation. T1, T2, T4 and T5 each land alone on top of it. T3 needs T1, and needs T2 only for shot 10. T6 needs all of them.
 
 Bo's answers on cards, the title, the falls and the Automaton are at the end of this doc and are written into T3, T5 and T6 above.
@@ -61,8 +76,10 @@ Bo's answers on cards, the title, the falls and the Automaton are at the end of 
 | `src/trailer/takes.js` (new) | The takes table as data: shots, segments, time spans in beats, staging, cues, pre-rolls, tracks, cards. DOM-free |
 | `src/trailer/tracks.js` (new) | Camera tracks: beat time → pose. Pure, DOM-free, no `three` |
 | `src/trailer/runner.js` (new) | Runs one mission segment: the trace stand-in, staging, pre-roll, cues, speed. DOM-free apart from the canvases it is handed |
+| `src/trailer/stage.js` (new) | The set dressing and the trailer-only falls, through the view's stage hook. Imports three |
 | `src/trailer/app.js` (new) | Page glue, hub takes, cards. The only trailer module touching the DOM |
 | `src/mission/view3d/index.js` | T1: the optional camera override, and what reads the solved camera under it (fog, near/far, the background). T2: the optional injected pass. T3: the optional hook that hands the trailer the scene and an entity's drawn object |
+| `src/mission/view3d/soldier.js`, `src/mission/view3d/enemy.js` | T3 (as built): `objectOf` and `partObject`, which the stage hook hands the trailer. They read the model maps and change nothing drawn |
 | `src/mission/view3d/background.js` | T1: only if the hive glow cannot be placed from the override's pose as it is |
 | `vendor/three/` | T2: `BokehPass.js` and `BokehShader.js` |
 | `.gitignore` | T0: `output/trailer/` |
