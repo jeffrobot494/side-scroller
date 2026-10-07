@@ -48,11 +48,19 @@ export function traceInput(trace) {
 // this level; `size` is the capture size, set after start() because start()
 // sizes the backing store from the config preset.
 //
+// `seg.camera`, if set, is (frame, mission) → a pose for the view's camera
+// override (src/trailer/tracks.js), or null for the play camera that frame.
+//
 // Returns { mission, frame() } — frame() is one OUTPUT frame: one sample, one
 // update of STEP × speed, the motion records, one render.
 export function startTake(seg, { canvas = null, view = null, size = null } = {}) {
   const m = new Mission(canvas, () => {});
-  if (view) m.setView(view);
+  let f = 0;
+  if (view) {
+    m.setView(view);
+    // The segment's camera, or the game's own when it names none.
+    view.setCamera(seg.camera ? (mm) => seg.camera(f, mm) : null);
+  }
   m.start(seg.mission, seg.level, seg.squad);
   // start() armed the real loop; from here the frames are ours.
   m.running = false;
@@ -62,7 +70,6 @@ export function startTake(seg, { canvas = null, view = null, size = null } = {})
     canvas.height = size.h;
   }
   const speed = seg.speed || 1;
-  let f = 0;
   return {
     mission: m,
     get frameIndex() { return f; },

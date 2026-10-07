@@ -35,6 +35,25 @@ import { createLasers } from "./laser.js";
 import { buildMist } from "./mist.js";
 import { haloPool, disposeTree, viewY } from "./util.js";
 
+// A trailer pose as the solved-camera shape draw() reads. Everything
+// downstream reads that shape. The background's `view.width`, `target` and
+// `position.z` place the hive glow for a camera looking straight down -z, so
+// draw() hands it one at the pose's own distance, on the pose's target.
+function poseCamera(p, aspect) {
+  const position = { x: p.position.x, y: viewY(p.position.y), z: p.position.z };
+  const target = { x: p.target.x, y: viewY(p.target.y), z: p.target.z };
+  const dist = Math.hypot(position.x - target.x, position.y - target.y, position.z - target.z) || 1;
+  const height = 2 * dist * Math.tan((p.fov * Math.PI) / 360);
+  return {
+    position, target, dist, aspect,
+    fov: p.fov,
+    roll: p.roll || 0,
+    near: Math.max(1, dist * 0.02),
+    far: dist * 30 + 8000,
+    view: { width: height * aspect, height },
+  };
+}
+
 export function createView3D(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
   // Pixel ratio 1 and no style writes: the drawing buffer IS the mission
@@ -103,6 +122,13 @@ export function createView3D(canvas) {
   composer.addPass(scanlines);
 
   let level = null; // everything built for one deploy
+
+  // THE CAMERA OVERRIDE (tech/trailer.md, T1). Unset — always, in the game —
+  // the camera is solveCamera3D and the invariant above holds. Set, it is a
+  // function (mission, frame) → a pose { position, target, fov, roll? } in
+  // GAME coordinates (y down, z toward the viewer), or null for the play
+  // camera this frame. The trailer is its only caller.
+  let cameraOverride = null;
   const halos = haloPool(scene);
 
   function draw(m, f) {
@@ -111,17 +137,22 @@ export function createView3D(canvas) {
       renderer.setSize(f.W, f.H, false);
       composer.setSize(f.W, f.H);
     }
-    const c = solveCamera3D(m.camera, f.z, f.W, f.H, f.sx, f.sy);
+    const pose = cameraOverride ? cameraOverride(m, f) : null;
+    const c = pose ? poseCamera(pose, f.W / f.H) : solveCamera3D(m.camera, f.z, f.W, f.H, f.sx, f.sy);
     camera.fov = c.fov;
     camera.aspect = c.aspect;
     camera.near = c.near;
     camera.far = c.far;
     camera.position.set(c.position.x, c.position.y, c.position.z);
+    camera.up.set(Math.sin(c.roll || 0), Math.cos(c.roll || 0), 0);
     camera.lookAt(c.target.x, c.target.y, c.target.z);
     camera.updateProjectionMatrix();
-    scene.fog.near = c.position.z + 50;
-    scene.fog.far = c.position.z + 2000;
-    level.background.update(m, c);
+    // `dist` is the camera's distance to what it looks at: position.z for the
+    // play camera, which looks straight down -z at z=0.
+    const dist = pose ? c.dist : c.position.z;
+    scene.fog.near = dist + 50;
+    scene.fog.far = dist + 2000;
+    level.background.update(m, pose ? { ...c, position: { x: c.target.x, y: c.target.y, z: dist } } : c);
     level.mist.group.visible = !!config.groundMist3d;
     if (level.mist.group.visible) level.mist.update(m);
 
@@ -166,6 +197,7 @@ export function createView3D(canvas) {
       };
     },
     draw,
+    setCamera(fn) { cameraOverride = fn || null; },
     // An enemy body died (tech/enemy-death-explosion.md E2): the tester's
     // explosion in its own orange, at the body's size times this page's knob.
     // Not with effects off, and not for a root whose rig plays its own death
