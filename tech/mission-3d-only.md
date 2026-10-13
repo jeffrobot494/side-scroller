@@ -65,7 +65,7 @@ O1 lands first, and it is a pure move with a green suite plus a clean `node buil
 | Whether and where the mission draws a world | `update()`, anything `sampleScene` reads, `scene.rng`. The golden must not move |
 | The "view not live" state and its freeze | A room mission's stepping: `_frozen()` already exempts `remote` and host-free missions, and the new reason has to as well. Any host that never set the wait flag: it keeps stepping as today |
 | | The view's reads of mission internals: `_gunTip`, `particles`, `camera`, `motion`, `time`, `scene` |
-| How three reaches the page and `dist/` | Other pages' import maps (`space.html`, `space3d.html`, `graphics-tester/`, `visual-design/`, `player2-lab.html`) stay on the CDN. Out of scope |
+| How three reaches the page and `dist/` | Other pages' import maps (`space.html`, `space3d.html`, `graphics-tester/`, `visual-design/`, `p2-lab/player2-lab.html`) stay on the CDN. Out of scope |
 | | `src/mission/render.js` and `src/mission/enemyspec/render.js`. The tools still draw 2D |
 
 ## Must not regress

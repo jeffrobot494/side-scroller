@@ -531,8 +531,8 @@ section + the tests are the source of truth for what currently exists):
   list is still stepped, the Siege Automaton's death is a 2.4s overload made of
   enemy data, and the Husk Charger stops, crouches and lunges. The graphics
   tester's enemy subjects are now a harness over the game's code.
-- **Player2 Lab (`tech/player2-lab.md` L0–L4 — built):** `player2-lab.html` at
-  the repo root, linked from nothing in the game or the editor, runs every
+- **Player2 Lab (`tech/player2-lab.md` L0–L4 — built):** `p2-lab/player2-lab.html`,
+  linked from nothing in the game or the editor, runs every
   Player2 generation modality — chat (multi-turn, streamed or whole), embeddings,
   TTS (whole or streamed), STT (file, mic, or a TTS run), image generate/edit
   (edit takes uploads or an earlier run's output), music, video (prompt, start
@@ -781,7 +781,7 @@ no process — but reach for it deliberately, not by habit.
   rules; calls state actions.
 - `src/player2/` — Player2 API client (`client.js`, `queue.js`). LLM + image
   generation gateway. **Exists but not yet wired** (see the two docs above).
-- `src/player2lab/` — the Player2 Lab page's modules (`player2-lab.html`). A
+- `src/player2lab/` — the Player2 Lab page's modules (`p2-lab/player2-lab.html`). A
   developer tool outside the game: imports nothing from `src/game/`,
   `src/mission/`, `src/hub/`, `src/editor/` or `src/net/`.
 

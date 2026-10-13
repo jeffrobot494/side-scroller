@@ -69,7 +69,7 @@ The prototype **copies** code and values from the game and imports none of them.
 
 | Path | Holds |
 |---|---|
-| `space.html` | The page. It is linked from nothing, like `player2-lab.html` |
+| `space.html` | The page. It is linked from nothing, like `p2-lab/player2-lab.html` |
 | `src/space/` (new) | Prototype modules, importing only each other |
 | `src/space/sim.js` (new) | World, bodies, collisions, weapons, enemies, squad AI. **DOM-free** |
 | `src/space/view.js` (new) | The camera rectangle (`cameraFor`, zoom-aware), wheel zoom (`zoomBy`, 0.3–2.5), the figure's turn (`figurePose`), and the 2D canvas. Over the 3D view that canvas is a transparent overlay of tells (the controlled soldier's ring, telegraphs, a mine's blast radius), screen-space health bars, edge arrows and HUD. Without Three it draws the whole flat world |
